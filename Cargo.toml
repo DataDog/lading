@@ -1,0 +1,15 @@
+[package]
+name = "file_gen"
+version = "0.1.0"
+authors = ["Brian L. Troutwine <brian@troutwine.us>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[profile.release]
+lto = true        # Optimize our binary at link stage.
+codegen-units = 1 # Increases compile time but improves optmization alternatives.
+debug = true      # Include debug symbols in the executable, benefits tooling.
+opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
