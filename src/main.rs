@@ -1,13 +1,15 @@
 use argh::FromArgs;
 use fastrand::Rng;
 use futures::stream::{FuturesUnordered, StreamExt};
+use governor::state::direct::InsufficientCapacity;
+use governor::{Quota, RateLimiter};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::num::NonZeroU32;
+use std::path::PathBuf;
 use tokio::runtime::Builder;
-use tokio::time;
 
 #[derive(FromArgs)]
 /// `file_gen` options
@@ -26,26 +28,63 @@ struct Config {
 
 #[derive(Debug, Deserialize)]
 struct LogTarget {
-    path: String,
+    path: PathBuf,
+    /// Sets the **soft** maximum bytes to be written into the `LogTarget`. This
+    /// limit is soft, meaning a burst may go beyond this limit by no more than
+    /// `maximum_token_burst`.
+    ///
+    /// After this limit is breached the target is closed and deleted. A new
+    /// target with the same name is created to be written to.
+    maximum_bytes_per: NonZeroU32,
+    /// Defines the number of bytes that are added into the `LogTarget`'s rate
+    /// limiting mechanism per second. This sets the maximum bytes that can be
+    /// written _continuously_ per second from this target. Higher bursts are
+    /// possible as the internal governor accumulates, up to
+    /// `maximum_bytes_burst`.
+    bytes_per_second: NonZeroU32,
+    maximum_bytes_burst: NonZeroU32,
 }
 
-async fn file_writer<P: AsRef<Path>>(rng: Rng, path: P) {
-    if let Some(p) = path.as_ref().to_str() {
-        let mut interval = time::interval(time::Duration::from_millis(1_000));
+enum Error {
+    Governor(InsufficientCapacity),
+}
 
-        loop {
-            interval.tick().await;
-            println!("[{}]{} goes brrrr...", rng.u8(0..u8::MAX), p);
-        }
+impl From<InsufficientCapacity> for Error {
+    fn from(error: InsufficientCapacity) -> Self {
+        Error::Governor(error)
     }
 }
 
-async fn run(rng: Rng) {
+async fn file_writer(rng: Rng, target: LogTarget) -> Result<(), Error> {
+    let gov = RateLimiter::direct(
+        Quota::per_second(target.bytes_per_second).allow_burst(target.maximum_bytes_burst),
+    );
+
+    if let Some(p) = target.path.to_str() {
+        loop {
+            match rng.u32(0..target.maximum_bytes_burst.get()) {
+                0 => {
+                    // TODO flush the file
+                }
+                bytes => {
+                    let bytes = NonZeroU32::new(bytes).unwrap();
+                    gov.until_n_ready(bytes).await?;
+                    println!("[{}]{} goes brrrr...", bytes, p);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run(rng: Rng, targets: HashMap<String, LogTarget>) {
     let mut workers = FuturesUnordered::new();
 
-    workers.push(file_writer(rng.clone(), Path::new("./foo/bar.txt")));
+    for (_, v) in targets {
+        workers.push(file_writer(rng.clone(), v));
+    }
 
-    while let Some(_) = workers.next().await {}
+    while workers.next().await.is_some() {}
 }
 
 fn get_config() -> Config {
@@ -65,7 +104,7 @@ fn main() {
 
     let rng: Rng = Rng::with_seed(config.random_seed);
 
-    let runtime = Builder::new_current_thread().enable_time().build().unwrap();
+    let runtime = Builder::new_current_thread().build().unwrap();
 
-    runtime.block_on(run(rng));
+    runtime.block_on(run(rng, config.targets));
 }
