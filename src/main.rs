@@ -3,14 +3,12 @@ use fastrand::Rng;
 use file_gen::config::{Config, LogTarget};
 use file_gen::Log;
 use futures::stream::{FuturesUnordered, StreamExt};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio::runtime::Builder;
-use tokio::{spawn, time};
-use tracing::{dispatcher, info, instrument};
+use tracing::{debug, dispatcher, instrument};
 use tracing_subscriber::fmt;
 
 #[derive(FromArgs)]
@@ -22,29 +20,24 @@ struct Opts {
 }
 
 #[instrument]
-async fn stats(global_bytes: Arc<AtomicU64>) {
-    let mut interval = time::interval(time::Duration::from_secs(1));
-
-    loop {
-        interval.tick().await;
-        info!("global_bytes: {}", global_bytes.swap(0, Ordering::Relaxed));
-    }
-}
-
-#[instrument]
 async fn run(rng: Rng, targets: HashMap<String, LogTarget>) {
+    // Set up the `metrics` integration. All metrics are exported from
+    // 0.0.0.0:9000 in prometheus format.
+    file_gen::init_metrics();
+    let _: () = PrometheusBuilder::new().install().unwrap();
+
+    // Set up the `tracing` integration. All traces are emitted on stdout.
+    let subscriber = fmt::SubscriberBuilder::default().finish();
+    let dispatch = dispatcher::Dispatch::new(subscriber);
+    dispatcher::set_global_default(dispatch).unwrap();
+
     let mut workers = FuturesUnordered::new();
 
-    let global_bytes = Arc::new(AtomicU64::new(0));
-
     for (_, tgt) in targets {
-        let log = Log::new(rng.clone(), tgt, global_bytes.clone())
-            .await
-            .unwrap();
+        let log = Log::new(rng.clone(), tgt).await.unwrap();
         workers.push(log.spin());
     }
 
-    spawn(stats(global_bytes));
     while workers.next().await.is_some() {}
 }
 
@@ -60,16 +53,15 @@ fn get_config() -> Config {
 }
 
 fn main() {
-    let subscriber = fmt::SubscriberBuilder::default().finish();
-    let dispatch = dispatcher::Dispatch::new(subscriber);
-    dispatcher::set_global_default(dispatch).unwrap();
-
     let config: Config = get_config();
-    info!("CONFIG: {:?}", config);
+    debug!("CONFIG: {:?}", config);
 
+    // The rng of this program is not meant to be cryptographical good just fast
+    // and repeatable. This will be cloned into every file worker. So, it's the
+    // root rng. If any other rng is used as the source _other_ than this one
+    // the determinism of this program is lost.
     let rng: Rng = Rng::with_seed(config.random_seed);
 
-    let runtime = Builder::new_current_thread().enable_time().build().unwrap();
-
+    let runtime = Builder::new_current_thread().enable_io().build().unwrap();
     runtime.block_on(run(rng, config.targets));
 }

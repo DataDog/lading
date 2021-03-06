@@ -1,7 +1,8 @@
 use byte_unit::{Byte, ByteError};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
+use std::convert::TryFrom;
+use std::num::{NonZeroU32, TryFromIntError};
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
@@ -32,6 +33,7 @@ pub struct LogTarget {
 #[derive(Debug)]
 pub enum Error {
     ByteError(ByteError),
+    TryFromInt(TryFromIntError),
 }
 
 impl From<ByteError> for Error {
@@ -40,19 +42,58 @@ impl From<ByteError> for Error {
     }
 }
 
+impl From<TryFromIntError> for Error {
+    fn from(error: TryFromIntError) -> Self {
+        Error::TryFromInt(error)
+    }
+}
+
 impl LogTarget {
+    /// Determine the `maximum_bytes_burst` for this [`LogTarget`]
+    ///
+    /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
+    ///
+    /// # Errors
+    ///
+    /// If the users supplies anything other than a stringy number plus some
+    /// recognizable unit this function will return an error. Likewise if the
+    /// user supplies a number that is larger than `u32::MAX` bytes this
+    /// function will return an error.
     pub fn maximum_bytes_burst(&self) -> Result<NonZeroU32, Error> {
         let bytes = Byte::from_str(&self.maximum_bytes_burst)?;
-        Ok(NonZeroU32::new(bytes.get_bytes() as u32).expect("maximum_bytes_burst must not be 0"))
+        Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
+            .expect("maximum_bytes_burst must not be 0"))
     }
 
+    /// Determine the `bytes_per_second` for this [`LogTarget`]
+    ///
+    /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
+    ///
+    /// # Errors
+    ///
+    /// If the users supplies anything other than a stringy number plus some
+    /// recognizable unit this function will return an error. Likewise if the
+    /// user supplies a number that is larger than `u32::MAX` bytes this
+    /// function will return an error.
     pub fn bytes_per_second(&self) -> Result<NonZeroU32, Error> {
         let bytes = Byte::from_str(&self.bytes_per_second)?;
-        Ok(NonZeroU32::new(bytes.get_bytes() as u32).expect("bytes_per_second must not be 0"))
+        Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
+            .expect("bytes_per_second must not be 0"))
     }
 
+    /// Determine the `maximum_bytes_per` for this [`LogTarget`]
+    ///
+    /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
+    ///
+    /// # Errors
+    ///
+    /// If the users supplies anything other than a stringy number plus some
+    /// recognizable unit this function will return an error. Likewise if the
+    /// user supplies a number that is larger than `u32::MAX` bytes this
+    /// function will return an error.
     pub fn maximum_bytes_per(&self) -> Result<NonZeroU32, Error> {
         let bytes = Byte::from_str(&self.maximum_bytes_per)?;
-        Ok(NonZeroU32::new(bytes.get_bytes() as u32).expect("maximum_bytes_per must not be 0"))
+        Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
+            .expect("maximum_bytes_per must not be 0"))
     }
 }

@@ -3,11 +3,10 @@ use fastrand::Rng;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state};
 use governor::{Quota, RateLimiter};
+use metrics::counter;
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
@@ -16,7 +15,7 @@ use tracing::{debug, info, instrument, span, Level};
 #[derive(Debug)]
 pub enum Error {
     Governor(InsufficientCapacity),
-    IoError(::std::io::Error),
+    Io(::std::io::Error),
     Config(config::Error),
 }
 
@@ -34,13 +33,12 @@ impl From<config::Error> for Error {
 
 impl From<::std::io::Error> for Error {
     fn from(error: ::std::io::Error) -> Self {
-        Error::IoError(error)
+        Error::Io(error)
     }
 }
 
 #[derive(Debug)]
 pub struct Log {
-    global_bytes: Arc<AtomicU64>,
     path: PathBuf,
     fp: BufWriter<fs::File>,
     maximum_bytes_per: NonZeroU32,
@@ -51,11 +49,7 @@ pub struct Log {
 
 impl Log {
     #[instrument]
-    pub async fn new(
-        rng: Rng,
-        target: LogTarget,
-        global_bytes: Arc<AtomicU64>,
-    ) -> Result<Self, Error> {
+    pub async fn new(rng: Rng, target: LogTarget) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
                 Quota::per_second(target.bytes_per_second()?)
@@ -81,7 +75,6 @@ impl Log {
             maximum_bytes_per
         );
         Ok(Self {
-            global_bytes,
             fp,
             maximum_bytes_per,
             path: target.path,
@@ -100,13 +93,10 @@ impl Log {
     #[instrument]
     pub async fn spin(mut self) -> Result<(), Error> {
         let mut bytes_written: u64 = 0;
-        let maximum_bytes_per: u64 = self.maximum_bytes_per.get() as u64;
+        let maximum_bytes_per: u64 = u64::from(self.maximum_bytes_per.get());
         let maximum_bytes_burst: u32 = self.maximum_bytes_burst.get();
 
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.maximum_bytes_burst.get() as usize);
-        for _ in 0..self.maximum_bytes_burst.get() {
-            buffer.push(0);
-        }
+        let mut buffer: Vec<u8> = vec![0; self.maximum_bytes_burst.get() as usize];
 
         loop {
             let span = span!(Level::INFO, "spin_loop");
@@ -114,18 +104,19 @@ impl Log {
 
             debug!("bytes_written: {}", bytes_written);
             {
-                let bytes = self.rng.u32(1..maximum_bytes_burst) as usize;
-                let nz_bytes = NonZeroU32::new(bytes as u32).unwrap();
+                let bytes = self.rng.u32(1..maximum_bytes_burst);
+                let nz_bytes = NonZeroU32::new(bytes).unwrap();
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
-                let slice = &mut buffer[0..bytes];
+                let slice = &mut buffer[0..bytes as usize];
                 self.fill_buffer(slice);
-                slice[bytes - 1] = b'\n';
+                slice[bytes as usize - 1] = b'\n';
 
                 debug!("writing {} bytes", bytes);
                 self.fp.write(slice).await?;
-                bytes_written += bytes as u64;
-                self.global_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+                bytes_written += u64::from(bytes);
+
+                counter!("global_bytes_written", u64::from(bytes));
             }
 
             if bytes_written > maximum_bytes_per {
