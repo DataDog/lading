@@ -52,7 +52,7 @@ features = ["std"]
 [dependencies.tokio]
 version = "1.2"
 default-features = false
-features = ["rt", "macros", "fs", "io-util"]
+features = ["rt", "macros", "fs", "io-util", "time"]
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.

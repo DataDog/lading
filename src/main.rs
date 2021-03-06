@@ -6,7 +6,10 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::runtime::Builder;
+use tokio::{spawn, time};
 use tracing::{dispatcher, info, instrument};
 use tracing_subscriber::fmt;
 
@@ -19,14 +22,29 @@ struct Opts {
 }
 
 #[instrument]
+async fn stats(global_bytes: Arc<AtomicU64>) {
+    let mut interval = time::interval(time::Duration::from_secs(1));
+
+    loop {
+        interval.tick().await;
+        info!("global_bytes: {}", global_bytes.swap(0, Ordering::Relaxed));
+    }
+}
+
+#[instrument]
 async fn run(rng: Rng, targets: HashMap<String, LogTarget>) {
     let mut workers = FuturesUnordered::new();
 
+    let global_bytes = Arc::new(AtomicU64::new(0));
+
     for (_, tgt) in targets {
-        let log = Log::new(rng.clone(), tgt).await.unwrap();
+        let log = Log::new(rng.clone(), tgt, global_bytes.clone())
+            .await
+            .unwrap();
         workers.push(log.spin());
     }
 
+    spawn(stats(global_bytes));
     while workers.next().await.is_some() {}
 }
 
@@ -51,7 +69,7 @@ fn main() {
 
     let rng: Rng = Rng::with_seed(config.random_seed);
 
-    let runtime = Builder::new_current_thread().build().unwrap();
+    let runtime = Builder::new_current_thread().enable_time().build().unwrap();
 
     runtime.block_on(run(rng, config.targets));
 }

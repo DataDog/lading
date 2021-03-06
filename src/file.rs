@@ -6,6 +6,8 @@ use governor::{Quota, RateLimiter};
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
@@ -38,6 +40,7 @@ impl From<::std::io::Error> for Error {
 
 #[derive(Debug)]
 pub struct Log {
+    global_bytes: Arc<AtomicU64>,
     path: PathBuf,
     fp: BufWriter<fs::File>,
     maximum_bytes_per: NonZeroU32,
@@ -48,7 +51,11 @@ pub struct Log {
 
 impl Log {
     #[instrument]
-    pub async fn new(rng: Rng, target: LogTarget) -> Result<Self, Error> {
+    pub async fn new(
+        rng: Rng,
+        target: LogTarget,
+        global_bytes: Arc<AtomicU64>,
+    ) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
                 Quota::per_second(target.bytes_per_second()?)
@@ -74,6 +81,7 @@ impl Log {
             maximum_bytes_per
         );
         Ok(Self {
+            global_bytes,
             fp,
             maximum_bytes_per,
             path: target.path,
@@ -117,6 +125,7 @@ impl Log {
                 debug!("writing {} bytes", bytes);
                 self.fp.write(slice).await?;
                 bytes_written += bytes as u64;
+                self.global_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
             }
 
             if bytes_written > maximum_bytes_per {
