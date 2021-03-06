@@ -4,4 +4,5 @@ random_seed = 201010
 path = "/tmp/playground/foo.txt"
 maximum_bytes_per = "1Gb"
 bytes_per_second = "10Mb"
-maximum_bytes_burst = "1Mb"
+# consider renaming to "max line size" or what not
+maximum_bytes_burst = "1024 Kb"
