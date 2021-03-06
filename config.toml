@@ -1,0 +1,7 @@
+random_seed = 201010
+
+[targets.foo]
+path = "/tmp/playground/foo.txt"
+maximum_bytes_per = "1Gb"
+bytes_per_second = "10Mb"
+maximum_bytes_burst = "1Mb"

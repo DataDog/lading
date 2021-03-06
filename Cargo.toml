@@ -9,6 +9,21 @@ edition = "2018"
 [dependencies]
 toml = "0.5"
 
+[dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["std", "attributes"]
+
+[dependencies.tracing-subscriber]
+version = "0.2"
+default-features = false
+features = ["fmt", "json", "chrono", "parking_lot"]
+
+[dependencies.byte-unit]
+version = "4.0"
+default-features = false
+features = []
+
 [dependencies.governor]
 version = "0.3"
 default-features = false
@@ -37,7 +52,7 @@ features = ["std"]
 [dependencies.tokio]
 version = "1.2"
 default-features = false
-features = ["rt", "macros", "fs"]
+features = ["rt", "macros", "fs", "io-util"]
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
