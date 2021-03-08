@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub random_seed: u64,
+    pub worker_threads: u16,
     pub targets: HashMap<String, LogTarget>,
 }
 
@@ -27,7 +28,7 @@ pub struct LogTarget {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     bytes_per_second: String,
-    maximum_bytes_burst: String,
+    maximum_line_size_bytes: String,
 }
 
 #[derive(Debug)]
@@ -49,7 +50,7 @@ impl From<TryFromIntError> for Error {
 }
 
 impl LogTarget {
-    /// Determine the `maximum_bytes_burst` for this [`LogTarget`]
+    /// Determine the `maximum_line_size_bytes` for this [`LogTarget`]
     ///
     /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
     ///
@@ -59,10 +60,10 @@ impl LogTarget {
     /// recognizable unit this function will return an error. Likewise if the
     /// user supplies a number that is larger than `u32::MAX` bytes this
     /// function will return an error.
-    pub fn maximum_bytes_burst(&self) -> Result<NonZeroU32, Error> {
-        let bytes = Byte::from_str(&self.maximum_bytes_burst)?;
+    pub fn maximum_line_size_bytes(&self) -> Result<NonZeroU32, Error> {
+        let bytes = Byte::from_str(&self.maximum_line_size_bytes)?;
         Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
-            .expect("maximum_bytes_burst must not be 0"))
+            .expect("maximum_line_size_bytes must not be 0"))
     }
 
     /// Determine the `bytes_per_second` for this [`LogTarget`]

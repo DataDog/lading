@@ -1,8 +1,20 @@
 random_seed = 201010
+worker_threads = 3
 
 [targets.foo]
 path = "/tmp/playground/foo.txt"
 maximum_bytes_per = "1Gb"
 bytes_per_second = "10Mb"
-# consider renaming to "max line size" or what not
-maximum_bytes_burst = "1024 Kb"
+maximum_line_size_bytes = "1024 Kb"
+
+[targets.bar]
+path = "/tmp/playground/bar.txt"
+maximum_bytes_per = "1Gb"
+bytes_per_second = "100Mb"
+maximum_line_size_bytes = "1024 Kb"
+
+[targets.bing]
+path = "/tmp/playground/bing.txt"
+maximum_bytes_per = "4Gb"
+bytes_per_second = "1Gb"
+maximum_line_size_bytes = "1Mb"

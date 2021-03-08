@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use tokio::runtime::Builder;
-use tracing::{debug, dispatcher, instrument};
-use tracing_subscriber::fmt;
 
 #[derive(FromArgs)]
 /// `file_gen` options
@@ -19,22 +17,16 @@ struct Opts {
     config_path: String,
 }
 
-#[instrument]
 async fn run(rng: Rng, targets: HashMap<String, LogTarget>) {
     // Set up the `metrics` integration. All metrics are exported from
     // 0.0.0.0:9000 in prometheus format.
-    file_gen::init_metrics();
+    file_gen::init_metrics(targets.keys().cloned().collect());
     let _: () = PrometheusBuilder::new().install().unwrap();
-
-    // Set up the `tracing` integration. All traces are emitted on stdout.
-    let subscriber = fmt::SubscriberBuilder::default().finish();
-    let dispatch = dispatcher::Dispatch::new(subscriber);
-    dispatcher::set_global_default(dispatch).unwrap();
 
     let mut workers = FuturesUnordered::new();
 
-    for (_, tgt) in targets {
-        let log = Log::new(rng.clone(), tgt).await.unwrap();
+    for (name, tgt) in targets {
+        let log = Log::new(rng.clone(), name, tgt).await.unwrap();
         workers.push(log.spin());
     }
 
@@ -54,7 +46,6 @@ fn get_config() -> Config {
 
 fn main() {
     let config: Config = get_config();
-    debug!("CONFIG: {:?}", config);
 
     // The rng of this program is not meant to be cryptographical good just fast
     // and repeatable. This will be cloned into every file worker. So, it's the
@@ -62,6 +53,10 @@ fn main() {
     // the determinism of this program is lost.
     let rng: Rng = Rng::with_seed(config.random_seed);
 
-    let runtime = Builder::new_current_thread().enable_io().build().unwrap();
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(config.worker_threads as usize)
+        .enable_io()
+        .build()
+        .unwrap();
     runtime.block_on(run(rng, config.targets));
 }

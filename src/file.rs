@@ -1,16 +1,16 @@
+use crate::buffer::fill_ascii_buffer;
 use crate::config::{self, LogTarget};
 use fastrand::Rng;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state};
 use governor::{Quota, RateLimiter};
-use metrics::counter;
+use metrics::{counter, gauge};
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
-use tracing::{debug, info, instrument, span, Level};
 
 #[derive(Debug)]
 pub enum Error {
@@ -40,26 +40,26 @@ impl From<::std::io::Error> for Error {
 #[derive(Debug)]
 pub struct Log {
     path: PathBuf,
+    name: String, // this is the stringy version of `path`
     fp: BufWriter<fs::File>,
     maximum_bytes_per: NonZeroU32,
-    maximum_bytes_burst: NonZeroU32,
+    maximum_line_size_bytes: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     rng: Rng,
 }
 
 impl Log {
-    #[instrument]
-    pub async fn new(rng: Rng, target: LogTarget) -> Result<Self, Error> {
+    pub async fn new(rng: Rng, name: String, target: LogTarget) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
                 Quota::per_second(target.bytes_per_second()?)
-                    .allow_burst(target.maximum_bytes_burst()?),
+                    .allow_burst(target.maximum_line_size_bytes()?),
             );
 
-        let maximum_bytes_burst = target.maximum_bytes_burst()?;
+        let maximum_line_size_bytes = target.maximum_line_size_bytes()?;
         let maximum_bytes_per = target.maximum_bytes_per()?;
         let fp = BufWriter::with_capacity(
-            maximum_bytes_burst.get() as usize,
+            maximum_line_size_bytes.get() as usize,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -68,64 +68,52 @@ impl Log {
                 .await?,
         );
 
-        info!(
-            "[{}] maximum_bytes_burst: {}, maximum_bytes_per: {}",
-            target.path.to_str().unwrap(),
-            maximum_bytes_burst,
-            maximum_bytes_per
-        );
         Ok(Self {
             fp,
             maximum_bytes_per,
+            name,
             path: target.path,
-            maximum_bytes_burst,
+            maximum_line_size_bytes,
             rate_limiter,
             rng,
         })
     }
 
-    #[instrument]
-    #[inline]
-    fn fill_buffer(&self, buffer: &mut [u8]) {
-        buffer.iter_mut().for_each(|c| *c = self.rng.u8(65..90));
-    }
-
-    #[instrument]
+    #[allow(clippy::cast_precision_loss)]
     pub async fn spin(mut self) -> Result<(), Error> {
+        let labels = vec![("target", self.name.clone())];
+
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per: u64 = u64::from(self.maximum_bytes_per.get());
-        let maximum_bytes_burst: u32 = self.maximum_bytes_burst.get();
+        let maximum_line_size_bytes: u32 = self.maximum_line_size_bytes.get();
 
-        let mut buffer: Vec<u8> = vec![0; self.maximum_bytes_burst.get() as usize];
+        gauge!("maximum_bytes_per", maximum_bytes_per as f64, &labels);
+        gauge!("maximum_line_size_bytes", maximum_bytes_per as f64, &labels);
+
+        let mut buffer: Vec<u8> = vec![0; self.maximum_line_size_bytes.get() as usize];
 
         loop {
-            let span = span!(Level::INFO, "spin_loop");
-            let _enter = span.enter();
-
-            debug!("bytes_written: {}", bytes_written);
             {
-                let bytes = self.rng.u32(1..maximum_bytes_burst);
+                let bytes = self.rng.u32(1..maximum_line_size_bytes);
                 let nz_bytes = NonZeroU32::new(bytes).unwrap();
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
                 let slice = &mut buffer[0..bytes as usize];
-                self.fill_buffer(slice);
+                fill_ascii_buffer(&self.rng, slice);
                 slice[bytes as usize - 1] = b'\n';
 
-                debug!("writing {} bytes", bytes);
                 self.fp.write(slice).await?;
                 bytes_written += u64::from(bytes);
-
-                counter!("global_bytes_written", u64::from(bytes));
+                counter!("bytes_written", u64::from(bytes), &labels);
+                gauge!("current_target_size_bytes", bytes_written as f64, &labels);
             }
 
             if bytes_written > maximum_bytes_per {
-                let rot_span = span!(Level::INFO, "rotation");
-                let _rot_enter = rot_span.enter();
-
-                info!("rotating file with bytes_written: {}", bytes_written);
+                let slop = (bytes_written - maximum_bytes_per).max(0) as f64;
+                counter!("file_rotated", 1, &labels);
+                gauge!("file_rotation_slop", slop, &labels);
                 let fp = BufWriter::with_capacity(
-                    maximum_bytes_burst as usize,
+                    maximum_line_size_bytes as usize,
                     fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)

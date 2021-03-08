@@ -19,16 +19,6 @@ version = "0.3"
 default-features = false
 features = ["tokio-exporter"]
 
-[dependencies.tracing]
-version = "0.1"
-default-features = false
-features = ["std", "attributes"]
-
-[dependencies.tracing-subscriber]
-version = "0.2"
-default-features = false
-features = ["fmt", "json", "chrono", "parking_lot"]
-
 [dependencies.byte-unit]
 version = "4.0"
 default-features = false
@@ -62,10 +52,17 @@ features = ["std"]
 [dependencies.tokio]
 version = "1.2"
 default-features = false
-features = ["rt", "macros", "fs", "io-util"]
+features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
+
+[dev-dependencies]
+criterion = "0.3"
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 debug = true      # Include debug symbols in the executable, benefits tooling.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
+
+[[bench]]
+name = "buffer"
+harness = false
