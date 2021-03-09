@@ -50,7 +50,7 @@ maximum_line_size_bytes = "1Mb"
 
 This configuration will create three total targets 'foo', 'bar' and 'bing'. Each
 target will produce a different line variant at a distinct tempo. Please see
-[`example.conf`](./example.conf) for more details about the various options.
+[`example.toml`](./example.toml) for more details about the various options.
 
 ## Performance
 
