@@ -50,7 +50,7 @@ pub struct LogTargetTemplate {
     ///
     /// After this limit is breached the target is closed and deleted. A new
     /// target with the same name is created to be written to.
-    maximum_bytes_per: String,
+    maximum_bytes_per_file: String,
     /// Defines the number of bytes that are added into the `LogTarget`'s rate
     /// limiting mechanism per second. This sets the maximum bytes that can be
     /// written _continuously_ per second from this target. Higher bursts are
@@ -73,7 +73,7 @@ pub struct LogTarget {
     ///
     /// After this limit is breached the target is closed and deleted. A new
     /// target with the same name is created to be written to.
-    pub maximum_bytes_per: NonZeroU32,
+    pub maximum_bytes_per_file: NonZeroU32,
     /// Defines the number of bytes that are added into the `LogTarget`'s rate
     /// limiting mechanism per second. This sets the maximum bytes that can be
     /// written _continuously_ per second from this target. Higher bursts are
@@ -124,7 +124,7 @@ impl Iterator for LogTargetTemplateIter {
         Some(LogTarget {
             path,
             variant: self.variant,
-            maximum_bytes_per: self.maximum_bytes_per,
+            maximum_bytes_per_file: self.maximum_bytes_per_file,
             bytes_per_second: self.bytes_per_second,
             maximum_line_size_bytes: self.maximum_line_size_bytes,
         })
@@ -138,7 +138,7 @@ pub struct LogTargetTemplateIter {
     duplicates: usize,
     current_duplicate: usize,
     variant: Variant,
-    maximum_bytes_per: NonZeroU32,
+    maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
 }
@@ -156,7 +156,7 @@ impl LogTargetTemplate {
             current_duplicate: 0,
             duplicates: self.duplicates as usize,
             variant: self.variant,
-            maximum_bytes_per: self.maximum_bytes_per()?,
+            maximum_bytes_per_file: self.maximum_bytes_per_file()?,
             bytes_per_second: self.bytes_per_second()?,
             maximum_line_size_bytes: self.maximum_line_size_bytes()?,
         })
@@ -194,7 +194,7 @@ impl LogTargetTemplate {
             .expect("bytes_per_second must not be 0"))
     }
 
-    /// Determine the `maximum_bytes_per` for this [`LogTargetTemplate`]
+    /// Determine the `maximum_bytes_per_file` for this [`LogTargetTemplate`]
     ///
     /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
     ///
@@ -204,9 +204,9 @@ impl LogTargetTemplate {
     /// recognizable unit this function will return an error. Likewise if the
     /// user supplies a number that is larger than `u32::MAX` bytes this
     /// function will return an error.
-    pub fn maximum_bytes_per(&self) -> Result<NonZeroU32, Error> {
-        let bytes = Byte::from_str(&self.maximum_bytes_per)?;
+    pub fn maximum_bytes_per_file(&self) -> Result<NonZeroU32, Error> {
+        let bytes = Byte::from_str(&self.maximum_bytes_per_file)?;
         Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
-            .expect("maximum_bytes_per must not be 0"))
+            .expect("maximum_bytes_per_file must not be 0"))
     }
 }

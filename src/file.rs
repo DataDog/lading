@@ -41,7 +41,7 @@ where
     name: String, // this is the stringy version of `path`
     fp: BufWriter<fs::File>,
     variant: Variant,
-    maximum_bytes_per: NonZeroU32,
+    maximum_bytes_per_file: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     rng: R,
@@ -68,7 +68,7 @@ where
             );
 
         let maximum_line_size_bytes = target.maximum_line_size_bytes;
-        let maximum_bytes_per = target.maximum_bytes_per;
+        let maximum_bytes_per_file = target.maximum_bytes_per_file;
         let fp = BufWriter::with_capacity(
             maximum_line_size_bytes.get() as usize,
             fs::OpenOptions::new()
@@ -81,7 +81,7 @@ where
 
         Ok(Self {
             fp,
-            maximum_bytes_per,
+            maximum_bytes_per_file,
             name,
             path: target.path,
             variant: target.variant,
@@ -106,11 +106,19 @@ where
         let labels = vec![("target", self.name.clone())];
 
         let mut bytes_written: u64 = 0;
-        let maximum_bytes_per: u64 = u64::from(self.maximum_bytes_per.get());
+        let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
         let maximum_line_size_bytes: u32 = self.maximum_line_size_bytes.get();
 
-        gauge!("maximum_bytes_per", maximum_bytes_per as f64, &labels);
-        gauge!("maximum_line_size_bytes", maximum_bytes_per as f64, &labels);
+        gauge!(
+            "maximum_bytes_per_file",
+            maximum_bytes_per_file as f64,
+            &labels
+        );
+        gauge!(
+            "maximum_line_size_bytes",
+            maximum_bytes_per_file as f64,
+            &labels
+        );
 
         let mut buffer: Vec<u8> = vec![0; self.maximum_line_size_bytes.get() as usize];
 
@@ -138,8 +146,8 @@ where
                 }
             }
 
-            if bytes_written > maximum_bytes_per {
-                let slop = (bytes_written - maximum_bytes_per).max(0) as f64;
+            if bytes_written > maximum_bytes_per_file {
+                let slop = (bytes_written - maximum_bytes_per_file).max(0) as f64;
                 gauge!("file_rotation_slop", slop, &labels);
                 // Delete file, leaving any open file handlers intact. This
                 // includes our own `self.fp` for the time being.
