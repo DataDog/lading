@@ -107,16 +107,23 @@ where
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
                 let slice = &mut buffer[0..bytes as usize];
-                match self.variant {
+                let res = match self.variant {
                     Variant::Ascii => buffer::fill_ascii_buffer(&mut self.rng, slice),
                     Variant::Constant => buffer::fill_constant_buffer(&mut self.rng, slice),
+                    Variant::Json => buffer::fill_json_buffer(&mut self.rng, slice),
+                };
+                match res {
+                    Ok(filled_bytes) => {
+                        self.fp.write(&slice[0..filled_bytes]).await?;
+                        bytes_written += filled_bytes as u64;
+                        counter!("bytes_written", u64::from(bytes_written), &labels);
+                        gauge!("current_target_size_bytes", bytes_written as f64, &labels);
+                    }
+                    Err(e) => {
+                        println!("{:?}", e);
+                        continue;
+                    }
                 }
-                slice[bytes as usize - 1] = b'\n';
-
-                self.fp.write(slice).await?;
-                bytes_written += u64::from(bytes);
-                counter!("bytes_written", u64::from(bytes), &labels);
-                gauge!("current_target_size_bytes", bytes_written as f64, &labels);
             }
 
             if bytes_written > maximum_bytes_per {

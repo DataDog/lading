@@ -48,6 +48,20 @@ fn fill_ascii_buffer_bench(c: &mut Criterion) {
     }
 }
 
+fn fill_json_buffer_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("fill_json_buffer");
+
+    for param in &PARAMETERS {
+        group.throughput(Throughput::Bytes(param.data_size as u64));
+
+        let mut rng = SplitMix64::from_seed(param.seed.to_be_bytes());
+        let mut data: Vec<u8> = vec![0; param.data_size];
+        group.bench_with_input(BenchmarkId::from_parameter(&param), &param, |b, _| {
+            b.iter(|| buffer::fill_json_buffer(&mut rng, &mut data[0..]))
+        });
+    }
+}
+
 fn fill_constant_buffer_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("fill_constant_buffer");
 
@@ -64,5 +78,5 @@ fn fill_constant_buffer_bench(c: &mut Criterion) {
 
 criterion_group!(name = benches;
                  config = Criterion::default();
-                 targets = fill_ascii_buffer_bench, fill_constant_buffer_bench);
+                 targets = fill_json_buffer_bench, fill_ascii_buffer_bench, fill_constant_buffer_bench);
 criterion_main!(benches);

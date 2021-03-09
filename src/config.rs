@@ -16,6 +16,7 @@ pub struct Config {
 pub enum Variant {
     Constant,
     Ascii,
+    Json,
 }
 
 #[derive(Debug, Deserialize)]
