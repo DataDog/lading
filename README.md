@@ -27,7 +27,7 @@ worker_threads = 3
 path_template = "/tmp/playground/%NNN%-foo.json"
 duplicates = 3
 variant = "Json"
-maximum_bytes_per = "1Gb"
+maximum_bytes_per_file = "1Gb"
 bytes_per_second = "10Mb"
 maximum_line_size_bytes = "1024 Kb"
 
@@ -35,7 +35,7 @@ maximum_line_size_bytes = "1024 Kb"
 path_template = "/tmp/playground/%NNN%-bar.txt"
 duplicates = 10
 variant = "Ascii"
-maximum_bytes_per = "1Gb"
+maximum_bytes_per_file = "1Gb"
 bytes_per_second = "100Mb"
 maximum_line_size_bytes = "1024 Kb"
 
@@ -43,7 +43,7 @@ maximum_line_size_bytes = "1024 Kb"
 path_template = "/tmp/playground/%NNN%-bing.const"
 duplicates = 2
 variant = "Constant"
-maximum_bytes_per = "4Gb"
+maximum_bytes_per_file = "4Gb"
 bytes_per_second = "500Mb"
 maximum_line_size_bytes = "1Mb"
 ```

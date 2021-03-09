@@ -19,7 +19,7 @@ variant = "Json"
 # breached the file handler is closed and a new file in the **same** location is
 # opened. The original file is deleted, simulating a 'rotation' without
 # increasing the total number of files on disk.
-maximum_bytes_per = "1Gb"
+maximum_bytes_per_file = "1Gb"
 # Set the bytes available per second to be written. The target will not be able
 # to produce bytes any faster than this, though it may chose to produce bytes
 # less quickly.

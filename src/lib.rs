@@ -20,7 +20,7 @@ pub use file::Log;
 /// Initialize this program's metrics subsystem
 pub fn init_metrics(mut targets: Vec<String>) {
     for target in targets.drain(..) {
-        register_gauge!("maximum_bytes_per",
+        register_gauge!("maximum_bytes_per_file",
                         Unit::Bytes,
                         "soft maximum size of the file, in bytes",
                         "target" => target.clone());
