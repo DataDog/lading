@@ -1,5 +1,5 @@
 use argh::FromArgs;
-use file_gen::config::{Config, LogTarget};
+use file_gen::config::{Config, LogTargetTemplate};
 use file_gen::Log;
 use futures::stream::{FuturesUnordered, StreamExt};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -18,7 +18,7 @@ struct Opts {
     config_path: String,
 }
 
-async fn run<R>(rng: R, targets: HashMap<String, LogTarget>)
+async fn run<R>(rng: R, targets: HashMap<String, LogTargetTemplate>)
 where
     R: Rng + Sized + Clone,
 {
@@ -29,9 +29,15 @@ where
 
     let mut workers = FuturesUnordered::new();
 
-    for (name, tgt) in targets {
-        let log = Log::new(rng.clone(), name, tgt).await.unwrap();
-        workers.push(log.spin());
+    for (name, template) in targets {
+        let mut iter = template.iter().unwrap();
+        let mut cur = 0;
+        while let Some(tgt) = iter.next() {
+            let name = format!("{}[{}]", name.clone(), cur);
+            cur += 1;
+            let log = Log::new(rng.clone(), name, tgt).await.unwrap();
+            workers.push(log.spin());
+        }
     }
 
     while workers.next().await.is_some() {}

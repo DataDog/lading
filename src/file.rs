@@ -1,5 +1,5 @@
 use crate::buffer;
-use crate::config::{self, LogTarget, Variant};
+use crate::config::{LogTarget, Variant};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state};
 use governor::{Quota, RateLimiter};
@@ -16,18 +16,11 @@ use tokio::io::BufWriter;
 pub enum Error {
     Governor(InsufficientCapacity),
     Io(::std::io::Error),
-    Config(config::Error),
 }
 
 impl From<InsufficientCapacity> for Error {
     fn from(error: InsufficientCapacity) -> Self {
         Error::Governor(error)
-    }
-}
-
-impl From<config::Error> for Error {
-    fn from(error: config::Error) -> Self {
-        Error::Config(error)
     }
 }
 
@@ -59,12 +52,12 @@ where
     pub async fn new(rng: R, name: String, target: LogTarget) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
-                Quota::per_second(target.bytes_per_second()?)
-                    .allow_burst(target.maximum_line_size_bytes()?),
+                Quota::per_second(target.bytes_per_second)
+                    .allow_burst(target.maximum_line_size_bytes),
             );
 
-        let maximum_line_size_bytes = target.maximum_line_size_bytes()?;
-        let maximum_bytes_per = target.maximum_bytes_per()?;
+        let maximum_line_size_bytes = target.maximum_line_size_bytes;
+        let maximum_bytes_per = target.maximum_bytes_per;
         let fp = BufWriter::with_capacity(
             maximum_line_size_bytes.get() as usize,
             fs::OpenOptions::new()
@@ -119,8 +112,8 @@ where
                         counter!("bytes_written", u64::from(bytes_written), &labels);
                         gauge!("current_target_size_bytes", bytes_written as f64, &labels);
                     }
-                    Err(e) => {
-                        println!("{:?}", e);
+                    Err(_) => {
+                        counter!("unable_to_write_to_target", 1, &labels);
                         continue;
                     }
                 }

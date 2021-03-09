@@ -31,6 +31,10 @@ pub fn init_metrics(mut targets: Vec<String>) {
                           Unit::Count,
                           "number of times the underlying file has been rotated",
                           "target" => target.clone());
+        register_counter!("unable_to_write_to_target",
+                          Unit::Count,
+                          "number of times the underlying file failed to be written to",
+                          "target" => target.clone());
         register_gauge!("file_rotation_slop",
                         Unit::Bytes,
                         "total number of bytes over the soft maximum at rotation",

@@ -2,22 +2,25 @@ random_seed = 201010
 worker_threads = 3
 
 [targets.foo]
-path = "/tmp/playground/foo.txt"
+path_template = "/tmp/playground/%NNN%-foo.json"
+duplicates = 3
 variant = "Json"
 maximum_bytes_per = "1Gb"
 bytes_per_second = "10Mb"
 maximum_line_size_bytes = "1024 Kb"
 
-# [targets.bar]
-# path = "/tmp/playground/bar.txt"
-# variant = "Ascii"
-# maximum_bytes_per = "1Gb"
-# bytes_per_second = "100Mb"
-# maximum_line_size_bytes = "1024 Kb"
+[targets.bar]
+path_template = "/tmp/playground/%NNN%-bar.txt"
+duplicates = 10
+variant = "Ascii"
+maximum_bytes_per = "1Gb"
+bytes_per_second = "100Mb"
+maximum_line_size_bytes = "1024 Kb"
 
-# [targets.bing]
-# path = "/tmp/playground/bing.txt"
-# variant = "Constant"
-# maximum_bytes_per = "4Gb"
-# bytes_per_second = "500Mb"
-# maximum_line_size_bytes = "1Mb"
+[targets.bing]
+path_template = "/tmp/playground/%NNN%-bing.const"
+duplicates = 2
+variant = "Constant"
+maximum_bytes_per = "4Gb"
+bytes_per_second = "500Mb"
+maximum_line_size_bytes = "1Mb"

@@ -31,35 +31,62 @@ struct JsonPayload {
     id: u64,
     name: u64,
     seed: u16,
+    byte_parade: Vec<u8>,
 }
 
-/// Performance: ~400Mb/s
+const fn max_string_u64() -> usize {
+    let base = 20;
+    let quotes = 2;
+    let comma = 1;
+
+    base + quotes + comma
+}
+
+const fn max_string_u16() -> usize {
+    let base = 5;
+    let quotes = 2;
+    let comma = 1;
+
+    base + quotes + comma
+}
+
+const fn max_string_u8() -> usize {
+    let base = 3;
+    let quotes = 2;
+    let comma = 1;
+
+    base + quotes + comma
+}
+
+/// Performance: ~250Mb/s
 #[inline]
 pub fn fill_json_buffer<R>(rng: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
 where
     R: Rng + Sized,
 {
+    // The final payload, being stringly encoded, will have a bunch of '"' and
+    // ',' characters populating it. To control for this we
+    let brackets = 2;
+    let curley_brackets = 2;
+    let payload_overhead = max_string_u64() * 2 + max_string_u16() + brackets + curley_brackets;
+    let remain = buffer.len().saturating_sub(payload_overhead);
+    let parade_bytes_available = remain / max_string_u8();
+
     let mut buf = Cursor::new(buffer);
-    let bytes_written;
-    loop {
-        let payload = JsonPayload {
-            id: rng.gen(),
-            name: rng.gen(),
-            seed: rng.gen(),
-        };
+    let mut byte_parade = vec![0; parade_bytes_available];
+    rng.fill_bytes(&mut byte_parade);
 
-        let pos = buf.position();
-        if to_writer(&mut buf, &payload).is_err() {
-            buf.set_position(pos);
-            buf.write(b"\n")?;
-            bytes_written = buf.position();
-            break;
-        } else {
-            buf.write(b"\n")?;
-        }
-    }
+    let payload = JsonPayload {
+        id: rng.gen(),
+        name: rng.gen(),
+        seed: rng.gen(),
+        byte_parade,
+    };
 
-    Ok(bytes_written as usize)
+    to_writer(&mut buf, &payload)?;
+    buf.write(b"\n")?;
+
+    Ok(buf.position() as usize)
 }
 
 /// Performance: ~100Gb/s
