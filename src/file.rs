@@ -1,5 +1,5 @@
-use crate::buffer::fill_ascii_buffer;
-use crate::config::{self, LogTarget};
+use crate::buffer;
+use crate::config::{self, LogTarget, Variant};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state};
 use governor::{Quota, RateLimiter};
@@ -45,6 +45,7 @@ where
     path: PathBuf,
     name: String, // this is the stringy version of `path`
     fp: BufWriter<fs::File>,
+    variant: Variant,
     maximum_bytes_per: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
@@ -79,6 +80,7 @@ where
             maximum_bytes_per,
             name,
             path: target.path,
+            variant: target.variant,
             maximum_line_size_bytes,
             rate_limiter,
             rng,
@@ -105,7 +107,10 @@ where
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
                 let slice = &mut buffer[0..bytes as usize];
-                fill_ascii_buffer(&mut self.rng, slice);
+                match self.variant {
+                    Variant::Ascii => buffer::fill_ascii_buffer(&mut self.rng, slice),
+                    Variant::Constant => buffer::fill_constant_buffer(&mut self.rng, slice),
+                }
                 slice[bytes as usize - 1] = b'\n';
 
                 self.fp.write(slice).await?;

@@ -13,8 +13,15 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
+pub enum Variant {
+    Constant,
+    Ascii,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct LogTarget {
     pub path: PathBuf,
+    pub variant: Variant,
     /// Sets the **soft** maximum bytes to be written into the `LogTarget`. This
     /// limit is soft, meaning a burst may go beyond this limit by no more than
     /// `maximum_token_burst`.
