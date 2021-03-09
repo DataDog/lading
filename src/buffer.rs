@@ -1,3 +1,4 @@
+//! Functions to fill buffers with random data.
 use rand::Rng;
 use serde::Serialize;
 use serde_json::to_writer;
@@ -5,12 +6,15 @@ use std::io::{self, Cursor, Write};
 
 const CHARSET: &[u8] =
     b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,/\\{}[];:'\"";
+#[allow(clippy::cast_possible_truncation)]
 const CHARSET_LEN: u8 = CHARSET.len() as u8;
 
+/// Errors related to buffer filling
 #[derive(Debug)]
 pub enum Error {
-    InsufficientSpace,
+    /// Json payload could not be encoded
     Json(serde_json::Error),
+    /// IO operation failed
     Io(io::Error),
 }
 
@@ -26,12 +30,17 @@ impl From<io::Error> for Error {
     }
 }
 
+/// The json payload produced for the json variant line
 #[derive(Debug, Serialize)]
-struct JsonPayload {
-    id: u64,
-    name: u64,
-    seed: u16,
-    byte_parade: Vec<u8>,
+pub struct JsonPayload {
+    /// A u64. Its name has no meaning.
+    pub id: u64,
+    /// A u64. Its name has no meaning.
+    pub name: u64,
+    /// A u16. Its name has no meaning.
+    pub seed: u16,
+    /// A variable length array of bytes. Its name has no meaning.
+    pub byte_parade: Vec<u8>,
 }
 
 const fn max_string_u64() -> usize {
@@ -58,9 +67,19 @@ const fn max_string_u8() -> usize {
     base + quotes + comma
 }
 
-/// Performance: ~250Mb/s
+/// Fill a buffer with a json payload
+///
+/// This function fills a buffer with a json payload, terminating the buffer in
+/// a newline. The exact payload is guaranteed to be an instance of
+/// [`JsonPayload`].
+///
+/// We measure this function as filling a buffer at ~450Mb/s, +/- 3%.
+///
+/// # Errors
+///
+/// This function will never produce an error.
 #[inline]
-pub fn fill_json_buffer<R>(rng: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
+pub fn fill_json<R>(rng: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
 where
     R: Rng + Sized,
 {
@@ -84,14 +103,28 @@ where
     };
 
     to_writer(&mut buf, &payload)?;
-    buf.write(b"\n")?;
+    buf.write_all(b"\n")?;
 
+    // On 32-bit and lower platforms this may truncate away valuable bytes. We
+    // consider it unlikely that this program will be run on anything other than
+    // a 64-bit computer.
+    #[allow(clippy::cast_possible_truncation)]
     Ok(buf.position() as usize)
 }
 
-/// Performance: ~100Gb/s
+/// Fill a buffer with a constant char
+///
+/// This function fills a buffer with a constant ascii char, terminating the
+/// buffer in a newline. The exact char is not specified and you should not rely
+/// on it being consistent across versions of this program.
+///
+/// We measure this function as filling a buffer at ~125Gb/s, +/- 5%.
+///
+/// # Errors
+///
+/// This function will never produce an error.
 #[inline]
-pub fn fill_constant_buffer<R>(_: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
+pub fn fill_constant<R>(_: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
 where
     R: Rng + Sized,
 {
@@ -100,9 +133,19 @@ where
     Ok(buffer.len())
 }
 
-/// Performance: ~1.2Gb/s
+/// Fill a buffer with ascii printable characters
+///
+/// This function fills a buffer with ascii printable characters, terminating
+/// the buffer in a newline. There is no structure to the line and not all
+/// printable characters are guaranteed to appear in the line.
+///
+/// We measure this function as filling a buffer at ~1.2Gb/s, +/- 1%.
+///
+/// # Errors
+///
+/// This function will never produce an error.
 #[inline]
-pub fn fill_ascii_buffer<R>(rng: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
+pub fn fill_ascii<R>(rng: &mut R, buffer: &mut [u8]) -> Result<usize, Error>
 where
     R: Rng + Sized,
 {

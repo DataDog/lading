@@ -43,7 +43,7 @@ fn fill_ascii_buffer_bench(c: &mut Criterion) {
         let mut rng = SplitMix64::from_seed(param.seed.to_be_bytes());
         let mut data: Vec<u8> = vec![0; param.data_size];
         group.bench_with_input(BenchmarkId::from_parameter(&param), &param, |b, _| {
-            b.iter(|| buffer::fill_ascii_buffer(&mut rng, &mut data[0..]))
+            b.iter(|| buffer::fill_ascii(&mut rng, &mut data[0..]))
         });
     }
 }
@@ -57,7 +57,7 @@ fn fill_json_buffer_bench(c: &mut Criterion) {
         let mut rng = SplitMix64::from_seed(param.seed.to_be_bytes());
         let mut data: Vec<u8> = vec![0; param.data_size];
         group.bench_with_input(BenchmarkId::from_parameter(&param), &param, |b, _| {
-            b.iter(|| buffer::fill_json_buffer(&mut rng, &mut data[0..]))
+            b.iter(|| buffer::fill_json(&mut rng, &mut data[0..]))
         });
     }
 }
@@ -71,7 +71,7 @@ fn fill_constant_buffer_bench(c: &mut Criterion) {
         let mut rng = SplitMix64::from_seed(param.seed.to_be_bytes());
         let mut data: Vec<u8> = vec![0; param.data_size];
         group.bench_with_input(BenchmarkId::from_parameter(&param), &param, |b, _| {
-            b.iter(|| buffer::fill_constant_buffer(&mut rng, &mut data[0..]))
+            b.iter(|| buffer::fill_constant(&mut rng, &mut data[0..]))
         });
     }
 }

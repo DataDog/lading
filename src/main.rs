@@ -6,8 +6,8 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::SplitMix64;
 use std::collections::HashMap;
-use std::fs;
 use std::io::Read;
+use std::{fs, mem};
 use tokio::runtime::Builder;
 
 #[derive(FromArgs)]
@@ -30,11 +30,9 @@ where
     let mut workers = FuturesUnordered::new();
 
     for (name, template) in targets {
-        let mut iter = template.iter().unwrap();
-        let mut cur = 0;
-        while let Some(tgt) = iter.next() {
+        let iter = template.iter().unwrap();
+        for (cur, tgt) in iter.enumerate() {
             let name = format!("{}[{}]", name.clone(), cur);
-            cur += 1;
             let log = Log::new(rng.clone(), name, tgt).await.unwrap();
             workers.push(log.spin());
         }
@@ -55,6 +53,8 @@ fn get_config() -> Config {
 }
 
 fn main() {
+    assert!(mem::size_of::<usize>() >= mem::size_of::<u64>());
+
     let config: Config = get_config();
 
     // The rng of this program is not meant to be cryptographical good just fast

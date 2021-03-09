@@ -30,6 +30,8 @@ impl From<::std::io::Error> for Error {
     }
 }
 
+/// The [`Log`] defines a task that emits variant lines to a file, managing
+/// rotation and controlling rate limits.
 #[derive(Debug)]
 pub struct Log<R>
 where
@@ -49,6 +51,15 @@ impl<R> Log<R>
 where
     R: Rng + Sized,
 {
+    /// Create a new [`Log`]
+    ///
+    /// A new instance of this type requires a random generator, its name and
+    /// the [`LogTarget`] for this task. The name will be used in telemetry and
+    /// should be unique, though no check is done here to ensure that it is.
+    ///
+    /// # Errors
+    ///
+    /// Creation will fail if the target file cannot be opened for writing.
     pub async fn new(rng: R, name: String, target: LogTarget) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
@@ -80,6 +91,16 @@ where
         })
     }
 
+    /// Enter the main loop of this [`LogTarget`]
+    ///
+    /// In this loop the target file will be populated with lines of the variant
+    /// dictated by the end user.
+    ///
+    /// # Errors
+    ///
+    /// This function will terminate with an error if file permissions are not
+    /// correct, if the file cannot be written to etc. Any error from
+    /// `std::io::Error` is possible.
     #[allow(clippy::cast_precision_loss)]
     pub async fn spin(mut self) -> Result<(), Error> {
         let labels = vec![("target", self.name.clone())];
@@ -96,26 +117,24 @@ where
         loop {
             {
                 let bytes = self.rng.gen_range(1..maximum_line_size_bytes);
-                let nz_bytes = NonZeroU32::new(bytes).unwrap();
+                let nz_bytes =
+                    NonZeroU32::new(bytes).expect("invalid condition, should never trigger");
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
                 let slice = &mut buffer[0..bytes as usize];
                 let res = match self.variant {
-                    Variant::Ascii => buffer::fill_ascii_buffer(&mut self.rng, slice),
-                    Variant::Constant => buffer::fill_constant_buffer(&mut self.rng, slice),
-                    Variant::Json => buffer::fill_json_buffer(&mut self.rng, slice),
+                    Variant::Ascii => buffer::fill_ascii(&mut self.rng, slice),
+                    Variant::Constant => buffer::fill_constant(&mut self.rng, slice),
+                    Variant::Json => buffer::fill_json(&mut self.rng, slice),
                 };
-                match res {
-                    Ok(filled_bytes) => {
-                        self.fp.write(&slice[0..filled_bytes]).await?;
-                        bytes_written += filled_bytes as u64;
-                        counter!("bytes_written", u64::from(bytes_written), &labels);
-                        gauge!("current_target_size_bytes", bytes_written as f64, &labels);
-                    }
-                    Err(_) => {
-                        counter!("unable_to_write_to_target", 1, &labels);
-                        continue;
-                    }
+                if let Ok(filled_bytes) = res {
+                    self.fp.write(&slice[0..filled_bytes]).await?;
+                    bytes_written += filled_bytes as u64;
+                    counter!("bytes_written", bytes_written, &labels);
+                    gauge!("current_target_size_bytes", bytes_written as f64, &labels);
+                } else {
+                    counter!("unable_to_write_to_target", 1, &labels);
+                    continue;
                 }
             }
 

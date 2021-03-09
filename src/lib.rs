@@ -1,3 +1,9 @@
+//! The `file_gen` library
+//!
+//! This crate is primarily intended to back the `file_gen` executable and is
+//! not considered useful otherwise.
+
+#![deny(missing_docs)]
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 
@@ -9,6 +15,7 @@ mod file;
 
 pub use file::Log;
 
+/// Initialize this program's metrics subsystem
 pub fn init_metrics(mut targets: Vec<String>) {
     for target in targets.drain(..) {
         register_gauge!("maximum_bytes_per",
