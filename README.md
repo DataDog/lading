@@ -1,6 +1,4 @@
-# `file_gen`
-
-A deterministic file generating program.
+# `file_gen` - A repeatable file generating program.
 
 This program generates line oriented file content in a repeatable way as rapidly
 as possible. The goal is to provide stable input to programs that track line

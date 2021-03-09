@@ -6,6 +6,8 @@
 #![deny(missing_docs)]
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
+#![deny(clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
 
 use metrics::{register_counter, register_gauge, Unit};
 
