@@ -52,6 +52,12 @@ This configuration will create three total targets 'foo', 'bar' and 'bing'. Each
 target will produce a different line variant at a distinct tempo. Please see
 [`example.toml`](./example.toml) for more details about the various options.
 
+## Telemetry
+
+This program self-instruments through prometheus metrics. This is subject to
+change and we do not document exactly what metrics are available, though you may
+find out for yourself by examining [`src/lib.rs`](./src/lib.rs) if you need.
+
 ## Performance
 
 Every attempt has been made to make `file_gen` generate bytes with as much
