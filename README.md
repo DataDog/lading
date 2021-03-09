@@ -72,3 +72,13 @@ following profile:
 * json: 450 Mb/s, +/- 3%
 * constant: 125 Gb/s, +/- 5%
 * ascii: 1.2 Gb/s, +/- 1%
+
+## Weird Quirks
+
+This program's configuration does not understand byte sizes greater than `u32`
+bytes. Ultimately this is a limitation inherited from the
+[`governor`](https://github.com/antifuchs/governor) dependency. If this
+limitation needs to be lifted we'll have to contribute a fix upstream, or adjust
+our rate limiting approach.
+
+Json generation is painfully slow. I'm very open to alternative approaches.
