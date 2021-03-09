@@ -27,15 +27,20 @@ features = []
 [dependencies.governor]
 version = "0.3"
 default-features = false
-features = ["std", "dashmap", "jitter", "quanta"]
+features = ["std", "jitter", "quanta"]
 
 [dependencies.argh]
 version = "0.1"
 default-features = false
 features = []
 
-[dependencies.fastrand]
-version = "1.4"
+[dependencies.rand]
+version = "0.8"
+default-features = false
+features = []
+
+[dependencies.rand_xoshiro]
+version = "0.6"
 default-features = false
 features = []
 

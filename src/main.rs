@@ -1,9 +1,10 @@
 use argh::FromArgs;
-use fastrand::Rng;
 use file_gen::config::{Config, LogTarget};
 use file_gen::Log;
 use futures::stream::{FuturesUnordered, StreamExt};
 use metrics_exporter_prometheus::PrometheusBuilder;
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::SplitMix64;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -17,7 +18,10 @@ struct Opts {
     config_path: String,
 }
 
-async fn run(rng: Rng, targets: HashMap<String, LogTarget>) {
+async fn run<R>(rng: R, targets: HashMap<String, LogTarget>)
+where
+    R: Rng + Sized + Clone,
+{
     // Set up the `metrics` integration. All metrics are exported from
     // 0.0.0.0:9000 in prometheus format.
     file_gen::init_metrics(targets.keys().cloned().collect());
@@ -51,7 +55,7 @@ fn main() {
     // and repeatable. This will be cloned into every file worker. So, it's the
     // root rng. If any other rng is used as the source _other_ than this one
     // the determinism of this program is lost.
-    let rng: Rng = Rng::with_seed(config.random_seed);
+    let rng = SplitMix64::from_seed(config.random_seed.to_be_bytes());
 
     let runtime = Builder::new_multi_thread()
         .worker_threads(config.worker_threads as usize)

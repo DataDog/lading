@@ -349,26 +349,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
-name = "fastrand"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca5faf057445ce5c9d4329e382b2ce7ca38550ef3b73a5348362d5f24e0c7fe3"
-dependencies = [
- "instant",
-]
-
-[[package]]
 name = "file_gen"
 version = "0.1.0"
 dependencies = [
  "argh",
  "byte-unit",
  "criterion",
- "fastrand",
  "futures",
  "governor",
  "metrics",
  "metrics-exporter-prometheus",
+ "rand",
+ "rand_xoshiro",
  "serde",
  "tokio",
  "toml",
@@ -495,7 +487,6 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06c5d2f987ee8f6dff3fa1a352058dc59b990e447e4c7846aa7d804971314f7b"
 dependencies = [
- "dashmap",
  "futures",
  "futures-timer",
  "no-std-compat",
@@ -1050,6 +1041,15 @@ name = "rand_hc"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
+dependencies = [
+ "rand_core",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
 dependencies = [
  "rand_core",
 ]

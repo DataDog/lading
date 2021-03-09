@@ -1,10 +1,10 @@
 use crate::buffer::fill_ascii_buffer;
 use crate::config::{self, LogTarget};
-use fastrand::Rng;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state};
 use governor::{Quota, RateLimiter};
 use metrics::{counter, gauge};
+use rand::Rng;
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -38,18 +38,24 @@ impl From<::std::io::Error> for Error {
 }
 
 #[derive(Debug)]
-pub struct Log {
+pub struct Log<R>
+where
+    R: Rng + Sized,
+{
     path: PathBuf,
     name: String, // this is the stringy version of `path`
     fp: BufWriter<fs::File>,
     maximum_bytes_per: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
-    rng: Rng,
+    rng: R,
 }
 
-impl Log {
-    pub async fn new(rng: Rng, name: String, target: LogTarget) -> Result<Self, Error> {
+impl<R> Log<R>
+where
+    R: Rng + Sized,
+{
+    pub async fn new(rng: R, name: String, target: LogTarget) -> Result<Self, Error> {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
                 Quota::per_second(target.bytes_per_second()?)
@@ -94,12 +100,12 @@ impl Log {
 
         loop {
             {
-                let bytes = self.rng.u32(1..maximum_line_size_bytes);
+                let bytes = self.rng.gen_range(1..maximum_line_size_bytes);
                 let nz_bytes = NonZeroU32::new(bytes).unwrap();
                 self.rate_limiter.until_n_ready(nz_bytes).await?;
 
                 let slice = &mut buffer[0..bytes as usize];
-                fill_ascii_buffer(&self.rng, slice);
+                fill_ascii_buffer(&mut self.rng, slice);
                 slice[bytes as usize - 1] = b'\n';
 
                 self.fp.write(slice).await?;
