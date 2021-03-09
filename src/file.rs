@@ -140,19 +140,27 @@ where
 
             if bytes_written > maximum_bytes_per {
                 let slop = (bytes_written - maximum_bytes_per).max(0) as f64;
-                counter!("file_rotated", 1, &labels);
                 gauge!("file_rotation_slop", slop, &labels);
+                // Delete file, leaving any open file handlers intact. This
+                // includes our own `self.fp` for the time being.
+                fs::remove_file(&self.path).await?;
+                // Open a new fp to `self.path`. Our `self.fp` will point to the
+                // original file but it no longer has a name.
                 let fp = BufWriter::with_capacity(
                     maximum_line_size_bytes as usize,
                     fs::OpenOptions::new()
                         .create(true)
-                        .truncate(true)
+                        .truncate(false)
                         .write(true)
                         .open(&self.path)
                         .await?,
                 );
+                // Replace and close the old file handler. At this point any
+                // other file handlers open are still valid but we have lost
+                // access to the old file pointer.
                 drop(mem::replace(&mut self.fp, fp));
                 bytes_written = 0;
+                counter!("file_rotated", 1, &labels);
             }
         }
     }

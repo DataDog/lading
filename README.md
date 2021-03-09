@@ -4,7 +4,8 @@ A deterministic file generating program.
 
 This program generates line oriented file content in a repeatable way as rapidly
 as possible. The goal is to provide stable input to programs that track line
-content and to do so at scale.
+content and to do so at scale. Line content is not guaranteed to be sourced from
+quality randomness.
 
 ## Basic Operation
 
