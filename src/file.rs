@@ -137,8 +137,9 @@ where
                 };
                 if let Ok(filled_bytes) = res {
                     self.fp.write(&slice[0..filled_bytes]).await?;
+                    counter!("bytes_written", filled_bytes as u64, &labels);
+
                     bytes_written += filled_bytes as u64;
-                    counter!("bytes_written", bytes_written, &labels);
                     gauge!("current_target_size_bytes", bytes_written as f64, &labels);
                 } else {
                     counter!("unable_to_write_to_target", 1, &labels);
