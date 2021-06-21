@@ -138,6 +138,7 @@ where
                 if let Ok(filled_bytes) = res {
                     self.fp.write(&slice[0..filled_bytes]).await?;
                     counter!("bytes_written", filled_bytes as u64, &labels);
+                    counter!("lines_written", 1, &labels);
 
                     bytes_written += filled_bytes as u64;
                     gauge!("current_target_size_bytes", bytes_written as f64, &labels);
