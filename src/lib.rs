@@ -32,6 +32,10 @@ pub fn init_metrics(mut targets: Vec<String>) {
                           Unit::Bytes,
                           "total bytes written to the file",
                           "target" => target.clone());
+        register_counter!("lines_written",
+                          Unit::Count,
+                          "total lines written to the file",
+                          "target" => target.clone());
         register_gauge!("current_target_size_bytes",
                           Unit::Bytes,
                           "current size in bytes of the target file",
