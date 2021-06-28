@@ -40,6 +40,7 @@ pub struct Log {
     fp: BufWriter<fs::File>,
     maximum_bytes_per_file: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
+    bytes_per_second: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     line_cache: Vec<(NonZeroU32, Vec<u8>)>,
 }
@@ -72,7 +73,7 @@ impl Log {
         let maximum_line_size_bytes = target.maximum_line_size_bytes;
         let maximum_bytes_per_file = target.maximum_bytes_per_file;
         let fp = BufWriter::with_capacity(
-            maximum_line_size_bytes.get() as usize,
+            target.bytes_per_second.get() as usize,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -103,6 +104,7 @@ impl Log {
             name,
             path: target.path,
             maximum_line_size_bytes,
+            bytes_per_second: target.bytes_per_second,
             rate_limiter,
             line_cache,
         })
@@ -124,7 +126,7 @@ impl Log {
 
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
-        let maximum_line_size_bytes: u32 = self.maximum_line_size_bytes.get();
+        let bytes_per_second: usize = self.bytes_per_second.get() as usize;
 
         gauge!(
             "maximum_bytes_per_file",
@@ -158,7 +160,7 @@ impl Log {
                 // Open a new fp to `self.path`. Our `self.fp` will point to the
                 // original file but it no longer has a name.
                 let fp = BufWriter::with_capacity(
-                    maximum_line_size_bytes as usize,
+                    bytes_per_second,
                     fs::OpenOptions::new()
                         .create(true)
                         .truncate(false)
