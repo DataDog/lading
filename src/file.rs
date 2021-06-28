@@ -5,6 +5,7 @@ use governor::{clock, state};
 use governor::{Quota, RateLimiter};
 use metrics::{counter, gauge};
 use rand::Rng;
+use std::convert::TryInto;
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -33,24 +34,17 @@ impl From<::std::io::Error> for Error {
 /// The [`Log`] defines a task that emits variant lines to a file, managing
 /// rotation and controlling rate limits.
 #[derive(Debug)]
-pub struct Log<R>
-where
-    R: Rng + Sized,
-{
+pub struct Log {
     path: PathBuf,
     name: String, // this is the stringy version of `path`
     fp: BufWriter<fs::File>,
-    variant: Variant,
     maximum_bytes_per_file: NonZeroU32,
     maximum_line_size_bytes: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
-    rng: R,
+    line_cache: Vec<(NonZeroU32, Vec<u8>)>,
 }
 
-impl<R> Log<R>
-where
-    R: Rng + Sized,
-{
+impl Log {
     /// Create a new [`Log`]
     ///
     /// A new instance of this type requires a random generator, its name and
@@ -60,7 +54,15 @@ where
     /// # Errors
     ///
     /// Creation will fail if the target file cannot be opened for writing.
-    pub async fn new(rng: R, name: String, target: LogTarget) -> Result<Self, Error> {
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the value of `maximum_line_size_bytes`
+    /// cannot be coerced into a machine word size.
+    pub async fn new<R>(mut rng: R, name: String, target: LogTarget) -> Result<Self, Error>
+    where
+        R: Rng + Sized,
+    {
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(
                 Quota::per_second(target.bytes_per_second)
@@ -79,15 +81,30 @@ where
                 .await?,
         );
 
+        let mut line_cache = Vec::with_capacity(1024);
+        let mut bytes_remaining = target.maximum_prebuild_cache_size_bytes.get() as usize;
+        while bytes_remaining > 0 {
+            let bytes = rng.gen_range(1..maximum_line_size_bytes.get()) as usize;
+            let mut buffer: Vec<u8> = vec![0; bytes];
+            let res = match target.variant {
+                Variant::Ascii => buffer::fill_ascii(&mut rng, &mut buffer),
+                Variant::Constant => buffer::fill_constant(&mut rng, &mut buffer),
+                Variant::Json => buffer::fill_json(&mut rng, &mut buffer),
+            };
+            res.expect("could not pre-fill line");
+            let nz_bytes = NonZeroU32::new(bytes.try_into().unwrap()).unwrap();
+            line_cache.push((nz_bytes, buffer));
+            bytes_remaining = bytes_remaining.saturating_sub(bytes);
+        }
+
         Ok(Self {
             fp,
             maximum_bytes_per_file,
             name,
             path: target.path,
-            variant: target.variant,
             maximum_line_size_bytes,
             rate_limiter,
-            rng,
+            line_cache,
         })
     }
 
@@ -120,32 +137,16 @@ where
             &labels
         );
 
-        let mut buffer: Vec<u8> = vec![0; self.maximum_line_size_bytes.get() as usize];
+        for (nz_bytes, line) in self.line_cache.iter().cycle() {
+            self.rate_limiter.until_n_ready(*nz_bytes).await?;
 
-        loop {
             {
-                let bytes = self.rng.gen_range(1..maximum_line_size_bytes);
-                let nz_bytes =
-                    NonZeroU32::new(bytes).expect("invalid condition, should never trigger");
-                self.rate_limiter.until_n_ready(nz_bytes).await?;
+                self.fp.write(&line).await?;
+                counter!("bytes_written", line.len() as u64, &labels);
+                counter!("lines_written", 1, &labels);
 
-                let slice = &mut buffer[0..bytes as usize];
-                let res = match self.variant {
-                    Variant::Ascii => buffer::fill_ascii(&mut self.rng, slice),
-                    Variant::Constant => buffer::fill_constant(&mut self.rng, slice),
-                    Variant::Json => buffer::fill_json(&mut self.rng, slice),
-                };
-                if let Ok(filled_bytes) = res {
-                    self.fp.write(&slice[0..filled_bytes]).await?;
-                    counter!("bytes_written", filled_bytes as u64, &labels);
-                    counter!("lines_written", 1, &labels);
-
-                    bytes_written += filled_bytes as u64;
-                    gauge!("current_target_size_bytes", bytes_written as f64, &labels);
-                } else {
-                    counter!("unable_to_write_to_target", 1, &labels);
-                    continue;
-                }
+                bytes_written += line.len() as u64;
+                gauge!("current_target_size_bytes", bytes_written as f64, &labels);
             }
 
             if bytes_written > maximum_bytes_per_file {
@@ -173,5 +174,6 @@ where
                 counter!("file_rotated", 1, &labels);
             }
         }
+        Ok(())
     }
 }
