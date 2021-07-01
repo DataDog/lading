@@ -199,6 +199,11 @@ impl Log {
             maximum_bytes_per_file as f64,
             &labels
         );
+        gauge!(
+            "bytes_per_second",
+            f64::from(self.bytes_per_second.get()),
+            &labels
+        );
 
         let mut fp = BufWriter::with_capacity(
             ONE_MEBIBYTE * 100,
