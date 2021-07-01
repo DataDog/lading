@@ -21,6 +21,10 @@ impl<'a> Arbitrary<'a> for Member {
             .for_each(|item| *item = CHARSET[(*item % CHARSET_LEN) as usize]);
         Ok(Member { bytes })
     }
+
+    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
+        (100, Some(6144)) // 100B to 6KiB
+    }
 }
 
 #[derive(Arbitrary, Debug)]
