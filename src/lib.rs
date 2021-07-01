@@ -11,7 +11,8 @@
 
 use metrics::{register_counter, register_gauge, Unit};
 
-pub mod buffer;
+mod payload;
+//pub mod buffer;
 pub mod config;
 mod file;
 

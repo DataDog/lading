@@ -1,6 +1,6 @@
 [package]
 name = "file_gen"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
@@ -11,6 +11,12 @@ description = "A repeatable file generating program."
 
 [dependencies]
 toml = "0.5"
+rayon = "1.5"
+
+[dependencies.arbitrary]
+version = "1"
+default-features = false
+features = ["derive"]
 
 [dependencies.metrics]
 version = "0.16"
@@ -42,11 +48,6 @@ version = "0.8"
 default-features = false
 features = []
 
-[dependencies.rand_xoshiro]
-version = "0.6"
-default-features = false
-features = []
-
 [dependencies.serde]
 version = "1.0"
 default-features = false
@@ -55,7 +56,7 @@ features = ["derive", "std"]
 [dependencies.serde_json]
 version = "1.0"
 default-features = false
-features = ["alloc"]
+features = ["std"]
 
 [dependencies.futures]
 version = "0.3"
@@ -67,14 +68,7 @@ version = "1.7"
 default-features = false
 features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
 
-[dev-dependencies]
-criterion = "0.3"
-
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
-
-[[bench]]
-name = "buffer"
-harness = false
