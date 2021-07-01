@@ -2,7 +2,7 @@ use crate::payload::{Error, Serialize};
 use arbitrary::{self, Arbitrary, Unstructured};
 use std::io::Write;
 
-const SIZES: [usize; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
+const SIZES: [usize; 8] = [16, 32, 64, 128, 256, 512, 1024, 2048];
 const CHARSET: &[u8] =
     b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,/\\{}[];:'\"";
 #[allow(clippy::cast_possible_truncation)]
