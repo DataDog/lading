@@ -197,10 +197,7 @@ impl Log {
             self.rate_limiter.until_n_ready(*nz_bytes).await?;
 
             {
-                // NOTE we intentionally do not wait on the write to
-                // complete. The rate_limiter is the sole governor of whether
-                // writes are attempted, avoiding coordinated omission.
-                let _ = fp.write(block);
+                fp.write(block).await?;
                 counter!("bytes_written", block.len() as u64, &labels);
                 counter!("lines_written", 1, &labels);
 

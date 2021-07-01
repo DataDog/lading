@@ -1,6 +1,6 @@
 [package]
 name = "file_gen"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
