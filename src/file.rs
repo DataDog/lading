@@ -12,7 +12,7 @@ use std::convert::TryInto;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 #[derive(Debug)]
 pub enum Error {
@@ -200,18 +200,21 @@ impl Log {
             &labels
         );
 
-        let mut fp = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&self.path)
-            .await?;
+        let mut fp = BufWriter::with_capacity(
+            ONE_MEBIBYTE * 100,
+            fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&self.path)
+                .await?,
+        );
 
         for (total_bytes, total_newlines, block) in self.block_cache.iter().cycle() {
             self.rate_limiter.until_n_ready(*total_bytes).await?;
 
             {
-                fp.write(block).await?;
+                fp.write_all(block).await?;
                 // block.len() and total_bytes are the same numeric value but we
                 // avoid needing to get a plain value from a non-zero by calling
                 // len here.
@@ -231,12 +234,15 @@ impl Log {
                 // Open a new fp to `self.path`, replacing `fp`. Any holders of
                 // the file pointer still have it but the file no longer has a
                 // name.
-                fp = fs::OpenOptions::new()
-                    .create(true)
-                    .truncate(false)
-                    .write(true)
-                    .open(&self.path)
-                    .await?;
+                fp = BufWriter::with_capacity(
+                    ONE_MEBIBYTE * 100,
+                    fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(false)
+                        .write(true)
+                        .open(&self.path)
+                        .await?,
+                );
                 bytes_written = 0;
                 counter!("file_rotated", 1, &labels);
             }

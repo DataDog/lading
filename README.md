@@ -54,7 +54,9 @@ throughput as possible. In the 0.3 series we have pivoted to a slower line
 construction mechanism but relied on prebuilding blocks to write, dramatically
 improving total throughput up to the limit of 4Gb/s per target duplicate. This
 is currently a hard limit based on a u32 embedded in the program. See "Weird
-Quirks".
+Quirks". To avoid excessive CPU use for slow targets we currently used buffered
+writing, which appears to limit out at just above 150Mb/s per target, more than
+enough for the needs of the vector project today.
 
 ## Weird Quirks
 
@@ -65,3 +67,6 @@ limitation needs to be lifted we'll have to contribute a fix upstream, or adjust
 our rate limiting approach.
 
 Json generation is painfully slow. I'm very open to alternative approaches.
+
+The use of Arbitrary has been... interesting. You'll find that Ascii generates a
+lot of empty lines.

@@ -1,6 +1,6 @@
 [package]
 name = "file_gen"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
@@ -70,6 +70,6 @@ default-features = false
 features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
 
 [profile.release]
-# lto = true        # Optimize our binary at link stage.
-# codegen-units = 1 # Increases compile time but improves optmization alternatives.
-# opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
+lto = true        # Optimize our binary at link stage.
+codegen-units = 1 # Increases compile time but improves optmization alternatives.
+opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
