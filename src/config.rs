@@ -5,7 +5,6 @@ use byte_unit::{Byte, ByteError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::iter::Iterator;
 use std::num::{NonZeroU32, TryFromIntError};
 use std::path::PathBuf;
 use std::str;
@@ -13,8 +12,6 @@ use std::str;
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    /// The random seed that this program will populate its rng with
-    pub random_seed: u64,
     /// Total number of worker threads to use in this program
     pub worker_threads: u16,
     /// The [`LogTargetTemplate`] instances and their base name
@@ -26,8 +23,6 @@ pub struct Config {
 /// This variant controls what kind of line text is created by this program.
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub enum Variant {
-    /// Generates a constant ascii char
-    Constant,
     /// Generates a line of printable ascii characters
     Ascii,
     /// Generates a json encoded line
@@ -57,10 +52,6 @@ pub struct LogTargetTemplate {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     bytes_per_second: String,
-    /// Defines the maximum number of bytes that a single line can be, meaning
-    /// lines range from 2 bytes (one character, newline) to this value plus
-    /// space for a newline.
-    maximum_line_size_bytes: String,
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: String,
@@ -86,9 +77,6 @@ pub struct LogTarget {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     pub bytes_per_second: NonZeroU32,
-    /// The maximum size in bytes that a line may be. This program may generate
-    /// lines of less size.
-    pub maximum_line_size_bytes: NonZeroU32,
     /// The maximum size in bytes that the prebuild cache may be.
     pub maximum_prebuild_cache_size_bytes: NonZeroU32,
 }
@@ -114,79 +102,26 @@ impl From<TryFromIntError> for Error {
     }
 }
 
-impl Iterator for LogTargetTemplateIter {
-    type Item = LogTarget;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_duplicate >= self.duplicates {
-            return None;
-        }
-
-        let duplicate = format!("{}", self.current_duplicate);
+impl LogTargetTemplate {
+    /// Strike a new `LogTarget` from this template
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if user configuration contains values that can't be
+    /// converted to u32 instances.
+    #[must_use]
+    pub fn strike(&self, duplicate: u8) -> LogTarget {
+        let duplicate = format!("{}", duplicate);
         let full_path = self.path_template.replace("%NNN%", &duplicate);
-
         let path = PathBuf::from(full_path);
 
-        self.current_duplicate += 1;
-
-        Some(LogTarget {
+        LogTarget {
             path,
             variant: self.variant,
-            maximum_bytes_per_file: self.maximum_bytes_per_file,
-            bytes_per_second: self.bytes_per_second,
-            maximum_line_size_bytes: self.maximum_line_size_bytes,
-            maximum_prebuild_cache_size_bytes: self.maximum_prebuild_cache_size_bytes,
-        })
-    }
-}
-
-/// The iterator for [`LogTargetTemplate`]
-#[derive(Debug)]
-pub struct LogTargetTemplateIter {
-    path_template: String,
-    duplicates: usize,
-    current_duplicate: usize,
-    variant: Variant,
-    maximum_bytes_per_file: NonZeroU32,
-    bytes_per_second: NonZeroU32,
-    maximum_line_size_bytes: NonZeroU32,
-    maximum_prebuild_cache_size_bytes: NonZeroU32,
-}
-
-impl LogTargetTemplate {
-    /// Convert this template into a [`LogTargetTemplateIter`]
-    ///
-    /// # Errors
-    ///
-    /// This conversion will fail if the configuration file provided by the user
-    /// is not valid.
-    pub fn iter(self) -> Result<LogTargetTemplateIter, Error> {
-        Ok(LogTargetTemplateIter {
-            path_template: self.path_template.clone(),
-            current_duplicate: 0,
-            duplicates: self.duplicates as usize,
-            variant: self.variant,
-            maximum_bytes_per_file: self.maximum_bytes_per_file()?,
-            bytes_per_second: self.bytes_per_second()?,
-            maximum_line_size_bytes: self.maximum_line_size_bytes()?,
-            maximum_prebuild_cache_size_bytes: self.maximum_prebuild_cache_size_bytes()?,
-        })
-    }
-
-    /// Determine the `maximum_line_size_bytes` for this [`LogTargetTemplate`]
-    ///
-    /// Parses the user's supplied stringy number into a non-zero u32 of bytes.
-    ///
-    /// # Errors
-    ///
-    /// If the users supplies anything other than a stringy number plus some
-    /// recognizable unit this function will return an error. Likewise if the
-    /// user supplies a number that is larger than `u32::MAX` bytes this
-    /// function will return an error.
-    pub fn maximum_line_size_bytes(&self) -> Result<NonZeroU32, Error> {
-        let bytes = Byte::from_str(&self.maximum_line_size_bytes)?;
-        Ok(NonZeroU32::new(u32::try_from(bytes.get_bytes())?)
-            .expect("maximum_line_size_bytes must not be 0"))
+            maximum_bytes_per_file: self.maximum_bytes_per_file().unwrap(),
+            bytes_per_second: self.bytes_per_second().unwrap(),
+            maximum_prebuild_cache_size_bytes: self.maximum_prebuild_cache_size_bytes().unwrap(),
+        }
     }
 
     /// Determine the `maximum_prebuild_cache_size_bytes` for this

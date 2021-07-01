@@ -1,6 +1,3 @@
-# Control the seed of the run's RNG
-random_seed = 201010
-
 # Set the number of background worker threads that this run will use.
 worker_threads = 3
 
@@ -26,4 +23,4 @@ maximum_bytes_per_file = "1Gb"
 bytes_per_second = "10Mb"
 # Set the maximum size of lines that this target will produce. The target may
 # produce lines of smaller size.
-maximum_line_size_bytes = "1024 Kb"
+maximum_prebuild_cache_size_bytes = "3 Gb"
