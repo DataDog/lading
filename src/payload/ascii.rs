@@ -2,6 +2,7 @@ use crate::payload::{Error, Serialize};
 use arbitrary::{self, Arbitrary, Unstructured};
 use std::io::Write;
 
+const SIZES: [usize; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
 const CHARSET: &[u8] =
     b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,/\\{}[];:'\"";
 #[allow(clippy::cast_possible_truncation)]
@@ -14,7 +15,9 @@ struct Member {
 
 impl<'a> Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut bytes: Vec<u8> = u.arbitrary()?;
+        let choice: u8 = u.arbitrary()?;
+        let size = SIZES[(choice as usize) % SIZES.len()];
+        let mut bytes: Vec<u8> = vec![0; size];
         u.fill_buffer(&mut bytes)?;
         bytes
             .iter_mut()
@@ -23,7 +26,7 @@ impl<'a> Arbitrary<'a> for Member {
     }
 
     fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (0, Some(6144)) // 100B to 6KiB
+        (128, Some(8192))
     }
 }
 
