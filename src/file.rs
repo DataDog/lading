@@ -5,9 +5,11 @@ use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use metrics::{counter, gauge};
 use rand::prelude::SliceRandom;
-use rand::Rng;
+use rand::RngCore;
+use rand::{thread_rng, Rng};
+use rayon::prelude::*;
 use std::convert::TryInto;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -18,6 +20,7 @@ pub enum Error {
     Io(::std::io::Error),
     Payload(payload::Error),
     Arbitrary(arbitrary::Error),
+    BlockEmpty,
 }
 
 impl From<arbitrary::Error> for Error {
@@ -54,69 +57,80 @@ const BLOCK_BYTE_SIZES: [usize; 6] = [
     32_000_000,
 ];
 
+fn total_newlines(input: &[u8]) -> NonZeroU64 {
+    NonZeroU64::new(bytecount::count(input, b'\n') as u64).unwrap()
+}
+
+fn chunk_bytes<R>(rng: &mut R, input: usize, bytes_per_second: usize) -> Vec<usize>
+where
+    R: Rng + Sized,
+{
+    let mut chunks = Vec::new();
+    let mut bytes_remaining = input;
+    while bytes_remaining > ONE_MEBIBYTE {
+        let bytes_max = std::cmp::min(bytes_per_second, bytes_remaining);
+        let block_bytes = BLOCK_BYTE_SIZES.choose(rng).unwrap();
+        if *block_bytes > bytes_max {
+            continue;
+        }
+        chunks.push(*block_bytes);
+        bytes_remaining = bytes_remaining.saturating_sub(*block_bytes);
+    }
+    chunks
+}
+
+fn construct_block(
+    block_bytes: usize,
+    variant: Variant,
+) -> Result<(NonZeroU32, NonZeroU64, Vec<u8>), Error> {
+    let mut rng = thread_rng();
+    let mut bytes: Vec<u8> = vec![0; block_bytes];
+    rng.fill_bytes(&mut bytes);
+    let unstructured: Unstructured = Unstructured::new(&bytes);
+    let mut block: Vec<u8> = Vec::new();
+    match variant {
+        Variant::Ascii => {
+            payload::Ascii::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
+        }
+        Variant::Json => {
+            payload::Json::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
+        }
+    }
+    block.shrink_to_fit();
+    if block.is_empty() {
+        return Err(Error::BlockEmpty);
+    }
+
+    let newlines = total_newlines(&block);
+    let nz_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
+    Ok((nz_bytes, newlines, block))
+}
+
 #[allow(clippy::ptr_arg)]
 #[allow(clippy::cast_precision_loss)]
 fn construct_block_cache<R>(
     mut rng: R,
     target: &LogTarget,
     labels: &Vec<(String, String)>,
-) -> Result<Vec<(NonZeroU32, Vec<u8>)>, Error>
+) -> Vec<(NonZeroU32, u64, Vec<u8>)>
 where
     R: Rng + Sized,
 {
     let bytes_per_second: usize = target.bytes_per_second.get() as usize;
-    let mut block_cache: Vec<(NonZeroU32, Vec<u8>)> =
-        Vec::with_capacity(bytes_per_second / ONE_MEBIBYTE);
+    let block_chunks = chunk_bytes(
+        &mut rng,
+        target.maximum_prebuild_cache_size_bytes.get() as usize,
+        bytes_per_second,
+    );
 
-    let mut block_cache_bytes_remaining = target.maximum_prebuild_cache_size_bytes.get() as usize;
-    while block_cache_bytes_remaining > ONE_MEBIBYTE {
-        gauge!(
-            "block_cache_bytes_remaining",
-            block_cache_bytes_remaining as f64,
-            labels
-        );
-        let bytes = {
-            let block_bytes_max = std::cmp::min(bytes_per_second, block_cache_bytes_remaining);
-
-            let block_bytes = BLOCK_BYTE_SIZES.choose(&mut rng).unwrap();
-            if *block_bytes > block_bytes_max {
-                continue;
-            }
-            let mut bytes: Vec<u8> = vec![0; *block_bytes];
-            rng.fill_bytes(&mut bytes);
-            bytes
-        };
-        let unstructured: Unstructured = Unstructured::new(&bytes);
-
-        let mut block: Vec<u8> = Vec::new();
-        match target.variant {
-            Variant::Ascii => {
-                payload::Ascii::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
-            }
-            Variant::Json => {
-                payload::Json::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
-            }
-        }
-
-        block.shrink_to_fit();
-        if block.is_empty() {
-            counter!("block_rejected_empty", 1, labels);
-            continue;
-        }
-        if block.len() > bytes_per_second {
-            counter!("block_rejected_too_big", 1, labels);
-            continue;
-        }
-
-        let nz_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
-        block_cache_bytes_remaining = block_cache_bytes_remaining.saturating_sub(block.len());
-        block_cache.push((nz_bytes, block));
-    }
-    gauge!("block_cache_bytes_remaining", 0.0, labels);
-    block_cache.shrink_to_fit();
-    block_cache.shuffle(&mut rng);
+    let block_cache: Vec<(NonZeroU32, u64, Vec<u8>)> = block_chunks
+        .into_par_iter()
+        .map(|block_size| construct_block(block_size, target.variant))
+        .map(std::result::Result::unwrap)
+        .map(|(nzu32, nzu64, bytes)| (nzu32, nzu64.get(), bytes))
+        .collect();
     gauge!("block_construction_complete", 1.0, labels);
-    Ok(block_cache)
+    block_cache
 }
 
 /// The [`Log`] defines a task that emits variant lines to a file, managing
@@ -128,7 +142,7 @@ pub struct Log {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
-    block_cache: Vec<(NonZeroU32, Vec<u8>)>,
+    block_cache: Vec<(NonZeroU32, u64, Vec<u8>)>,
 }
 
 impl Log {
@@ -151,7 +165,7 @@ impl Log {
         let maximum_bytes_per_file = target.maximum_bytes_per_file;
 
         let labels = vec![("target".to_string(), name.clone())];
-        let block_cache = construct_block_cache(rng, &target, &labels)?;
+        let block_cache = construct_block_cache(rng, &target, &labels);
 
         Ok(Self {
             maximum_bytes_per_file,
@@ -193,13 +207,16 @@ impl Log {
             .open(&self.path)
             .await?;
 
-        for (nz_bytes, block) in self.block_cache.iter().cycle() {
-            self.rate_limiter.until_n_ready(*nz_bytes).await?;
+        for (total_bytes, total_newlines, block) in self.block_cache.iter().cycle() {
+            self.rate_limiter.until_n_ready(*total_bytes).await?;
 
             {
                 fp.write(block).await?;
+                // block.len() and total_bytes are the same numeric value but we
+                // avoid needing to get a plain value from a non-zero by calling
+                // len here.
                 counter!("bytes_written", block.len() as u64, &labels);
-                counter!("lines_written", 1, &labels);
+                counter!("lines_written", *total_newlines, &labels);
 
                 bytes_written += block.len() as u64;
                 gauge!("current_target_size_bytes", bytes_written as f64, &labels);
