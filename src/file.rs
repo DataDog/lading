@@ -206,7 +206,7 @@ impl Log {
             bytes_per_second,
             fs::OpenOptions::new()
                 .create(true)
-                .truncate(false)
+                .truncate(true)
                 .write(true)
                 .open(&self.path)
                 .await?,
