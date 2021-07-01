@@ -23,7 +23,7 @@ impl<'a> Arbitrary<'a> for Member {
     }
 
     fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (100, Some(6144)) // 100B to 6KiB
+        (0, Some(6144)) // 100B to 6KiB
     }
 }
 
