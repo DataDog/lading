@@ -191,6 +191,7 @@ impl Log {
     pub async fn spin(self) -> Result<(), Error> {
         let labels = vec![("target", self.name.clone())];
 
+        let bytes_per_second = self.bytes_per_second.get() as usize;
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
@@ -199,14 +200,10 @@ impl Log {
             maximum_bytes_per_file as f64,
             &labels
         );
-        gauge!(
-            "bytes_per_second",
-            f64::from(self.bytes_per_second.get()),
-            &labels
-        );
+        gauge!("bytes_per_second", bytes_per_second as f64, &labels);
 
         let mut fp = BufWriter::with_capacity(
-            ONE_MEBIBYTE * 100,
+            bytes_per_second,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(false)
@@ -240,7 +237,7 @@ impl Log {
                 // the file pointer still have it but the file no longer has a
                 // name.
                 fp = BufWriter::with_capacity(
-                    ONE_MEBIBYTE * 100,
+                    bytes_per_second,
                     fs::OpenOptions::new()
                         .create(true)
                         .truncate(false)

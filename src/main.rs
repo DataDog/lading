@@ -40,7 +40,11 @@ async fn run(targets: HashMap<String, LogTargetTemplate>) {
             .for_each(|log| workers.push(log.spin()));
     });
 
-    while workers.next().await.is_some() {}
+    loop {
+        if let Some(res) = workers.next().await {
+            res.unwrap();
+        }
+    }
 }
 
 fn get_config() -> Config {
