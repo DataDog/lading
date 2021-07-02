@@ -2,9 +2,11 @@ use std::io::{self, Write};
 
 mod ascii;
 mod json;
+mod statik;
 
 pub use ascii::Ascii;
 pub use json::Json;
+pub use statik::Static;
 
 /// Errors related to serialization
 #[derive(Debug)]

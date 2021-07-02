@@ -82,6 +82,7 @@ where
 fn construct_block(
     block_bytes: usize,
     variant: Variant,
+    static_path: Option<&PathBuf>,
 ) -> Result<(NonZeroU32, NonZeroU64, Vec<u8>), Error> {
     let mut rng = thread_rng();
     let mut bytes: Vec<u8> = vec![0; block_bytes];
@@ -89,6 +90,10 @@ fn construct_block(
     let unstructured: Unstructured = Unstructured::new(&bytes);
     let mut block: Vec<u8> = Vec::new();
     match variant {
+        Variant::Static => {
+            let pyld = payload::Static::new(block_bytes, static_path.unwrap());
+            pyld.to_bytes(&mut block)?;
+        }
         Variant::Ascii => {
             payload::Ascii::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
         }
@@ -125,7 +130,7 @@ where
 
     let block_cache: Vec<(NonZeroU32, u64, Vec<u8>)> = block_chunks
         .into_par_iter()
-        .map(|block_size| construct_block(block_size, target.variant))
+        .map(|block_size| construct_block(block_size, target.variant, target.static_path.as_ref()))
         .map(std::result::Result::unwrap)
         .map(|(nzu32, nzu64, bytes)| (nzu32, nzu64.get(), bytes))
         .collect();
