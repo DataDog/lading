@@ -122,7 +122,7 @@ impl LogTargetTemplate {
         let duplicate = format!("{}", duplicate);
         let full_path = self.path_template.replace("%NNN%", &duplicate);
         let path = PathBuf::from(full_path);
-        let static_path = self.static_path.as_ref().map(|p| PathBuf::from(p));
+        let static_path = self.static_path.as_ref().map(PathBuf::from);
 
         LogTarget {
             path,

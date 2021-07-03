@@ -1,14 +1,14 @@
 use crate::payload::{Error, Serialize};
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 pub struct Static<'a> {
-    path: &'a PathBuf,
+    path: &'a Path,
     bytes_max: usize,
 }
 
 impl<'a> Static<'a> {
-    pub fn new(bytes_max: usize, path: &'a PathBuf) -> Self {
+    pub fn new(bytes_max: usize, path: &'a Path) -> Self {
         Self { path, bytes_max }
     }
 }
