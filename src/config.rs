@@ -23,6 +23,8 @@ pub struct Config {
 /// This variant controls what kind of line text is created by this program.
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub enum Variant {
+    /// Generates a limited subset of FoundationDB logs
+    FoundationDb,
     /// Generates a static, user supplied data
     Static,
     /// Generates a line of printable ascii characters

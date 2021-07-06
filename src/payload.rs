@@ -1,10 +1,12 @@
 use std::io::{self, Write};
 
 mod ascii;
+mod foundationdb;
 mod json;
 mod statik;
 
 pub use ascii::Ascii;
+pub use foundationdb::FoundationDb;
 pub use json::Json;
 pub use statik::Static;
 

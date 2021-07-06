@@ -9,7 +9,7 @@ use rand::RngCore;
 use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use std::convert::TryInto;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -57,8 +57,8 @@ const BLOCK_BYTE_SIZES: [usize; 6] = [
     32_000_000,
 ];
 
-fn total_newlines(input: &[u8]) -> NonZeroU64 {
-    NonZeroU64::new(bytecount::count(input, b'\n') as u64).unwrap()
+fn total_newlines(input: &[u8]) -> u64 {
+    bytecount::count(input, b'\n') as u64
 }
 
 fn chunk_bytes<R>(rng: &mut R, input: usize, bytes_per_second: usize) -> Vec<usize>
@@ -79,11 +79,18 @@ where
     chunks
 }
 
+#[derive(Debug)]
+struct Block {
+    total_bytes: NonZeroU32,
+    lines: u64,
+    bytes: Vec<u8>,
+}
+
 fn construct_block(
     block_bytes: usize,
     variant: Variant,
     static_path: Option<&PathBuf>,
-) -> Result<(NonZeroU32, NonZeroU64, Vec<u8>), Error> {
+) -> Result<Block, Error> {
     let mut rng = thread_rng();
     let mut bytes: Vec<u8> = vec![0; block_bytes];
     rng.fill_bytes(&mut bytes);
@@ -100,15 +107,22 @@ fn construct_block(
         Variant::Json => {
             payload::Json::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
         }
+        Variant::FoundationDb => {
+            payload::FoundationDb::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
+        }
     }
     block.shrink_to_fit();
     if block.is_empty() {
         return Err(Error::BlockEmpty);
     }
 
+    let total_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
     let newlines = total_newlines(&block);
-    let nz_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
-    Ok((nz_bytes, newlines, block))
+    Ok(Block {
+        total_bytes,
+        lines: newlines,
+        bytes: block,
+    })
 }
 
 #[allow(clippy::ptr_arg)]
@@ -117,7 +131,7 @@ fn construct_block_cache<R>(
     mut rng: R,
     target: &LogTarget,
     labels: &Vec<(String, String)>,
-) -> Vec<(NonZeroU32, u64, Vec<u8>)>
+) -> Vec<Block>
 where
     R: Rng + Sized,
 {
@@ -128,11 +142,10 @@ where
         bytes_per_second,
     );
 
-    let block_cache: Vec<(NonZeroU32, u64, Vec<u8>)> = block_chunks
+    let block_cache: Vec<Block> = block_chunks
         .into_par_iter()
         .map(|block_size| construct_block(block_size, target.variant, target.static_path.as_ref()))
         .map(std::result::Result::unwrap)
-        .map(|(nzu32, nzu64, bytes)| (nzu32, nzu64.get(), bytes))
         .collect();
     gauge!("block_construction_complete", 1.0, labels);
     block_cache
@@ -147,7 +160,7 @@ pub struct Log {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
-    block_cache: Vec<(NonZeroU32, u64, Vec<u8>)>,
+    block_cache: Vec<Block>,
 }
 
 impl Log {
@@ -217,8 +230,12 @@ impl Log {
                 .await?,
         );
 
-        for (total_bytes, total_newlines, block) in self.block_cache.iter().cycle() {
-            self.rate_limiter.until_n_ready(*total_bytes).await?;
+        for blk in self.block_cache.iter().cycle() {
+            let total_bytes = blk.total_bytes;
+            let total_newlines = blk.lines;
+            let block = &blk.bytes;
+
+            self.rate_limiter.until_n_ready(total_bytes).await?;
 
             {
                 fp.write_all(block).await?;
@@ -226,7 +243,7 @@ impl Log {
                 // avoid needing to get a plain value from a non-zero by calling
                 // len here.
                 counter!("bytes_written", block.len() as u64, &labels);
-                counter!("lines_written", *total_newlines, &labels);
+                counter!("lines_written", total_newlines, &labels);
 
                 bytes_written += block.len() as u64;
                 gauge!("current_target_size_bytes", bytes_written as f64, &labels);
