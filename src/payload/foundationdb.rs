@@ -1,41 +1,113 @@
 use crate::payload::{Error, Serialize};
 use arbitrary::{self, Arbitrary};
+use serde::Serializer;
 use std::io::Write;
 
+#[derive(Arbitrary, Debug)]
+struct StrF32 {
+    inner: f32,
+}
+
+impl serde::ser::Serialize for StrF32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}", self.inner))
+    }
+}
+
+#[derive(Arbitrary, Debug)]
+struct StrU8 {
+    inner: u8,
+}
+
+impl serde::ser::Serialize for StrU8 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}", self.inner))
+    }
+}
+
+#[derive(Arbitrary, Debug)]
+struct StrU16 {
+    inner: u16,
+}
+
+impl serde::ser::Serialize for StrU16 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}", self.inner))
+    }
+}
+
+#[derive(Arbitrary, Debug)]
+struct StrU32 {
+    inner: u32,
+}
+
+impl serde::ser::Serialize for StrU32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}", self.inner))
+    }
+}
+
+#[derive(Arbitrary, Debug)]
+struct StrU64 {
+    inner: u64,
+}
+
+impl serde::ser::Serialize for StrU64 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}", self.inner))
+    }
+}
+
 #[derive(Arbitrary, Debug, serde::Serialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "PascalCase")]
+#[serde(tag = "Type")]
 enum Member {
     // Many keys are missing, those with complex internal structure especially.
-    SlowTask {
-        severity: u8,
-        m_clocks: u32,
-    },
+    #[serde(rename_all = "PascalCase")]
+    SlowTask { severity: StrU8, m_clocks: StrU32 },
+    #[serde(rename_all = "PascalCase")]
     TransactionMetrics {
-        severity: u8,
-        time: f32,
-        id: u64,
-        elapsed: f32,
-        internal: u8,
-        mean_latency: u16,
-        median_latency: u16,
-        max_latency: u16,
-        latency90: u32,
-        latency98: u32,
-        mean_row_read_latency: f32,
-        median_row_read_latency: f32,
-        max_row_read_latency: f32,
-        mean_commit_latency: u32,
-        median_commit_latency: u32,
-        max_commit_latency: u32,
-        mean_grv_latency: f32,
-        max_grv_latency: f32,
-        mean_mutations_per_commit: u32,
-        median_mutations_per_commit: u32,
-        max_mutations_per_commit: u32,
-        mean_bytes_per_commit: u32,
-        median_bytes_per_commit: u32,
-        max_bytes_per_commit: u32,
+        severity: StrU8,
+        time: StrF32,
+        #[serde(rename = "ID")]
+        id: StrU64,
+        elapsed: StrF32,
+        internal: StrU8,
+        mean_latency: StrU16,
+        median_latency: StrU16,
+        max_latency: StrU16,
+        latency90: StrU32,
+        latency98: StrU32,
+        mean_row_read_latency: StrF32,
+        median_row_read_latency: StrF32,
+        max_row_read_latency: StrF32,
+        mean_commit_latency: StrU32,
+        median_commit_latency: StrU32,
+        max_commit_latency: StrU32,
+        #[serde(rename = "MeanGRVLatency")]
+        mean_grv_latency: StrF32,
+        #[serde(rename = "MaxGRVLatency")]
+        max_grv_latency: StrF32,
+        mean_mutations_per_commit: StrU32,
+        median_mutations_per_commit: StrU32,
+        max_mutations_per_commit: StrU32,
+        mean_bytes_per_commit: StrU32,
+        median_bytes_per_commit: StrU32,
+        max_bytes_per_commit: StrU32,
     },
 }
 
