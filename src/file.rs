@@ -146,7 +146,9 @@ where
         .into_par_iter()
         .map(|block_size| construct_block(block_size, target.variant, target.static_path.as_ref()))
         .map(std::result::Result::unwrap)
+        .filter(|block| block.total_bytes.get() as usize <= bytes_per_second)
         .collect();
+    assert!(!block_cache.is_empty());
     gauge!("block_construction_complete", 1.0, labels);
     block_cache
 }
