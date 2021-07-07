@@ -1,6 +1,6 @@
 [package]
 name = "file_gen"
-version = "0.3.7"
+version = "0.3.8"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
@@ -73,3 +73,9 @@ features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
+
+[[bin]]
+name = "udp_blackhole"
+
+[[bin]]
+name = "file_gen"

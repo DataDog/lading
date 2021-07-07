@@ -18,6 +18,10 @@ jobs:
             os: ubuntu-latest
             artifact_name: target/release/file_gen
             asset_name: file_gen-linux
+          - name: linux
+            os: ubuntu-latest
+            artifact_name: target/release/udp_blackhole
+            asset_name: udp_blackhole-linux
 
     steps:
     - uses: actions/checkout@v1
