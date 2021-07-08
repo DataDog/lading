@@ -117,6 +117,9 @@ impl Log {
             Variant::Ascii => {
                 construct_block_cache(&payload::Ascii::default(), &block_chunks, &labels)
             }
+            Variant::DatadogLog => {
+                construct_block_cache(&payload::DatadogLog::default(), &block_chunks, &labels)
+            }
             Variant::Json => {
                 construct_block_cache(&payload::Json::default(), &block_chunks, &labels)
             }
