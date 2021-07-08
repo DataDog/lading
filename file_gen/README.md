@@ -1,16 +1,16 @@
-# `file_gen` - A repeatable file generating program.
+# `file_gen` - A file generating program.
 
-This program generates line oriented file content in a repeatable way as rapidly
-as possible. The goal is to provide stable input to programs that track line
-content and to do so at scale. Line content is not guaranteed to be sourced from
-quality randomness.
+This program generates line oriented file content with stable throughput. The
+goal is to provide stable input to programs that track line content and to do so
+at scale. Line content is not guaranteed to be sourced from quality randomness.
 
 ## Basic Operation
 
 The `file_gen` program generates line oriented files with size, bytes per second
-and variant goals. Today there are three supported line variants: json, constant
-and ascii. The `json` variant produces a known payload and the `ascii` variant
-fills lines with printable ascii characters. More formats are planned.
+and variant goals. Today there are five supported line variants: ascii, datadog
+agent logs messages, foundationdb trace logs, json and static file content.
+. The json variant produces a known payload and the ascii variant fills lines
+with printable ascii characters. More formats are planned.
 
 ## Configuration
 
@@ -65,8 +65,3 @@ bytes. Ultimately this is a limitation inherited from the
 [`governor`](https://github.com/antifuchs/governor) dependency. If this
 limitation needs to be lifted we'll have to contribute a fix upstream, or adjust
 our rate limiting approach.
-
-Json generation is painfully slow. I'm very open to alternative approaches.
-
-The use of Arbitrary has been... interesting. You'll find that Ascii generates a
-lot of empty lines.
