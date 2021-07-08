@@ -1,0 +1,21 @@
+[package]
+name = "udp_blackhole"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+
+[dependencies.argh]
+version = "0.1"
+default-features = false
+features = []
+
+[dependencies.metrics]
+version = "0.16"
+default-features = false
+features = ["std"]
+
+[dependencies.tokio]
+version = "1.8"
+default-features = false
+features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]

@@ -1,8 +1,8 @@
-use crate::block::{self, construct_block_cache, Block};
 use crate::config::{LogTarget, Variant};
-use crate::payload;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
+use lading_common::block::{self, construct_block_cache, Block};
+use lading_common::payload;
 use metrics::{counter, gauge};
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -15,14 +15,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 pub enum Error {
     Governor(InsufficientCapacity),
     Io(::std::io::Error),
-    Arbitrary(arbitrary::Error),
     Block(block::Error),
-}
-
-impl From<arbitrary::Error> for Error {
-    fn from(error: arbitrary::Error) -> Self {
-        Error::Arbitrary(error)
-    }
 }
 
 impl From<block::Error> for Error {
