@@ -1,7 +1,6 @@
 use crate::block::{self, construct_block_cache, Block};
 use crate::config::{LogTarget, Variant};
 use crate::payload;
-use arbitrary;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use metrics::{counter, gauge};
@@ -94,6 +93,11 @@ impl Log {
     /// # Errors
     ///
     /// Creation will fail if the target file cannot be opened for writing.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if variant is Static and the `static_path` is not
+    /// set.
     pub fn new(name: String, target: LogTarget) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =

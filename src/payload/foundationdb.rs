@@ -133,7 +133,7 @@ impl Serialize for FoundationDb {
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
                     writeln!(writer, "{}", encoding)?;
-                    bytes_remaining = remainder
+                    bytes_remaining = remainder;
                 }
                 None => break,
             }
