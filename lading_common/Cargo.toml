@@ -1,9 +1,13 @@
 [package]
 name = "lading_common"
 version = "0.1.0"
+authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+repository = "https://github.com/blt/lading/lading_common"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::testing"]
+description = "A set of code for data generation and blocking."
 
 [dependencies]
 bytecount = "0.6"
