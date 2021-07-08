@@ -11,10 +11,10 @@
 
 use metrics::{register_counter, register_gauge, Unit};
 
-mod payload;
-//pub mod buffer;
+mod block;
 pub mod config;
 mod file;
+mod payload;
 
 pub use file::Log;
 

@@ -35,7 +35,7 @@ async fn run(targets: HashMap<String, LogTargetTemplate>) {
 
                 let tgt_name = format!("{}[{}]", name.clone(), duplicate);
                 let tgt = template.strike(duplicate);
-                Log::new(rand::thread_rng(), tgt_name, tgt).unwrap()
+                Log::new(tgt_name, tgt).unwrap()
             })
             .for_each(|log| workers.push(log.spin()));
     });
