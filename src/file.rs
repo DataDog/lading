@@ -1,14 +1,12 @@
+use crate::block::{self, construct_block_cache, Block};
 use crate::config::{LogTarget, Variant};
-use crate::payload::{self, Serialize};
-use arbitrary::{self, Arbitrary, Unstructured};
+use crate::payload;
+use arbitrary;
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use metrics::{counter, gauge};
 use rand::prelude::SliceRandom;
-use rand::RngCore;
-use rand::{thread_rng, Rng};
-use rayon::prelude::*;
-use std::convert::TryInto;
+use rand::Rng;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use tokio::fs;
@@ -18,9 +16,8 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 pub enum Error {
     Governor(InsufficientCapacity),
     Io(::std::io::Error),
-    Payload(payload::Error),
     Arbitrary(arbitrary::Error),
-    BlockEmpty,
+    Block(block::Error),
 }
 
 impl From<arbitrary::Error> for Error {
@@ -29,9 +26,9 @@ impl From<arbitrary::Error> for Error {
     }
 }
 
-impl From<payload::Error> for Error {
-    fn from(error: payload::Error) -> Self {
-        Error::Payload(error)
+impl From<block::Error> for Error {
+    fn from(error: block::Error) -> Self {
+        Error::Block(error)
     }
 }
 
@@ -57,10 +54,6 @@ const BLOCK_BYTE_SIZES: [usize; 6] = [
     32_000_000,
 ];
 
-fn total_newlines(input: &[u8]) -> u64 {
-    bytecount::count(input, b'\n') as u64
-}
-
 fn chunk_bytes<R>(rng: &mut R, input: usize, bytes_per_second: usize) -> Vec<usize>
 where
     R: Rng + Sized,
@@ -77,80 +70,6 @@ where
         bytes_remaining = bytes_remaining.saturating_sub(*block_bytes);
     }
     chunks
-}
-
-#[derive(Debug)]
-struct Block {
-    total_bytes: NonZeroU32,
-    lines: u64,
-    bytes: Vec<u8>,
-}
-
-fn construct_block(
-    block_bytes: usize,
-    variant: Variant,
-    static_path: Option<&PathBuf>,
-) -> Result<Block, Error> {
-    let mut rng = thread_rng();
-    let mut bytes: Vec<u8> = vec![0; block_bytes];
-    rng.fill_bytes(&mut bytes);
-    let unstructured: Unstructured = Unstructured::new(&bytes);
-    let mut block: Vec<u8> = Vec::new();
-    match variant {
-        Variant::Static => {
-            let pyld = payload::Static::new(block_bytes, static_path.unwrap());
-            pyld.to_bytes(&mut block)?;
-        }
-        Variant::Ascii => {
-            payload::Ascii::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
-        }
-        Variant::Json => {
-            payload::Json::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
-        }
-        Variant::FoundationDb => {
-            payload::FoundationDb::arbitrary_take_rest(unstructured)?.to_bytes(&mut block)?;
-        }
-    }
-    block.shrink_to_fit();
-    if block.is_empty() {
-        return Err(Error::BlockEmpty);
-    }
-
-    let total_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
-    let newlines = total_newlines(&block);
-    Ok(Block {
-        total_bytes,
-        lines: newlines,
-        bytes: block,
-    })
-}
-
-#[allow(clippy::ptr_arg)]
-#[allow(clippy::cast_precision_loss)]
-fn construct_block_cache<R>(
-    mut rng: R,
-    target: &LogTarget,
-    labels: &Vec<(String, String)>,
-) -> Vec<Block>
-where
-    R: Rng + Sized,
-{
-    let bytes_per_second: usize = target.bytes_per_second.get() as usize;
-    let block_chunks = chunk_bytes(
-        &mut rng,
-        target.maximum_prebuild_cache_size_bytes.get() as usize,
-        bytes_per_second,
-    );
-
-    let block_cache: Vec<Block> = block_chunks
-        .into_par_iter()
-        .map(|block_size| construct_block(block_size, target.variant, target.static_path.as_ref()))
-        .map(std::result::Result::unwrap)
-        .filter(|block| block.total_bytes.get() as usize <= bytes_per_second)
-        .collect();
-    assert!(!block_cache.is_empty());
-    gauge!("block_construction_complete", 1.0, labels);
-    block_cache
 }
 
 /// The [`Log`] defines a task that emits variant lines to a file, managing
@@ -175,17 +94,37 @@ impl Log {
     /// # Errors
     ///
     /// Creation will fail if the target file cannot be opened for writing.
-    pub fn new<R>(rng: R, name: String, target: LogTarget) -> Result<Self, Error>
-    where
-        R: Rng + Sized,
-    {
+    pub fn new(name: String, target: LogTarget) -> Result<Self, Error> {
+        let mut rng = rand::thread_rng();
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
             RateLimiter::direct(Quota::per_second(target.bytes_per_second));
 
         let maximum_bytes_per_file = target.maximum_bytes_per_file;
 
+        let bytes_per_second: usize = target.bytes_per_second.get() as usize;
+        let block_chunks = chunk_bytes(
+            &mut rng,
+            target.maximum_prebuild_cache_size_bytes.get() as usize,
+            bytes_per_second,
+        );
+
         let labels = vec![("target".to_string(), name.clone())];
-        let block_cache = construct_block_cache(rng, &target, &labels);
+        let block_cache = match target.variant {
+            Variant::Ascii => {
+                construct_block_cache(&payload::Ascii::default(), &block_chunks, &labels)
+            }
+            Variant::Json => {
+                construct_block_cache(&payload::Json::default(), &block_chunks, &labels)
+            }
+            Variant::FoundationDb => {
+                construct_block_cache(&payload::FoundationDb::default(), &block_chunks, &labels)
+            }
+            Variant::Static => construct_block_cache(
+                &payload::Static::new(&target.static_path.unwrap()),
+                &block_chunks,
+                &labels,
+            ),
+        };
 
         Ok(Self {
             maximum_bytes_per_file,

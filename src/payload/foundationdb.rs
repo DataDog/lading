@@ -1,5 +1,7 @@
 use crate::payload::{Error, Serialize};
+use arbitrary::Unstructured;
 use arbitrary::{self, Arbitrary};
+use rand::{thread_rng, RngCore};
 use serde::Serializer;
 use std::io::Write;
 
@@ -111,19 +113,30 @@ enum Member {
     },
 }
 
-#[derive(Arbitrary, Debug)]
-pub struct FoundationDb {
-    members: Vec<Member>,
-}
+#[derive(Debug, Default)]
+pub struct FoundationDb {}
 
 impl Serialize for FoundationDb {
-    fn to_bytes<W>(&self, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write,
     {
-        for member in &self.members {
-            serde_json::to_writer(&mut *writer, member)?;
-            writeln!(writer)?;
+        let mut rng = thread_rng();
+        let mut entropy: Vec<u8> = vec![0; max_bytes];
+        rng.fill_bytes(&mut entropy);
+        let mut unstructured = Unstructured::new(&entropy);
+
+        let mut bytes_remaining = max_bytes;
+        while let Ok(member) = unstructured.arbitrary::<Member>() {
+            let encoding = serde_json::to_string(&member)?;
+            let line_length = encoding.len() + 1; // add one for the newline
+            match bytes_remaining.checked_sub(line_length) {
+                Some(remainder) => {
+                    writeln!(writer, "{}", encoding)?;
+                    bytes_remaining = remainder
+                }
+                None => break,
+            }
         }
         Ok(())
     }

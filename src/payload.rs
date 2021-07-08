@@ -32,7 +32,7 @@ impl From<io::Error> for Error {
 }
 
 pub trait Serialize {
-    fn to_bytes<W>(&self, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write;
 }

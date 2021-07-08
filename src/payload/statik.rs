@@ -2,19 +2,19 @@ use crate::payload::{Error, Serialize};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct Static<'a> {
     path: &'a Path,
-    bytes_max: usize,
 }
 
 impl<'a> Static<'a> {
-    pub fn new(bytes_max: usize, path: &'a Path) -> Self {
-        Self { path, bytes_max }
+    pub fn new(path: &'a Path) -> Self {
+        Self { path }
     }
 }
 
 impl<'a> Serialize for Static<'a> {
-    fn to_bytes<W>(&self, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write,
     {
@@ -24,7 +24,7 @@ impl<'a> Serialize for Static<'a> {
         let file = std::fs::OpenOptions::new().read(true).open(self.path)?;
         let mut reader = std::io::BufReader::new(file);
 
-        let mut bytes_remaining = self.bytes_max;
+        let mut bytes_remaining = max_bytes;
         let mut line = String::new();
         while bytes_remaining > 0 {
             let len = reader.read_line(&mut line)?;
