@@ -9,14 +9,11 @@
 #![deny(clippy::cargo)]
 #![allow(clippy::multiple_crate_versions)]
 
+pub use file::Log;
 use metrics::{register_counter, register_gauge, Unit};
 
-mod block;
 pub mod config;
 mod file;
-mod payload;
-
-pub use file::Log;
 
 /// Initialize this program's metrics subsystem
 pub fn init_metrics(mut targets: Vec<String>) {

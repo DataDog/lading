@@ -1,81 +1,11 @@
-[package]
-name = "file_gen"
-version = "0.3.8"
-authors = ["Brian L. Troutwine <brian@troutwine.us>"]
-edition = "2018"
-license = "MIT"
-repository = "https://github.com/blt/file_gen/"
-keywords = ["random_test", "generator"]
-categories = ["command-line-utilities", "development-tools::profiling", "filesystem"]
-description = "A repeatable file generating program."
-
-[dependencies]
-toml = "0.5"
-rayon = "1.5"
-bytecount = "0.6"
-
-[dependencies.arbitrary]
-version = "1"
-default-features = false
-features = ["derive"]
-
-[dependencies.metrics]
-version = "0.16"
-default-features = false
-features = ["std"]
-
-[dependencies.metrics-exporter-prometheus]
-version = "0.5"
-default-features = false
-features = ["tokio-exporter"]
-
-[dependencies.byte-unit]
-version = "4.0"
-default-features = false
-features = []
-
-[dependencies.governor]
-version = "0.3"
-default-features = false
-features = ["std", "jitter", "quanta"]
-
-[dependencies.argh]
-version = "0.1"
-default-features = false
-features = []
-
-[dependencies.rand]
-version = "0.8"
-default-features = false
-features = []
-
-[dependencies.serde]
-version = "1.0"
-default-features = false
-features = ["derive", "std"]
-
-[dependencies.serde_json]
-version = "1.0"
-default-features = false
-features = ["std"]
-
-[dependencies.futures]
-version = "0.3"
-default-features = false
-features = ["std"]
-
-[dependencies.tokio]
-version = "1.8"
-default-features = false
-features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
+[workspace]
+members = [
+  "lading_common",
+  "file_gen",
+  "udp_blackhole"
+]
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
-
-[[bin]]
-name = "udp_blackhole"
-
-[[bin]]
-name = "file_gen"

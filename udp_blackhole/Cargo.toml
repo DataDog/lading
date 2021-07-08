@@ -1,0 +1,27 @@
+[package]
+name = "udp_blackhole"
+version = "0.1.0"
+authors = ["Brian L. Troutwine <brian@troutwine.us>"]
+edition = "2018"
+license = "MIT"
+repository = "https://github.com/blt/lading/udp_blackhole"
+keywords = ["udp", "blackhole"]
+categories = ["command-line-utilities", "development-tools::profiling"]
+description = "A UDP blackhole program with some instrumentation"
+
+[dependencies]
+
+[dependencies.argh]
+version = "0.1"
+default-features = false
+features = []
+
+[dependencies.metrics]
+version = "0.16"
+default-features = false
+features = ["std"]
+
+[dependencies.tokio]
+version = "1.8"
+default-features = false
+features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
