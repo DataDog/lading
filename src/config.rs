@@ -23,6 +23,8 @@ pub struct Config {
 /// This variant controls what kind of line text is created by this program.
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub enum Variant {
+    /// Generates Datadog Logs JSON messages
+    DatadogLog,
     /// Generates a limited subset of FoundationDB logs
     FoundationDb,
     /// Generates a static, user supplied data

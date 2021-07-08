@@ -1,11 +1,14 @@
 use std::io::{self, Write};
 
 mod ascii;
+mod common;
+mod datadog_logs;
 mod foundationdb;
 mod json;
 mod statik;
 
 pub use ascii::Ascii;
+pub use datadog_logs::DatadogLog;
 pub use foundationdb::FoundationDb;
 pub use json::Json;
 pub use statik::Static;
