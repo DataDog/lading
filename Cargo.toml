@@ -2,7 +2,8 @@
 members = [
   "lading_common",
   "file_gen",
-  "udp_blackhole"
+  "udp_blackhole",
+  "http_gen",
 ]
 
 [profile.release]

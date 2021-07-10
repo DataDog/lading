@@ -1,26 +1,22 @@
 use argh::FromArgs;
-use file_gen::config::{Config, LogTargetTemplate};
-use file_gen::Log;
 use futures::stream::{FuturesUnordered, StreamExt};
+use http_gen::config::{Config, Target};
+use http_gen::Worker;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::SocketAddr;
-use std::{fs, mem};
 use tokio::runtime::Builder;
 
 #[derive(FromArgs)]
-/// `file_gen` options
+/// `http_gen` options
 struct Opts {
     /// path on disk to the configuration file
     #[argh(option)]
     config_path: String,
 }
 
-async fn run(addr: SocketAddr, targets: HashMap<String, LogTargetTemplate>) {
-    // Set up the `metrics` integration. All metrics are exported from
-    // 0.0.0.0:9000 in prometheus format.
+async fn run(addr: SocketAddr, targets: HashMap<String, Target>) {
     let _: () = PrometheusBuilder::new()
         .listen_address(addr)
         .install()
@@ -28,16 +24,10 @@ async fn run(addr: SocketAddr, targets: HashMap<String, LogTargetTemplate>) {
 
     let mut workers = FuturesUnordered::new();
 
-    targets.into_par_iter().for_each(|(name, template)| {
-        (0..template.duplicates)
-            .into_par_iter()
-            .map(|duplicate| {
-                let tgt_name = format!("{}[{}]", name.clone(), duplicate);
-                let tgt = template.strike(duplicate);
-                Log::new(tgt_name, tgt).unwrap()
-            })
-            .for_each(|log| workers.push(log.spin()));
-    });
+    targets
+        .into_iter()
+        .map(|(name, target)| Worker::new(name, target).unwrap())
+        .for_each(|worker| workers.push(worker.spin()));
 
     loop {
         if let Some(res) = workers.next().await {
@@ -48,7 +38,7 @@ async fn run(addr: SocketAddr, targets: HashMap<String, LogTargetTemplate>) {
 
 fn get_config() -> Config {
     let ops: Opts = argh::from_env();
-    let mut file: fs::File = fs::OpenOptions::new()
+    let mut file: std::fs::File = std::fs::OpenOptions::new()
         .read(true)
         .open(ops.config_path)
         .unwrap();
@@ -58,12 +48,11 @@ fn get_config() -> Config {
 }
 
 fn main() {
-    assert!(mem::size_of::<usize>() >= mem::size_of::<u64>());
-
     let config: Config = get_config();
     let runtime = Builder::new_multi_thread()
         .worker_threads(config.worker_threads as usize)
         .enable_io()
+        .enable_time()
         .build()
         .unwrap();
     runtime.block_on(run(config.prometheus_addr, config.targets));

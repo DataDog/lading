@@ -1,5 +1,7 @@
 use crate::payload::{self, Serialize};
 use metrics::gauge;
+use rand::prelude::SliceRandom;
+use rand::Rng;
 use std::convert::TryInto;
 use std::num::NonZeroU32;
 
@@ -25,6 +27,29 @@ pub struct Block {
 #[inline]
 fn total_newlines(input: &[u8]) -> u64 {
     bytecount::count(input, b'\n') as u64
+}
+
+pub fn chunk_bytes<R>(rng: &mut R, total_bytes: usize, block_byte_sizes: &[usize]) -> Vec<usize>
+where
+    R: Rng + Sized,
+{
+    assert!(!block_byte_sizes.is_empty());
+
+    let mut chunks = Vec::new();
+    let mut bytes_remaining = total_bytes;
+    let minimum = *block_byte_sizes.iter().min().unwrap();
+    let maximum = *block_byte_sizes.iter().max().unwrap();
+
+    while bytes_remaining > minimum {
+        let bytes_max = std::cmp::min(maximum, bytes_remaining);
+        let block_bytes = block_byte_sizes.choose(rng).unwrap();
+        if *block_bytes > bytes_max {
+            continue;
+        }
+        chunks.push(*block_bytes);
+        bytes_remaining = bytes_remaining.saturating_sub(*block_bytes);
+    }
+    chunks
 }
 
 #[allow(clippy::ptr_arg)]

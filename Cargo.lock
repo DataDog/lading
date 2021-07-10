@@ -93,6 +93,7 @@ version = "4.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063197e6eb4b775b64160dedde7a0986bb2836cce140e9492e9e96f28e18bcd8"
 dependencies = [
+ "serde",
  "utf8-width",
 ]
 
@@ -282,7 +283,7 @@ checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 
 [[package]]
 name = "file_gen"
-version = "0.3.9"
+version = "0.4.0"
 dependencies = [
  "argh",
  "byte-unit",
@@ -476,9 +477,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7245cd7449cc792608c3c8a9eaf69bd4eabbabf802713748fd739c98b82f0747"
+checksum = "527e8c9ac747e28542699a951517aa9a6945af506cd1f2e1b53a576c17b6cc11"
 dependencies = [
  "bytes",
  "fnv",
@@ -493,6 +494,36 @@ checksum = "2861bd27ee074e5ee891e8b539837a9430012e249d7f0ca2d795650f579c1994"
 dependencies = [
  "bytes",
  "http",
+]
+
+[[package]]
+name = "http-serde"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25698ac7002625796d5a7df8f0602400571da944c2edc1d5c268a6947dd4f692"
+dependencies = [
+ "http",
+ "serde",
+]
+
+[[package]]
+name = "http_gen"
+version = "0.4.0"
+dependencies = [
+ "argh",
+ "byte-unit",
+ "futures",
+ "governor",
+ "http",
+ "http-serde",
+ "hyper",
+ "lading_common",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "rand",
+ "serde",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -563,7 +594,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "lading_common"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -1244,7 +1275,7 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "udp_blackhole"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "argh",
  "metrics",
