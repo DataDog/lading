@@ -1,12 +1,12 @@
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
-use rand::{thread_rng, RngCore};
+use rand::Rng;
 use std::io::Write;
 
 const SIZES: [usize; 13] = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 
 /// A simplistic 'Payload' structure without self-reference
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Member {
     /// A u64. Its name has no meaning.
     pub id: u64,
@@ -52,11 +52,11 @@ impl<'a> Arbitrary<'a> for Member {
 pub struct Json {}
 
 impl Serialize for Json {
-    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
+        R: Rng + Sized,
         W: Write,
     {
-        let mut rng = thread_rng();
         let mut entropy: Vec<u8> = vec![0; max_bytes];
         rng.fill_bytes(&mut entropy);
         let mut unstructured = Unstructured::new(&entropy);
@@ -74,5 +74,59 @@ impl Serialize for Json {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use quickcheck::{QuickCheck, TestResult};
+    use rand::rngs::SmallRng;
+    use rand::SeedableRng;
+
+    use super::Member;
+    use crate::payload::{Json, Serialize};
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    #[test]
+    fn payload_not_exceed_max_bytes() {
+        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let json = Json::default();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            assert!(bytes.len() <= max_bytes);
+
+            TestResult::passed()
+        }
+        QuickCheck::new()
+            .tests(1_000)
+            .quickcheck(inner as fn(u64, u16) -> TestResult);
+    }
+
+    // We want to know that every payload produced by this type actually
+    // deserializes as json, is not truncated etc.
+    #[test]
+    fn every_payload_deserializes() {
+        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let json = Json::default();
+
+            let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
+            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+
+            let payload = std::str::from_utf8(&bytes).unwrap();
+            for msg in payload.lines() {
+                let _members: Member = serde_json::from_str(msg).unwrap();
+            }
+
+            TestResult::passed()
+        }
+        QuickCheck::new()
+            .tests(1_000_000)
+            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }

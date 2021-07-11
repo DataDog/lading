@@ -11,6 +11,7 @@ pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
 pub use foundationdb::FoundationDb;
 pub use json::Json;
+use rand::Rng;
 pub use statik::Static;
 
 /// Errors related to serialization
@@ -35,7 +36,8 @@ impl From<io::Error> for Error {
 }
 
 pub trait Serialize {
-    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
+        R: Rng + Sized,
         W: Write;
 }

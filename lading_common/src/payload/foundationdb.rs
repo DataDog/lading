@@ -1,7 +1,7 @@
 use crate::payload::{Error, Serialize};
 use arbitrary::Unstructured;
 use arbitrary::{self, Arbitrary};
-use rand::{thread_rng, RngCore};
+use rand::Rng;
 use serde::Serializer;
 use std::io::Write;
 
@@ -117,11 +117,11 @@ enum Member {
 pub struct FoundationDb {}
 
 impl Serialize for FoundationDb {
-    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
+        R: Rng + Sized,
         W: Write,
     {
-        let mut rng = thread_rng();
         let mut entropy: Vec<u8> = vec![0; max_bytes];
         rng.fill_bytes(&mut entropy);
         let mut unstructured = Unstructured::new(&entropy);
@@ -139,5 +139,33 @@ impl Serialize for FoundationDb {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::payload::{FoundationDb, Serialize};
+    use quickcheck::{QuickCheck, TestResult};
+    use rand::rngs::SmallRng;
+    use rand::SeedableRng;
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    #[test]
+    fn payload_not_exceed_max_bytes() {
+        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let fdb = FoundationDb::default();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            fdb.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            assert!(bytes.len() <= max_bytes);
+
+            TestResult::passed()
+        }
+        QuickCheck::new()
+            .tests(1_000)
+            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }
