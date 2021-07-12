@@ -1,6 +1,6 @@
 [package]
 name = "lading_common"
-version = "0.1.0"
+version = "0.4.0"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
@@ -17,11 +17,6 @@ version = "0.16"
 default-features = false
 features = ["std"]
 
-[dependencies.rand]
-version = "0.8"
-default-features = false
-features = []
-
 [dependencies.arbitrary]
 version = "1"
 default-features = false
@@ -29,10 +24,18 @@ features = ["derive"]
 
 [dependencies.serde]
 version = "1.0"
-default-features = false
+default-features = true
 features = ["derive", "std"]
 
 [dependencies.serde_json]
 version = "1.0"
 default-features = false
 features = ["std"]
+
+[dependencies.rand]
+version = "0.8"
+default-features = false
+features = ["small_rng", "std", "std_rng"]
+
+[dev-dependencies]
+quickcheck = "1"

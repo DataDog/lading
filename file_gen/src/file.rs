@@ -1,11 +1,9 @@
 use crate::config::{LogTarget, Variant};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
-use lading_common::block::{self, construct_block_cache, Block};
+use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::{counter, gauge};
-use rand::prelude::SliceRandom;
-use rand::Rng;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use tokio::fs;
@@ -46,24 +44,6 @@ const BLOCK_BYTE_SIZES: [usize; 6] = [
     32_000_000,
 ];
 
-fn chunk_bytes<R>(rng: &mut R, input: usize, bytes_per_second: usize) -> Vec<usize>
-where
-    R: Rng + Sized,
-{
-    let mut chunks = Vec::new();
-    let mut bytes_remaining = input;
-    while bytes_remaining > ONE_MEBIBYTE {
-        let bytes_max = std::cmp::min(bytes_per_second, bytes_remaining);
-        let block_bytes = BLOCK_BYTE_SIZES.choose(rng).unwrap();
-        if *block_bytes > bytes_max {
-            continue;
-        }
-        chunks.push(*block_bytes);
-        bytes_remaining = bytes_remaining.saturating_sub(*block_bytes);
-    }
-    chunks
-}
-
 /// The [`Log`] defines a task that emits variant lines to a file, managing
 /// rotation and controlling rate limits.
 #[derive(Debug)]
@@ -91,18 +71,21 @@ impl Log {
     ///
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: LogTarget) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
+        let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
+        let maximum_bytes_per_file =
+            NonZeroU32::new(target.maximum_bytes_per_file.get_bytes() as u32).unwrap();
+        let maximum_prebuild_cache_size_bytes =
+            NonZeroU32::new(target.maximum_prebuild_cache_size_bytes.get_bytes() as u32).unwrap();
         let rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock> =
-            RateLimiter::direct(Quota::per_second(target.bytes_per_second));
+            RateLimiter::direct(Quota::per_second(bytes_per_second));
 
-        let maximum_bytes_per_file = target.maximum_bytes_per_file;
-
-        let bytes_per_second: usize = target.bytes_per_second.get() as usize;
         let block_chunks = chunk_bytes(
             &mut rng,
-            target.maximum_prebuild_cache_size_bytes.get() as usize,
-            bytes_per_second,
+            maximum_prebuild_cache_size_bytes.get() as usize,
+            &BLOCK_BYTE_SIZES,
         );
 
         let labels = vec![("target".to_string(), name.clone())];
@@ -119,18 +102,16 @@ impl Log {
             Variant::FoundationDb => {
                 construct_block_cache(&payload::FoundationDb::default(), &block_chunks, &labels)
             }
-            Variant::Static => construct_block_cache(
-                &payload::Static::new(&target.static_path.unwrap()),
-                &block_chunks,
-                &labels,
-            ),
+            Variant::Static { static_path } => {
+                construct_block_cache(&payload::Static::new(&static_path), &block_chunks, &labels)
+            }
         };
 
         Ok(Self {
             maximum_bytes_per_file,
             name,
             path: target.path,
-            bytes_per_second: target.bytes_per_second,
+            bytes_per_second,
             rate_limiter,
             block_cache,
         })
@@ -147,6 +128,7 @@ impl Log {
     /// correct, if the file cannot be written to etc. Any error from
     /// `std::io::Error` is possible.
     #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn spin(self) -> Result<(), Error> {
         let labels = vec![("target", self.name.clone())];
 
@@ -191,8 +173,6 @@ impl Log {
             }
 
             if bytes_written > maximum_bytes_per_file {
-                let slop = (bytes_written - maximum_bytes_per_file).max(0) as f64;
-                gauge!("file_rotation_slop", slop, &labels);
                 // Delete file, leaving any open file handlers intact. This
                 // includes our own `fp` for the time being.
                 fs::remove_file(&self.path).await?;

@@ -1,22 +1,13 @@
 use arbitrary::Unstructured;
 
-const SIZES: [usize; 8] = [16, 32, 64, 128, 256, 512, 1024, 2048];
+const SIZES: [usize; 12] = [0, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,";
 #[allow(clippy::cast_possible_truncation)]
 const CHARSET_LEN: u8 = CHARSET.len() as u8;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AsciiStr {
     bytes: Vec<u8>,
-}
-
-impl serde::Serialize for AsciiStr {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
 }
 
 impl AsciiStr {
@@ -40,6 +31,6 @@ impl<'a> arbitrary::Arbitrary<'a> for AsciiStr {
     }
 
     fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (128, Some(8192))
+        (0, Some(2048))
     }
 }

@@ -11,6 +11,7 @@ pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
 pub use foundationdb::FoundationDb;
 pub use json::Json;
+use rand::Rng;
 pub use statik::Static;
 
 /// Errors related to serialization
@@ -20,11 +21,19 @@ pub enum Error {
     Json(serde_json::Error),
     /// IO operation failed
     Io(io::Error),
+    /// Arbitrary instance could not be created
+    Arbitrary(arbitrary::Error),
 }
 
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
         Error::Json(error)
+    }
+}
+
+impl From<arbitrary::Error> for Error {
+    fn from(error: arbitrary::Error) -> Self {
+        Error::Arbitrary(error)
     }
 }
 
@@ -35,7 +44,8 @@ impl From<io::Error> for Error {
 }
 
 pub trait Serialize {
-    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
+        R: Rng + Sized,
         W: Write;
 }

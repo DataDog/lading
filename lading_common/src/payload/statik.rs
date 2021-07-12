@@ -1,4 +1,5 @@
 use crate::payload::{Error, Serialize};
+use rand::Rng;
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -14,8 +15,9 @@ impl<'a> Static<'a> {
 }
 
 impl<'a> Serialize for Static<'a> {
-    fn to_bytes<W>(&self, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, _rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
+        R: Rng + Sized,
         W: Write,
     {
         // Read lines from `static_path` until such time as the total byte
