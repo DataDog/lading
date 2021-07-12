@@ -44,20 +44,12 @@ impl Serialize for DatadogLog {
     {
         let mut entropy: Vec<u8> = vec![0; max_bytes];
         rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
+        let unstructured = Unstructured::new(&entropy);
 
-        let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Vec<Member>>() {
-            let encoding = serde_json::to_string(&member)?;
-            let line_length = encoding.len() + 1; // add one for the newline
-            match bytes_remaining.checked_sub(line_length) {
-                Some(remainder) => {
-                    writeln!(writer, "{}", encoding)?;
-                    bytes_remaining = remainder;
-                }
-                None => break,
-            }
-        }
+        let members: Vec<Member> =
+            <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
+        let encoding = serde_json::to_string(&members)?;
+        write!(writer, "{}", encoding)?;
         Ok(())
     }
 }

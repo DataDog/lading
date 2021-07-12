@@ -52,7 +52,7 @@ features = []
 [dependencies.hyper]
 version = "0.14"
 default-features = false
-features = ["client", "runtime"]
+features = ["client"]
 
 [dependencies.tokio]
 version = "1.8"

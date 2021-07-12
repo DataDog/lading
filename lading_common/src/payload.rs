@@ -21,11 +21,19 @@ pub enum Error {
     Json(serde_json::Error),
     /// IO operation failed
     Io(io::Error),
+    /// Arbitrary instance could not be created
+    Arbitrary(arbitrary::Error),
 }
 
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
         Error::Json(error)
+    }
+}
+
+impl From<arbitrary::Error> for Error {
+    fn from(error: arbitrary::Error) -> Self {
+        Error::Arbitrary(error)
     }
 }
 
