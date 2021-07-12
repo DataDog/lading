@@ -42,14 +42,26 @@ impl Serialize for DatadogLog {
         W: Write,
         R: Rng + Sized,
     {
+        if max_bytes < 2 {
+            // 'empty' payload  is []
+            return Ok(());
+        }
+
         let mut entropy: Vec<u8> = vec![0; max_bytes];
         rng.fill_bytes(&mut entropy);
         let unstructured = Unstructured::new(&entropy);
 
-        let members: Vec<Member> =
-            <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let encoding = serde_json::to_string(&members)?;
-        write!(writer, "{}", encoding)?;
+        let mut members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
+        loop {
+            let encoding = serde_json::to_string(&members)?;
+            if encoding.len() < max_bytes {
+                let encoding = serde_json::to_string(&members)?;
+                write!(writer, "{}", encoding)?;
+                break;
+            } else {
+                members.pop();
+            }
+        }
         Ok(())
     }
 }
@@ -74,7 +86,11 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            assert!(bytes.len() <= max_bytes);
+            debug_assert!(
+                bytes.len() <= max_bytes,
+                "{:?}",
+                std::str::from_utf8(&bytes).unwrap()
+            );
 
             TestResult::passed()
         }
