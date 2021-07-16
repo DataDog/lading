@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "file_gen"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "argh",
  "byte-unit",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "http_gen"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "argh",
  "byte-unit",
@@ -604,7 +604,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "lading_common"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -1287,7 +1287,7 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "udp_blackhole"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "argh",
  "metrics",

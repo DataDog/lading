@@ -5,21 +5,42 @@ use rand::Rng;
 use std::io::Write;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+// https://github.com/DataDog/datadog-agent/blob/a33248c2bc125920a9577af1e16f12298875a4ad/pkg/logs/processor/json.go#L23-L49
 struct Member {
     /// The message is a short ascii string, without newlines for now
     pub message: String,
+    /// The message status
+    pub status: String,
     /// The timestamp is a simple integer value since epoch, presumably
     pub timestamp: u32,
+    /// The hostname that sent the logs
+    pub hostname: String,
+    /// The service that sent the logs
+    pub service: String,
+    /// The ultimate source of the logs
+    pub source: String,
+    /// Comma-separate list of tags
+    pub tags: String,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let ascii_str = u.arbitrary::<AsciiStr>()?;
+        let status = u.arbitrary::<AsciiStr>()?;
         let timestamp = u.arbitrary::<u32>()?;
+        let hostname = u.arbitrary::<AsciiStr>()?;
+        let service = u.arbitrary::<AsciiStr>()?;
+        let source = u.arbitrary::<AsciiStr>()?;
+        let tags = u.arbitrary::<AsciiStr>()?;
 
         Ok(Member {
             message: ascii_str.as_str().to_string(),
+            status: status.as_str().to_string(),
             timestamp,
+            hostname: hostname.as_str().to_string(),
+            service: service.as_str().to_string(),
+            source: source.as_str().to_string(),
+            tags: tags.as_str().to_string(),
         })
     }
 
