@@ -1,6 +1,7 @@
 use argh::FromArgs;
 use metrics::counter;
 use std::io;
+use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 use tokio::runtime::Builder;
 
@@ -12,15 +13,15 @@ struct Opts {
     pub worker_threads: u16,
     /// address -- IP plus port -- to bind to
     #[argh(option)]
-    pub binding_addr: String,
+    pub binding_addr: SocketAddr,
 }
 
 struct Server {
-    addr: String,
+    addr: SocketAddr,
 }
 
 impl Server {
-    fn new(addr: String) -> Self {
+    fn new(addr: SocketAddr) -> Self {
         Self { addr }
     }
 
