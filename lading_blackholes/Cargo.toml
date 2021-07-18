@@ -11,7 +11,7 @@ description = "Blackhole programs with some instrumentation"
 
 [dependencies]
 metrics = { version = "0.16", default-features = false, features = ["std"] }
-metrics-exporter-prometheus = { version = "0.5", default-features = false, features = ["tokio-exporter"] }
+metrics-exporter-prometheus = { version = "0.6", default-features = false, features = ["tokio-exporter"] }
 
 [dependencies.argh]
 version = "0.1"
