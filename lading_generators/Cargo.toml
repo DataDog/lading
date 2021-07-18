@@ -1,17 +1,18 @@
 [package]
-name = "http_gen"
+name = "lading_generators"
 readme = "README.md"
 version = "0.4.1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
-repository = "https://github.com/blt/lading/file_gen"
+repository = "https://github.com/blt/lading/"
 keywords = ["random_test", "generator"]
 categories = ["command-line-utilities", "development-tools::profiling", "filesystem"]
-description = "A file generating program with stable throughput."
+description = "Generating programs with stable throughput."
 
 [dependencies]
 lading_common = { path = "../lading_common" }
+rayon = "1.5"
 toml = "0.5"
 
 [dependencies.argh]
@@ -19,25 +20,15 @@ version = "0.1"
 default-features = false
 features = []
 
-[dependencies.byte-unit]
-version = "4.0"
-default-features = false
-features = ["serde"]
-
-[dependencies.metrics]
-version = "0.16"
-default-features = false
-features = ["std"]
-
-[dependencies.serde]
-version = "1.0"
-default-features = false
-features = ["derive", "std"]
-
 [dependencies.futures]
 version = "0.3"
 default-features = false
 features = ["std"]
+
+[dependencies.byte-unit]
+version = "4.0"
+default-features = false
+features = ["serde"]
 
 [dependencies.http]
 version = "0.2"
@@ -54,20 +45,30 @@ version = "0.14"
 default-features = false
 features = ["client"]
 
+[dependencies.governor]
+version = "0.3"
+default-features = false
+features = ["std", "jitter", "quanta"]
+
 [dependencies.tokio]
 version = "1.8"
 default-features = false
-features = ["rt", "rt-multi-thread", "macros", "io-util"]
+features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
+
+[dependencies.serde]
+version = "1.0"
+default-features = false
+features = ["derive", "std"]
+
+[dependencies.metrics]
+version = "0.16"
+default-features = false
+features = ["std"]
 
 [dependencies.metrics-exporter-prometheus]
 version = "0.5"
 default-features = false
 features = ["tokio-exporter"]
-
-[dependencies.governor]
-version = "0.3"
-default-features = false
-features = ["std", "jitter", "quanta"]
 
 [dependencies.rand]
 version = "0.8"

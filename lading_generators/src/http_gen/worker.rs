@@ -1,4 +1,4 @@
-use crate::config::{Method, Target, Variant};
+use crate::http_gen::config::{Method, Target, Variant};
 use futures::stream::{self, StreamExt};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};

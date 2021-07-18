@@ -1,4 +1,4 @@
-use crate::config::{LogTarget, Variant};
+use crate::file_gen::config::{LogTarget, Variant};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};

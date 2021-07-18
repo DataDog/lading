@@ -1,9 +1,8 @@
 [workspace]
 members = [
   "lading_common",
-  "file_gen",
-  "blackhole",
-  "http_gen",
+  "lading_generators",
+  "lading_blackholes",
 ]
 
 [profile.release]

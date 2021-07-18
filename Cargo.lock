@@ -88,17 +88,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
-name = "blackhole"
-version = "0.4.2"
-dependencies = [
- "argh",
- "hyper",
- "metrics",
- "metrics-exporter-prometheus",
- "tokio",
-]
-
-[[package]]
 name = "byte-unit"
 version = "4.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,24 +289,6 @@ checksum = "a19187fea3ac7e84da7dacf48de0c45d63c6a76f9490dae389aead16c243fce3"
 dependencies = [
  "log",
  "regex",
-]
-
-[[package]]
-name = "file_gen"
-version = "0.4.1"
-dependencies = [
- "argh",
- "byte-unit",
- "futures",
- "governor",
- "lading_common",
- "metrics",
- "metrics-exporter-prometheus",
- "rand",
- "rayon",
- "serde",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -528,26 +499,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "http_gen"
-version = "0.4.1"
-dependencies = [
- "argh",
- "byte-unit",
- "futures",
- "governor",
- "http",
- "http-serde",
- "hyper",
- "lading_common",
- "metrics",
- "metrics-exporter-prometheus",
- "rand",
- "serde",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "httparse"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -614,8 +565,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
+name = "lading_blackholes"
+version = "0.4.1"
+dependencies = [
+ "argh",
+ "hyper",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "tokio",
+]
+
+[[package]]
 name = "lading_common"
-version = "0.4.2"
+version = "0.4.1"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -624,6 +586,27 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lading_generators"
+version = "0.4.1"
+dependencies = [
+ "argh",
+ "byte-unit",
+ "futures",
+ "governor",
+ "http",
+ "http-serde",
+ "hyper",
+ "lading_common",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "rand",
+ "rayon",
+ "serde",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

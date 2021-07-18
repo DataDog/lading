@@ -1,10 +1,10 @@
 [package]
 name = "lading_common"
-version = "0.4.2"
+version = "0.4.1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
-repository = "https://github.com/blt/lading/lading_common"
+repository = "https://github.com/blt/lading/"
 keywords = ["random_test", "generator"]
 categories = ["development-tools::testing"]
 description = "A set of code for data generation and blocking."

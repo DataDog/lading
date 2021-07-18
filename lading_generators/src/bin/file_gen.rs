@@ -1,7 +1,7 @@
 use argh::FromArgs;
-use file_gen::config::{Config, LogTargetTemplate};
-use file_gen::Log;
 use futures::stream::{FuturesUnordered, StreamExt};
+use lading_generators::file_gen::config::{Config, LogTargetTemplate};
+use lading_generators::file_gen::Log;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use rayon::prelude::*;
 use std::collections::HashMap;

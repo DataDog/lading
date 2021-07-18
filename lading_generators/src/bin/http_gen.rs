@@ -1,7 +1,7 @@
 use argh::FromArgs;
 use futures::stream::{FuturesUnordered, StreamExt};
-use http_gen::config::{Config, Target};
-use http_gen::Worker;
+use lading_generators::http_gen::config::{Config, Target};
+use lading_generators::http_gen::Worker;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::collections::HashMap;
 use std::io::Read;
