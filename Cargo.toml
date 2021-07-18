@@ -2,7 +2,7 @@
 members = [
   "lading_common",
   "file_gen",
-  "udp_blackhole",
+  "blackhole",
   "http_gen",
 ]
 

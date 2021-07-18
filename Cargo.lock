@@ -88,6 +88,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "blackhole"
+version = "0.4.2"
+dependencies = [
+ "argh",
+ "hyper",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "tokio",
+]
+
+[[package]]
 name = "byte-unit"
 version = "4.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1284,15 +1295,6 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
-
-[[package]]
-name = "udp_blackhole"
-version = "0.4.1"
-dependencies = [
- "argh",
- "metrics",
- "tokio",
-]
 
 [[package]]
 name = "unicode-segmentation"
