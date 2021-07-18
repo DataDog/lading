@@ -1,13 +1,13 @@
 [package]
-name = "blackhole"
-version = "0.4.2"
+name = "lading_blackholes"
+version = "0.4.1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
-repository = "https://github.com/blt/lading/udp_blackhole"
-keywords = ["udp", "blackhole"]
+repository = "https://github.com/blt/lading/"
+keywords = ["udp", "http", "blackhole"]
 categories = ["command-line-utilities", "development-tools::profiling"]
-description = "A UDP blackhole program with some instrumentation"
+description = "Blackhole programs with some instrumentation"
 
 [dependencies]
 metrics = { version = "0.16", default-features = false, features = ["std"] }
