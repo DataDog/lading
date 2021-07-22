@@ -10,9 +10,9 @@ checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
 
 [[package]]
 name = "ahash"
-version = "0.7.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f200cbb1e856866d9eade941cf3aa0c5d7dd36f74311c4273b494f4ef036957"
+checksum = "43bb833f0bf979d8475d38fbf09ed3b8a55e1885fe93ad3f93239fc6a4f17b98"
 dependencies = [
  "getrandom",
  "once_cell",
@@ -425,6 +425,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "825343c4eef0b63f541f8903f395dc5beb362a979b5799a84062527ef1e37726"
+dependencies = [
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "http",
+ "indexmap",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -446,7 +465,7 @@ version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
 dependencies = [
- "ahash 0.7.2",
+ "ahash 0.7.4",
 ]
 
 [[package]]
@@ -520,6 +539,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -570,9 +590,10 @@ version = "0.4.1"
 dependencies = [
  "argh",
  "hyper",
- "metrics",
+ "metrics 0.17.0",
  "metrics-exporter-prometheus",
  "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -581,7 +602,7 @@ version = "0.4.1"
 dependencies = [
  "arbitrary",
  "bytecount",
- "metrics",
+ "metrics 0.16.0",
  "quickcheck",
  "rand",
  "serde",
@@ -600,7 +621,7 @@ dependencies = [
  "http-serde",
  "hyper",
  "lading_common",
- "metrics",
+ "metrics 0.17.0",
  "metrics-exporter-prometheus",
  "rand",
  "rayon",
@@ -690,14 +711,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-exporter-prometheus"
-version = "0.5.0"
+name = "metrics"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "423ac561fc3300388e62947ce7f944ba6d40468afe9916ce5b7774171d8b38b8"
+checksum = "a00f42f354a2ed4894db863b3a4db47aef2d2e4435b937221749bd37a8a7aaa8"
+dependencies = [
+ "ahash 0.7.4",
+ "metrics-macros",
+ "proc-macro-hack",
+]
+
+[[package]]
+name = "metrics-exporter-prometheus"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9db7052a7cb0b0c0922a1ce499c9e78576763b1d47499ba980a4fe731b96909d"
 dependencies = [
  "hyper",
  "ipnet",
- "metrics",
+ "metrics 0.17.0",
  "metrics-util",
  "parking_lot",
  "quanta 0.7.2",
@@ -721,10 +753,11 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0c93306cf63ff153c57963151a011194af0f33c91fe30ec30faf98732350a1a"
+checksum = "a58e622a425b7308e73e4390c68b8cb3df4443f2a57495e391b978412531638c"
 dependencies = [
+ "ahash 0.7.4",
  "aho-corasick",
  "atomic-shim",
  "crossbeam-epoch 0.9.3",
@@ -732,14 +765,13 @@ dependencies = [
  "dashmap",
  "hashbrown 0.11.2",
  "indexmap",
- "metrics",
+ "metrics 0.17.0",
  "num_cpus",
  "ordered-float",
  "parking_lot",
  "quanta 0.7.2",
  "radix_trie",
  "sketches-ddsketch",
- "t1ha",
 ]
 
 [[package]]
@@ -855,6 +887,26 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "576bc800220cc65dac09e99e97b08b358cfab6e17078de8dc5fee223bd2d0c08"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e8fe8163d14ce7f0cdac2e040116f22eac817edabff0be91e8aff7e9accf389"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1239,6 +1291,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1caa0b0c8d94a049db56b5acf8cba99dc0623aab1b26d5b5f5e2d945846b3592"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "log",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "toml"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,6 +1312,27 @@ checksum = "a31142970826733df8241ef35dc040ef98c679ab14d7c3e54d827099b3acecaa"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "tower"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f60422bc7fefa2f3ec70359b8ff1caff59d785877eb70595904605bcc412470f"
+dependencies = [
+ "futures-core",
+ "pin-project",
+ "tokio",
+ "tokio-util",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tower-layer"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343bc9466d3fe6b0f960ef45960509f84480bf4fd96f92901afe7ff3df9d3a62"
 
 [[package]]
 name = "tower-service"
@@ -1261,7 +1348,19 @@ checksum = "01ebdc2bb4498ab1ab5f5b73c5803825e60199229ccba0698170e3be0e7f959f"
 dependencies = [
  "cfg-if 1.0.0",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c42e6fa53307c8a17e4ccd4dc81cf5ec38db9209f59b222210375b54ee40d1e2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

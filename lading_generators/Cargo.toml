@@ -43,7 +43,7 @@ features = []
 [dependencies.hyper]
 version = "0.14"
 default-features = false
-features = ["client"]
+features = ["client", "http2"]
 
 [dependencies.governor]
 version = "0.3"
@@ -61,12 +61,12 @@ default-features = false
 features = ["derive", "std"]
 
 [dependencies.metrics]
-version = "0.16"
+version = "0.17"
 default-features = false
 features = ["std"]
 
 [dependencies.metrics-exporter-prometheus]
-version = "0.5"
+version = "0.6"
 default-features = false
 features = ["tokio-exporter"]
 
