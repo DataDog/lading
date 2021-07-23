@@ -1,3 +1,5 @@
+#![allow(clippy::nonstandard_macro_braces)]
+
 use argh::FromArgs;
 use hyper::server::conn::{AddrIncoming, AddrStream};
 use hyper::service::{make_service_fn, service_fn};
@@ -36,22 +38,18 @@ struct HttpServer {
 }
 
 async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    match (req.method(), req.uri().path()) {
-        _ => {
-            metrics::counter!("requests_received", 1);
+    metrics::counter!("requests_received", 1);
 
-            let bytes = body::to_bytes(req).await?;
-            metrics::counter!("bytes_received", bytes.len() as u64);
+    let bytes = body::to_bytes(req).await?;
+    metrics::counter!("bytes_received", bytes.len() as u64);
 
-            let mut okay = Response::default();
-            *okay.status_mut() = StatusCode::OK;
-            okay.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("application/text"),
-            );
-            Ok(okay)
-        }
-    }
+    let mut okay = Response::default();
+    *okay.status_mut() = StatusCode::OK;
+    okay.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/text"),
+    );
+    Ok(okay)
 }
 
 impl HttpServer {
