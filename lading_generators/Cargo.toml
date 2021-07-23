@@ -70,7 +70,17 @@ version = "0.6"
 default-features = false
 features = ["tokio-exporter"]
 
+[dependencies.pretty_env_logger]
+version = "0.4"
+default-features = false
+features = []
+
 [dependencies.rand]
 version = "0.8"
+default-features = false
+features = []
+
+[dependencies.rdkafka]
+version = "0.26.0"
 default-features = false
 features = []
