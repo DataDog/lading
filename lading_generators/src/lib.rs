@@ -8,3 +8,4 @@
 
 pub mod file_gen;
 pub mod http_gen;
+pub mod kafka_gen;
