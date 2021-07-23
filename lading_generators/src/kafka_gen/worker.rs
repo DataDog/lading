@@ -9,6 +9,7 @@ use rdkafka::config::FromClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout;
 use rdkafka::ClientConfig;
+use std::convert::TryInto;
 use std::num::NonZeroU32;
 
 #[derive(Debug)]
@@ -130,8 +131,8 @@ impl Worker {
         let mut blocks = self.block_cache.iter().cycle();
         loop {
             let block = blocks.next().expect("should never be empty");
-            let block_size = block.bytes.len() as u64;
-            let limiter_n = if limit_by_bytes { block_size as u32 } else { 1 };
+            let block_size = block.total_bytes;
+            let limiter_n = if limit_by_bytes { block_size.get() } else { 1 };
             let limiter_n = NonZeroU32::new(limiter_n).expect("should never be zero");
 
             let _ = rate_limiter.until_n_ready(limiter_n).await;
@@ -144,7 +145,7 @@ impl Worker {
             match result {
                 Ok(..) => {
                     increment_counter!("request_ok", &labels);
-                    counter!("bytes_written", block_size, &labels);
+                    counter!("bytes_written", u64::from(block_size.get()), &labels);
                 }
                 Err(..) => {
                     counter!("request_failure", 1, &labels);
@@ -157,20 +158,21 @@ impl Worker {
 fn generate_block_cache(
     cache_size: byte_unit::Byte,
     variant: Variant,
-    labels: &Vec<(String, String)>,
+    #[allow(clippy::ptr_arg)] labels: &Vec<(String, String)>,
 ) -> Vec<Block> {
     let mut rng = rand::thread_rng();
 
-    let chunks = chunk_bytes(&mut rng, cache_size.get_bytes() as usize, &BLOCK_BYTE_SIZES);
+    let total_size = cache_size.get_bytes().try_into().unwrap_or(usize::MAX);
+    let chunks = chunk_bytes(&mut rng, total_size, &BLOCK_BYTE_SIZES);
 
     match variant {
-        Variant::Ascii => construct_block_cache(&payload::Ascii::default(), &chunks, &labels),
+        Variant::Ascii => construct_block_cache(&payload::Ascii::default(), &chunks, labels),
         Variant::DatadogLog => {
-            construct_block_cache(&payload::DatadogLog::default(), &chunks, &labels)
+            construct_block_cache(&payload::DatadogLog::default(), &chunks, labels)
         }
-        Variant::Json => construct_block_cache(&payload::Json::default(), &chunks, &labels),
+        Variant::Json => construct_block_cache(&payload::Json::default(), &chunks, labels),
         Variant::FoundationDb => {
-            construct_block_cache(&payload::FoundationDb::default(), &chunks, &labels)
+            construct_block_cache(&payload::FoundationDb::default(), &chunks, labels)
         }
     }
 }
@@ -187,7 +189,7 @@ fn get_rate_limiter(
             let amount = if amount.get_bytes() == 0 {
                 1
             } else {
-                amount.get_bytes() as u32
+                amount.get_bytes().try_into().unwrap_or(u32::MAX)
             };
             let amount = NonZeroU32::new(amount).expect("amount should not be zero");
             RateLimiter::direct(Quota::per_second(amount))

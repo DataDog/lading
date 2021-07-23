@@ -16,7 +16,7 @@ pub struct Config {
 }
 
 /// The throughput configuration
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum Throughput {
     /// The producer should run as fast as possible.
