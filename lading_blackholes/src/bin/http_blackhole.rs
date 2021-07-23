@@ -1,5 +1,3 @@
-#![allow(clippy::nonstandard_macro_braces)]
-
 use argh::FromArgs;
 use hyper::server::conn::{AddrIncoming, AddrStream};
 use hyper::service::{make_service_fn, service_fn};
@@ -55,8 +53,8 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 impl HttpServer {
     fn new(httpd_addr: SocketAddr, prometheus_addr: SocketAddr) -> Self {
         Self {
-            httpd_addr,
             prometheus_addr,
+            httpd_addr,
         }
     }
 

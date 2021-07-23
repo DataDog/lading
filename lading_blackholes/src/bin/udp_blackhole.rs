@@ -1,4 +1,3 @@
-#![allow(clippy::nonstandard_macro_braces)]
 use argh::FromArgs;
 use metrics::counter;
 use std::io;

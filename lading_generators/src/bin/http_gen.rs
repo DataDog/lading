@@ -1,5 +1,3 @@
-#![allow(clippy::nonstandard_macro_braces)]
-
 use argh::FromArgs;
 use futures::stream::{FuturesUnordered, StreamExt};
 use lading_generators::http_gen::config::{Config, Target};
