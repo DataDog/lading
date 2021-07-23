@@ -18,9 +18,9 @@ struct Member {
     /// The service that sent the logs
     pub service: String,
     /// The ultimate source of the logs
-    pub source: String,
+    pub ddsource: String,
     /// Comma-separate list of tags
-    pub tags: String,
+    pub ddtags: String,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Member {
@@ -39,8 +39,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Member {
             timestamp,
             hostname: hostname.as_str().to_string(),
             service: service.as_str().to_string(),
-            source: source.as_str().to_string(),
-            tags: tags.as_str().to_string(),
+            ddsource: source.as_str().to_string(),
+            ddtags: tags.as_str().to_string(),
         })
     }
 
