@@ -590,7 +590,7 @@ version = "0.4.1"
 dependencies = [
  "argh",
  "hyper",
- "metrics 0.17.0",
+ "metrics",
  "metrics-exporter-prometheus",
  "tokio",
  "tower",
@@ -602,7 +602,7 @@ version = "0.4.1"
 dependencies = [
  "arbitrary",
  "bytecount",
- "metrics 0.16.0",
+ "metrics",
  "quickcheck",
  "rand",
  "serde",
@@ -621,7 +621,7 @@ dependencies = [
  "http-serde",
  "hyper",
  "lading_common",
- "metrics 0.17.0",
+ "metrics",
  "metrics-exporter-prometheus",
  "rand",
  "rayon",
@@ -701,17 +701,6 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c0a7fa53d812d26e59d2baf7a6f77442041454ab32908eb304447f00f0dd4de"
-dependencies = [
- "metrics-macros",
- "proc-macro-hack",
- "t1ha",
-]
-
-[[package]]
-name = "metrics"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a00f42f354a2ed4894db863b3a4db47aef2d2e4435b937221749bd37a8a7aaa8"
@@ -729,7 +718,7 @@ checksum = "9db7052a7cb0b0c0922a1ce499c9e78576763b1d47499ba980a4fe731b96909d"
 dependencies = [
  "hyper",
  "ipnet",
- "metrics 0.17.0",
+ "metrics",
  "metrics-util",
  "parking_lot",
  "quanta 0.7.2",
@@ -765,7 +754,7 @@ dependencies = [
  "dashmap",
  "hashbrown 0.11.2",
  "indexmap",
- "metrics 0.17.0",
+ "metrics",
  "num_cpus",
  "ordered-float",
  "parking_lot",
@@ -1105,15 +1094,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5eb417147ba9860a96cfe72a0b93bf88fee1744b5636ec99ab20c1aa9376581"
 
 [[package]]
-name = "rustc_version"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
-dependencies = [
- "semver",
-]
-
-[[package]]
 name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1124,21 +1104,6 @@ name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
-
-[[package]]
-name = "semver"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
-dependencies = [
- "semver-parser",
-]
-
-[[package]]
-name = "semver-parser"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
@@ -1219,18 +1184,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
-]
-
-[[package]]
-name = "t1ha"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa44aa51ae1a544e2c35a38831ba54ae40591f21384816f531b84f3e984b9ccc"
-dependencies = [
- "cfg-if 0.1.10",
- "lazy_static",
- "num-traits",
- "rustc_version",
 ]
 
 [[package]]
