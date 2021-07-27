@@ -5,42 +5,201 @@ use rand::Rng;
 use std::io::Write;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Status {
+    Notice,
+    Info,
+    Warning,
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Status {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.arbitrary::<u8>()?;
+        let res = match choice % 3 {
+            0 => Status::Notice,
+            1 => Status::Info,
+            2 => Status::Warning,
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Hostname {
+    Alpha,
+    Beta,
+    Gamma,
+    Localhost,
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Hostname {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.arbitrary::<u8>()?;
+        let res = match choice % 4 {
+            0 => Hostname::Alpha,
+            1 => Hostname::Beta,
+            2 => Hostname::Gamma,
+            3 => Hostname::Localhost,
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Service {
+    Vector,
+    Lading,
+    Cernan,
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Service {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.arbitrary::<u8>()?;
+        let res = match choice % 3 {
+            0 => Service::Vector,
+            1 => Service::Lading,
+            2 => Service::Cernan,
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Source {
+    Bergman,
+    Keaton,
+    Kurosawa,
+    Lynch,
+    Waters,
+    Tarkovsky,
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Source {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.arbitrary::<u8>()?;
+        let res = match choice % 6 {
+            0 => Source::Bergman,
+            1 => Source::Keaton,
+            2 => Source::Kurosawa,
+            3 => Source::Lynch,
+            4 => Source::Waters,
+            5 => Source::Tarkovsky,
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+}
+
+const TAG_OPTIONS: [&'static str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct Structured {
+    proportional: u32,
+    integral: u64,
+    derivative: f64,
+    vegetable: i16,
+    mineral: String,
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Structured {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let ascii_str = u.arbitrary::<AsciiStr>()?;
+
+        Ok(Structured {
+            mineral: ascii_str.as_str().to_string(),
+            proportional: u.arbitrary::<u32>()?,
+            integral: u.arbitrary::<u64>()?,
+            derivative: u.arbitrary::<f64>()?,
+            vegetable: u.arbitrary::<i16>()?,
+        })
+    }
+
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        size_hint::recursion_guard(depth, |depth| {
+            size_hint::and_all(&[
+                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
+                <u32 as arbitrary::Arbitrary>::size_hint(depth),
+                <u64 as arbitrary::Arbitrary>::size_hint(depth),
+                <f64 as arbitrary::Arbitrary>::size_hint(depth),
+                <i16 as arbitrary::Arbitrary>::size_hint(depth),
+            ])
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum Message {
+    Unstructured(String),
+    Structured(String),
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for Message {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let inner = if u.arbitrary::<bool>()? {
+            let ascii_str = u.arbitrary::<AsciiStr>()?;
+            Message::Unstructured(ascii_str.as_str().to_string())
+        } else {
+            let structured = u.arbitrary::<Structured>()?;
+            Message::Structured(serde_json::to_string(&structured).unwrap())
+        };
+
+        Ok(inner)
+    }
+
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        size_hint::recursion_guard(depth, |depth| {
+            size_hint::and(
+                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
+                <Structured as arbitrary::Arbitrary>::size_hint(depth),
+            )
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 // https://github.com/DataDog/datadog-agent/blob/a33248c2bc125920a9577af1e16f12298875a4ad/pkg/logs/processor/json.go#L23-L49
 struct Member {
     /// The message is a short ascii string, without newlines for now
-    pub message: String,
+    pub message: Message,
     /// The message status
-    pub status: String,
+    pub status: Status,
     /// The timestamp is a simple integer value since epoch, presumably
     pub timestamp: u32,
     /// The hostname that sent the logs
-    pub hostname: String,
+    pub hostname: Hostname,
     /// The service that sent the logs
-    pub service: String,
+    pub service: Service,
     /// The ultimate source of the logs
-    pub ddsource: String,
+    pub ddsource: Source,
     /// Comma-separate list of tags
     pub ddtags: String,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let ascii_str = u.arbitrary::<AsciiStr>()?;
-        let status = u.arbitrary::<AsciiStr>()?;
+        let message = u.arbitrary::<Message>()?;
+        let status = u.arbitrary::<Status>()?;
         let timestamp = u.arbitrary::<u32>()?;
-        let hostname = u.arbitrary::<AsciiStr>()?;
-        let service = u.arbitrary::<AsciiStr>()?;
-        let source = u.arbitrary::<AsciiStr>()?;
-        let tags = u.arbitrary::<AsciiStr>()?;
+        let hostname = u.arbitrary::<Hostname>()?;
+        let service = u.arbitrary::<Service>()?;
+        let source = u.arbitrary::<Source>()?;
+        let tag_idx = u.arbitrary::<usize>()? % TAG_OPTIONS.len();
 
         Ok(Member {
-            message: ascii_str.as_str().to_string(),
-            status: status.as_str().to_string(),
+            message,
+            status,
             timestamp,
-            hostname: hostname.as_str().to_string(),
-            service: service.as_str().to_string(),
-            ddsource: source.as_str().to_string(),
-            ddtags: tags.as_str().to_string(),
+            hostname,
+            service,
+            ddsource: source,
+            ddtags: TAG_OPTIONS[tag_idx as usize].to_string(),
         })
     }
 
