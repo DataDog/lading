@@ -96,7 +96,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Source {
     }
 }
 
-const TAG_OPTIONS: [&'static str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
+const TAG_OPTIONS: [&str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Structured {
