@@ -636,6 +636,9 @@ dependencies = [
  "hyper",
  "metrics",
  "metrics-exporter-prometheus",
+ "once_cell",
+ "serde",
+ "serde_json",
  "tokio",
  "tower",
 ]

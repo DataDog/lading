@@ -24,10 +24,24 @@ version = "0.14"
 default-features = false
 features = ["http2", "tcp"]
 
+[dependencies.serde]
+version = "1.0"
+default-features = false
+features = ["derive", "std"]
+
+[dependencies.serde_json]
+version = "1.0"
+default-features = false
+features = ["std"]
+
 [dependencies.tokio]
 version = "1.9"
 default-features = false
 features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"]
+
+[dependencies.once_cell]
+version = "1.8"
+default-features = false
 
 [[bin]]
 name = "udp_blackhole"

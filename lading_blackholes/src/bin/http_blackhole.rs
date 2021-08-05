@@ -4,10 +4,14 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{body, header};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use metrics_exporter_prometheus::PrometheusBuilder;
+use once_cell::unsync::OnceCell;
+use serde::Serialize;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tower::ServiceBuilder;
+
+const RESPONSE: OnceCell<Vec<u8>> = OnceCell::new();
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -35,6 +39,22 @@ struct HttpServer {
     httpd_addr: SocketAddr,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KinesisPutRecordBatchResponseEntry {
+    error_code: Option<String>,
+    error_message: Option<String>,
+    record_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KinesisPutRecordBatchResponse {
+    encrypted: Option<bool>,
+    failed_put_count: u32,
+    request_responses: Vec<KinesisPutRecordBatchResponseEntry>,
+}
+
 async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
@@ -45,7 +65,23 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     *okay.status_mut() = StatusCode::OK;
     okay.headers_mut().insert(
         header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/text"),
+        header::HeaderValue::from_static("application/json"),
+    );
+    *okay.body_mut() = Body::from(
+        RESPONSE
+            .get_or_init(|| {
+                let response = KinesisPutRecordBatchResponse {
+                    encrypted: None,
+                    failed_put_count: 0,
+                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                        error_code: None,
+                        error_message: None,
+                        record_id: "foobar".to_string(),
+                    }],
+                };
+                serde_json::to_vec(&response).unwrap()
+            })
+            .clone(),
     );
     Ok(okay)
 }

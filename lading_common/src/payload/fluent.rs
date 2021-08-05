@@ -11,17 +11,57 @@ use std::{collections::HashMap, io::Write};
 #[derive(Debug, Default)]
 pub struct Fluent {}
 
-fn record<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<HashMap<String, String>> {
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RecordValue {
+    String(String),
+    Object(HashMap<String, u8>),
+}
+
+fn object<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<RecordValue> {
+    let mut obj = HashMap::new();
+    for _ in 0..u.arbitrary_len::<(AsciiStr, u8)>()? {
+        let key = u.arbitrary::<AsciiStr>()?;
+        let msg = u.arbitrary::<u8>()?;
+        obj.insert(key.as_str().to_string(), msg);
+    }
+    Ok(RecordValue::Object(obj))
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for RecordValue {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let v = if u.arbitrary::<bool>()? {
+            RecordValue::String(AsciiStr::arbitrary(u)?.as_str().to_string())
+        } else {
+            object(u)?
+        };
+        Ok(v)
+    }
+
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        size_hint::recursion_guard(depth, |depth| {
+            size_hint::and_all(&[
+                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
+                <HashMap<String, u8> as arbitrary::Arbitrary>::size_hint(depth),
+            ])
+        })
+    }
+}
+
+fn record<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<HashMap<String, RecordValue>> {
     let mut record = HashMap::new();
 
     let msg = u.arbitrary::<AsciiStr>()?;
-    record.insert("message".to_string(), msg.as_str().to_string());
+    record.insert(
+        "message".to_string(),
+        RecordValue::String(msg.as_str().to_string()),
+    );
+    record.insert("event".to_string(), object(u)?);
 
     for _ in 0..u.arbitrary_len::<(AsciiStr, AsciiStr)>()? {
         let key = u.arbitrary::<AsciiStr>()?;
-        let msg = u.arbitrary::<AsciiStr>()?;
-
-        record.insert(key.as_str().to_string(), msg.as_str().to_string());
+        let msg = RecordValue::String(u.arbitrary::<AsciiStr>()?.as_str().to_string());
+        record.insert(key.as_str().to_string(), msg);
     }
     Ok(record)
 }
@@ -29,7 +69,7 @@ fn record<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<HashMap<String, Str
 #[derive(Serialize_tuple)]
 struct Entry {
     time: u32,
-    record: HashMap<String, String>, // always contains 'message' key
+    record: HashMap<String, RecordValue>, // always contains 'message' and 'event' -> object key
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Entry {
@@ -78,7 +118,7 @@ impl<'a> arbitrary::Arbitrary<'a> for FluentForward {
 struct FluentMessage {
     tag: String,
     time: u32,
-    record: HashMap<String, String>, // always contains 'message' key
+    record: HashMap<String, RecordValue>, // always contains 'message' key
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
