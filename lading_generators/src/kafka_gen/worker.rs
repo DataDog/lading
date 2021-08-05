@@ -1,13 +1,16 @@
 use crate::kafka_gen::config::Throughput;
 use crate::kafka_gen::config::{Target, Variant};
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::{counter, increment_counter};
 use rdkafka::config::FromClientConfig;
+use rdkafka::error::KafkaError;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::util::Timeout;
+use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use std::convert::TryInto;
 use std::num::NonZeroU32;
@@ -127,28 +130,49 @@ impl Worker {
         let limit_by_bytes = matches!(self.target.throughput, Throughput::BytesPerSecond { .. });
         let rate_limiter = get_rate_limiter(self.target.throughput);
 
+        let mut in_flight = FuturesUnordered::new();
+
         // Now produce our messages.
         let mut blocks = self.block_cache.iter().cycle();
         loop {
+            while let Some(Some(result)) = in_flight.next().now_or_never() {
+                match result {
+                    Ok(block_size) => {
+                        increment_counter!("request_ok", &labels);
+                        counter!("bytes_written", block_size, &labels);
+                    }
+                    Err(..) => {
+                        counter!("request_failure", 1, &labels);
+                    }
+                }
+            }
+
             let block = blocks.next().expect("should never be empty");
             let block_size = block.total_bytes;
             let limiter_n = if limit_by_bytes { block_size.get() } else { 1 };
             let limiter_n = NonZeroU32::new(limiter_n).expect("should never be zero");
 
             let _ = rate_limiter.until_n_ready(limiter_n).await;
-            let record = FutureRecord::to(topic.as_ref())
-                .payload(&block.bytes)
-                .key(&());
+            let mut record = Some(
+                FutureRecord::to(topic.as_ref())
+                    .payload(&block.bytes)
+                    .key(&()),
+            );
 
-            let result = producer.send(record, Timeout::Never).await;
-            counter!("requests_sent", 1, &labels);
-            match result {
-                Ok(..) => {
-                    increment_counter!("request_ok", &labels);
-                    counter!("bytes_written", u64::from(block_size.get()), &labels);
-                }
-                Err(..) => {
-                    counter!("request_failure", 1, &labels);
+            loop {
+                match producer.send_result(record.take().unwrap()) {
+                    Ok(fut) => {
+                        counter!("requests_sent", 1, &labels);
+                        in_flight
+                            .push(async move { fut.await.map(|_| u64::from(block_size.get())) });
+                        break;
+                    }
+                    Err((e, old_record)) => {
+                        if e == KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) {
+                            record = Some(old_record);
+                            tokio::task::yield_now().await;
+                        }
+                    }
                 }
             }
         }
