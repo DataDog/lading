@@ -20,7 +20,7 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 enum BodyVariant {
     Nothing,
     AwsKinesis,
@@ -83,7 +83,10 @@ struct KinesisPutRecordBatchResponse {
 }
 
 #[allow(clippy::borrow_interior_mutable_const)]
-async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+async fn srv(
+    body_variant: BodyVariant,
+    req: Request<Body>,
+) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
     let bytes = body::to_bytes(req).await?;
@@ -95,7 +98,25 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
     );
-    *okay.body_mut() = Body::from(RESPONSE.get().unwrap().clone());
+
+    let body_bytes = RESPONSE
+        .get_or_init(|| match body_variant {
+            BodyVariant::AwsKinesis => {
+                let response = KinesisPutRecordBatchResponse {
+                    encrypted: None,
+                    failed_put_count: 0,
+                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                        error_code: None,
+                        error_message: None,
+                        record_id: "foobar".to_string(),
+                    }],
+                };
+                serde_json::to_vec(&response).unwrap()
+            }
+            BodyVariant::Nothing => vec![],
+        })
+        .clone();
+    *okay.body_mut() = Body::from(body_bytes);
     Ok(okay)
 }
 
@@ -118,25 +139,9 @@ impl HttpServer {
             .install()
             .unwrap();
 
-        let body = match body_variant {
-            BodyVariant::AwsKinesis => {
-                let response = KinesisPutRecordBatchResponse {
-                    encrypted: None,
-                    failed_put_count: 0,
-                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                        error_code: None,
-                        error_message: None,
-                        record_id: "foobar".to_string(),
-                    }],
-                };
-                serde_json::to_vec(&response).unwrap()
-            }
-            BodyVariant::Nothing => vec![],
-        };
-        let _ = RESPONSE.set(body).unwrap();
-
-        let service =
-            make_service_fn(|_: &AddrStream| async { Ok::<_, hyper::Error>(service_fn(srv)) });
+        let service = make_service_fn(|_: &AddrStream| async move {
+            Ok::<_, hyper::Error>(service_fn(move |request| srv(body_variant, request)))
+        });
         let svc = ServiceBuilder::new()
             .load_shed()
             .concurrency_limit(concurrency_limit)
