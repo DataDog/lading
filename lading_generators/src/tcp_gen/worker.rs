@@ -99,6 +99,10 @@ impl Worker {
         let mut client: TcpStream = TcpStream::connect(self.addr).await.unwrap();
 
         for blk in self.block_cache.iter().cycle() {
+            self.rate_limiter
+                .until_n_ready(blk.total_bytes)
+                .await
+                .unwrap();
             client.write_all(&blk.bytes).await.unwrap();
         }
         unreachable!()
