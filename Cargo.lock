@@ -624,7 +624,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "lading_blackholes"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "argh",
  "hyper",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "lading_common"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "lading_generators"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "argh",
  "byte-unit",
