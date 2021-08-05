@@ -7,14 +7,38 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::unsync::OnceCell;
 use serde::Serialize;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tower::ServiceBuilder;
+
+#[allow(clippy::declare_interior_mutable_const)]
 
 const RESPONSE: OnceCell<Vec<u8>> = OnceCell::new();
 
 fn default_concurrent_requests_max() -> usize {
     100
+}
+
+#[derive(Debug)]
+enum BodyVariant {
+    Nothing,
+    AwsKinesis,
+}
+
+impl FromStr for BodyVariant {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "nothing" => Ok(BodyVariant::Nothing),
+            "aws_kinesis" | "kinesis" => Ok(BodyVariant::AwsKinesis),
+            _ => Err("unknown variant"),
+        }
+    }
+}
+
+fn default_body_variant() -> BodyVariant {
+    BodyVariant::AwsKinesis
 }
 
 #[derive(FromArgs)]
@@ -32,6 +56,9 @@ struct Opts {
     /// address -- IP plus port -- for prometheus exporting to bind to
     #[argh(option)]
     pub prometheus_addr: SocketAddr,
+    /// the body variant to respond with, default nothing
+    #[argh(option, default = "default_body_variant()")]
+    pub body_variant: BodyVariant,
 }
 
 struct HttpServer {
@@ -55,6 +82,7 @@ struct KinesisPutRecordBatchResponse {
     request_responses: Vec<KinesisPutRecordBatchResponseEntry>,
 }
 
+#[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
@@ -67,22 +95,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
     );
-    *okay.body_mut() = Body::from(
-        RESPONSE
-            .get_or_init(|| {
-                let response = KinesisPutRecordBatchResponse {
-                    encrypted: None,
-                    failed_put_count: 0,
-                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                        error_code: None,
-                        error_message: None,
-                        record_id: "foobar".to_string(),
-                    }],
-                };
-                serde_json::to_vec(&response).unwrap()
-            })
-            .clone(),
-    );
+    *okay.body_mut() = Body::from(RESPONSE.get().unwrap().clone());
     Ok(okay)
 }
 
@@ -94,11 +107,33 @@ impl HttpServer {
         }
     }
 
-    async fn run(self, concurrency_limit: usize) -> Result<(), hyper::Error> {
+    #[allow(clippy::borrow_interior_mutable_const)]
+    async fn run(
+        self,
+        body_variant: BodyVariant,
+        concurrency_limit: usize,
+    ) -> Result<(), hyper::Error> {
         let _: () = PrometheusBuilder::new()
             .listen_address(self.prometheus_addr)
             .install()
             .unwrap();
+
+        let body = match body_variant {
+            BodyVariant::AwsKinesis => {
+                let response = KinesisPutRecordBatchResponse {
+                    encrypted: None,
+                    failed_put_count: 0,
+                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                        error_code: None,
+                        error_message: None,
+                        record_id: "foobar".to_string(),
+                    }],
+                };
+                serde_json::to_vec(&response).unwrap()
+            }
+            BodyVariant::Nothing => vec![],
+        };
+        let _ = RESPONSE.set(body).unwrap();
 
         let service =
             make_service_fn(|_: &AddrStream| async { Ok::<_, hyper::Error>(service_fn(srv)) });
@@ -130,6 +165,6 @@ fn main() {
         .build()
         .unwrap();
     runtime
-        .block_on(httpd.run(ops.concurrent_requests_max))
+        .block_on(httpd.run(ops.body_variant, ops.concurrent_requests_max))
         .unwrap();
 }

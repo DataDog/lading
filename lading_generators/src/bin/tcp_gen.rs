@@ -26,7 +26,7 @@ async fn run(addr: SocketAddr, targets: HashMap<String, Target>) {
 
     targets
         .into_iter()
-        .map(|(name, target)| Worker::new(name, target).unwrap())
+        .map(|(name, target)| Worker::new(name, &target).unwrap())
         .for_each(|worker| workers.push(worker.spin()));
 
     loop {

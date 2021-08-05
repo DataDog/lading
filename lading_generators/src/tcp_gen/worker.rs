@@ -57,7 +57,7 @@ impl Worker {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(name: String, target: Target) -> Result<Self, Error> {
+    pub fn new(name: String, target: &Target) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
         let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));

@@ -18,7 +18,7 @@ enum RecordValue {
     Object(HashMap<String, u8>),
 }
 
-fn object<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<RecordValue> {
+fn object(u: &mut Unstructured<'_>) -> arbitrary::Result<RecordValue> {
     let mut obj = HashMap::new();
     for _ in 0..u.arbitrary_len::<(AsciiStr, u8)>()? {
         let key = u.arbitrary::<AsciiStr>()?;
@@ -48,7 +48,7 @@ impl<'a> arbitrary::Arbitrary<'a> for RecordValue {
     }
 }
 
-fn record<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<HashMap<String, RecordValue>> {
+fn record(u: &mut Unstructured<'_>) -> arbitrary::Result<HashMap<String, RecordValue>> {
     let mut record = HashMap::new();
 
     let msg = u.arbitrary::<AsciiStr>()?;
