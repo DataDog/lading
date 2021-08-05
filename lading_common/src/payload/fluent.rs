@@ -17,25 +17,25 @@ fn record<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<HashMap<String, Str
     let msg = u.arbitrary::<AsciiStr>()?;
     record.insert("message".to_string(), msg.as_str().to_string());
 
-    // for _ in 0..u.arbitrary_len::<(AsciiStr, AsciiStr)>()? {
-    //     let key = u.arbitrary::<AsciiStr>()?;
-    //     let msg = u.arbitrary::<AsciiStr>()?;
+    for _ in 0..u.arbitrary_len::<(AsciiStr, AsciiStr)>()? {
+        let key = u.arbitrary::<AsciiStr>()?;
+        let msg = u.arbitrary::<AsciiStr>()?;
 
-    //     record.insert(key.as_str().to_string(), msg.as_str().to_string());
-    // }
+        record.insert(key.as_str().to_string(), msg.as_str().to_string());
+    }
     Ok(record)
 }
 
 #[derive(Serialize_tuple)]
 struct Entry {
-    time: u64,
+    time: u32,
     record: HashMap<String, String>, // always contains 'message' key
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Entry {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Entry {
-            time: u.arbitrary::<u64>()?,
+            time: u.arbitrary::<u32>()?,
             record: record(u)?,
         })
     }
@@ -77,15 +77,15 @@ impl<'a> arbitrary::Arbitrary<'a> for FluentForward {
 #[derive(serde::Serialize)]
 struct FluentMessage {
     tag: String,
-    time: u64,
+    time: u32,
     record: HashMap<String, String>, // always contains 'message' key
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(FluentMessage {
-            tag: "thetag".to_string(), // u.arbitrary::<AsciiStr>()?.as_str().to_string(),
-            time: u.arbitrary::<u64>()?,
+            tag: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
+            time: u.arbitrary::<u32>()?,
             record: record(u)?,
         })
     }
@@ -94,7 +94,7 @@ impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
         size_hint::recursion_guard(depth, |depth| {
             size_hint::and_all(&[
                 <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <u64 as arbitrary::Arbitrary>::size_hint(depth),
+                <u32 as arbitrary::Arbitrary>::size_hint(depth),
                 <HashMap<String, String> as arbitrary::Arbitrary>::size_hint(depth),
             ])
         })
@@ -105,15 +105,15 @@ impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
 #[serde(untagged)]
 enum Member {
     Message(FluentMessage),
-    //Forward(FluentForward),
+    Forward(FluentForward),
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 1 {
+        let res = match choice % 2 {
             0 => Member::Message(u.arbitrary::<FluentMessage>()?),
-            //      0 => Member::Forward(u.arbitrary::<FluentForward>()?),
+            1 => Member::Forward(u.arbitrary::<FluentForward>()?),
             _ => unreachable!(),
         };
         Ok(res)
@@ -123,7 +123,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Member {
         size_hint::recursion_guard(depth, |depth| {
             size_hint::and_all(&[
                 <FluentMessage as arbitrary::Arbitrary>::size_hint(depth),
-                // <FluentForward as arbitrary::Arbitrary>::size_hint(depth),
+                <FluentForward as arbitrary::Arbitrary>::size_hint(depth),
             ])
         })
     }
