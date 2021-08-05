@@ -128,7 +128,6 @@ impl HttpServer {
         }
     }
 
-    #[allow(clippy::borrow_interior_mutable_const)]
     async fn run(
         self,
         body_variant: BodyVariant,
