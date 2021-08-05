@@ -3,12 +3,14 @@ use std::io::{self, Write};
 mod ascii;
 mod common;
 mod datadog_logs;
+mod fluent;
 mod foundationdb;
 mod json;
 mod statik;
 
 pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
+pub use fluent::Fluent;
 pub use foundationdb::FoundationDb;
 pub use json::Json;
 use rand::Rng;
@@ -17,12 +19,20 @@ pub use statik::Static;
 /// Errors related to serialization
 #[derive(Debug)]
 pub enum Error {
+    /// MsgPack payload could not be encoded
+    MsgPack(rmp_serde::encode::Error),
     /// Json payload could not be encoded
     Json(serde_json::Error),
     /// IO operation failed
     Io(io::Error),
     /// Arbitrary instance could not be created
     Arbitrary(arbitrary::Error),
+}
+
+impl From<rmp_serde::encode::Error> for Error {
+    fn from(error: rmp_serde::encode::Error) -> Self {
+        Error::MsgPack(error)
+    }
 }
 
 impl From<serde_json::Error> for Error {

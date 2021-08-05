@@ -9,3 +9,4 @@
 pub mod file_gen;
 pub mod http_gen;
 pub mod kafka_gen;
+pub mod tcp_gen;
