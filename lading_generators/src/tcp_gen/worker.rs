@@ -3,6 +3,7 @@ use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
+use metrics::counter;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use tokio::io::AsyncWriteExt;
@@ -104,6 +105,11 @@ impl Worker {
                 .await
                 .unwrap();
             client.write_all(&blk.bytes).await.unwrap();
+            counter!(
+                "bytes_written",
+                blk.total_bytes.get() as u64,
+                &self.metric_labels
+            );
         }
         unreachable!()
     }
