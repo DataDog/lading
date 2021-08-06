@@ -53,13 +53,6 @@ impl From<::std::io::Error> for Error {
 
 const ONE_MEBIBYTE: usize = 1_000_000;
 const BLOCK_BYTE_SIZES: [usize; 5] = [
-    // ONE_MEBIBYTE / 1024,
-    // ONE_MEBIBYTE / 512,
-    // ONE_MEBIBYTE / 256,
-    // ONE_MEBIBYTE / 128,
-    // ONE_MEBIBYTE / 64,
-    // ONE_MEBIBYTE / 32,
-    // ONE_MEBIBYTE / 16,
     ONE_MEBIBYTE / 8,
     ONE_MEBIBYTE / 4,
     ONE_MEBIBYTE / 2,

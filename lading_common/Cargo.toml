@@ -22,10 +22,18 @@ version = "1"
 default-features = false
 features = ["derive"]
 
+[dependencies.rmp-serde]
+version = "0.15"
+default-features = false
+
 [dependencies.serde]
 version = "1.0"
 default-features = true
 features = ["derive", "std"]
+
+[dependencies.serde_tuple]
+version = "0.5"
+default-features = false
 
 [dependencies.serde_json]
 version = "1.0"

@@ -35,6 +35,7 @@ jobs:
           target/release/file_gen
           target/release/http_gen
           target/release/kafka_gen
+          target/release/tcp_gen
           target/release/http_blackhole
           target/release/udp_blackhole
       env:

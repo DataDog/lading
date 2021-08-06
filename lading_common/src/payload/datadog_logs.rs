@@ -231,15 +231,17 @@ impl Serialize for DatadogLog {
         rng.fill_bytes(&mut entropy);
         let unstructured = Unstructured::new(&entropy);
 
-        let mut members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
+        let members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
+        let low = 0;
+        let mut high = members.len();
+
         loop {
-            let encoding = serde_json::to_string(&members)?;
-            if encoding.len() < max_bytes {
-                let encoding = serde_json::to_string(&members)?;
+            let encoding = serde_json::to_string(&members[low..high])?;
+            if encoding.len() > max_bytes {
+                high /= 2;
+            } else {
                 write!(writer, "{}", encoding)?;
                 break;
-            } else {
-                members.pop();
             }
         }
         Ok(())
