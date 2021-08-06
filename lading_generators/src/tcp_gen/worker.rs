@@ -107,7 +107,7 @@ impl Worker {
             client.write_all(&blk.bytes).await.unwrap();
             counter!(
                 "bytes_written",
-                blk.total_bytes.get() as u64,
+                u64::from(blk.total_bytes.get()),
                 &self.metric_labels
             );
         }
