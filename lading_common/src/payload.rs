@@ -7,6 +7,7 @@ mod fluent;
 mod foundationdb;
 mod json;
 mod statik;
+mod syslog;
 
 pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
@@ -15,6 +16,7 @@ pub use foundationdb::FoundationDb;
 pub use json::Json;
 use rand::Rng;
 pub use statik::Static;
+pub use syslog::Syslog5424;
 
 /// Errors related to serialization
 #[derive(Debug)]
