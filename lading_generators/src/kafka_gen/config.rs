@@ -60,6 +60,8 @@ pub struct Target {
     pub throughput: Throughput,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The block sizes for messages to this target
+    pub block_sizes: Vec<byte_unit::Byte>,
     /// Map of rdkafka=-specific overrides to apply to the producer
     pub producer_config: Option<HashMap<String, String>>,
 }

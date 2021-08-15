@@ -64,6 +64,8 @@ pub struct LogTargetTemplate {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     bytes_per_second: Byte,
+    /// The block sizes for messages to this target
+    pub block_sizes: Vec<byte_unit::Byte>,
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
@@ -89,6 +91,8 @@ pub struct LogTarget {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     pub bytes_per_second: Byte,
+    /// The block sizes for messages to this target
+    pub block_sizes: Vec<usize>,
     /// The maximum size in bytes that the prebuild cache may be.
     pub maximum_prebuild_cache_size_bytes: Byte,
 }
@@ -118,9 +122,15 @@ impl LogTargetTemplate {
         let duplicate = format!("{}", duplicate);
         let full_path = self.path_template.replace("%NNN%", &duplicate);
         let path = PathBuf::from(full_path);
+        let block_sizes: Vec<usize> = self
+            .block_sizes
+            .iter()
+            .map(|sz| sz.get_bytes() as usize)
+            .collect();
 
         LogTarget {
             path,
+            block_sizes,
             variant: self.variant.clone(),
             maximum_bytes_per_file: self.maximum_bytes_per_file,
             bytes_per_second: self.bytes_per_second,

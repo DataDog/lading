@@ -48,18 +48,6 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-const ONE_MEBIBYTE: usize = 1_000_000;
-const BLOCK_BYTE_SIZES: [usize; 8] = [
-    ONE_MEBIBYTE / 1024,
-    ONE_MEBIBYTE / 512,
-    ONE_MEBIBYTE / 256,
-    ONE_MEBIBYTE / 128,
-    ONE_MEBIBYTE / 64,
-    ONE_MEBIBYTE / 32,
-    ONE_MEBIBYTE / 16,
-    ONE_MEBIBYTE / 8,
-];
-
 /// The [`Worker`] defines a task that emits variant lines to an HTTP server
 /// controlling throughput.
 #[derive(Debug)]
@@ -88,9 +76,15 @@ impl Worker {
             ("server".to_string(), target.bootstrap_server.to_string()),
         ];
 
+        let block_sizes: Vec<usize> = target
+            .block_sizes
+            .iter()
+            .map(|sz| sz.get_bytes() as usize)
+            .collect();
         let block_cache = generate_block_cache(
             target.maximum_prebuild_cache_size_bytes,
             target.variant,
+            &block_sizes,
             &labels,
         );
 
@@ -182,12 +176,13 @@ impl Worker {
 fn generate_block_cache(
     cache_size: byte_unit::Byte,
     variant: Variant,
+    block_sizes: &[usize],
     #[allow(clippy::ptr_arg)] labels: &Vec<(String, String)>,
 ) -> Vec<Block> {
     let mut rng = rand::thread_rng();
 
     let total_size = cache_size.get_bytes().try_into().unwrap_or(usize::MAX);
-    let chunks = chunk_bytes(&mut rng, total_size, &BLOCK_BYTE_SIZES);
+    let chunks = chunk_bytes(&mut rng, total_size, block_sizes);
 
     match variant {
         Variant::Ascii => construct_block_cache(&payload::Ascii::default(), &chunks, labels),
