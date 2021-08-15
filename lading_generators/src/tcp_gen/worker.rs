@@ -72,6 +72,9 @@ impl Worker {
             &BLOCK_BYTE_SIZES,
         );
         let block_cache = match target.variant {
+            Variant::Syslog5424 => {
+                construct_block_cache(&payload::Syslog5424::default(), &block_chunks, &labels)
+            }
             Variant::Fluent => {
                 construct_block_cache(&payload::Fluent::default(), &block_chunks, &labels)
             }

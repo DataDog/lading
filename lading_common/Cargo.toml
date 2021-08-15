@@ -11,6 +11,7 @@ description = "A set of code for data generation and blocking."
 
 [dependencies]
 bytecount = "0.6"
+chrono = "0.4"
 
 [dependencies.metrics]
 version = "0.17"

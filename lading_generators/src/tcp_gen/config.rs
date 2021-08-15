@@ -20,6 +20,8 @@ pub struct Config {
 pub enum Variant {
     /// Generates Fluent messages
     Fluent,
+    /// Generates syslog5424 messages
+    Syslog5424,
 }
 
 /// The [`Target`] instance from which to derive workers
