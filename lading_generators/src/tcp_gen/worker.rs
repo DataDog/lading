@@ -56,9 +56,9 @@ impl Worker {
                     Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
                     Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
                     Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
                 ]
             })
             .iter()

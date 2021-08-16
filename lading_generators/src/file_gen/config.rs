@@ -128,12 +128,12 @@ impl LogTargetTemplate {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(8f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(16f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(32f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(8_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(16_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(32_f64, ByteUnit::MB).unwrap(),
                 ]
             })
             .iter()
