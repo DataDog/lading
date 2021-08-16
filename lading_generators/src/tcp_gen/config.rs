@@ -33,6 +33,8 @@ pub struct Target {
     pub variant: Variant,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
+    /// The block sizes for messages to this target
+    pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }

@@ -34,16 +34,6 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-const ONE_MEBIBYTE: usize = 1_000_000;
-const BLOCK_BYTE_SIZES: [usize; 6] = [
-    ONE_MEBIBYTE,
-    2_000_000,
-    4_000_000,
-    8_000_000,
-    16_000_000,
-    32_000_000,
-];
-
 /// The [`Log`] defines a task that emits variant lines to a file, managing
 /// rotation and controlling rate limits.
 #[derive(Debug)]
@@ -85,7 +75,7 @@ impl Log {
         let block_chunks = chunk_bytes(
             &mut rng,
             maximum_prebuild_cache_size_bytes.get() as usize,
-            &BLOCK_BYTE_SIZES,
+            &target.block_sizes,
         );
 
         let labels = vec![("target".to_string(), name.clone())];

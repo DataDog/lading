@@ -1,4 +1,5 @@
 use crate::http_gen::config::{Method, Target, Variant};
+use byte_unit::{Byte, ByteUnit};
 use futures::stream::{self, StreamExt};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
@@ -51,15 +52,6 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-const ONE_MEBIBYTE: usize = 1_000_000;
-const BLOCK_BYTE_SIZES: [usize; 5] = [
-    ONE_MEBIBYTE / 8,
-    ONE_MEBIBYTE / 4,
-    ONE_MEBIBYTE / 2,
-    ONE_MEBIBYTE,
-    ONE_MEBIBYTE * 2,
-];
-
 /// The [`Worker`] defines a task that emits variant lines to an HTTP server
 /// controlling throughput.
 #[derive(Debug)]
@@ -88,6 +80,21 @@ impl Worker {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: Target) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
+        let block_sizes: Vec<usize> = target
+            .block_sizes
+            .unwrap_or_else(|| {
+                vec![
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                ]
+            })
+            .iter()
+            .map(|sz| sz.get_bytes() as usize)
+            .collect();
         let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let labels = vec![
@@ -102,7 +109,7 @@ impl Worker {
                 let block_chunks = chunk_bytes(
                     &mut rng,
                     maximum_prebuild_cache_size_bytes.get_bytes() as usize,
-                    &BLOCK_BYTE_SIZES,
+                    &block_sizes,
                 );
                 let block_cache = match variant {
                     Variant::Ascii => {
