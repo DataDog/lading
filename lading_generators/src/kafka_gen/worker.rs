@@ -1,5 +1,6 @@
 use crate::kafka_gen::config::Throughput;
 use crate::kafka_gen::config::{Target, Variant};
+use byte_unit::{Byte, ByteUnit};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use governor::state::direct::{self, InsufficientCapacity};
@@ -78,6 +79,19 @@ impl Worker {
 
         let block_sizes: Vec<usize> = target
             .block_sizes
+            .clone()
+            .unwrap_or_else(|| {
+                vec![
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 64.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 128.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 256.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 512.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 1024.0, ByteUnit::MB).unwrap(),
+                ]
+            })
             .iter()
             .map(|sz| sz.get_bytes() as usize)
             .collect();

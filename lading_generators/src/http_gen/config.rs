@@ -62,7 +62,7 @@ pub struct Target {
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target
-    pub block_sizes: Vec<byte_unit::Byte>,
+    pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
 }

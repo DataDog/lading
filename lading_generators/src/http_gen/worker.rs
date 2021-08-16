@@ -1,4 +1,5 @@
 use crate::http_gen::config::{Method, Target, Variant};
+use byte_unit::{Byte, ByteUnit};
 use futures::stream::{self, StreamExt};
 use governor::state::direct::{self, InsufficientCapacity};
 use governor::{clock, state, Quota, RateLimiter};
@@ -81,6 +82,16 @@ impl Worker {
         let mut rng = rand::thread_rng();
         let block_sizes: Vec<usize> = target
             .block_sizes
+            .unwrap_or_else(|| {
+                vec![
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4f64, ByteUnit::MB).unwrap(),
+                ]
+            })
             .iter()
             .map(|sz| sz.get_bytes() as usize)
             .collect();

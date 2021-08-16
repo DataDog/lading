@@ -1,7 +1,7 @@
 //! This module controls configuration parsing from the end user, providing a
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
-use byte_unit::Byte;
+use byte_unit::{Byte, ByteUnit};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -65,7 +65,7 @@ pub struct LogTargetTemplate {
     /// `maximum_bytes_burst`.
     bytes_per_second: Byte,
     /// The block sizes for messages to this target
-    pub block_sizes: Vec<byte_unit::Byte>,
+    pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
@@ -125,6 +125,17 @@ impl LogTargetTemplate {
         let path = PathBuf::from(full_path);
         let block_sizes: Vec<usize> = self
             .block_sizes
+            .clone()
+            .unwrap_or_else(|| {
+                vec![
+                    Byte::from_unit(1f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(8f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(16f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(32f64, ByteUnit::MB).unwrap(),
+                ]
+            })
             .iter()
             .map(|sz| sz.get_bytes() as usize)
             .collect();
