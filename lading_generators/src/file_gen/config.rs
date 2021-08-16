@@ -118,6 +118,7 @@ impl LogTargetTemplate {
     /// Function will panic if user configuration contains values that can't be
     /// converted to u32 instances.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn strike(&self, duplicate: u8) -> LogTarget {
         let duplicate = format!("{}", duplicate);
         let full_path = self.path_template.replace("%NNN%", &duplicate);
