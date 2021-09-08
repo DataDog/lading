@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "lading_common"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "lading_generators"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "argh",
  "byte-unit",
