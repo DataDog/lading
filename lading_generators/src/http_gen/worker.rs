@@ -115,6 +115,11 @@ impl Worker {
                     Variant::Ascii => {
                         construct_block_cache(&payload::Ascii::default(), &block_chunks, &labels)
                     }
+                    Variant::SplunkHec => construct_block_cache(
+                        &payload::SplunkHec::default(),
+                        &block_chunks,
+                        &labels,
+                    ),
                     Variant::DatadogLog => construct_block_cache(
                         &payload::DatadogLog::default(),
                         &block_chunks,
