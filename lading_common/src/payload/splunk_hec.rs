@@ -168,10 +168,10 @@ mod test {
         fn inner(seed: u64, max_bytes: u16) -> TestResult {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
-            let json = Json::default();
+            let hec = SplunkHec::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            hec.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             assert!(bytes.len() <= max_bytes);
 
             TestResult::passed()
@@ -188,10 +188,10 @@ mod test {
         fn inner(seed: u64, max_bytes: u16) -> TestResult {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
-            let json = Json::default();
+            let hec = SplunkHec::default();
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            hec.to_bytes(rng, max_bytes, &mut bytes).unwrap();
 
             let payload = std::str::from_utf8(&bytes).unwrap();
             for msg in payload.lines() {
