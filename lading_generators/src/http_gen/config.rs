@@ -32,6 +32,8 @@ pub enum Method {
 /// Variant of the [`TargetTemplate`]
 #[derive(Debug, Deserialize)]
 pub enum Variant {
+    /// Generates Splunk HEC messages
+    SplunkHec,
     /// Generates Datadog Logs JSON messages
     DatadogLog,
     /// Generates a limited subset of FoundationDB logs

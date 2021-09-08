@@ -1,4 +1,13 @@
+pub use ascii::Ascii;
+pub use datadog_logs::DatadogLog;
+pub use fluent::Fluent;
+pub use foundationdb::FoundationDb;
+pub use json::Json;
+use rand::Rng;
+pub use splunk_hec::SplunkHec;
+pub use statik::Static;
 use std::io::{self, Write};
+pub use syslog::Syslog5424;
 
 mod ascii;
 mod common;
@@ -6,17 +15,9 @@ mod datadog_logs;
 mod fluent;
 mod foundationdb;
 mod json;
+mod splunk_hec;
 mod statik;
 mod syslog;
-
-pub use ascii::Ascii;
-pub use datadog_logs::DatadogLog;
-pub use fluent::Fluent;
-pub use foundationdb::FoundationDb;
-pub use json::Json;
-use rand::Rng;
-pub use statik::Static;
-pub use syslog::Syslog5424;
 
 /// Errors related to serialization
 #[derive(Debug)]
