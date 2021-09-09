@@ -8,6 +8,23 @@ const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
 const STAGES: [&str; 4] = ["production", "performance", "noprod", "staging"];
 const CONTAINER_TYPES: [&str; 1] = ["ingress"];
 const EVENT_TYPES: [&str; 1] = ["service"];
+const SYSTEM_IDS: [&str; 4] = ["one", "two", "three", "four"];
+const SERVICES: [&str; 7] = [
+    "tablet",
+    "phone",
+    "phone2",
+    "laptop",
+    "desktop",
+    "monitor",
+    "bigger-monitor",
+];
+const MESSAGES: [&str; 5] = [
+"Es war ein Mann im Lande Uz, der hieß Hiob. Derselbe war schlecht und recht, gottesfürchtig und mied das Böse.",
+"Und zeugte sieben Söhne und drei Töchter;",
+"und seines Viehs waren siebentausend Schafe, dreitausend Kamele, fünfhundert Joch Rinder und fünfhundert Eselinnen, und er hatte viel Gesinde; und er war herrlicher denn alle, die gegen Morgen wohnten.",
+"Und seine Söhne gingen und machten ein Mahl, ein jeglicher in seinem Hause auf seinen Tag, und sandten hin und luden ihre drei Schwestern, mit ihnen zu essen und zu trinken",
+"Und wenn die Tage des Mahls um waren, sandte Hiob hin und heiligte sie und machte sich des Morgens früh auf und opferte Brandopfer nach ihrer aller Zahl; denn Hiob gedachte: Meine Söhne möchten gesündigt und Gott abgesagt haben in ihrem Herzen. Also tat Hiob allezeit.",
+    ];
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Attrs {
@@ -30,36 +47,30 @@ struct Attrs {
 impl<'a> Arbitrary<'a> for Attrs {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let choice: u8 = u.arbitrary()?;
+        let system_id = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
         let partition = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
         let event_type = EVENT_TYPES[(choice as usize) % EVENT_TYPES.len()].to_string();
         let stage = STAGES[(choice as usize) % STAGES.len()].to_string();
+        let service = SERVICES[(choice as usize) % SERVICES.len()].to_string();
         let container = CONTAINER_TYPES[(choice as usize) % CONTAINER_TYPES.len()].to_string();
+        let aws_account = "verymodelofthemodernmajor".to_string();
 
         let attrs = Attrs {
-            system_id: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
+            system_id,
             stage: stage.clone(),
             event_type,
-            c2c_service: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
+            c2c_service: service,
             c2c_partition: partition,
             c2c_stage: stage,
             c2c_container_type: container,
-            aws_account: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
+            aws_account,
         };
         Ok(attrs)
     }
 
     fn size_hint(depth: usize) -> (usize, Option<usize>) {
         size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-            ])
+            size_hint::and_all(&[<AsciiStr as Arbitrary>::size_hint(depth)])
         })
     }
 }
@@ -100,12 +111,16 @@ struct Member {
 
 impl<'a> Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice: u8 = u.arbitrary()?;
+        let host = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
+        let index = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
+        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let member = Member {
             event: u.arbitrary()?,
             time: 1606215269.333915,
-            host: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
-            index: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
-            message: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
+            host,
+            index,
+            message,
         };
         Ok(member)
     }
