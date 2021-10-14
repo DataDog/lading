@@ -8,11 +8,15 @@ use std::io::Read;
 use std::net::SocketAddr;
 use tokio::runtime::Builder;
 
+fn default_config_path() -> String {
+    "/etc/lading/kafka_gen.toml".to_string()
+}
+
 #[derive(FromArgs)]
 /// `kafka_gen` options
 struct Opts {
     /// path on disk to the configuration file
-    #[argh(option)]
+    #[argh(option, default = "default_config_path()")]
     config_path: String,
 }
 
