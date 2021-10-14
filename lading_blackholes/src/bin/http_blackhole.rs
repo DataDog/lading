@@ -5,7 +5,8 @@ use hyper::{body, header};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::unsync::OnceCell;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
@@ -20,7 +21,11 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug, Copy, Clone)]
+fn default_config_path() -> String {
+    "/etc/lading/http_blackhole.toml".to_string()
+}
+
+#[derive(Debug, Copy, Clone, Deserialize)]
 enum BodyVariant {
     Nothing,
     AwsKinesis,
@@ -44,20 +49,25 @@ fn default_body_variant() -> BodyVariant {
 #[derive(FromArgs)]
 /// `http_blackhole` options
 struct Opts {
+    /// path on disk to the configuration file
+    #[argh(option, default = "default_config_path()")]
+    config_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+/// Main configuration struct for this program
+struct Config {
     /// number of worker threads to use in this program
-    #[argh(option)]
     pub worker_threads: u16,
     /// number of concurrent HTTP connections to allow
-    #[argh(option, default = "default_concurrent_requests_max()")]
+    #[serde(default = "default_concurrent_requests_max")]
     pub concurrent_requests_max: usize,
     /// address -- IP plus port -- to bind to
-    #[argh(option)]
     pub binding_addr: SocketAddr,
     /// address -- IP plus port -- for prometheus exporting to bind to
-    #[argh(option)]
     pub prometheus_addr: SocketAddr,
     /// the body variant to respond with, default nothing
-    #[argh(option, default = "default_body_variant()")]
+    #[serde(default = "default_body_variant")]
     pub body_variant: BodyVariant,
 }
 
@@ -159,16 +169,27 @@ impl HttpServer {
     }
 }
 
-fn main() {
+fn get_config() -> Config {
     let ops: Opts = argh::from_env();
-    let httpd = HttpServer::new(ops.binding_addr, ops.prometheus_addr);
+    let mut file: std::fs::File = std::fs::OpenOptions::new()
+        .read(true)
+        .open(ops.config_path)
+        .unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
+    toml::from_str(&contents).unwrap()
+}
+
+fn main() {
+    let config: Config = get_config();
+    let httpd = HttpServer::new(config.binding_addr, config.prometheus_addr);
     let runtime = Builder::new_multi_thread()
-        .worker_threads(ops.worker_threads as usize)
+        .worker_threads(config.worker_threads as usize)
         .enable_io()
         .enable_time()
         .build()
         .unwrap();
     runtime
-        .block_on(httpd.run(ops.body_variant, ops.concurrent_requests_max))
+        .block_on(httpd.run(config.body_variant, config.concurrent_requests_max))
         .unwrap();
 }
