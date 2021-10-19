@@ -5,7 +5,7 @@ use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::counter;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroU32;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -84,8 +84,14 @@ impl Worker {
             }
         };
 
+        let addr = target
+            .addr
+            .to_socket_addrs()
+            .expect("could not convert to socket")
+            .next()
+            .unwrap();
         Ok(Self {
-            addr: target.addr,
+            addr,
             block_cache,
             name,
             rate_limiter,

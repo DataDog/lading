@@ -1,6 +1,6 @@
 [package]
 name = "lading_common"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"

@@ -28,7 +28,7 @@ pub enum Variant {
 #[derive(Debug, Deserialize)]
 pub struct Target {
     /// The address for the target, must be a valid SocketAddr
-    pub addr: SocketAddr,
+    pub addr: String,
     /// The payload variant
     pub variant: Variant,
     /// The bytes per second to send or receive from the target
