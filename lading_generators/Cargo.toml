@@ -81,6 +81,6 @@ default-features = false
 features = []
 
 [dependencies.rdkafka]
-version = "0.26.0"
+version = "0.27.0"
 default-features = false
 features = []
