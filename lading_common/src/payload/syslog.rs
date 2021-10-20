@@ -1,8 +1,9 @@
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Unstructured};
-use chrono::{prelude::Local, SecondsFormat};
 use rand::Rng;
 use std::io::Write;
+use std::time::SystemTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Debug, Default)]
 pub struct Syslog5424 {}
@@ -62,11 +63,18 @@ struct Member {
     message: String,    // shortish structured string
 }
 
+fn to_rfc3339<T>(dt: T) -> String
+where
+    T: Into<OffsetDateTime>,
+{
+    dt.into().format(&Rfc3339).unwrap()
+}
+
 impl<'a> arbitrary::Arbitrary<'a> for Member {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let priority = u.arbitrary::<u8>()? % 191;
         let syslog_version = (u.arbitrary::<u8>()? % 3) + 1;
-        let timestamp = Local::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let timestamp = to_rfc3339(SystemTime::now());
         let hostname_idx = u.arbitrary::<usize>()? % HOSTNAMES.len();
         let app_name_idx = u.arbitrary::<usize>()? % APP_NAMES.len();
         let procid = (u.arbitrary::<u16>()? % 9899) + 101;
