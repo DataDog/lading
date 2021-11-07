@@ -1,8 +1,18 @@
-use std::{collections::HashMap, fs::read_to_string, net::SocketAddr};
+use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32};
 
 use argh::FromArgs;
+use byte_unit::{Byte, ByteUnit};
 use futures::stream::{FuturesUnordered, StreamExt};
+use governor::{
+    clock,
+    state::{self, direct},
+    Quota, RateLimiter,
+};
 use http::Uri;
+use lading_common::{
+    block::{chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
 use tokio::runtime::Builder;
@@ -55,6 +65,8 @@ struct Target {
     pub encoding: Encoding,
     /// Indexer acknowledgements behavior, if enabled
     pub acknowledgements: Option<AckConfig>,
+    /// The maximum size in bytes of the cache of prebuilt messages
+    pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target
@@ -64,18 +76,57 @@ struct Target {
 }
 
 struct Worker {
+    uri: Uri,
     name: String,
-    target: Target,
+    parallel_connections: u16,
+    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    block_cache: Vec<Block>,
+    metric_labels: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
-pub enum Error {
-
-}
+pub enum Error {}
 
 impl Worker {
     fn new(name: String, target: Target) -> Result<Self, Error> {
-        Ok(Self { name, target })
+        let mut rng = rand::thread_rng();
+        let block_sizes: Vec<usize> = target
+            .block_sizes
+            .unwrap_or_else(|| {
+                vec![
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                ]
+            })
+            .iter()
+            .map(|sz| sz.get_bytes() as usize)
+            .collect();
+        let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
+        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
+        let labels = vec![
+            ("name".to_string(), name.clone()),
+            ("target".to_string(), target.target_uri.to_string()),
+        ];
+        let block_chunks = chunk_bytes(
+            &mut rng,
+            target.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
+            &block_sizes,
+        );
+        let block_cache =
+            construct_block_cache(&payload::SplunkHec::default(), &block_chunks, &labels);
+
+        Ok(Self {
+            parallel_connections: target.parallel_connections,
+            uri: target.target_uri,
+            block_cache,
+            name,
+            rate_limiter,
+            metric_labels: labels,
+        })
     }
 
     async fn spin(self) -> Result<(), Error> {
@@ -93,13 +144,11 @@ fn get_config() -> Config {
 }
 
 async fn run(addr: SocketAddr, targets: HashMap<String, Target>) {
-    // connect to prometheus
     let _: () = PrometheusBuilder::new()
         .listen_address(addr)
         .install()
         .unwrap();
 
-    // for each target, spin up a Worker (a task) that will connect to Splunk, submit data, and perform acknowledgements
     let mut workers = FuturesUnordered::new();
 
     targets
