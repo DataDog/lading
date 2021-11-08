@@ -1,18 +1,20 @@
-use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32};
+use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32, sync::Arc};
 
 use argh::FromArgs;
 use byte_unit::{Byte, ByteUnit};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{self, FuturesUnordered, StreamExt};
 use governor::{
     clock,
     state::{self, direct},
     Quota, RateLimiter,
 };
-use http::Uri;
+use http::{Method, Request, Uri, header::{AUTHORIZATION, CONTENT_LENGTH}};
+use hyper::{Body, Client, client::HttpConnector};
 use lading_common::{
     block::{chunk_bytes, construct_block_cache, Block},
     payload,
 };
+use metrics::{counter, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
 use tokio::runtime::Builder;
@@ -39,12 +41,6 @@ struct Config {
     pub targets: HashMap<String, Target>,
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum Encoding {
-    Raw,
-    Json,
-}
 
 #[derive(Deserialize, Debug)]
 struct AckConfig {
@@ -58,11 +54,11 @@ struct AckConfig {
 
 #[derive(Deserialize, Debug)]
 struct Target {
-    /// The URI for the target, must be a valid URI
+    /// The URI Authority for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
-    /// Encode data as string (services/collector/raw endpoint) or JSON (services/collector/event endpoint)
-    pub encoding: Encoding,
+    /// HEC authentication token
+    pub token: String,
     /// Indexer acknowledgements behavior, if enabled
     pub acknowledgements: Option<AckConfig>,
     /// The maximum size in bytes of the cache of prebuilt messages
@@ -70,13 +66,14 @@ struct Target {
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>, // q: what is a block size?
+    pub block_sizes: Option<Vec<byte_unit::Byte>>, // q: what is a block representing?
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16, // q: how does this combine with worker threads?
 }
 
 struct Worker {
     uri: Uri,
+    token: String,
     name: String,
     parallel_connections: u16,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
@@ -85,7 +82,23 @@ struct Worker {
 }
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    InvalidHECPath,
+}
+
+/// Derive the intended encoding based on the URI path
+/// https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
+fn get_encoding_from_uri(uri: &Uri) -> Result<payload::Encoding, Error> {
+    let endpoint = uri.path_and_query().expect("Missing HEC path");
+    let path = endpoint.path();
+    if path == "/services/collector/event" || path == "/services/collector/event/1.0" {
+        Ok(payload::Encoding::Json)
+    } else if path == "/services/collector/raw" || path == "/services/collector/raw/1.0" {
+        Ok(payload::Encoding::Text)
+    } else {
+        Err(Error::InvalidHECPath)
+    }
+}
 
 impl Worker {
     fn new(name: String, target: Target) -> Result<Self, Error> {
@@ -111,17 +124,19 @@ impl Worker {
             ("name".to_string(), name.clone()),
             ("target".to_string(), target.target_uri.to_string()),
         ];
+        let encoding = get_encoding_from_uri(&target.target_uri)?;
         let block_chunks = chunk_bytes(
             &mut rng,
             target.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
             &block_sizes,
         );
         let block_cache =
-            construct_block_cache(&payload::SplunkHec::default(), &block_chunks, &labels);
+            construct_block_cache(&payload::SplunkHec::new(encoding), &block_chunks, &labels);
 
         Ok(Self {
             parallel_connections: target.parallel_connections,
             uri: target.target_uri,
+            token: target.token,
             block_cache,
             name,
             rate_limiter,
@@ -130,8 +145,63 @@ impl Worker {
     }
 
     async fn spin(self) -> Result<(), Error> {
-        // send data to Splunk, ack, loop
-        println!("hello world");
+        let client: Client<HttpConnector, Body> = Client::builder()
+            .pool_max_idle_per_host(self.parallel_connections as usize)
+            .retry_canceled_requests(false)
+            .set_host(false)
+            .build_http();
+
+        let rate_limiter = Arc::new(self.rate_limiter);
+        let uri = self.uri;
+        let token = self.token;
+        let labels = self.metric_labels;
+
+        gauge!(
+            "maximum_requests",
+            f64::from(self.parallel_connections),
+            &labels
+        );
+        stream::iter(self.block_cache.iter().cycle())
+            .for_each_concurrent(self.parallel_connections as usize, |blk| {
+                let client = client.clone();
+                let rate_limiter = Arc::clone(&rate_limiter);
+                let labels = labels.clone();
+                let uri = uri.clone();
+
+                let total_bytes = blk.total_bytes;
+                let body = Body::from(blk.bytes.clone());
+                let block_length = blk.bytes.len();
+
+                let request: Request<Body> = Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header(AUTHORIZATION, format!("Splunk {}", token))
+                    .header(CONTENT_LENGTH, block_length)
+                    .body(body)
+                    .unwrap();
+
+                async move {
+                    rate_limiter.until_n_ready(total_bytes).await.unwrap();
+                    counter!("requests_sent", 1, &labels);
+                    match client.request(request).await {
+                        Ok(response) => {
+                            counter!("bytes_written", block_length as u64, &labels);
+                            let status = response.status();
+                            let mut status_labels = labels.clone();
+                            status_labels
+                                .push(("status_code".to_string(), status.as_u16().to_string()));
+                            counter!("request_ok", 1, &status_labels);
+                        }
+                        Err(err) => {
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            error_labels.push(("body_size".to_string(), block_length.to_string()));
+                            counter!("request_failure", 1, &error_labels);
+                        }
+                    }
+                }
+            })
+            .await;
         Ok(())
     }
 }

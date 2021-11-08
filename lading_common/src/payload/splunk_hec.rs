@@ -2,6 +2,7 @@ use crate::payload::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
+use std::fmt::Display;
 use std::io::Write;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
@@ -139,8 +140,28 @@ impl<'a> Arbitrary<'a> for Member {
     }
 }
 
+#[derive(Debug)]
+pub enum Encoding {
+    Text,
+    Json,
+}
+
+impl Default for Encoding {
+    fn default() -> Self {
+        Self::Json
+    }
+}
+
 #[derive(Debug, Default)]
-pub struct SplunkHec {}
+pub struct SplunkHec {
+    encoding: Encoding,
+}
+
+impl SplunkHec {
+    pub fn new(encoding: Encoding) -> Self {
+        Self { encoding }
+    }
+}
 
 impl Serialize for SplunkHec {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -154,7 +175,18 @@ impl Serialize for SplunkHec {
 
         let mut bytes_remaining = max_bytes;
         while let Ok(member) = unstructured.arbitrary::<Member>() {
-            let encoding = serde_json::to_string(&member)?;
+            let encoding = match self.encoding {
+                Encoding::Text => {
+                    let event = member.event;
+                    format!(
+                        "{} {} {}",
+                        event.timestamp.to_string(),
+                        event.message,
+                        serde_json::to_string(&event.attrs)?
+                    )
+                }
+                Encoding::Json => serde_json::to_string(&member)?,
+            };
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {

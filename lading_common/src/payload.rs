@@ -4,7 +4,7 @@ pub use fluent::Fluent;
 pub use foundationdb::FoundationDb;
 pub use json::Json;
 use rand::Rng;
-pub use splunk_hec::SplunkHec;
+pub use splunk_hec::{SplunkHec, Encoding};
 pub use statik::Static;
 use std::io::{self, Write};
 pub use syslog::Syslog5424;
