@@ -2,6 +2,7 @@ use crate::payload::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
+use std::collections::HashSet;
 use std::io::Write;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
@@ -201,11 +202,11 @@ impl Serialize for SplunkHec {
 
 #[derive(serde::Serialize)]
 pub struct SplunkHecAckQuery {
-    acks: Vec<u64>
+    acks: HashSet<u64>
 }
 
 impl SplunkHecAckQuery {
-    pub fn new_ack_body(acks: Vec<u64>) -> String {
+    pub fn new_ack_body(acks: HashSet<u64>) -> String {
         let ack_query = SplunkHecAckQuery {
             acks
         };

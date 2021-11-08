@@ -9,7 +9,7 @@ use std::{
 
 use argh::FromArgs;
 use byte_unit::{Byte, ByteUnit};
-use futures::stream::{self, FuturesUnordered, StreamExt};
+use futures::{SinkExt, channel::mpsc::{self, Receiver, Sender}, stream::{self, FuturesUnordered, StreamExt}};
 use governor::{
     clock,
     state::{self, direct},
@@ -17,17 +17,17 @@ use governor::{
 };
 use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
-    Method, Request, Response, Uri,
+    Method, Request, Uri,
 };
 use hyper::{client::HttpConnector, Body, Client};
 use lading_common::{
     block::{chunk_bytes, construct_block_cache, Block},
-    payload::{self, SplunkHecAckQuery},
+    payload::{self},
 };
 use metrics::{counter, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
-use tokio::{runtime::Builder, sync::RwLock};
+use tokio::{runtime::Builder};
 
 fn default_config_path() -> String {
     "/etc/lading/splunk_hec_gen.toml".to_string()
@@ -108,8 +108,6 @@ fn get_encoding_from_uri(uri: &Uri) -> Result<payload::Encoding, Error> {
     }
 }
 
-type ChannelIdToAckIds = HashMap<String, Arc<RwLock<HashSet<u64>>>>;
-
 impl Worker {
     fn new(name: String, target: Target) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
@@ -175,25 +173,25 @@ impl Worker {
             ));
         }
 
-        let pending_ack_ids = if let Some(ack_config) = self.ack_config {
-            let mut pending_ack_ids: ChannelIdToAckIds = HashMap::new();
+        let channel_id_to_ack_id_tx = if let Some(ack_config) = self.ack_config {
+            let mut channel_id_to_ack_id_tx: HashMap<String, Sender<u64>> = HashMap::new();
             let ack_client: Client<HttpConnector, Body> = Client::builder()
                 .retry_canceled_requests(false)
                 .set_host(false)
                 .build_http();
             for channel_id in channel_ids.clone() {
-                let ack_ids = Arc::new(RwLock::new(HashSet::new()));
-                pending_ack_ids.insert(channel_id.clone(), ack_ids.clone());
+                let (tx, rx) = mpsc::channel::<u64>(10000);
+                channel_id_to_ack_id_tx.insert(channel_id.clone(), tx);
                 spawn_ack_service(
                     uri.clone(),
                     token.clone(),
                     channel_id.clone(),
                     ack_client.clone(),
                     &ack_config,
-                    ack_ids.clone(),
+                    rx,
                 );
             }
-            Some(Arc::new(pending_ack_ids))
+            Some(channel_id_to_ack_id_tx)
         } else {
             None
         };
@@ -210,7 +208,7 @@ impl Worker {
                 let rate_limiter = Arc::clone(&rate_limiter);
                 let labels = labels.clone();
                 let uri = uri.clone();
-                let pending_ack_ids = pending_ack_ids.clone();
+                let channel_id_to_ack_id_tx = channel_id_to_ack_id_tx.clone();
 
                 let total_bytes = blk.total_bytes;
                 let body = Body::from(blk.bytes.clone());
@@ -237,7 +235,8 @@ impl Worker {
                             status_labels
                                 .push(("status_code".to_string(), status.as_u16().to_string()));
                             counter!("request_ok", 1, &status_labels);
-                            if let Some(pending_acks) = pending_ack_ids {
+                            if let Some(mut channel_id_to_ack_id_tx) = channel_id_to_ack_id_tx {
+                                let ack_tx = channel_id_to_ack_id_tx.get_mut(channel_id).unwrap();
                                 let body = String::from_utf8(
                                     hyper::body::to_bytes(response.into_body())
                                         .await
@@ -247,13 +246,9 @@ impl Worker {
                                 .unwrap();
                                 let hec_ack_response =
                                     serde_json::from_str::<HecAckResponse>(body.as_str()).unwrap();
-                                match pending_acks.get(channel_id) {
-                                    Some(channel_ack_ids_lock) => {
-                                        let mut channel_ack_ids =
-                                            channel_ack_ids_lock.write().await;
-                                        channel_ack_ids.insert(hec_ack_response.ackId);
-                                    }
-                                    None => todo!(),
+                                match ack_tx.send(hec_ack_response.ack_id).await {
+                                    Ok(_) => {},
+                                    Err(_) => {},
                                 }
                             }
                         }
@@ -277,7 +272,7 @@ fn spawn_ack_service(
     channel_id: String,
     client: Client<HttpConnector, Body>,
     ack_config: &AckConfig,
-    ack_ids_lock: Arc<RwLock<HashSet<u64>>>,
+    mut ack_rx: Receiver<u64>,
 ) {
     let ack_uri = Uri::builder()
         .authority(uri.authority().unwrap().to_string())
@@ -285,14 +280,16 @@ fn spawn_ack_service(
         .path_and_query("/services/collector/ack")
         .build()
         .unwrap();
+    let mut ack_ids = HashSet::new();
     let mut interval = tokio::time::interval(Duration::from_secs(ack_config.ack_query_interval));
     tokio::spawn(async move {
         loop {
-            interval.tick().await;
-            let ack_ids = ack_ids_lock.read().await;
-            let ack_ids = ack_ids.iter().map(|ack_id| *ack_id).collect::<Vec<u64>>();
+            let new_ack_ids = ack_rx.by_ref().take_until(interval.tick()).collect::<Vec<_>>().await;
+            ack_ids.extend(new_ack_ids.into_iter());
             if ack_ids.len() > 0 {
-                let body = Body::from(SplunkHecAckQuery::new_ack_body(ack_ids));
+                let body = Body::from(serde_json::json!({
+                    "acks": ack_ids
+                }).to_string());
                 let request: Request<Body> = Request::builder()
                     .method(Method::POST)
                     .uri(ack_uri.clone())
@@ -302,18 +299,20 @@ fn spawn_ack_service(
                     .unwrap();
                 match client.request(request).await {
                     Ok(response) => {
-                        let status = response.status();
-                        let body = serde_json::json!(String::from_utf8(
+                        // todo: check response code
+                        let body = 
                             hyper::body::to_bytes(response.into_body())
                                 .await
                                 .unwrap()
-                                .to_vec(),
-                        )
-                        .unwrap());
-                        println!("queried for ack: {:?}", body);
+                                .to_vec();
+                        
+                        let ack_status= serde_json::from_slice::<HecAckStatusResponse>(body.as_slice()).unwrap();
+                        let acked_ack_ids = ack_status.acks.into_iter().filter_map(|(ack_id, acked)| if acked { Some(ack_id) } else { None }).collect::<HashSet<_>>();
+                        ack_ids = ack_ids.difference(&acked_ack_ids).map(|x| *x).collect::<HashSet<_>>();
                     }
                     Err(err) => {
-                        println!("query failed");
+                        // todo: handle error sending request
+                        println!("ack query failed");
                     }
                 }
             }
@@ -322,10 +321,16 @@ fn spawn_ack_service(
 }
 
 #[derive(Deserialize, Debug)]
+struct HecAckStatusResponse {
+    acks: HashMap<u64, bool>,
+}
+
+#[derive(Deserialize, Debug)]
 struct HecAckResponse {
     text: String,
     code: u8,
-    ackId: u64,
+    #[serde(rename = "ackId")]
+    ack_id: u64,
 }
 
 fn get_config() -> Config {
