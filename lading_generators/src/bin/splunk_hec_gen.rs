@@ -1,4 +1,11 @@
-use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::read_to_string,
+    net::SocketAddr,
+    num::NonZeroU32,
+    sync::Arc,
+    time::Duration,
+};
 
 use argh::FromArgs;
 use byte_unit::{Byte, ByteUnit};
@@ -8,16 +15,19 @@ use governor::{
     state::{self, direct},
     Quota, RateLimiter,
 };
-use http::{Method, Request, Uri, header::{AUTHORIZATION, CONTENT_LENGTH}};
-use hyper::{Body, Client, client::HttpConnector};
+use http::{
+    header::{AUTHORIZATION, CONTENT_LENGTH},
+    Method, Request, Response, Uri,
+};
+use hyper::{client::HttpConnector, Body, Client};
 use lading_common::{
     block::{chunk_bytes, construct_block_cache, Block},
-    payload,
+    payload::{self, SplunkHecAckQuery},
 };
 use metrics::{counter, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
-use tokio::runtime::Builder;
+use tokio::{runtime::Builder, sync::RwLock};
 
 fn default_config_path() -> String {
     "/etc/lading/splunk_hec_gen.toml".to_string()
@@ -40,7 +50,6 @@ struct Config {
     /// The [`Target`] instances and their base name
     pub targets: HashMap<String, Target>,
 }
-
 
 #[derive(Deserialize, Debug)]
 struct AckConfig {
@@ -99,6 +108,8 @@ fn get_encoding_from_uri(uri: &Uri) -> Result<payload::Encoding, Error> {
     }
 }
 
+type ChannelIdToAckIds = HashMap<String, Arc<RwLock<HashSet<u64>>>>;
+
 impl Worker {
     fn new(name: String, target: Target) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
@@ -156,16 +167,38 @@ impl Worker {
         let token = self.token;
         let labels = self.metric_labels;
 
-        if let Some(ack_config) = self.ack_config {
-            spawn_ack_service(&ack_config);
-        }
-
         let mut channel_ids = Vec::new();
         for i in 0..self.parallel_connections {
-            channel_ids.push(format!("{}-1111-1111-1111-111111111111", 10000000 as u32 + i as u32));
+            channel_ids.push(format!(
+                "{}-1111-1111-1111-111111111111",
+                10000000 as u32 + i as u32
+            ));
         }
-        let mut channel_ids = channel_ids.iter().cycle();
 
+        let pending_ack_ids = if let Some(ack_config) = self.ack_config {
+            let mut pending_ack_ids: ChannelIdToAckIds = HashMap::new();
+            let ack_client: Client<HttpConnector, Body> = Client::builder()
+                .retry_canceled_requests(false)
+                .set_host(false)
+                .build_http();
+            for channel_id in channel_ids.clone() {
+                let ack_ids = Arc::new(RwLock::new(HashSet::new()));
+                pending_ack_ids.insert(channel_id.clone(), ack_ids.clone());
+                spawn_ack_service(
+                    uri.clone(),
+                    token.clone(),
+                    channel_id.clone(),
+                    ack_client.clone(),
+                    &ack_config,
+                    ack_ids.clone(),
+                );
+            }
+            Some(Arc::new(pending_ack_ids))
+        } else {
+            None
+        };
+
+        let mut channel_ids_cycle = channel_ids.iter().cycle();
         gauge!(
             "maximum_requests",
             f64::from(self.parallel_connections),
@@ -177,17 +210,19 @@ impl Worker {
                 let rate_limiter = Arc::clone(&rate_limiter);
                 let labels = labels.clone();
                 let uri = uri.clone();
+                let pending_ack_ids = pending_ack_ids.clone();
 
                 let total_bytes = blk.total_bytes;
                 let body = Body::from(blk.bytes.clone());
                 let block_length = blk.bytes.len();
+                let channel_id = channel_ids_cycle.next().unwrap();
 
                 let request: Request<Body> = Request::builder()
                     .method(Method::POST)
                     .uri(uri)
                     .header(AUTHORIZATION, format!("Splunk {}", token))
                     .header(CONTENT_LENGTH, block_length)
-                    .header("x-splunk-request-channel", channel_ids.next().unwrap())
+                    .header("x-splunk-request-channel", channel_id)
                     .body(body)
                     .unwrap();
 
@@ -202,6 +237,25 @@ impl Worker {
                             status_labels
                                 .push(("status_code".to_string(), status.as_u16().to_string()));
                             counter!("request_ok", 1, &status_labels);
+                            if let Some(pending_acks) = pending_ack_ids {
+                                let body = String::from_utf8(
+                                    hyper::body::to_bytes(response.into_body())
+                                        .await
+                                        .unwrap()
+                                        .to_vec(),
+                                )
+                                .unwrap();
+                                let hec_ack_response =
+                                    serde_json::from_str::<HecAckResponse>(body.as_str()).unwrap();
+                                match pending_acks.get(channel_id) {
+                                    Some(channel_ack_ids_lock) => {
+                                        let mut channel_ack_ids =
+                                            channel_ack_ids_lock.write().await;
+                                        channel_ack_ids.insert(hec_ack_response.ackId);
+                                    }
+                                    None => todo!(),
+                                }
+                            }
                         }
                         Err(err) => {
                             let mut error_labels = labels.clone();
@@ -217,18 +271,61 @@ impl Worker {
     }
 }
 
-fn spawn_ack_service(ack_config: &AckConfig) {
+fn spawn_ack_service(
+    uri: Uri,
+    token: String,
+    channel_id: String,
+    client: Client<HttpConnector, Body>,
+    ack_config: &AckConfig,
+    ack_ids_lock: Arc<RwLock<HashSet<u64>>>,
+) {
+    let ack_uri = Uri::builder()
+        .authority(uri.authority().unwrap().to_string())
+        .scheme("http")
+        .path_and_query("/services/collector/ack")
+        .build()
+        .unwrap();
     let mut interval = tokio::time::interval(Duration::from_secs(ack_config.ack_query_interval));
     tokio::spawn(async move {
         loop {
             interval.tick().await;
-            println!("querying for acks");
+            let ack_ids = ack_ids_lock.read().await;
+            let ack_ids = ack_ids.iter().map(|ack_id| *ack_id).collect::<Vec<u64>>();
+            if ack_ids.len() > 0 {
+                let body = Body::from(SplunkHecAckQuery::new_ack_body(ack_ids));
+                let request: Request<Body> = Request::builder()
+                    .method(Method::POST)
+                    .uri(ack_uri.clone())
+                    .header(AUTHORIZATION, format!("Splunk {}", token))
+                    .header("x-splunk-request-channel", channel_id.clone())
+                    .body(body)
+                    .unwrap();
+                match client.request(request).await {
+                    Ok(response) => {
+                        let status = response.status();
+                        let body = serde_json::json!(String::from_utf8(
+                            hyper::body::to_bytes(response.into_body())
+                                .await
+                                .unwrap()
+                                .to_vec(),
+                        )
+                        .unwrap());
+                        println!("queried for ack: {:?}", body);
+                    }
+                    Err(err) => {
+                        println!("query failed");
+                    }
+                }
+            }
         }
     });
 }
 
-fn handle_ack_response() {
-
+#[derive(Deserialize, Debug)]
+struct HecAckResponse {
+    text: String,
+    code: u8,
+    ackId: u64,
 }
 
 fn get_config() -> Config {

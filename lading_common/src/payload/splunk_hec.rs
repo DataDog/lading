@@ -199,6 +199,20 @@ impl Serialize for SplunkHec {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct SplunkHecAckQuery {
+    acks: Vec<u64>
+}
+
+impl SplunkHecAckQuery {
+    pub fn new_ack_body(acks: Vec<u64>) -> String {
+        let ack_query = SplunkHecAckQuery {
+            acks
+        };
+        serde_json::to_string(&ack_query).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use quickcheck::{QuickCheck, TestResult};

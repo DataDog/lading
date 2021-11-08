@@ -60,6 +60,11 @@ version = "1.0"
 default-features = false
 features = ["derive", "std"]
 
+[dependencies.serde_json]
+version = "1.0"
+default-features = false
+features = ["std"]
+
 [dependencies.metrics]
 version = "0.17"
 default-features = false
