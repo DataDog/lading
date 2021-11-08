@@ -78,13 +78,17 @@ impl<'a> Arbitrary<'a> for Attrs {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Event {
     pub timestamp: f64,
+    pub message: String,
     attrs: Attrs,
 }
 
 impl<'a> Arbitrary<'a> for Event {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice: u8 = u.arbitrary()?;
+        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let event = Event {
             timestamp: 1606215269.333915,
+            message,
             attrs: u.arbitrary()?,
         };
         Ok(event)
@@ -94,6 +98,7 @@ impl<'a> Arbitrary<'a> for Event {
         size_hint::recursion_guard(depth, |depth| {
             size_hint::and_all(&[
                 <f64 as Arbitrary>::size_hint(depth),
+                <AsciiStr as Arbitrary>::size_hint(depth),
                 <Attrs as Arbitrary>::size_hint(depth),
             ])
         })
@@ -106,7 +111,6 @@ struct Member {
     pub time: f64,
     pub host: String,
     pub index: String,
-    pub message: String,
 }
 
 impl<'a> Arbitrary<'a> for Member {
@@ -114,13 +118,11 @@ impl<'a> Arbitrary<'a> for Member {
         let choice: u8 = u.arbitrary()?;
         let host = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
         let index = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
-        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let member = Member {
             event: u.arbitrary()?,
             time: 1606215269.333915,
             host,
             index,
-            message,
         };
         Ok(member)
     }
@@ -130,7 +132,6 @@ impl<'a> Arbitrary<'a> for Member {
             size_hint::and_all(&[
                 <Attrs as Arbitrary>::size_hint(depth),
                 <f64 as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
                 <AsciiStr as Arbitrary>::size_hint(depth),
                 <AsciiStr as Arbitrary>::size_hint(depth),
             ])
