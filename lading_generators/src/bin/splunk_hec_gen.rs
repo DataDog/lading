@@ -24,6 +24,7 @@ use lading_common::{
     block::{chunk_bytes, construct_block_cache, Block},
     payload::{self},
 };
+use lading_generators::splunk_hec_gen::config::{AckConfig, Config, Target};
 use metrics::{counter, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
@@ -40,44 +41,6 @@ struct Opts {
     #[argh(option, default = "default_config_path()")]
     config_path: String,
 }
-
-#[derive(Deserialize, Debug)]
-struct Config {
-    /// Total number of worker threads to use in this program
-    pub worker_threads: u16,
-    /// Address and port for prometheus exporter
-    pub prometheus_addr: SocketAddr,
-    /// The [`Target`] instances and their base name
-    pub targets: HashMap<String, Target>,
-}
-
-#[derive(Deserialize, Debug)]
-struct AckConfig {
-    /// The time between queries to /services/collector/ack
-    pub ack_query_interval: u64,
-    /// The time an ackId can remain pending before assuming data was dropped
-    pub ack_timeout: u64,
-}
-
-#[derive(Deserialize, Debug)]
-struct Target {
-    /// The URI for the target, must be a valid URI
-    #[serde(with = "http_serde::uri")]
-    pub target_uri: Uri,
-    /// HEC authentication token
-    pub token: String,
-    /// Indexer acknowledgements behavior, if enabled
-    pub acknowledgements: Option<AckConfig>,
-    /// The maximum size in bytes of the cache of prebuilt messages
-    pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
-    /// The bytes per second to send or receive from the target
-    pub bytes_per_second: byte_unit::Byte,
-    /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>, // q: what is a block representing?
-    /// The total number of parallel connections to maintain
-    pub parallel_connections: u16, // q: how does this combine with worker threads?
-}
-
 struct Worker {
     uri: Uri,
     token: String,
