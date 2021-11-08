@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32, sync::Arc};
+use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use argh::FromArgs;
 use byte_unit::{Byte, ByteUnit};
@@ -44,17 +44,15 @@ struct Config {
 
 #[derive(Deserialize, Debug)]
 struct AckConfig {
-    /// The number of channels to create
-    pub channels: usize,
     /// The time between queries to /services/collector/ack
-    pub ack_query_interval: usize,
+    pub ack_query_interval: u64,
     /// The time an ackId can remain pending before assuming data was dropped
-    pub ack_timeout: usize,
+    pub ack_timeout: u64,
 }
 
 #[derive(Deserialize, Debug)]
 struct Target {
-    /// The URI Authority for the target, must be a valid URI
+    /// The URI for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
     /// HEC authentication token
@@ -79,6 +77,7 @@ struct Worker {
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
+    ack_config: Option<AckConfig>,
 }
 
 #[derive(Debug)]
@@ -141,6 +140,7 @@ impl Worker {
             name,
             rate_limiter,
             metric_labels: labels,
+            ack_config: target.acknowledgements,
         })
     }
 
@@ -155,6 +155,16 @@ impl Worker {
         let uri = self.uri;
         let token = self.token;
         let labels = self.metric_labels;
+
+        if let Some(ack_config) = self.ack_config {
+            spawn_ack_service(&ack_config);
+        }
+
+        let mut channel_ids = Vec::new();
+        for i in 0..self.parallel_connections {
+            channel_ids.push(format!("{}-1111-1111-1111-111111111111", 10000000 as u32 + i as u32));
+        }
+        let mut channel_ids = channel_ids.iter().cycle();
 
         gauge!(
             "maximum_requests",
@@ -177,6 +187,7 @@ impl Worker {
                     .uri(uri)
                     .header(AUTHORIZATION, format!("Splunk {}", token))
                     .header(CONTENT_LENGTH, block_length)
+                    .header("x-splunk-request-channel", channel_ids.next().unwrap())
                     .body(body)
                     .unwrap();
 
@@ -204,6 +215,20 @@ impl Worker {
             .await;
         Ok(())
     }
+}
+
+fn spawn_ack_service(ack_config: &AckConfig) {
+    let mut interval = tokio::time::interval(Duration::from_secs(ack_config.ack_query_interval));
+    tokio::spawn(async move {
+        loop {
+            interval.tick().await;
+            println!("querying for acks");
+        }
+    });
+}
+
+fn handle_ack_response() {
+
 }
 
 fn get_config() -> Config {

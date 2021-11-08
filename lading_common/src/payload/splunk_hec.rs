@@ -2,7 +2,6 @@ use crate::payload::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
-use std::fmt::Display;
 use std::io::Write;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
