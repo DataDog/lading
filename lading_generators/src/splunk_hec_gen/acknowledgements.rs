@@ -149,6 +149,7 @@ impl AckService {
                                         |(ack_id, acked)| if acked { Some(ack_id) } else { None },
                                     )
                                     .collect::<Vec<_>>();
+                                counter!("ack_ids_acked", acked_ack_ids.len() as u64, "channel_id" => channel_id.clone());
 
                                 // Remove successfully acked ack ids
                                 for acked_ack_id in acked_ack_ids {
@@ -163,6 +164,7 @@ impl AckService {
                                         timed_out_ack_ids.push(*ack_id);
                                     }
                                 }
+                                counter!("ack_ids_dropped", timed_out_ack_ids.len() as u64, "channel_id" => channel_id.clone());
                                 for timed_out_ack_id in timed_out_ack_ids {
                                     ack_ids.remove(&timed_out_ack_id);
                                 }
