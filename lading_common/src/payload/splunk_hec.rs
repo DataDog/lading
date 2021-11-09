@@ -2,6 +2,7 @@ use crate::payload::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
+use serde::Deserialize;
 use std::io::Write;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
@@ -78,13 +79,17 @@ impl<'a> Arbitrary<'a> for Attrs {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Event {
     pub timestamp: f64,
+    pub message: String,
     attrs: Attrs,
 }
 
 impl<'a> Arbitrary<'a> for Event {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice: u8 = u.arbitrary()?;
+        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let event = Event {
             timestamp: 1606215269.333915,
+            message,
             attrs: u.arbitrary()?,
         };
         Ok(event)
@@ -94,6 +99,7 @@ impl<'a> Arbitrary<'a> for Event {
         size_hint::recursion_guard(depth, |depth| {
             size_hint::and_all(&[
                 <f64 as Arbitrary>::size_hint(depth),
+                <AsciiStr as Arbitrary>::size_hint(depth),
                 <Attrs as Arbitrary>::size_hint(depth),
             ])
         })
@@ -106,7 +112,6 @@ struct Member {
     pub time: f64,
     pub host: String,
     pub index: String,
-    pub message: String,
 }
 
 impl<'a> Arbitrary<'a> for Member {
@@ -114,13 +119,11 @@ impl<'a> Arbitrary<'a> for Member {
         let choice: u8 = u.arbitrary()?;
         let host = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
         let index = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
-        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let member = Member {
             event: u.arbitrary()?,
             time: 1606215269.333915,
             host,
             index,
-            message,
         };
         Ok(member)
     }
@@ -132,14 +135,34 @@ impl<'a> Arbitrary<'a> for Member {
                 <f64 as Arbitrary>::size_hint(depth),
                 <AsciiStr as Arbitrary>::size_hint(depth),
                 <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
             ])
         })
     }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Encoding {
+    Text,
+    Json,
+}
+
+impl Default for Encoding {
+    fn default() -> Self {
+        Self::Json
+    }
+}
+
 #[derive(Debug, Default)]
-pub struct SplunkHec {}
+pub struct SplunkHec {
+    encoding: Encoding,
+}
+
+impl SplunkHec {
+    pub fn new(encoding: Encoding) -> Self {
+        Self { encoding }
+    }
+}
 
 impl Serialize for SplunkHec {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -153,7 +176,18 @@ impl Serialize for SplunkHec {
 
         let mut bytes_remaining = max_bytes;
         while let Ok(member) = unstructured.arbitrary::<Member>() {
-            let encoding = serde_json::to_string(&member)?;
+            let encoding = match self.encoding {
+                Encoding::Text => {
+                    let event = member.event;
+                    format!(
+                        "{} {} {}",
+                        event.timestamp.to_string(),
+                        event.message,
+                        serde_json::to_string(&event.attrs)?
+                    )
+                }
+                Encoding::Json => serde_json::to_string(&member)?,
+            };
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {

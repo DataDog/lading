@@ -5,6 +5,7 @@ implemented are:
 
 * `file_gen`
 * `http_gen`
+* `splunk_hec_gen`
 
 ## `file_gen` - A file generating program.
 
@@ -102,6 +103,57 @@ dd-api-key = "deadbeef"
 
 This creates a single target 'simple' that emits datadog log agent payloads to
 localhost:8282/v1/input at 500Mb per second with 100 parallel connections.
+
+### Telemetry
+
+This program self-instruments through prometheus metrics. This is subject to
+change and we do not document exactly what metrics are available, though you may
+find out for yourself by examining [`src/lib.rs`](./src/lib.rs) if you need.
+
+### Weird Quirks
+
+This program's configuration does not understand byte sizes greater than `u32`
+bytes. Ultimately this is a limitation inherited from the
+[`governor`](https://github.com/antifuchs/governor) dependency. If this
+limitation needs to be lifted we'll have to contribute a fix upstream, or adjust
+our rate limiting approach.
+
+## `splunk_hec_gen` - A Splunk HEC load generating program
+
+This program generates Splunk HEC payloads and POSTs them to configured targets.
+The goal is to provide stable throughput without coordination with the test
+subject. The underlying implementation is similar to `http_gen` with additional
+complexity to support Splunk HEC indexer acknowledgements.
+
+### Configuration
+
+This program is primarily configured through its config file. Here is an
+example:
+
+```
+worker_threads = 10
+prometheus_addr = "0.0.0.0:9001"
+
+[targets.simple]
+target_uri = "http://localhost:8088/"
+token = "abcd1234"
+format = "json"
+bytes_per_second = "500 Mb"
+parallel_connections = 100
+maximum_prebuild_cache_size_bytes = "500 Mb"
+
+[targets.simple.acknowledgements]
+ack_query_interval_seconds = 10
+ack_timeout_seconds = 300
+```
+
+This creates a single target 'simple' that emits Splunk HEC payloads in JSON
+format to a Splunk HEC instance at localhost:8088 at 500Mb per second with 100
+parallel connections. The exact Splunk HEC endpoint path is determined by the
+configured data format (`json` to `/services/collector/event` or `text` to
+`/services/collector/raw`). See
+[`src/splunk_hec_gen/config.rs`](./src/splunk_hec_gen/config.rs) for
+configuration option descriptions.
 
 ### Telemetry
 
