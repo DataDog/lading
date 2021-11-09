@@ -151,7 +151,9 @@ This creates a single target 'simple' that emits Splunk HEC payloads in JSON
 format to a Splunk HEC instance at localhost:8088 at 500Mb per second with 100
 parallel connections. The exact Splunk HEC endpoint path is determined by the
 configured data format (`json` to `/services/collector/event` or `text` to
-`/services/collector/raw`).
+`/services/collector/raw`). See
+[`src/splunk_hec_gen/config.rs`](./src/splunk_hec_gen/config.rs) for
+configuration option descriptions.
 
 ### Telemetry
 
