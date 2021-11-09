@@ -15,7 +15,10 @@ use super::{config::AckConfig, worker::Error};
 
 type AckId = u64;
 
+/// Splunk HEC channels
 pub struct Channels {
+    /// If acknowledgements are enabled, the channel id maps to Some(Sender) used
+    /// to send ack ids to a separate task that will query for ack status
     ids: HashMap<String, Option<Sender<AckId>>>,
     acks_enabled: bool,
 }
@@ -65,8 +68,8 @@ impl Channels {
                 .ids
                 .keys()
                 .map(|channel_id| {
-                    let (tx, rx) = mpsc::channel::<u64>(10000);
-                    ack_service.spawn_task(channel_id.clone(), rx);
+                    let (tx, rx) = mpsc::channel::<AckId>(10000);
+                    ack_service.spawn_ack_task(channel_id.clone(), rx);
                     (channel_id.clone(), tx)
                 })
                 .collect::<Vec<(String, Sender<AckId>)>>();
@@ -90,7 +93,10 @@ struct AckService {
 }
 
 impl AckService {
-    pub fn spawn_task(&self, channel_id: String, mut ack_rx: Receiver<u64>) {
+    /// Spawn a tokio task that will continuously query /services/collector/ack
+    /// to check on a particular Splunk channel's ack id statuses. The task
+    /// receives new ack ids from [`super::worker::Worker`]
+    pub fn spawn_ack_task(&self, channel_id: String, mut ack_rx: Receiver<AckId>) {
         let mut ack_ids = HashMap::new();
         let mut interval =
             tokio::time::interval(Duration::from_secs(self.ack_config.ack_query_interval));
@@ -127,10 +133,9 @@ impl AckService {
                             let status = parts.status;
                             counter!("ack_status_request_ok", 1, "channel_id" => channel_id.clone(), "status" => status.to_string());
                             if status == StatusCode::OK {
-                                let body = hyper::body::to_bytes(body).await.unwrap().to_vec();
+                                let body = hyper::body::to_bytes(body).await.unwrap();
                                 let ack_status =
-                                    serde_json::from_slice::<HecAckStatusResponse>(body.as_slice())
-                                        .unwrap();
+                                    serde_json::from_slice::<HecAckStatusResponse>(&body).unwrap();
 
                                 let acked_ack_ids = ack_status
                                     .acks
@@ -170,5 +175,5 @@ impl AckService {
 
 #[derive(Deserialize, Debug)]
 struct HecAckStatusResponse {
-    acks: HashMap<u64, bool>,
+    acks: HashMap<AckId, bool>,
 }

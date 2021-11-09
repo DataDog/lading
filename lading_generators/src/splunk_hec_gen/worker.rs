@@ -186,21 +186,16 @@ impl Worker {
                     match client.request(request).await {
                         Ok(response) => {
                             counter!("bytes_written", block_length as u64, &labels);
-                            let status = response.status();
+                            let (parts, body) = response.into_parts();
+                            let status = parts.status;
                             let mut status_labels = labels.clone();
                             status_labels
                                 .push(("status_code".to_string(), status.as_u16().to_string()));
                             counter!("request_ok", 1, &status_labels);
                             if let Some(mut ack_id_tx) = ack_id_tx {
-                                let body = String::from_utf8(
-                                    hyper::body::to_bytes(response.into_body())
-                                        .await
-                                        .unwrap()
-                                        .to_vec(),
-                                )
-                                .unwrap();
+                                let body_bytes = hyper::body::to_bytes(body).await.unwrap();
                                 let hec_ack_response =
-                                    serde_json::from_str::<HecAckResponse>(body.as_str()).unwrap();
+                                    serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
                                 let _ = ack_id_tx.try_send(hec_ack_response.ack_id);
                             }
                         }
