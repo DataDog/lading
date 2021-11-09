@@ -1,7 +1,7 @@
 use std::{num::NonZeroU32, sync::Arc};
 
 use byte_unit::{Byte, ByteUnit};
-use futures::{SinkExt, StreamExt, stream};
+use futures::{StreamExt, stream};
 use governor::{Quota, RateLimiter, clock, state::{self, direct}};
 use http::{Method, Request, Uri, header::{AUTHORIZATION, CONTENT_LENGTH}};
 use hyper::{Body, Client, client::HttpConnector};
@@ -28,6 +28,7 @@ pub struct Worker {
 #[derive(Debug)]
 pub enum Error {
     InvalidHECPath,
+    AcksAlreadyEnabled,
 }
 
 /// Derive the intended encoding based on the URI path
@@ -102,7 +103,7 @@ impl Worker {
     ///
     /// # Errors
     ///
-    /// TODO
+    /// Function will error if unable to enable acknowledgements when configured to do so.
     ///
     /// # Panics
     ///
@@ -128,7 +129,7 @@ impl Worker {
                 .path_and_query("/services/collector/ack")
                 .build()
                 .unwrap();
-            channels.enable_acknowledgements(ack_uri, token.clone(), ack_config).unwrap();
+            channels.enable_acknowledgements(ack_uri, token.clone(), ack_config)?;
         }
 
         let channel_info = channels.get_channel_info();
@@ -180,10 +181,7 @@ impl Worker {
                                 .unwrap();
                                 let hec_ack_response =
                                     serde_json::from_str::<HecAckResponse>(body.as_str()).unwrap();
-                                match ack_id_tx.send(hec_ack_response.ack_id).await {
-                                    Ok(_) => {},
-                                    Err(_) => {},
-                                }
+                                let _ = ack_id_tx.try_send(hec_ack_response.ack_id);
                             }
                         }
                         Err(err) => {

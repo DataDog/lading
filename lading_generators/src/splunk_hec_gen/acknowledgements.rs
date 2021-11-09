@@ -9,7 +9,7 @@ use hyper::{client::HttpConnector, Body, Client};
 use metrics::counter;
 use serde::Deserialize;
 
-use super::config::AckConfig;
+use super::{config::AckConfig, worker::Error};
 
 type AckId = u64;
 
@@ -46,7 +46,7 @@ impl Channels {
         ack_uri: Uri,
         token: String,
         ack_config: AckConfig,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         if !self.acks_enabled {
             let client: Client<HttpConnector, Body> = Client::builder()
                 .retry_canceled_requests(false)
@@ -75,7 +75,7 @@ impl Channels {
             self.acks_enabled = true;
             Ok(())
         } else {
-            Err(())
+            Err(Error::AcksAlreadyEnabled)
         }
     }
 }
@@ -115,6 +115,7 @@ impl AckService {
                         .header("x-splunk-request-channel", channel_id.clone())
                         .body(body)
                         .unwrap();
+
                     match client.request(request).await {
                         Ok(response) => {
                             let (parts, body) = response.into_parts();
