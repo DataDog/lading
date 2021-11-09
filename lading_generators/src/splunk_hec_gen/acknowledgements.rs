@@ -1,14 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 
 use futures::{
     channel::mpsc::{self, Receiver, Sender},
     StreamExt,
 };
-use http::{header::AUTHORIZATION, Method, Request, Uri};
+use http::{header::AUTHORIZATION, Method, Request, StatusCode, Uri};
 use hyper::{client::HttpConnector, Body, Client};
+use metrics::counter;
 use serde::Deserialize;
 
 use super::config::AckConfig;
@@ -25,7 +23,7 @@ impl Channels {
         let ids = (0..num_channels)
             .map(|i| {
                 (
-                    format!("{}-1111-1111-1111-111111111111", 10000000 as u32 + i as u32),
+                    format!("{}-1111-1111-1111-111111111111", 10000000u32 + i as u32),
                     None,
                 )
             })
@@ -91,11 +89,10 @@ struct AckService {
 
 impl AckService {
     pub fn spawn_task(&self, channel_id: String, mut ack_rx: Receiver<u64>) {
-        let mut ack_ids = HashSet::new();
+        let mut ack_ids = HashMap::new();
         let mut interval =
             tokio::time::interval(Duration::from_secs(self.ack_config.ack_query_interval));
-        // todo: use retries to expire ack ids
-        // let retries = self.ack_config.ack_timeout / self.ack_config.ack_query_interval;
+        let retries = self.ack_config.ack_timeout / self.ack_config.ack_query_interval;
         let client = self.client.clone();
         let token = self.token.clone();
         let ack_uri = self.ack_uri.clone();
@@ -104,12 +101,13 @@ impl AckService {
                 let new_ack_ids = ack_rx
                     .by_ref()
                     .take_until(interval.tick())
+                    .map(|ack_id| (ack_id, retries))
                     .collect::<Vec<_>>()
                     .await;
-                ack_ids.extend(new_ack_ids.into_iter());
+                ack_ids.extend(new_ack_ids);
 
                 if ack_ids.len() > 0 {
-                    let body = Body::from(serde_json::json!({ "acks": ack_ids }).to_string());
+                    let body = Body::from(serde_json::json!({ "acks": ack_ids.keys().collect::<Vec<&u64>>() }).to_string());
                     let request: Request<Body> = Request::builder()
                         .method(Method::POST)
                         .uri(ack_uri.clone())
@@ -119,30 +117,40 @@ impl AckService {
                         .unwrap();
                     match client.request(request).await {
                         Ok(response) => {
-                            // todo: check response code
-                            let body = hyper::body::to_bytes(response.into_body())
-                                .await
-                                .unwrap()
-                                .to_vec();
-                            let ack_status =
-                                serde_json::from_slice::<HecAckStatusResponse>(body.as_slice())
-                                    .unwrap();
+                            let (parts, body) = response.into_parts();
+                            let status = parts.status;
+                            counter!("ack_status_request_ok", 1, "channel_id" => channel_id.clone(), "status" => status.to_string());
+                            if status == StatusCode::OK {
+                                let body = hyper::body::to_bytes(body).await.unwrap().to_vec();
+                                let ack_status =
+                                    serde_json::from_slice::<HecAckStatusResponse>(body.as_slice())
+                                        .unwrap();
 
-                            let acked_ack_ids = ack_status
-                                .acks
-                                .into_iter()
-                                .filter_map(
-                                    |(ack_id, acked)| if acked { Some(ack_id) } else { None },
-                                )
-                                .collect::<HashSet<_>>();
-                            ack_ids = ack_ids
-                                .difference(&acked_ack_ids)
-                                .map(|x| *x)
-                                .collect::<HashSet<_>>();
+                                let acked_ack_ids = ack_status
+                                    .acks
+                                    .into_iter()
+                                    .filter_map(
+                                        |(ack_id, acked)| if acked { Some(ack_id) } else { None },
+                                    )
+                                    .collect::<Vec<_>>();
+
+                                for acked_ack_id in acked_ack_ids {
+                                    ack_ids.remove(&acked_ack_id);
+                                }
+                                let mut timed_out_ack_ids = Vec::new();
+                                for (ack_id, retries) in ack_ids.iter_mut() {
+                                    *retries -= 1;
+                                    if retries <= &mut 0 {
+                                        timed_out_ack_ids.push(*ack_id);
+                                    }
+                                }
+                                for timed_out_ack_id in timed_out_ack_ids {
+                                    ack_ids.remove(&timed_out_ack_id);
+                                }
+                            }
                         }
-                        Err(_err) => {
-                            // todo: handle error sending request
-                            println!("ack query failed");
+                        Err(err) => {
+                            counter!("ack_status_request_failure", 1, "channel_id" => channel_id.clone(), "error" => err.to_string());
                         }
                     }
                 }
