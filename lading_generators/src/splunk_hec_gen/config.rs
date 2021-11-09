@@ -21,10 +21,11 @@ pub struct Config {
 /// Optional Splunk HEC indexer acknowledgements configuration
 #[derive(Deserialize, Debug)]
 pub struct AckConfig {
-    /// The time between queries to /services/collector/ack
-    pub ack_query_interval: u64,
-    /// The time an ackId can remain pending before assuming data was dropped
-    pub ack_timeout: u64,
+    /// The time in seconds between queries to /services/collector/ack
+    pub ack_query_interval_seconds: u64,
+    /// The time in seconds an ackId can remain pending before assuming data was
+    /// dropped
+    pub ack_timeout_seconds: u64,
 }
 
 /// The [`Target`] instance from which to derive workers

@@ -98,9 +98,11 @@ impl AckService {
     /// receives new ack ids from [`super::worker::Worker`]
     pub fn spawn_ack_task(&self, channel_id: String, mut ack_rx: Receiver<AckId>) {
         let mut ack_ids = HashMap::new();
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(self.ack_config.ack_query_interval));
-        let retries = self.ack_config.ack_timeout / self.ack_config.ack_query_interval;
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            self.ack_config.ack_query_interval_seconds,
+        ));
+        let retries =
+            self.ack_config.ack_timeout_seconds / self.ack_config.ack_query_interval_seconds;
         let client = self.client.clone();
         let token = self.token.clone();
         let ack_uri = self.ack_uri.clone();
