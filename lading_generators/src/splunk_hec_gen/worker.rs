@@ -1,13 +1,15 @@
-use std::{collections::{HashMap, HashSet}, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{num::NonZeroU32, sync::Arc};
 
 use byte_unit::{Byte, ByteUnit};
-use futures::{SinkExt, StreamExt, channel::mpsc::{self, Receiver, Sender}, stream};
+use futures::{SinkExt, StreamExt, stream};
 use governor::{Quota, RateLimiter, clock, state::{self, direct}};
 use http::{Method, Request, Uri, header::{AUTHORIZATION, CONTENT_LENGTH}};
 use hyper::{Body, Client, client::HttpConnector};
 use lading_common::{block::{Block, chunk_bytes, construct_block_cache}, payload};
 use metrics::{counter, gauge};
 use serde::Deserialize;
+
+use crate::splunk_hec_gen::acknowledgements::Channels;
 
 use super::config::{AckConfig, Target};
 
@@ -16,7 +18,6 @@ use super::config::{AckConfig, Target};
 pub struct Worker {
     uri: Uri,
     token: String,
-    name: String,
     parallel_connections: u16,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
@@ -91,7 +92,6 @@ impl Worker {
             uri: target.target_uri,
             token: target.token,
             block_cache,
-            name,
             rate_limiter,
             metric_labels: labels,
             ack_config: target.acknowledgements,
@@ -120,38 +120,19 @@ impl Worker {
         let token = self.token;
         let labels = self.metric_labels;
 
-        let mut channel_ids = Vec::new();
-        for i in 0..self.parallel_connections {
-            channel_ids.push(format!(
-                "{}-1111-1111-1111-111111111111",
-                10000000 as u32 + i as u32
-            ));
+        let mut channels = Channels::new(self.parallel_connections);
+        if let Some(ack_config) = self.ack_config {
+            let ack_uri = Uri::builder()
+                .authority(uri.authority().unwrap().to_string())
+                .scheme("http")
+                .path_and_query("/services/collector/ack")
+                .build()
+                .unwrap();
+            channels.enable_acknowledgements(ack_uri, token.clone(), ack_config).unwrap();
         }
 
-        let channel_id_to_ack_id_tx = if let Some(ack_config) = self.ack_config {
-            let mut channel_id_to_ack_id_tx: HashMap<String, Sender<u64>> = HashMap::new();
-            let ack_client: Client<HttpConnector, Body> = Client::builder()
-                .retry_canceled_requests(false)
-                .set_host(false)
-                .build_http();
-            for channel_id in channel_ids.clone() {
-                let (tx, rx) = mpsc::channel::<u64>(10000);
-                channel_id_to_ack_id_tx.insert(channel_id.clone(), tx);
-                spawn_ack_service(
-                    uri.clone(),
-                    token.clone(),
-                    channel_id.clone(),
-                    ack_client.clone(),
-                    &ack_config,
-                    rx,
-                );
-            }
-            Some(channel_id_to_ack_id_tx)
-        } else {
-            None
-        };
-
-        let mut channel_ids_cycle = channel_ids.iter().cycle();
+        let channel_info = channels.get_channel_info();
+        let mut channel_info= channel_info.iter().cycle();
         gauge!(
             "maximum_requests",
             f64::from(self.parallel_connections),
@@ -163,12 +144,11 @@ impl Worker {
                 let rate_limiter = Arc::clone(&rate_limiter);
                 let labels = labels.clone();
                 let uri = uri.clone();
-                let channel_id_to_ack_id_tx = channel_id_to_ack_id_tx.clone();
 
                 let total_bytes = blk.total_bytes;
                 let body = Body::from(blk.bytes.clone());
                 let block_length = blk.bytes.len();
-                let channel_id = channel_ids_cycle.next().unwrap();
+                let (channel_id, ack_id_tx) = channel_info.next().unwrap().to_owned();
 
                 let request: Request<Body> = Request::builder()
                     .method(Method::POST)
@@ -190,8 +170,7 @@ impl Worker {
                             status_labels
                                 .push(("status_code".to_string(), status.as_u16().to_string()));
                             counter!("request_ok", 1, &status_labels);
-                            if let Some(mut channel_id_to_ack_id_tx) = channel_id_to_ack_id_tx {
-                                let ack_tx = channel_id_to_ack_id_tx.get_mut(channel_id).unwrap();
+                            if let Some(mut ack_id_tx) = ack_id_tx {
                                 let body = String::from_utf8(
                                     hyper::body::to_bytes(response.into_body())
                                         .await
@@ -201,7 +180,7 @@ impl Worker {
                                 .unwrap();
                                 let hec_ack_response =
                                     serde_json::from_str::<HecAckResponse>(body.as_str()).unwrap();
-                                match ack_tx.send(hec_ack_response.ack_id).await {
+                                match ack_id_tx.send(hec_ack_response.ack_id).await {
                                     Ok(_) => {},
                                     Err(_) => {},
                                 }
@@ -219,65 +198,6 @@ impl Worker {
             .await;
         Ok(())
     }
-}
-
-fn spawn_ack_service(
-    uri: Uri,
-    token: String,
-    channel_id: String,
-    client: Client<HttpConnector, Body>,
-    ack_config: &AckConfig,
-    mut ack_rx: Receiver<u64>,
-) {
-    let ack_uri = Uri::builder()
-        .authority(uri.authority().unwrap().to_string())
-        .scheme("http")
-        .path_and_query("/services/collector/ack")
-        .build()
-        .unwrap();
-    let mut ack_ids = HashSet::new();
-    let mut interval = tokio::time::interval(Duration::from_secs(ack_config.ack_query_interval));
-    tokio::spawn(async move {
-        loop {
-            let new_ack_ids = ack_rx.by_ref().take_until(interval.tick()).collect::<Vec<_>>().await;
-            ack_ids.extend(new_ack_ids.into_iter());
-            if ack_ids.len() > 0 {
-                let body = Body::from(serde_json::json!({
-                    "acks": ack_ids
-                }).to_string());
-                let request: Request<Body> = Request::builder()
-                    .method(Method::POST)
-                    .uri(ack_uri.clone())
-                    .header(AUTHORIZATION, format!("Splunk {}", token))
-                    .header("x-splunk-request-channel", channel_id.clone())
-                    .body(body)
-                    .unwrap();
-                match client.request(request).await {
-                    Ok(response) => {
-                        // todo: check response code
-                        let body = 
-                            hyper::body::to_bytes(response.into_body())
-                                .await
-                                .unwrap()
-                                .to_vec();
-                        
-                        let ack_status= serde_json::from_slice::<HecAckStatusResponse>(body.as_slice()).unwrap();
-                        let acked_ack_ids = ack_status.acks.into_iter().filter_map(|(ack_id, acked)| if acked { Some(ack_id) } else { None }).collect::<HashSet<_>>();
-                        ack_ids = ack_ids.difference(&acked_ack_ids).map(|x| *x).collect::<HashSet<_>>();
-                    }
-                    Err(err) => {
-                        // todo: handle error sending request
-                        println!("ack query failed");
-                    }
-                }
-            }
-        }
-    });
-}
-
-#[derive(Deserialize, Debug)]
-struct HecAckStatusResponse {
-    acks: HashMap<u64, bool>,
 }
 
 #[derive(Deserialize, Debug)]
