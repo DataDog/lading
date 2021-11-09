@@ -68,7 +68,7 @@ impl Channels {
                 .ids
                 .keys()
                 .map(|channel_id| {
-                    let (tx, rx) = mpsc::channel::<AckId>(10000);
+                    let (tx, rx) = mpsc::channel::<AckId>(1000000);
                     ack_service.spawn_ack_task(channel_id.clone(), rx);
                     (channel_id.clone(), tx)
                 })
