@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "lading_blackholes"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "argh",
  "hyper",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "lading_common"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "arbitrary",
  "bytecount",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "lading_generators"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "argh",
  "byte-unit",
