@@ -8,7 +8,7 @@ mod acknowledgements;
 pub mod config;
 mod worker;
 
-const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &'static str = "/services/collector/ack";
-const SPLUNK_HEC_JSON_PATH: &'static str = "/services/collector/event";
-const SPLUNK_HEC_TEXT_PATH: &'static str = "/services/collector/raw";
-const SPLUNK_HEC_CHANNEL_HEADER: &'static str = "x-splunk-request-channel";
+const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
+const SPLUNK_HEC_JSON_PATH: &str = "/services/collector/event";
+const SPLUNK_HEC_TEXT_PATH: &str = "/services/collector/raw";
+const SPLUNK_HEC_CHANNEL_HEADER: &str = "x-splunk-request-channel";

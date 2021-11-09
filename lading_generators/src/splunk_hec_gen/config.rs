@@ -20,7 +20,7 @@ pub struct Config {
 
 /// Optional Splunk HEC indexer acknowledgements configuration
 #[derive(Deserialize, Debug)]
-pub struct AckConfig {
+pub struct AckSettings {
     /// The time in seconds between queries to /services/collector/ack
     pub ack_query_interval_seconds: u64,
     /// The time in seconds an ackId can remain pending before assuming data was
@@ -39,7 +39,7 @@ pub struct Target {
     /// Splunk HEC authentication token
     pub token: String,
     /// Splunk HEC indexer acknowledgements behavior options
-    pub acknowledgements: Option<AckConfig>,
+    pub acknowledgements: Option<AckSettings>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The bytes per second to send or receive from the target

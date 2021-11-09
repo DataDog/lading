@@ -24,7 +24,7 @@ use crate::splunk_hec_gen::{
 };
 
 use super::{
-    config::{AckConfig, Target},
+    config::{AckSettings, Target},
     SPLUNK_HEC_JSON_PATH, SPLUNK_HEC_TEXT_PATH,
 };
 
@@ -43,11 +43,11 @@ pub struct Worker {
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
-    ack_config: Option<AckConfig>,
+    ack_settings: Option<AckSettings>,
 }
 
 /// Derive the intended path from the format configuration
-/// https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
+// https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
 fn get_uri_by_format(base_uri: &Uri, format: &payload::SplunkHecEncoding) -> Uri {
     let path = match format {
         payload::SplunkHecEncoding::Text => SPLUNK_HEC_TEXT_PATH,
@@ -73,6 +73,7 @@ impl Worker {
     ///
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: Target) -> Result<Self, Error> {
         let mut rng = rand::thread_rng();
         let block_sizes: Vec<usize> = target
@@ -93,7 +94,7 @@ impl Worker {
         let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let labels = vec![
-            ("name".to_string(), name.clone()),
+            ("name".to_string(), name),
             ("target".to_string(), target.target_uri.to_string()),
         ];
         let uri = get_uri_by_format(&target.target_uri, &target.format);
@@ -115,7 +116,7 @@ impl Worker {
             block_cache,
             rate_limiter,
             metric_labels: labels,
-            ack_config: target.acknowledgements,
+            ack_settings: target.acknowledgements,
         })
     }
 
@@ -142,14 +143,14 @@ impl Worker {
         let labels = self.metric_labels;
 
         let mut channels = Channels::new(self.parallel_connections);
-        if let Some(ack_config) = self.ack_config {
+        if let Some(ack_settings) = self.ack_settings {
             let ack_uri = Uri::builder()
                 .authority(uri.authority().unwrap().to_string())
                 .scheme("http")
                 .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
                 .build()
                 .unwrap();
-            channels.enable_acknowledgements(ack_uri, token.clone(), ack_config)?;
+            channels.enable_acknowledgements(ack_uri, token.clone(), ack_settings)?;
         }
 
         let channel_info = channels.get_channel_info();

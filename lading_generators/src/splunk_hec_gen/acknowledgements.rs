@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::splunk_hec_gen::SPLUNK_HEC_CHANNEL_HEADER;
 
-use super::{config::AckConfig, worker::Error};
+use super::{config::AckSettings, worker::Error};
 
 type AckId = u64;
 
@@ -28,7 +28,7 @@ impl Channels {
         let ids = (0..num_channels)
             .map(|i| {
                 (
-                    format!("{}-1111-1111-1111-111111111111", 10000000u32 + i as u32),
+                    format!("{}-1111-1111-1111-111111111111", 10_000_000_u32 + u32::from(i)),
                     None,
                 )
             })
@@ -42,7 +42,7 @@ impl Channels {
     pub fn get_channel_info(&self) -> Vec<(String, Option<Sender<AckId>>)> {
         self.ids
             .iter()
-            .map(|(channel_id, ack_id_tx)| (channel_id.to_owned(), ack_id_tx.to_owned()))
+            .map(|(channel_id, ack_id_tx)| (channel_id.clone(), ack_id_tx.clone()))
             .collect()
     }
 
@@ -50,9 +50,11 @@ impl Channels {
         &mut self,
         ack_uri: Uri,
         token: String,
-        ack_config: AckConfig,
+        ack_settings: AckSettings,
     ) -> Result<(), Error> {
-        if !self.acks_enabled {
+        if self.acks_enabled {
+            Err(Error::AcksAlreadyEnabled)
+        } else {
             let client: Client<HttpConnector, Body> = Client::builder()
                 .retry_canceled_requests(false)
                 .set_host(false)
@@ -61,14 +63,14 @@ impl Channels {
                 ack_uri,
                 token,
                 client,
-                ack_config,
+                ack_settings,
             };
 
             let channel_id_to_ack_id_tx = self
                 .ids
                 .keys()
                 .map(|channel_id| {
-                    let (tx, rx) = mpsc::channel::<AckId>(1000000);
+                    let (tx, rx) = mpsc::channel::<AckId>(1_000_000);
                     ack_service.spawn_ack_task(channel_id.clone(), rx);
                     (channel_id.clone(), tx)
                 })
@@ -79,8 +81,6 @@ impl Channels {
 
             self.acks_enabled = true;
             Ok(())
-        } else {
-            Err(Error::AcksAlreadyEnabled)
         }
     }
 }
@@ -89,7 +89,7 @@ struct AckService {
     pub ack_uri: Uri,
     pub token: String,
     pub client: Client<HttpConnector, Body>,
-    pub ack_config: AckConfig,
+    pub ack_settings: AckSettings,
 }
 
 impl AckService {
@@ -99,10 +99,10 @@ impl AckService {
     pub fn spawn_ack_task(&self, channel_id: String, mut ack_rx: Receiver<AckId>) {
         let mut ack_ids = HashMap::new();
         let mut interval = tokio::time::interval(Duration::from_secs(
-            self.ack_config.ack_query_interval_seconds,
+            self.ack_settings.ack_query_interval_seconds,
         ));
         let retries =
-            self.ack_config.ack_timeout_seconds / self.ack_config.ack_query_interval_seconds;
+            self.ack_settings.ack_timeout_seconds / self.ack_settings.ack_query_interval_seconds;
         let client = self.client.clone();
         let token = self.token.clone();
         let ack_uri = self.ack_uri.clone();
@@ -116,7 +116,7 @@ impl AckService {
                     .await;
                 ack_ids.extend(new_ack_ids);
 
-                if ack_ids.len() > 0 {
+                if !ack_ids.is_empty() {
                     let body = Body::from(
                         serde_json::json!({ "acks": ack_ids.keys().collect::<Vec<&u64>>() })
                             .to_string(),
@@ -154,7 +154,7 @@ impl AckService {
                                 // For all remaining ack ids, decrement the retries count,
                                 // removing ack ids with no retries left
                                 let mut timed_out_ack_ids = Vec::new();
-                                for (ack_id, retries) in ack_ids.iter_mut() {
+                                for (ack_id, retries) in &mut ack_ids {
                                     *retries -= 1;
                                     if retries <= &mut 0 {
                                         timed_out_ack_ids.push(*ack_id);
