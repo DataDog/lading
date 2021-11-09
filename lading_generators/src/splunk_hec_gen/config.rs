@@ -33,7 +33,7 @@ pub struct Target {
     /// The URI for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
-    /// Format used when submitting event data to Splunk HEC 
+    /// Format used when submitting event data to Splunk HEC
     pub format: SplunkHecEncoding,
     /// Splunk HEC authentication token
     pub token: String,

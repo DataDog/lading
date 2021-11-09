@@ -4,9 +4,9 @@
 //! not considered useful otherwise.
 
 pub use worker::Worker;
+mod acknowledgements;
 pub mod config;
 mod worker;
-mod acknowledgements;
 
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &'static str = "/services/collector/ack";
 const SPLUNK_HEC_JSON_PATH: &'static str = "/services/collector/event";

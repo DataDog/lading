@@ -19,9 +19,14 @@ use lading_common::{
 use metrics::{counter, gauge};
 use serde::Deserialize;
 
-use crate::splunk_hec_gen::{SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH, SPLUNK_HEC_CHANNEL_HEADER, acknowledgements::Channels};
+use crate::splunk_hec_gen::{
+    acknowledgements::Channels, SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH, SPLUNK_HEC_CHANNEL_HEADER,
+};
 
-use super::{SPLUNK_HEC_JSON_PATH, SPLUNK_HEC_TEXT_PATH, config::{AckConfig, Target}};
+use super::{
+    config::{AckConfig, Target},
+    SPLUNK_HEC_JSON_PATH, SPLUNK_HEC_TEXT_PATH,
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -97,8 +102,11 @@ impl Worker {
             target.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
             &block_sizes,
         );
-        let block_cache =
-            construct_block_cache(&payload::SplunkHec::new(target.format), &block_chunks, &labels);
+        let block_cache = construct_block_cache(
+            &payload::SplunkHec::new(target.format),
+            &block_chunks,
+            &labels,
+        );
 
         Ok(Self {
             parallel_connections: target.parallel_connections,
@@ -208,7 +216,6 @@ impl Worker {
             .await;
         Ok(())
     }
-
 }
 
 #[derive(Deserialize, Debug)]
