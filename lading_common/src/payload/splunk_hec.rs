@@ -2,7 +2,7 @@ use crate::payload::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
-use std::collections::HashSet;
+use serde::Deserialize;
 use std::io::Write;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
@@ -140,7 +140,8 @@ impl<'a> Arbitrary<'a> for Member {
     }
 }
 
-#[derive(Debug)]
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum Encoding {
     Text,
     Json,
@@ -197,20 +198,6 @@ impl Serialize for SplunkHec {
             }
         }
         Ok(())
-    }
-}
-
-#[derive(serde::Serialize)]
-pub struct SplunkHecAckQuery {
-    acks: HashSet<u64>
-}
-
-impl SplunkHecAckQuery {
-    pub fn new_ack_body(acks: HashSet<u64>) -> String {
-        let ack_query = SplunkHecAckQuery {
-            acks
-        };
-        serde_json::to_string(&ack_query).unwrap()
     }
 }
 

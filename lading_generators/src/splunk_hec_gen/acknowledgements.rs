@@ -9,6 +9,8 @@ use hyper::{client::HttpConnector, Body, Client};
 use metrics::counter;
 use serde::Deserialize;
 
+use crate::splunk_hec_gen::SPLUNK_HEC_CHANNEL_HEADER;
+
 use super::{config::AckConfig, worker::Error};
 
 type AckId = u64;
@@ -107,12 +109,15 @@ impl AckService {
                 ack_ids.extend(new_ack_ids);
 
                 if ack_ids.len() > 0 {
-                    let body = Body::from(serde_json::json!({ "acks": ack_ids.keys().collect::<Vec<&u64>>() }).to_string());
+                    let body = Body::from(
+                        serde_json::json!({ "acks": ack_ids.keys().collect::<Vec<&u64>>() })
+                            .to_string(),
+                    );
                     let request: Request<Body> = Request::builder()
                         .method(Method::POST)
                         .uri(ack_uri.clone())
                         .header(AUTHORIZATION, format!("Splunk {}", token))
-                        .header("x-splunk-request-channel", channel_id.clone())
+                        .header(SPLUNK_HEC_CHANNEL_HEADER, channel_id.clone())
                         .body(body)
                         .unwrap();
 
@@ -135,9 +140,12 @@ impl AckService {
                                     )
                                     .collect::<Vec<_>>();
 
+                                // Remove successfully acked ack ids
                                 for acked_ack_id in acked_ack_ids {
                                     ack_ids.remove(&acked_ack_id);
                                 }
+                                // For all remaining ack ids, decrement the retries count,
+                                // removing ack ids with no retries left
                                 let mut timed_out_ack_ids = Vec::new();
                                 for (ack_id, retries) in ack_ids.iter_mut() {
                                     *retries -= 1;

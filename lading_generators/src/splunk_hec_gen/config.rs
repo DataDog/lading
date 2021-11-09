@@ -4,6 +4,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use http::Uri;
+use lading_common::payload::SplunkHecEncoding;
 use serde::Deserialize;
 
 /// Main configuration struct for this program
@@ -32,9 +33,11 @@ pub struct Target {
     /// The URI for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
+    /// Format used when submitting event data to Splunk HEC 
+    pub format: SplunkHecEncoding,
     /// Splunk HEC authentication token
     pub token: String,
-    /// Indexer acknowledgements behavior options
+    /// Splunk HEC indexer acknowledgements behavior options
     pub acknowledgements: Option<AckConfig>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,

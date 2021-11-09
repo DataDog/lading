@@ -1,17 +1,33 @@
 use std::{num::NonZeroU32, sync::Arc};
 
 use byte_unit::{Byte, ByteUnit};
-use futures::{StreamExt, stream};
-use governor::{Quota, RateLimiter, clock, state::{self, direct}};
-use http::{Method, Request, Uri, header::{AUTHORIZATION, CONTENT_LENGTH}};
-use hyper::{Body, Client, client::HttpConnector};
-use lading_common::{block::{Block, chunk_bytes, construct_block_cache}, payload};
+use futures::{stream, StreamExt};
+use governor::{
+    clock,
+    state::{self, direct},
+    Quota, RateLimiter,
+};
+use http::{
+    header::{AUTHORIZATION, CONTENT_LENGTH},
+    Method, Request, Uri,
+};
+use hyper::{client::HttpConnector, Body, Client};
+use lading_common::{
+    block::{chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use metrics::{counter, gauge};
 use serde::Deserialize;
 
-use crate::splunk_hec_gen::acknowledgements::Channels;
+use crate::splunk_hec_gen::{SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH, SPLUNK_HEC_CHANNEL_HEADER, acknowledgements::Channels};
 
-use super::config::{AckConfig, Target};
+use super::{SPLUNK_HEC_JSON_PATH, SPLUNK_HEC_TEXT_PATH, config::{AckConfig, Target}};
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidHECPath,
+    AcksAlreadyEnabled,
+}
 
 /// The [`Worker`] defines a task that emits variant lines to a Splunk HEC server
 /// controlling throughput.
@@ -25,24 +41,20 @@ pub struct Worker {
     ack_config: Option<AckConfig>,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    InvalidHECPath,
-    AcksAlreadyEnabled,
-}
-
-/// Derive the intended encoding based on the URI path
+/// Derive the intended path from the format configuration
 /// https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_encoding_from_uri(uri: &Uri) -> Result<payload::Encoding, Error> {
-    let endpoint = uri.path_and_query().expect("Missing HEC path");
-    let path = endpoint.path();
-    if path == "/services/collector/event" || path == "/services/collector/event/1.0" {
-        Ok(payload::Encoding::Json)
-    } else if path == "/services/collector/raw" || path == "/services/collector/raw/1.0" {
-        Ok(payload::Encoding::Text)
-    } else {
-        Err(Error::InvalidHECPath)
-    }
+fn get_uri_by_format(base_uri: &Uri, format: &payload::SplunkHecEncoding) -> Uri {
+    let path = match format {
+        payload::SplunkHecEncoding::Text => SPLUNK_HEC_TEXT_PATH,
+        payload::SplunkHecEncoding::Json => SPLUNK_HEC_JSON_PATH,
+    };
+
+    Uri::builder()
+        .authority(base_uri.authority().unwrap().to_string())
+        .scheme("http")
+        .path_and_query(path)
+        .build()
+        .unwrap()
 }
 
 impl Worker {
@@ -79,18 +91,18 @@ impl Worker {
             ("name".to_string(), name.clone()),
             ("target".to_string(), target.target_uri.to_string()),
         ];
-        let encoding = get_encoding_from_uri(&target.target_uri)?;
+        let uri = get_uri_by_format(&target.target_uri, &target.format);
         let block_chunks = chunk_bytes(
             &mut rng,
             target.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
             &block_sizes,
         );
         let block_cache =
-            construct_block_cache(&payload::SplunkHec::new(encoding), &block_chunks, &labels);
+            construct_block_cache(&payload::SplunkHec::new(target.format), &block_chunks, &labels);
 
         Ok(Self {
             parallel_connections: target.parallel_connections,
-            uri: target.target_uri,
+            uri,
             token: target.token,
             block_cache,
             rate_limiter,
@@ -126,14 +138,14 @@ impl Worker {
             let ack_uri = Uri::builder()
                 .authority(uri.authority().unwrap().to_string())
                 .scheme("http")
-                .path_and_query("/services/collector/ack")
+                .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
                 .build()
                 .unwrap();
             channels.enable_acknowledgements(ack_uri, token.clone(), ack_config)?;
         }
 
         let channel_info = channels.get_channel_info();
-        let mut channel_info= channel_info.iter().cycle();
+        let mut channel_info = channel_info.iter().cycle();
         gauge!(
             "maximum_requests",
             f64::from(self.parallel_connections),
@@ -156,7 +168,7 @@ impl Worker {
                     .uri(uri)
                     .header(AUTHORIZATION, format!("Splunk {}", token))
                     .header(CONTENT_LENGTH, block_length)
-                    .header("x-splunk-request-channel", channel_id)
+                    .header(SPLUNK_HEC_CHANNEL_HEADER, channel_id)
                     .body(body)
                     .unwrap();
 
@@ -196,6 +208,7 @@ impl Worker {
             .await;
         Ok(())
     }
+
 }
 
 #[derive(Deserialize, Debug)]

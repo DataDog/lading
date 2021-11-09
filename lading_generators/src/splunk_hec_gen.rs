@@ -7,3 +7,8 @@ pub use worker::Worker;
 pub mod config;
 mod worker;
 mod acknowledgements;
+
+const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &'static str = "/services/collector/ack";
+const SPLUNK_HEC_JSON_PATH: &'static str = "/services/collector/event";
+const SPLUNK_HEC_TEXT_PATH: &'static str = "/services/collector/raw";
+const SPLUNK_HEC_CHANNEL_HEADER: &'static str = "x-splunk-request-channel";
