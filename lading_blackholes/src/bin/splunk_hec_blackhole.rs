@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fs::read_to_string, net::SocketAddr, sync::atomic::{AtomicU64, Ordering}, time::Duration};
+use std::{
+    collections::HashMap,
+    fs::read_to_string,
+    net::SocketAddr,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use argh::FromArgs;
 use hyper::{
@@ -8,12 +14,10 @@ use hyper::{
     Body, Method, Request, Response, Server, StatusCode,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Builder;
 use tower::ServiceBuilder;
 
-const RESPONSE: OnceCell<Vec<u8>> = OnceCell::new();
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
 fn default_concurrent_requests_max() -> usize {
@@ -69,7 +73,11 @@ struct HecAckResponse {
 
 impl From<HecAckRequest> for HecAckResponse {
     fn from(ack_request: HecAckRequest) -> Self {
-        let acks = ack_request.acks.into_iter().map(|ack_id| (ack_id, true)).collect();
+        let acks = ack_request
+            .acks
+            .into_iter()
+            .map(|ack_id| (ack_id, true))
+            .collect();
         HecAckResponse { acks }
     }
 }
@@ -102,13 +110,12 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         (Method::POST, "/services/collector/ack") => {
             match serde_json::from_slice::<HecAckRequest>(&bytes) {
                 Ok(ack_request) => {
-                    let body_bytes = serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
+                    let body_bytes =
+                        serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
                     *okay.body_mut() = Body::from(body_bytes);
-                },
+                }
                 Err(_) => {
                     *okay.status_mut() = StatusCode::BAD_REQUEST;
-                    let body_bytes = RESPONSE.get_or_init(|| vec![]).clone();
-                    *okay.body_mut() = Body::from(body_bytes);
                 }
             }
         }
@@ -124,13 +131,11 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
                 text: "Success",
                 code: 0,
                 ack_id,
-            }).unwrap();
+            })
+            .unwrap();
             *okay.body_mut() = Body::from(body_bytes);
         }
-        _ => {
-            let body_bytes = RESPONSE.get_or_init(|| vec![]).clone();
-            *okay.body_mut() = Body::from(body_bytes);
-        }
+        _ => {}
     }
 
     Ok(okay)
