@@ -40,8 +40,10 @@ jobs:
           target/release/http_gen
           target/release/kafka_gen
           target/release/tcp_gen
+          target/release/splunk_hec_gen
           target/release/http_blackhole
           target/release/udp_blackhole
+          target/release/splunk_hec_blackhole
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
