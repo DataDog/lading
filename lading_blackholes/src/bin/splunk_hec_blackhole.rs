@@ -107,18 +107,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     );
 
     match (parts.method, parts.uri.path()) {
-        (Method::POST, "/services/collector/ack") => {
-            match serde_json::from_slice::<HecAckRequest>(&bytes) {
-                Ok(ack_request) => {
-                    let body_bytes =
-                        serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
-                    *okay.body_mut() = Body::from(body_bytes);
-                }
-                Err(_) => {
-                    *okay.status_mut() = StatusCode::BAD_REQUEST;
-                }
-            }
-        }
+        // Path for submitting event data
         (
             Method::POST,
             "/services/collector/event"
@@ -134,6 +123,19 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
             })
             .unwrap();
             *okay.body_mut() = Body::from(body_bytes);
+        }
+        // Path for querying indexer acknowledgements
+        (Method::POST, "/services/collector/ack") => {
+            match serde_json::from_slice::<HecAckRequest>(&bytes) {
+                Ok(ack_request) => {
+                    let body_bytes =
+                        serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
+                    *okay.body_mut() = Body::from(body_bytes);
+                }
+                Err(_) => {
+                    *okay.status_mut() = StatusCode::BAD_REQUEST;
+                }
+            }
         }
         _ => {}
     }
@@ -155,9 +157,8 @@ impl SplunkHecServer {
             .install()
             .unwrap();
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request| srv(request)))
-        });
+        let service =
+            make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
         let svc = ServiceBuilder::new()
             .load_shed()
             .concurrency_limit(concurrency_limit)
