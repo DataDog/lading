@@ -91,7 +91,6 @@ struct HecResponse {
     ack_id: u64,
 }
 
-#[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
