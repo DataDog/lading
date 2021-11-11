@@ -14,6 +14,8 @@ tower = { version = "0.4", default-features = false, features = ["timeout", "lim
 metrics = { version = "0.17", default-features = false, features = ["std"] }
 metrics-exporter-prometheus = { version = "0.6", default-features = false, features = ["tokio-exporter"] }
 toml = "0.5"
+serde_qs = "0.8.5"
+rand = "0.8.4"
 
 [dependencies.argh]
 version = "0.1"
@@ -49,3 +51,6 @@ name = "udp_blackhole"
 
 [[bin]]
 name = "http_blackhole"
+
+[[bin]]
+name = "sqs_blackhole"
