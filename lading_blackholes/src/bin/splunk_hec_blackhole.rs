@@ -25,7 +25,7 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 fn default_config_path() -> String {
-    "/etc/lading/splunk_hec_blackhole.toml".to_string()
+    "/etc/lading/splunk_hec_blackhole.yaml".to_string()
 }
 
 #[derive(FromArgs)]

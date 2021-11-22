@@ -14,7 +14,7 @@ use tokio::time::Duration;
 use tower::ServiceBuilder;
 
 fn default_config_path() -> String {
-    "/etc/lading/sqs_blackhole.toml".to_string()
+    "/etc/lading/sqs_blackhole.yaml".to_string()
 }
 
 fn default_concurrent_requests_max() -> usize {

@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use tokio::runtime::Builder;
 
 fn default_config_path() -> String {
-    "/etc/lading/http_gen.toml".to_string()
+    "/etc/lading/http_gen.yaml".to_string()
 }
 
 #[derive(FromArgs)]

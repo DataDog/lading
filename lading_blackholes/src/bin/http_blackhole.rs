@@ -22,7 +22,7 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 fn default_config_path() -> String {
-    "/etc/lading/http_blackhole.toml".to_string()
+    "/etc/lading/http_blackhole.yaml".to_string()
 }
 
 #[derive(Debug, Copy, Clone, Deserialize)]

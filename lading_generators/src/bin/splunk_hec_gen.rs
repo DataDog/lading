@@ -10,7 +10,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::runtime::Builder;
 
 fn default_config_path() -> String {
-    "/etc/lading/splunk_hec_gen.toml".to_string()
+    "/etc/lading/splunk_hec_gen.yaml".to_string()
 }
 
 #[derive(FromArgs, Debug)]
