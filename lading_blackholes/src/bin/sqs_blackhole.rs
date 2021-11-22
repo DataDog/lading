@@ -73,9 +73,8 @@ impl HttpServer {
             .install()
             .unwrap();
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request| srv(request)))
-        });
+        let service =
+            make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
         let svc = ServiceBuilder::new()
             .load_shed()
             .concurrency_limit(concurrency_limit)
