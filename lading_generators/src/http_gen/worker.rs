@@ -133,7 +133,11 @@ impl Worker {
                         &block_chunks,
                         &labels,
                     ),
-                    Variant::Static { .. } => unimplemented!(),
+                    Variant::Static { static_path } => construct_block_cache(
+                        &payload::Static::new(&static_path),
+                        &block_chunks,
+                        &labels,
+                    ),
                 };
 
                 Ok(Self {
@@ -217,6 +221,6 @@ impl Worker {
                 }
             })
             .await;
-        unimplemented!()
+        unreachable!()
     }
 }
