@@ -3,7 +3,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use lading_generators::file_gen::config::{Config, LogTargetTemplate};
 use lading_generators::file_gen::Log;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::SocketAddr;
@@ -32,9 +31,9 @@ async fn run(addr: SocketAddr, targets: HashMap<String, LogTargetTemplate>) {
 
     let mut workers = FuturesUnordered::new();
 
-    targets.into_par_iter().for_each(|(name, template)| {
+    targets.into_iter().for_each(|(name, template)| {
         (0..template.duplicates)
-            .into_par_iter()
+            .into_iter()
             .map(|duplicate| {
                 let tgt_name = format!("{}[{}]", name.clone(), duplicate);
                 let tgt = template.strike(duplicate);
@@ -58,7 +57,7 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
+    serde_yaml::from_str(&contents).unwrap()
 }
 
 fn main() {

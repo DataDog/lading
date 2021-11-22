@@ -1,7 +1,7 @@
 [package]
 name = "lading_generators"
 readme = "README.md"
-version = "0.5.3"
+version = "0.6.0"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2018"
 license = "MIT"
@@ -12,8 +12,7 @@ description = "Generating programs with stable throughput."
 
 [dependencies]
 lading_common = { path = "../lading_common" }
-rayon = "1.5"
-toml = "0.5"
+serde_yaml = "0.8"
 
 [dependencies.argh]
 version = "0.1"

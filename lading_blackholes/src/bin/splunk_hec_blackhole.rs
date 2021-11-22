@@ -53,7 +53,7 @@ struct Config {
 fn get_config() -> Config {
     let opts = argh::from_env::<Opts>();
     let contents = read_to_string(&opts.config_path).unwrap();
-    toml::from_str::<Config>(&contents).unwrap()
+    serde_yaml::from_str::<Config>(&contents).unwrap()
 }
 
 struct SplunkHecServer {

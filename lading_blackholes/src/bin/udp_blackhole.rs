@@ -65,7 +65,7 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
+    serde_yaml::from_str(&contents).unwrap()
 }
 
 fn main() {
