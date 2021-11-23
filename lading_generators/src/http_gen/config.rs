@@ -18,7 +18,7 @@ pub struct Config {
 
 /// The HTTP method to be used in requests
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 pub enum Method {
     /// Make HTTP Post requests
     Post {
@@ -31,6 +31,7 @@ pub enum Method {
 
 /// Variant of the [`TargetTemplate`]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Variant {
     /// Generates Splunk HEC messages
     SplunkHec,

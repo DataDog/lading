@@ -10,7 +10,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::runtime::Builder;
 
 fn default_config_path() -> String {
-    "/etc/lading/splunk_hec_gen.toml".to_string()
+    "/etc/lading/splunk_hec_gen.yaml".to_string()
 }
 
 #[derive(FromArgs, Debug)]
@@ -23,7 +23,7 @@ struct Opts {
 fn get_config() -> Config {
     let opts = argh::from_env::<Opts>();
     let contents = read_to_string(&opts.config_path).unwrap();
-    toml::from_str::<Config>(&contents).unwrap()
+    serde_yaml::from_str::<Config>(&contents).unwrap()
 }
 
 async fn run(addr: SocketAddr, targets: HashMap<String, Target>) {

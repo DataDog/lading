@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use tokio::runtime::Builder;
 
 fn default_config_path() -> String {
-    "/etc/lading/kafka_gen.toml".to_string()
+    "/etc/lading/kafka_gen.yaml".to_string()
 }
 
 #[derive(FromArgs)]
@@ -48,7 +48,7 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
+    serde_yaml::from_str(&contents).unwrap()
 }
 
 fn main() {

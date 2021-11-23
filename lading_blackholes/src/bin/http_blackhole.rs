@@ -22,7 +22,7 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 fn default_config_path() -> String {
-    "/etc/lading/http_blackhole.toml".to_string()
+    "/etc/lading/http_blackhole.yaml".to_string()
 }
 
 #[derive(Debug, Copy, Clone, Deserialize)]
@@ -77,7 +77,7 @@ struct HttpServer {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 struct KinesisPutRecordBatchResponseEntry {
     error_code: Option<String>,
     error_message: Option<String>,
@@ -85,7 +85,7 @@ struct KinesisPutRecordBatchResponseEntry {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 struct KinesisPutRecordBatchResponse {
     encrypted: Option<bool>,
     failed_put_count: u32,
@@ -177,7 +177,7 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
+    serde_yaml::from_str(&contents).unwrap()
 }
 
 fn main() {

@@ -9,7 +9,7 @@ use tokio::net::UdpSocket;
 use tokio::runtime::Builder;
 
 fn default_config_path() -> String {
-    "/etc/lading/udp_blackhole.toml".to_string()
+    "/etc/lading/udp_blackhole.yaml".to_string()
 }
 
 #[derive(FromArgs)]
@@ -65,7 +65,7 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    toml::from_str(&contents).unwrap()
+    serde_yaml::from_str(&contents).unwrap()
 }
 
 fn main() {

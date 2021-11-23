@@ -27,28 +27,29 @@ This program is primarily configured through its config file. Here is an
 example:
 
 ```
-worker_threads = 3
+worker_threads: 3
 
-[targets.bar]
-path_template = "/tmp/data/file_gen/%NNN%-bar.log"
-duplicates = 1
-variant = "Ascii"
-maximum_bytes_per_file = "4 Gb"
-bytes_per_second = "50 Mb"
-maximum_prebuild_cache_size_bytes = "3 Gb"
+targets:
+  bar:
+    path_template: "/tmp/data/file_gen/%NNN%-bar.log"
+    duplicates: 1
+    variant: "Ascii"
+    maximum_bytes_per_file: "4 Gb"
+    bytes_per_second: "50 Mb"
+    maximum_prebuild_cache_size_bytes: "3 Gb"
 
-[targets.foo]
-path_template = "/tmp/data/file_gen/%NNN%-foo.log"
-duplicates = 2
-variant = "Json"
-maximum_bytes_per_file = "4 Gb"
-bytes_per_second = "1 Gb"
-maximum_prebuild_cache_size_bytes = "2 Gb"
+  foo:
+    path_template: "/tmp/data/file_gen/%NNN%-foo.log"
+    duplicates: 2
+    variant: "Json"
+    maximum_bytes_per_file: "4 Gb"
+    bytes_per_second: "1 Gb"
+    maximum_prebuild_cache_size_bytes: "2 Gb"
 ```
 
 This configuration will create two total targets 'foo' and 'bar'. Each
 target will produce a different line variant at a distinct tempo. Please see
-[`example.toml`](./example.toml) for more details about the various options.
+[`example.yaml`](./example.yaml) for more details about the various options.
 
 ### Telemetry
 
@@ -86,19 +87,20 @@ This program is primarily configured through its config file. Here is an
 example:
 
 ```
-worker_threads = 10
-prometheus_addr = "0.0.0.0:9001"
+worker_threads: 10
+prometheus_addr: "0.0.0.0:9001"
 
-[targets.simple]
-target_uri = "http://localhost:8282/v1/input"
-bytes_per_second = "500 Mb"
-parallel_connections = 100
-method.type = "Post"
-method.variant = "DatadogLog"
-method.maximum_prebuild_cache_size_bytes = "500 Mb"
-
-[targets.simple.headers]
-dd-api-key = "deadbeef"
+targets:
+  simple:
+    headers:
+      dd-api-key: "deadbeef"
+    target_uri: "http://localhost:8282/v1/input"
+    bytes_per_second: "500 Mb"
+    parallel_connections: 100
+    method:
+      post:
+        variant = "DatadogLog"
+        maximum_prebuild_cache_size_bytes = "500 Mb"
 ```
 
 This creates a single target 'simple' that emits datadog log agent payloads to
@@ -131,20 +133,20 @@ This program is primarily configured through its config file. Here is an
 example:
 
 ```
-worker_threads = 10
-prometheus_addr = "0.0.0.0:9001"
+worker_threads: 10
+prometheus_addr: "0.0.0.0:9001"
 
-[targets.simple]
-target_uri = "http://localhost:8088/"
-token = "abcd1234"
-format = "json"
-bytes_per_second = "500 Mb"
-parallel_connections = 100
-maximum_prebuild_cache_size_bytes = "500 Mb"
-
-[targets.simple.acknowledgements]
-ack_query_interval_seconds = 10
-ack_timeout_seconds = 300
+targets:
+  simple:
+    target_uri = "http://localhost:8088/"
+    token = "abcd1234"
+    format = "json"
+    bytes_per_second = "500 Mb"
+    parallel_connections = 100
+    maximum_prebuild_cache_size_bytes = "500 Mb"
+    acknowledgements:
+      ack_query_interval_seconds = 10
+      ack_timeout_seconds = 300
 ```
 
 This creates a single target 'simple' that emits Splunk HEC payloads in JSON

@@ -17,6 +17,7 @@ pub struct Config {
 
 /// Variant of the [`Target`]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Variant {
     /// Generates Fluent messages
     Fluent,

@@ -17,7 +17,7 @@ pub struct Config {
 
 /// The throughput configuration
 #[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 pub enum Throughput {
     /// The producer should run as fast as possible.
     Unlimited,
@@ -35,6 +35,7 @@ pub enum Throughput {
 
 /// Variant of the [`TargetTemplate`]
 #[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Variant {
     /// Generates Datadog Logs JSON messages
     DatadogLog,
