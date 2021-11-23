@@ -2,58 +2,25 @@ name: Release
 
 on:
   push:
-    tags:
-      - '*'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  publish:
-    name: Publish for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        name: [linux]
-
-        include:
-          - os: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v1
-
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-
-    - name: Build
-      run: cargo build --release --locked
-
-    - name: Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: |
-          target/release/file_gen
-          target/release/http_gen
-          target/release/kafka_gen
-          target/release/tcp_gen
-          target/release/splunk_hec_gen
-          target/release/http_blackhole
-          target/release/udp_blackhole
-          target/release/splunk_hec_blackhole
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-and-push-image:
+  container:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
+      - uses: actions/checkout@v2.3.5
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
       - name: Log in to the Container registry
         uses: docker/login-action@v1
         with:
@@ -65,11 +32,17 @@ jobs:
         uses: docker/metadata-action@v3
         id: meta
         with:
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
         with:
+          builder: ${{ steps.buildx.outputs.name }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha, scope=${{ github.workflow }}
+          cache-to: type=gha, scope=${{ github.workflow }}
