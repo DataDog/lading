@@ -82,6 +82,9 @@ impl Worker {
             Variant::Fluent => {
                 construct_block_cache(&payload::Fluent::default(), &block_chunks, &labels)
             }
+            Variant::Static { ref static_path } => {
+                construct_block_cache(&payload::Static::new(&static_path), &block_chunks, &labels)
+            }
         };
 
         let addr = target

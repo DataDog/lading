@@ -2,7 +2,7 @@
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
 use serde::Deserialize;
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
@@ -23,6 +23,12 @@ pub enum Variant {
     Fluent,
     /// Generates syslog5424 messages
     Syslog5424,
+    /// Generates a static, user supplied data
+    Static {
+        /// Defines the file path to read static variant data from. Content is
+        /// assumed to be line-oriented but no other claim is made on the file.
+        static_path: PathBuf,
+    },
 }
 
 /// The [`Target`] instance from which to derive workers
