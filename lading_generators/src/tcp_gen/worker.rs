@@ -103,27 +103,34 @@ impl Worker {
     ///
     /// # Errors
     ///
-    /// TODO
+    /// Function will return an error when the TCP socket cannot be written to.
     ///
     /// # Panics
     ///
-    /// Function will panic if it is unable to create HTTP requests for the
-    /// target.
+    /// Function will panic if underlying byte capacity is not available.
+    ///
     pub async fn spin(self) -> Result<(), Error> {
         let mut client: TcpStream = TcpStream::connect(self.addr).await.unwrap();
+        let labels = self.metric_labels;
 
         for blk in self.block_cache.iter().cycle() {
             self.rate_limiter
                 .until_n_ready(blk.total_bytes)
                 .await
                 .unwrap();
-            client.write_all(&blk.bytes).await.unwrap();
-            counter!(
-                "bytes_written",
-                u64::from(blk.total_bytes.get()),
-                &self.metric_labels
-            );
+            let block_length = blk.bytes.len();
+            match client.write_all(&blk.bytes).await {
+                Ok(()) => {
+                    counter!("bytes_written", u64::from(blk.total_bytes.get()), &labels);
+                }
+                Err(err) => {
+                    let mut error_labels = labels.clone();
+                    error_labels.push(("error".to_string(), err.to_string()));
+                    error_labels.push(("body_size".to_string(), block_length.to_string()));
+                    counter!("request_failure", 1, &error_labels);
+                }
+            }
         }
-        unreachable!()
+        Ok(())
     }
 }
