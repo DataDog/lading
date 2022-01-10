@@ -28,6 +28,8 @@ pub enum Variant {
 /// The [`Target`] instance from which to derive workers
 #[derive(Debug, Deserialize)]
 pub struct Target {
+    /// The seed for random operations against this target
+    pub seed: [u8; 32],
     /// The address for the target, must be a valid SocketAddr
     pub addr: String,
     /// The payload variant

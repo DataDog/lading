@@ -5,6 +5,7 @@ use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::counter;
+use rand::{prelude::StdRng, SeedableRng};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroU32;
 use tokio::io::AsyncWriteExt;
@@ -45,7 +46,7 @@ impl Worker {
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: &Target) -> Result<Self, Error> {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::from_seed(target.seed);
         let block_sizes: Vec<usize> = target
             .block_sizes
             .clone()
@@ -76,12 +77,18 @@ impl Worker {
             &block_sizes,
         );
         let block_cache = match target.variant {
-            Variant::Syslog5424 => {
-                construct_block_cache(&payload::Syslog5424::default(), &block_chunks, &labels)
-            }
-            Variant::Fluent => {
-                construct_block_cache(&payload::Fluent::default(), &block_chunks, &labels)
-            }
+            Variant::Syslog5424 => construct_block_cache(
+                &mut rng,
+                &payload::Syslog5424::default(),
+                &block_chunks,
+                &labels,
+            ),
+            Variant::Fluent => construct_block_cache(
+                &mut rng,
+                &payload::Fluent::default(),
+                &block_chunks,
+                &labels,
+            ),
         };
 
         let addr = target

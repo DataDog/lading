@@ -10,6 +10,8 @@ use hyper::{Body, Request, Uri};
 use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::{counter, gauge};
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -79,7 +81,7 @@ impl Worker {
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: Target) -> Result<Self, Error> {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::from_seed(target.seed);
         let block_sizes: Vec<usize> = target
             .block_sizes
             .unwrap_or_else(|| {
@@ -112,28 +114,38 @@ impl Worker {
                     &block_sizes,
                 );
                 let block_cache = match variant {
-                    Variant::Ascii => {
-                        construct_block_cache(&payload::Ascii::default(), &block_chunks, &labels)
-                    }
+                    Variant::Ascii => construct_block_cache(
+                        &mut rng,
+                        &payload::Ascii::default(),
+                        &block_chunks,
+                        &labels,
+                    ),
                     Variant::SplunkHec => construct_block_cache(
+                        &mut rng,
                         &payload::SplunkHec::default(),
                         &block_chunks,
                         &labels,
                     ),
                     Variant::DatadogLog => construct_block_cache(
+                        &mut rng,
                         &payload::DatadogLog::default(),
                         &block_chunks,
                         &labels,
                     ),
-                    Variant::Json => {
-                        construct_block_cache(&payload::Json::default(), &block_chunks, &labels)
-                    }
+                    Variant::Json => construct_block_cache(
+                        &mut rng,
+                        &payload::Json::default(),
+                        &block_chunks,
+                        &labels,
+                    ),
                     Variant::FoundationDb => construct_block_cache(
+                        &mut rng,
                         &payload::FoundationDb::default(),
                         &block_chunks,
                         &labels,
                     ),
                     Variant::Static { static_path } => construct_block_cache(
+                        &mut rng,
                         &payload::Static::new(&static_path),
                         &block_chunks,
                         &labels,

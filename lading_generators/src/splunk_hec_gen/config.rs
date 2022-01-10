@@ -31,6 +31,8 @@ pub struct AckSettings {
 /// The [`Target`] instance from which to derive workers
 #[derive(Deserialize, Debug)]
 pub struct Target {
+    /// The seed for random operations against this target
+    pub seed: [u8; 32],
     /// The URI for the target, must be a valid URI
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
