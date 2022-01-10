@@ -50,6 +50,8 @@ pub enum Variant {
 /// The [`Target`] instance from which to derive workers
 #[derive(Clone, Debug, Deserialize)]
 pub struct Target {
+    /// The seed for random operations against this target
+    pub seed: [u8; 32],
     /// Bootstrap server for Kafka.  Used identically like the flag of the same
     /// name present on Kafka CLI tooling.
     pub bootstrap_server: String,

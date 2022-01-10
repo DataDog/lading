@@ -8,6 +8,8 @@ use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::{counter, increment_counter};
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 use rdkafka::config::FromClientConfig;
 use rdkafka::error::KafkaError;
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -98,6 +100,7 @@ impl Worker {
         let block_cache = generate_block_cache(
             target.maximum_prebuild_cache_size_bytes,
             target.variant,
+            target.seed,
             &block_sizes,
             &labels,
         );
@@ -190,22 +193,27 @@ impl Worker {
 fn generate_block_cache(
     cache_size: byte_unit::Byte,
     variant: Variant,
+    seed: [u8; 32],
     block_sizes: &[usize],
     #[allow(clippy::ptr_arg)] labels: &Vec<(String, String)>,
 ) -> Vec<Block> {
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_seed(seed);
 
     let total_size = cache_size.get_bytes().try_into().unwrap_or(usize::MAX);
     let chunks = chunk_bytes(&mut rng, total_size, block_sizes);
 
     match variant {
-        Variant::Ascii => construct_block_cache(&payload::Ascii::default(), &chunks, labels),
-        Variant::DatadogLog => {
-            construct_block_cache(&payload::DatadogLog::default(), &chunks, labels)
+        Variant::Ascii => {
+            construct_block_cache(&mut rng, &payload::Ascii::default(), &chunks, labels)
         }
-        Variant::Json => construct_block_cache(&payload::Json::default(), &chunks, labels),
+        Variant::DatadogLog => {
+            construct_block_cache(&mut rng, &payload::DatadogLog::default(), &chunks, labels)
+        }
+        Variant::Json => {
+            construct_block_cache(&mut rng, &payload::Json::default(), &chunks, labels)
+        }
         Variant::FoundationDb => {
-            construct_block_cache(&payload::FoundationDb::default(), &chunks, labels)
+            construct_block_cache(&mut rng, &payload::FoundationDb::default(), &chunks, labels)
         }
     }
 }

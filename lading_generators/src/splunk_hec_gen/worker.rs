@@ -1,5 +1,9 @@
-use std::{num::NonZeroU32, sync::Arc};
-
+use crate::splunk_hec_gen::{
+    acknowledgements::Channels,
+    config::{AckSettings, Target},
+    SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH, SPLUNK_HEC_CHANNEL_HEADER, SPLUNK_HEC_JSON_PATH,
+    SPLUNK_HEC_TEXT_PATH,
+};
 use byte_unit::{Byte, ByteUnit};
 use futures::{stream, StreamExt};
 use governor::{
@@ -17,16 +21,9 @@ use lading_common::{
     payload,
 };
 use metrics::{counter, gauge};
+use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-
-use crate::splunk_hec_gen::{
-    acknowledgements::Channels, SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH, SPLUNK_HEC_CHANNEL_HEADER,
-};
-
-use super::{
-    config::{AckSettings, Target},
-    SPLUNK_HEC_JSON_PATH, SPLUNK_HEC_TEXT_PATH,
-};
+use std::{num::NonZeroU32, sync::Arc};
 
 #[derive(Debug)]
 pub enum Error {
@@ -75,7 +72,7 @@ impl Worker {
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: Target) -> Result<Self, Error> {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::from_seed(target.seed);
         let block_sizes: Vec<usize> = target
             .block_sizes
             .unwrap_or_else(|| {
@@ -104,6 +101,7 @@ impl Worker {
             &block_sizes,
         );
         let block_cache = construct_block_cache(
+            &mut rng,
             &payload::SplunkHec::new(target.format),
             &block_chunks,
             &labels,

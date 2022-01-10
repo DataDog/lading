@@ -4,6 +4,8 @@ use governor::{clock, state, Quota, RateLimiter};
 use lading_common::block::{self, chunk_bytes, construct_block_cache, Block};
 use lading_common::payload;
 use metrics::{counter, gauge};
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use tokio::fs;
@@ -63,7 +65,7 @@ impl Log {
     /// set.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(name: String, target: LogTarget) -> Result<Self, Error> {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::from_seed(target.seed);
         let bytes_per_second = NonZeroU32::new(target.bytes_per_second.get_bytes() as u32).unwrap();
         let maximum_bytes_per_file =
             NonZeroU32::new(target.maximum_bytes_per_file.get_bytes() as u32).unwrap();
@@ -81,20 +83,29 @@ impl Log {
         let labels = vec![("target".to_string(), name.clone())];
         let block_cache = match target.variant {
             Variant::Ascii => {
-                construct_block_cache(&payload::Ascii::default(), &block_chunks, &labels)
+                construct_block_cache(&mut rng, &payload::Ascii::default(), &block_chunks, &labels)
             }
-            Variant::DatadogLog => {
-                construct_block_cache(&payload::DatadogLog::default(), &block_chunks, &labels)
-            }
+            Variant::DatadogLog => construct_block_cache(
+                &mut rng,
+                &payload::DatadogLog::default(),
+                &block_chunks,
+                &labels,
+            ),
             Variant::Json => {
-                construct_block_cache(&payload::Json::default(), &block_chunks, &labels)
+                construct_block_cache(&mut rng, &payload::Json::default(), &block_chunks, &labels)
             }
-            Variant::FoundationDb => {
-                construct_block_cache(&payload::FoundationDb::default(), &block_chunks, &labels)
-            }
-            Variant::Static { static_path } => {
-                construct_block_cache(&payload::Static::new(&static_path), &block_chunks, &labels)
-            }
+            Variant::FoundationDb => construct_block_cache(
+                &mut rng,
+                &payload::FoundationDb::default(),
+                &block_chunks,
+                &labels,
+            ),
+            Variant::Static { static_path } => construct_block_cache(
+                &mut rng,
+                &payload::Static::new(&static_path),
+                &block_chunks,
+                &labels,
+            ),
         };
 
         Ok(Self {

@@ -54,19 +54,22 @@ where
 
 #[allow(clippy::ptr_arg)]
 #[allow(clippy::cast_precision_loss)]
-pub fn construct_block_cache<S>(
+pub fn construct_block_cache<R, S>(
+    mut rng: R,
     serializer: &S,
     block_chunks: &[usize],
     labels: &Vec<(String, String)>,
 ) -> Vec<Block>
 where
     S: Serialize,
+    R: Rng,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
         let mut block: Vec<u8> = Vec::with_capacity(*block_size);
-        let rng = rand::thread_rng();
-        serializer.to_bytes(rng, *block_size, &mut block).unwrap();
+        serializer
+            .to_bytes(&mut rng, *block_size, &mut block)
+            .unwrap();
         block.shrink_to_fit();
         // For unknown reasons this fails. Will need to start property testing
         // this library.
