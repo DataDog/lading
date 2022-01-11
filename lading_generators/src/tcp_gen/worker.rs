@@ -117,27 +117,42 @@ impl Worker {
     /// Function will panic if underlying byte capacity is not available.
     ///
     pub async fn spin(self) -> Result<(), Error> {
-        let mut client: TcpStream = TcpStream::connect(self.addr).await.unwrap();
         let labels = self.metric_labels;
 
-        for blk in self.block_cache.iter().cycle() {
-            self.rate_limiter
-                .until_n_ready(blk.total_bytes)
-                .await
-                .unwrap();
-            let block_length = blk.bytes.len();
-            match client.write_all(&blk.bytes).await {
-                Ok(()) => {
-                    counter!("bytes_written", u64::from(blk.total_bytes.get()), &labels);
+        'connection: loop {
+            match TcpStream::connect(self.addr).await {
+                Ok(mut client) => {
+                    for blk in self.block_cache.iter().cycle() {
+                        self.rate_limiter
+                            .until_n_ready(blk.total_bytes)
+                            .await
+                            .unwrap();
+                        let block_length = blk.bytes.len();
+                        match client.write_all(&blk.bytes).await {
+                            Ok(()) => {
+                                counter!(
+                                    "bytes_written",
+                                    u64::from(blk.total_bytes.get()),
+                                    &labels
+                                );
+                            }
+                            Err(err) => {
+                                let mut error_labels = labels.clone();
+                                error_labels.push(("error".to_string(), err.to_string()));
+                                error_labels
+                                    .push(("body_size".to_string(), block_length.to_string()));
+                                counter!("request_failure", 1, &error_labels);
+                                continue 'connection;
+                            }
+                        }
+                    }
                 }
                 Err(err) => {
                     let mut error_labels = labels.clone();
                     error_labels.push(("error".to_string(), err.to_string()));
-                    error_labels.push(("body_size".to_string(), block_length.to_string()));
-                    counter!("request_failure", 1, &error_labels);
+                    counter!("connection_failure", 1, &error_labels);
                 }
             }
         }
-        Ok(())
     }
 }
