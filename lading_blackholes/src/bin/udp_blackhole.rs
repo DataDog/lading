@@ -48,7 +48,7 @@ impl Server {
             .unwrap();
 
         let socket = UdpSocket::bind(&self.addr).await?;
-        let mut buf: Vec<u8> = vec![0; 4096];
+        let mut buf: Vec<u8> = vec![0; 65536];
 
         loop {
             counter!("packet_received", 1);
