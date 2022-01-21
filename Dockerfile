@@ -13,4 +13,5 @@ COPY --from=builder /app/target/release/tcp_gen /
 COPY --from=builder /app/target/release/http_blackhole /
 COPY --from=builder /app/target/release/splunk_hec_blackhole /
 COPY --from=builder /app/target/release/sqs_blackhole /
+COPY --from=builder /app/target/release/tcp_blackhole /
 COPY --from=builder /app/target/release/udp_blackhole /
