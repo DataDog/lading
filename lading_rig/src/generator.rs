@@ -14,6 +14,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tracing::info;
 
+use crate::signals::Shutdown;
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     /// The seed for random operations against this target
@@ -44,6 +46,7 @@ pub struct Server {
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
+    shutdown: Shutdown,
 }
 
 #[derive(Debug)]
@@ -69,7 +72,7 @@ impl Server {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<usize> = config
             .block_sizes
@@ -123,6 +126,7 @@ impl Server {
             block_cache,
             rate_limiter,
             metric_labels: labels,
+            shutdown,
         })
     }
 
@@ -136,43 +140,51 @@ impl Server {
     ///
     /// Function will panic if underlying byte capacity is not available.
     ///
-    pub async fn spin(self) -> Result<(), Error> {
+    pub async fn spin(mut self) -> Result<(), Error> {
         let labels = self.metric_labels;
 
         'connection: loop {
-            match TcpStream::connect(self.addr).await {
-                Ok(mut client) => {
-                    for blk in self.block_cache.iter().cycle() {
-                        self.rate_limiter
-                            .until_n_ready(blk.total_bytes)
-                            .await
-                            .unwrap();
-                        let block_length = blk.bytes.len();
-                        match client.write_all(&blk.bytes).await {
-                            Ok(()) => {
-                                info!(bytes_written = u64::from(blk.total_bytes.get()));
-                                counter!(
-                                    "bytes_written",
-                                    u64::from(blk.total_bytes.get()),
-                                    &labels
-                                );
+            tokio::select! {
+                conn = TcpStream::connect(self.addr) => {
+                    match conn {
+                        Ok(mut client) => {
+                            for blk in self.block_cache.iter().cycle() {
+                                self.rate_limiter
+                                    .until_n_ready(blk.total_bytes)
+                                    .await
+                                    .unwrap();
+                                let block_length = blk.bytes.len();
+                                match client.write_all(&blk.bytes).await {
+                                    Ok(()) => {
+                                        counter!(
+                                            "bytes_written",
+                                            u64::from(blk.total_bytes.get()),
+                                            &labels
+                                        );
+                                    }
+                                    Err(err) => {
+                                        let mut error_labels = labels.clone();
+                                        error_labels.push(("error".to_string(), err.to_string()));
+                                        error_labels
+                                            .push(("body_size".to_string(), block_length.to_string()));
+                                        counter!("request_failure", 1, &error_labels);
+                                        continue 'connection;
+                                    }
+                                }
                             }
-                            Err(err) => {
-                                let mut error_labels = labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                error_labels
-                                    .push(("body_size".to_string(), block_length.to_string()));
-                                counter!("request_failure", 1, &error_labels);
-                                continue 'connection;
-                            }
+                        }
+                        Err(err) => {
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("connection_failure", 1, &error_labels);
                         }
                     }
                 }
-                Err(err) => {
-                    let mut error_labels = labels.clone();
-                    error_labels.push(("error".to_string(), err.to_string()));
-                    counter!("connection_failure", 1, &error_labels);
-                }
+                _ = self.shutdown.recv() => {
+                    info!("shutdown signal received");
+                    return Ok(());
+                },
+
             }
         }
     }

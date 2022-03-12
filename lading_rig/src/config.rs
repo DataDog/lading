@@ -13,6 +13,10 @@ pub struct Config {
     pub worker_threads: u16,
     /// Address and port for prometheus exporter
     pub prometheus_addr: SocketAddr,
+    /// The time, in seconds, to run target in-rig
+    // TODO later it would be interesting to set goals and let rig figure out
+    // how long to run for, have a maximum duration cap instead
+    pub experiment_duration: u32,
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,
     /// The program being targetted by this rig
