@@ -85,6 +85,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-shim"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67cd4b51d303cf3501c301e8125df442128d3c6d7c69f71b27833d253de47e77"
+dependencies = [
+ "crossbeam-utils 0.8.5",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -636,8 +645,8 @@ dependencies = [
  "argh",
  "futures",
  "hyper",
- "metrics",
- "metrics-exporter-prometheus",
+ "metrics 0.17.0",
+ "metrics-exporter-prometheus 0.6.1",
  "once_cell",
  "rand",
  "serde",
@@ -655,7 +664,7 @@ version = "0.7.0"
 dependencies = [
  "arbitrary",
  "bytecount",
- "metrics",
+ "metrics 0.17.0",
  "quickcheck",
  "rand",
  "rmp-serde",
@@ -677,8 +686,8 @@ dependencies = [
  "http-serde",
  "hyper",
  "lading_common",
- "metrics",
- "metrics-exporter-prometheus",
+ "metrics 0.17.0",
+ "metrics-exporter-prometheus 0.6.1",
  "pretty_env_logger",
  "rand",
  "rdkafka",
@@ -698,8 +707,9 @@ dependencies = [
  "governor",
  "hyper",
  "lading_common",
- "metrics",
- "metrics-exporter-prometheus",
+ "metrics 0.18.1",
+ "metrics-exporter-prometheus 0.9.0",
+ "metrics-util 0.12.0",
  "once_cell",
  "rand",
  "serde",
@@ -711,6 +721,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -804,8 +815,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a00f42f354a2ed4894db863b3a4db47aef2d2e4435b937221749bd37a8a7aaa8"
 dependencies = [
  "ahash 0.7.6",
- "metrics-macros",
+ "metrics-macros 0.4.0",
  "proc-macro-hack",
+]
+
+[[package]]
+name = "metrics"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e52eb6380b6d2a10eb3434aec0885374490f5b82c8aaf5cd487a183c98be834"
+dependencies = [
+ "ahash 0.7.6",
+ "metrics-macros 0.5.1",
 ]
 
 [[package]]
@@ -816,8 +837,25 @@ checksum = "343a5ceb38235928e7a5687412590f07e6d281522dcd9ff51246f8856eef5fe5"
 dependencies = [
  "hyper",
  "ipnet",
- "metrics",
- "metrics-util",
+ "metrics 0.17.0",
+ "metrics-util 0.10.1",
+ "parking_lot",
+ "quanta 0.9.3",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "metrics-exporter-prometheus"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b93b470b04c005178058e18ac8bb2eb3fda562cf87af5ea05ba8d44190d458c"
+dependencies = [
+ "hyper",
+ "indexmap",
+ "ipnet",
+ "metrics 0.18.1",
+ "metrics-util 0.12.0",
  "parking_lot",
  "quanta 0.9.3",
  "thiserror",
@@ -839,6 +877,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49e30813093f757be5cf21e50389a24dc7dbb22c49f23b7e8f51d69b508a5ffa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "metrics-util"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -846,13 +895,34 @@ checksum = "74c9b6aee519e1461b678952d3671652bb341d0664b1188f895a436a4e2e6ffa"
 dependencies = [
  "ahash 0.7.6",
  "aho-corasick",
- "atomic-shim",
+ "atomic-shim 0.1.0",
  "crossbeam-epoch 0.9.5",
  "crossbeam-utils 0.8.5",
  "dashmap",
  "hashbrown 0.11.2",
  "indexmap",
- "metrics",
+ "metrics 0.17.0",
+ "num_cpus",
+ "ordered-float",
+ "parking_lot",
+ "quanta 0.9.3",
+ "radix_trie",
+ "sketches-ddsketch",
+]
+
+[[package]]
+name = "metrics-util"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107a38013e91c04ddf31826b0d0dcc2e0d4ebedded8234cc0dc2b7bbd0c121e8"
+dependencies = [
+ "aho-corasick",
+ "atomic-shim 0.2.0",
+ "crossbeam-epoch 0.9.5",
+ "crossbeam-utils 0.8.5",
+ "hashbrown 0.11.2",
+ "indexmap",
+ "metrics 0.18.1",
  "num_cpus",
  "ordered-float",
  "parking_lot",
@@ -1657,6 +1727,16 @@ name = "utf8-width"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cf7d77f457ef8dfa11e4cd5933c5ddb5dc52a94664071951219a97710f0a32b"
+
+[[package]]
+name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom",
+ "serde",
+]
 
 [[package]]
 name = "version_check"
