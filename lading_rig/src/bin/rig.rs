@@ -1,4 +1,4 @@
-use argh::FromArgs;
+use argh::{FromArgValue, FromArgs};
 use lading_rig::{
     blackhole,
     captures::CaptureManager,
@@ -8,7 +8,7 @@ use lading_rig::{
     target,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use std::io::Read;
+use std::{collections::HashMap, io::Read};
 use tokio::{
     runtime::Builder,
     signal,
@@ -21,12 +21,33 @@ fn default_config_path() -> String {
     "/etc/lading/rig.yaml".to_string()
 }
 
+struct CliLabels {
+    inner: HashMap<String, String>,
+}
+
+impl FromArgValue for CliLabels {
+    fn from_arg_value(input: &str) -> Result<Self, String> {
+        let pair_err = String::from("pairs must be separated by '='");
+        let mut labels = HashMap::new();
+        for kv in input.split(',') {
+            let mut pair = kv.split('=');
+            let key = pair.next().ok_or(pair_err.clone())?;
+            let value = pair.next().ok_or(pair_err.clone())?;
+            labels.insert(key.into(), value.into());
+        }
+        Ok(Self { inner: labels })
+    }
+}
+
 #[derive(FromArgs)]
 /// `rig` options
 struct Opts {
     /// path on disk to the configuration file
     #[argh(option, default = "default_config_path()")]
     config_path: String,
+    /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
+    #[argh(option)]
+    global_labels: CliLabels,
 }
 
 fn get_config() -> Config {
@@ -37,7 +58,26 @@ fn get_config() -> Config {
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    serde_yaml::from_str(&contents).unwrap()
+    let mut config: Config = serde_yaml::from_str(&contents).unwrap();
+    match config.telemetry {
+        Telemetry::Prometheus {
+            ref mut global_labels,
+            ..
+        } => {
+            for (k, v) in ops.global_labels.inner {
+                global_labels.insert(k.into(), v.into());
+            }
+        }
+        Telemetry::Log {
+            ref mut global_labels,
+            ..
+        } => {
+            for (k, v) in ops.global_labels.inner {
+                global_labels.insert(k.into(), v.into());
+            }
+        }
+    }
+    return config;
 }
 
 // TODO log target stdout to another file
