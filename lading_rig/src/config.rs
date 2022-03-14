@@ -48,6 +48,32 @@ pub struct Target {
     pub command: String,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
+    pub output: Output,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Output {
+    #[serde(default)]
+    pub stderr: Behavior,
+    #[serde(default)]
+    pub stdout: Behavior,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Behavior {
+    /// Redirect stdout, stderr to /dev/null
+    Quiet,
+    Log(
+        /// Location to write stdio/stderr
+        PathBuf,
+    ),
+}
+
+impl Default for Behavior {
+    fn default() -> Self {
+        Self::Quiet
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -19,6 +19,8 @@ target:
   command: "/home/blt/projects/com/github/vectordev/vector/target/release/vector"
   arguments: ["--config", "/home/blt/soak_flake/vector.toml"]
   environment_variables: { "VECTOR_LOG": "info"}
+  output:
+    stderr: "/tmp/vector.stderr.log"
 
 blackhole:
   binding_addr: "0.0.0.0:8080"
