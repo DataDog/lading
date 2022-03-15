@@ -122,8 +122,8 @@ async fn inner_main(config: Config) {
     // * the "blackhole" which may or may not exist.
 
     let generator_server =
-        generator::Server::new(config.generator, Shutdown::new(shutdown_snd.subscribe())).unwrap();
-    let _gsrv = tokio::spawn(generator_server.spin());
+        generator::Server::new(config.generator, Shutdown::new(shutdown_snd.subscribe()));
+    let _gsrv = tokio::spawn(generator_server.run());
 
     let target_server = target::Server::new(config.target, Shutdown::new(shutdown_snd.subscribe()));
     let tsrv = tokio::spawn(target_server.run());
