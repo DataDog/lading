@@ -705,6 +705,7 @@ dependencies = [
  "byte-unit",
  "futures",
  "governor",
+ "http",
  "http-serde",
  "hyper",
  "lading_common",
