@@ -181,7 +181,7 @@ impl Serialize for SplunkHec {
                     let event = member.event;
                     format!(
                         "{} {} {}",
-                        event.timestamp.to_string(),
+                        event.timestamp,
                         event.message,
                         serde_json::to_string(&event.attrs)?
                     )

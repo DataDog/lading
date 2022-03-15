@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
-use crate::generator;
+use crate::{blackhole, generator};
 
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
@@ -22,7 +22,7 @@ pub struct Config {
     /// The program being targetted by this rig
     pub target: Target,
     /// The blackhole to supply for the target
-    pub blackhole: Option<Blackhole>,
+    pub blackhole: Option<blackhole::Config>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,16 +74,4 @@ impl Default for Behavior {
     fn default() -> Self {
         Self::Quiet
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BlackholeVariant {
-    Tcp,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Blackhole {
-    /// address -- IP plus port -- to bind to
-    pub binding_addr: SocketAddr,
 }

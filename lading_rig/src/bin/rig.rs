@@ -31,8 +31,8 @@ impl FromArgValue for CliLabels {
         let mut labels = HashMap::new();
         for kv in input.split(',') {
             let mut pair = kv.split('=');
-            let key = pair.next().ok_or(pair_err.clone())?;
-            let value = pair.next().ok_or(pair_err.clone())?;
+            let key = pair.next().ok_or_else(|| pair_err.clone())?;
+            let value = pair.next().ok_or_else(|| pair_err.clone())?;
             labels.insert(key.into(), value.into());
         }
         Ok(Self { inner: labels })
@@ -65,7 +65,7 @@ fn get_config() -> Config {
             ..
         } => {
             for (k, v) in ops.global_labels.inner {
-                global_labels.insert(k.into(), v.into());
+                global_labels.insert(k, v);
             }
         }
         Telemetry::Log {
@@ -73,14 +73,13 @@ fn get_config() -> Config {
             ..
         } => {
             for (k, v) in ops.global_labels.inner {
-                global_labels.insert(k.into(), v.into());
+                global_labels.insert(k, v);
             }
         }
     }
-    return config;
+    config
 }
 
-// TODO log target stdout to another file
 // TODO require healthcheck for target, use k8s approach?
 
 async fn inner_main(config: Config) {
@@ -129,11 +128,9 @@ async fn inner_main(config: Config) {
     let target_server = target::Server::new(config.target, Shutdown::new(shutdown_snd.subscribe()));
     let tsrv = tokio::spawn(target_server.run());
 
-    if let Some(blackhole) = config.blackhole {
-        let blackhole_server = blackhole::Server::new(
-            blackhole.binding_addr,
-            Shutdown::new(shutdown_snd.subscribe()),
-        );
+    if let Some(blackhole_conf) = config.blackhole {
+        let blackhole_server =
+            blackhole::Server::new(blackhole_conf, Shutdown::new(shutdown_snd.subscribe()));
         let _bsrv = tokio::spawn(blackhole_server.run());
     }
 

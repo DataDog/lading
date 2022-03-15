@@ -144,7 +144,7 @@ impl Serialize for Syslog5424 {
         let encoded = members.into_iter().map(|m| m.into_string());
 
         let mut written_bytes = 0;
-        for line in encoded.into_iter() {
+        for line in encoded {
             if line.len() + 1 + written_bytes > max_bytes {
                 break;
             }

@@ -1,6 +1,9 @@
 use byte_unit::{Byte, ByteUnit};
-use governor::state::direct::{self, InsufficientCapacity};
-use governor::{clock, state, Quota, RateLimiter};
+use governor::{
+    clock, state,
+    state::direct::{self, InsufficientCapacity},
+    Quota, RateLimiter,
+};
 use lading_common::{
     block::{chunk_bytes, construct_block_cache, Block},
     payload,
@@ -8,10 +11,11 @@ use lading_common::{
 use metrics::counter;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::num::NonZeroU32;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use std::{
+    net::{SocketAddr, ToSocketAddrs},
+    num::NonZeroU32,
+};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::info;
 
 use crate::signals::Shutdown;
@@ -139,7 +143,6 @@ impl Server {
     /// # Panics
     ///
     /// Function will panic if underlying byte capacity is not available.
-    ///
     pub async fn spin(mut self) -> Result<(), Error> {
         let labels = self.metric_labels;
 

@@ -23,4 +23,5 @@ target:
     stderr: "/tmp/vector.stderr.log"
 
 blackhole:
-  binding_addr: "0.0.0.0:8080"
+  tcp:
+    binding_addr: "0.0.0.0:8080"
