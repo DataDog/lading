@@ -20,6 +20,7 @@ byte-unit = { version = "4.0", features = ["serde"] }
 hyper = { version = "0.14", features = ["client"] }
 http-serde = "1.1"
 http = "0.2"
+rdkafka = "0.28"
 serde = { version = "1.0", features = ["std", "derive"] }
 serde_json = { version = "1.0", features = ["std"] }
 tokio = { version = "1.14", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
