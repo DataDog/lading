@@ -17,7 +17,8 @@ rand = "0.8.4"
 argh = "0.1"
 futures = "0.3.19"
 byte-unit = { version = "4.0", features = ["serde"] }
-hyper = "0.14"
+hyper = { version = "0.14", features = ["client"] }
+http-serde = "1.1"
 serde = { version = "1.0", features = ["std", "derive"] }
 serde_json = { version = "1.0", features = ["std"] }
 tokio = { version = "1.14", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
