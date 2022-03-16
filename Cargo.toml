@@ -2,8 +2,6 @@
 members = [
   "lading_rig",
   "lading_common",
-  "lading_generators",
-  "lading_blackholes",
 ]
 
 [profile.release]
