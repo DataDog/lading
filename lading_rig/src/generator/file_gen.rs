@@ -182,7 +182,7 @@ impl FileGen {
                 ),
                 Variant::Static { ref static_path } => construct_block_cache(
                     &mut rng,
-                    &payload::Static::new(&static_path),
+                    &payload::Static::new(static_path),
                     &block_chunks,
                     &labels,
                 ),

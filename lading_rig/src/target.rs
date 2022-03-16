@@ -1,10 +1,46 @@
-use crate::{
-    config::{Behavior, Target},
-    signals::Shutdown,
-};
-use std::{fs, io, process::Stdio};
+use crate::signals::Shutdown;
+use serde::Deserialize;
+use std::{collections::HashMap, fs, io, path::PathBuf, process::Stdio};
 use tokio::process::Command;
 use tracing::info;
+
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub environment_variables: HashMap<String, String>,
+    pub output: Output,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Behavior {
+    /// Redirect stdout, stderr to /dev/null
+    Quiet,
+    Log(
+        /// Location to write stdio/stderr
+        PathBuf,
+    ),
+}
+
+impl Default for Behavior {
+    fn default() -> Self {
+        Self::Quiet
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Output {
+    #[serde(default)]
+    pub stderr: Behavior,
+    #[serde(default)]
+    pub stdout: Behavior,
+}
 
 pub struct Server {
     command: Command,
@@ -22,7 +58,8 @@ fn stdio(behavior: &Behavior) -> Stdio {
 }
 
 impl Server {
-    pub fn new(config: Target, shutdown: Shutdown) -> Self {
+    #[must_use]
+    pub fn new(config: Config, shutdown: Shutdown) -> Self {
         let mut command = Command::new(config.command);
         command
             .stdin(Stdio::null())
@@ -35,18 +72,31 @@ impl Server {
         Self { command, shutdown }
     }
 
-    // TODO have actual return
-    pub async fn run(mut self) -> Result<(), io::Error> {
-        let mut child = self.command.spawn().unwrap();
+    /// Run this [`Server`] to completion
+    ///
+    /// This function runs the user supplied process to its completion, or until
+    /// a shutdown signal is received. Child exit status does not currently
+    /// propagate. This is less than ideal.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying process cannot be waited
+    /// on or will not shutdown when signaled to.
+    ///
+    /// # Panics
+    ///
+    /// None are known.
+    pub async fn run(mut self) -> Result<(), Error> {
+        let mut child = self.command.spawn().map_err(Error::Io)?;
         let wait = child.wait();
         tokio::select! {
             res = wait => {
                 info!("child exited");
-                res.unwrap();
+                res.map_err(Error::Io)?;
             },
             _ = self.shutdown.recv() => {
                 info!("shutdown signal received");
-                child.kill().await.unwrap();
+                child.kill().await.map_err(Error::Io)?;
             }
         }
         Ok(())

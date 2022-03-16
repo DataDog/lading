@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::{
     borrow::Cow,
     collections::HashMap,
+    ffi::OsStr,
     io,
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
@@ -132,7 +133,7 @@ impl CaptureManager {
             lines.len(),
             self.capture_path
                 .file_name()
-                .and_then(|name| name.to_str())
+                .and_then(OsStr::to_str)
                 .unwrap()
         );
         for line in lines.drain(..) {

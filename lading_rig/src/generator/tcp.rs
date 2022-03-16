@@ -76,7 +76,7 @@ impl Tcp {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<usize> = config
             .block_sizes

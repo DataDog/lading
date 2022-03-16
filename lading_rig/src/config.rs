@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
-use crate::{blackhole, generator};
+use crate::{blackhole, generator, target};
 
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
@@ -20,7 +20,7 @@ pub struct Config {
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,
     /// The program being targetted by this rig
-    pub target: Target,
+    pub target: target::Config,
     /// The blackhole to supply for the target
     pub blackhole: Option<blackhole::Config>,
 }
@@ -41,37 +41,4 @@ pub enum Telemetry {
         /// Additional labels to include in every metric
         global_labels: HashMap<String, String>,
     },
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Target {
-    pub command: String,
-    pub arguments: Vec<String>,
-    pub environment_variables: HashMap<String, String>,
-    pub output: Output,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Output {
-    #[serde(default)]
-    pub stderr: Behavior,
-    #[serde(default)]
-    pub stdout: Behavior,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Behavior {
-    /// Redirect stdout, stderr to /dev/null
-    Quiet,
-    Log(
-        /// Location to write stdio/stderr
-        PathBuf,
-    ),
-}
-
-impl Default for Behavior {
-    fn default() -> Self {
-        Self::Quiet
-    }
 }

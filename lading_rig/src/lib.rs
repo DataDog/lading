@@ -1,10 +1,9 @@
 //! The `rig` library
 
-//#![allow(clippy::multiple_crate_versions)]
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
 #![deny(clippy::pedantic)]
-//#![deny(missing_docs)]
+#![allow(clippy::cast_precision_loss)]
 
 pub mod blackhole;
 pub mod captures;

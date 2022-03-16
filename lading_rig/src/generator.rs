@@ -34,18 +34,40 @@ pub enum Server {
 }
 
 impl Server {
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
-        match config {
-            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(conf, shutdown).unwrap()),
-            Config::Http(conf) => Self::Http(http::Http::new(conf, shutdown).unwrap()),
-            Config::SplunkHec(conf) => {
-                Self::SplunkHec(splunk_hec::SplunkHec::new(conf, shutdown).unwrap())
+    /// Create a new [`Server`]
+    ///
+    /// This function creates a new [`Server`] instance, deferring to the
+    /// underlying sub-server.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying sub-server creation
+    /// signals error.
+    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let srv = match config {
+            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown).map_err(Error::Tcp)?),
+            Config::Http(conf) => Self::Http(http::Http::new(conf, shutdown).map_err(Error::Http)?),
+            Config::SplunkHec(conf) => Self::SplunkHec(
+                splunk_hec::SplunkHec::new(conf, shutdown).map_err(Error::SplunkHec)?,
+            ),
+            Config::Kafka(conf) => {
+                Self::Kafka(kafka::Kafka::new(conf, shutdown).map_err(Error::Kafka)?)
             }
-            Config::Kafka(conf) => Self::Kafka(kafka::Kafka::new(conf, shutdown).unwrap()),
-            Config::FileGen(conf) => Self::FileGen(file_gen::FileGen::new(conf, shutdown).unwrap()),
-        }
+            Config::FileGen(conf) => {
+                Self::FileGen(file_gen::FileGen::new(conf, shutdown).map_err(Error::FileGen)?)
+            }
+        };
+        Ok(srv)
     }
 
+    /// Run this [`Server`] to completion
+    ///
+    /// This function runs the user supplied process to its completion, or until
+    /// a shutdown signal is received.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying sub-server signals error.
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),

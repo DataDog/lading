@@ -266,7 +266,7 @@ impl SplunkHec {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.
-                    let _ = CONNECTION_SEMAPHORE.get().unwrap().acquire_many(self.parallel_connections as u32).await.unwrap();
+                    let _semaphore = CONNECTION_SEMAPHORE.get().unwrap().acquire_many(u32::from(self.parallel_connections)).await.unwrap();
                     return Ok(());
                 },
             }
