@@ -54,6 +54,11 @@ pub struct CaptureManager {
 }
 
 impl CaptureManager {
+    /// Create a new [`CaptureManager`]
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if the underlying capture file cannot be opened.
     pub async fn new(capture_path: PathBuf, shutdown: Shutdown) -> Self {
         let fp = File::create(&capture_path).await.unwrap();
         Self {
@@ -69,6 +74,11 @@ impl CaptureManager {
         }
     }
 
+    /// Install the [`CaptureManager`] as global [`metrics::Recorder`]
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if there is already a global recorder set.
     pub fn install(&self) {
         let recorder = CaptureRecorder {
             inner: Arc::clone(&self.inner),
@@ -143,6 +153,19 @@ impl CaptureManager {
         }
     }
 
+    /// Run [`CaptureManager`] to completion
+    ///
+    /// Once a second any metrics produced by this program are flushed to disk
+    /// and this process only stops once an error occurs or a shutdown signal is
+    /// received.
+    ///
+    /// # Errors
+    ///
+    /// Function will error if underlying IO writes do not succeed.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub async fn run(mut self) -> Result<(), io::Error> {
         let mut write_delay = time::interval(Duration::from_secs(1));
 

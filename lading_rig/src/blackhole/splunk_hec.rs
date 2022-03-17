@@ -124,7 +124,9 @@ pub struct SplunkHec {
 }
 
 impl SplunkHec {
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    /// Create a new [`SplunkHec`] server instance
+    #[must_use]
+    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
         Self {
             httpd_addr: config.binding_addr,
             concurrency_limit: config.concurrent_requests_max,
@@ -132,6 +134,18 @@ impl SplunkHec {
         }
     }
 
+    /// Run [`SplunkHec`] to completion
+    ///
+    /// This function runs the `SplunkHec` server forever, unless a shutdown
+    /// signal is received or an unrecoverable error is encountered.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if receiving a packet fails.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let service =
             make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
@@ -146,7 +160,7 @@ impl SplunkHec {
                 addr.set_keepalive(Some(Duration::from_secs(60)));
                 addr
             })
-            .unwrap();
+            .map_err(Error::Hyper)?;
         let server = Server::builder(addr).serve(svc);
         loop {
             tokio::select! {

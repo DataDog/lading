@@ -37,7 +37,9 @@ pub struct Sqs {
 }
 
 impl Sqs {
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    /// Create a new [`Sqs`] server instance
+    #[must_use]
+    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
         Self {
             httpd_addr: config.binding_addr,
             concurrency_limit: config.concurrent_requests_max,
@@ -45,6 +47,18 @@ impl Sqs {
         }
     }
 
+    /// Run [`Sqs`] to completion
+    ///
+    /// This function runs the SQS server forever, unless a shutdown signal is
+    /// received or an unrecoverable error is encountered.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an if an http server error ocurrs.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let service =
             make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
@@ -121,6 +135,7 @@ pub struct DeleteMessageBatch {
 }
 
 impl DeleteMessageBatch {
+    #[must_use]
     pub fn get_entry_ids(&self) -> Vec<&String> {
         let mut output = vec![];
         if let Some(x) = &self.entry_1_id {
@@ -155,6 +170,8 @@ impl DeleteMessageBatch {
         }
         output
     }
+
+    #[must_use]
     pub fn generate_response(&self) -> String {
         let mut entries = String::new();
         for id in self.get_entry_ids() {
@@ -208,6 +225,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     }
 }
 
+#[must_use]
 pub fn random_string(len: usize) -> String {
     thread_rng()
         .sample_iter(&Alphanumeric)

@@ -23,13 +23,27 @@ pub struct Udp {
 }
 
 impl Udp {
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    /// Create a new [`Udp`] server instance
+    #[must_use]
+    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
         Self {
             binding_addr: config.binding_addr,
             shutdown,
         }
     }
 
+    /// Run [`Udp`] to completion
+    ///
+    /// This function runs the UDP server forever, unless a shutdown signal is
+    /// received or an unrecoverable error is encountered.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if receiving a packet fails.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await

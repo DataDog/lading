@@ -34,16 +34,34 @@ pub enum Server {
 }
 
 impl Server {
+    /// Create a new [`Server`]
+    ///
+    /// This function creates a new [`Server`] instance, deferring to the
+    /// underlying sub-server.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying sub-server creation
+    /// signals error.
+    #[must_use]
     pub fn new(config: Config, shutdown: Shutdown) -> Self {
         match config {
-            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(conf, shutdown)),
-            Config::Http(conf) => Self::Http(http::Http::new(conf, shutdown)),
-            Config::Udp(conf) => Self::Udp(udp::Udp::new(conf, shutdown)),
-            Config::Sqs(conf) => Self::Sqs(sqs::Sqs::new(conf, shutdown)),
-            Config::SplunkHec(conf) => Self::SplunkHec(splunk_hec::SplunkHec::new(conf, shutdown)),
+            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown)),
+            Config::Http(conf) => Self::Http(http::Http::new(&conf, shutdown)),
+            Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown)),
+            Config::Sqs(conf) => Self::Sqs(sqs::Sqs::new(&conf, shutdown)),
+            Config::SplunkHec(conf) => Self::SplunkHec(splunk_hec::SplunkHec::new(&conf, shutdown)),
         }
     }
 
+    /// Runs this [`Server`] to completion
+    ///
+    /// This function runs the user supplied process to its completion, or until
+    /// a shutdown signal is received.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying sub-server signals error.
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),

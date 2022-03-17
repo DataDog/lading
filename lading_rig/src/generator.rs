@@ -7,6 +7,7 @@ pub mod kafka;
 pub mod splunk_hec;
 pub mod tcp;
 
+#[derive(Debug)]
 pub enum Error {
     Tcp(tcp::Error),
     Http(http::Error),
@@ -62,8 +63,8 @@ impl Server {
 
     /// Run this [`Server`] to completion
     ///
-    /// This function runs the user supplied process to its completion, or until
-    /// a shutdown signal is received.
+    /// This function runs the sub-server its completion, or until a shutdown
+    /// signal is received.
     ///
     /// # Errors
     ///

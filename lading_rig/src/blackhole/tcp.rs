@@ -24,7 +24,9 @@ pub struct Tcp {
 }
 
 impl Tcp {
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    /// Create a new [`Tcp`] server instance
+    #[must_use]
+    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
         Self {
             binding_addr: config.binding_addr,
             shutdown,
@@ -39,8 +41,22 @@ impl Tcp {
         }
     }
 
+    /// Run [`Tcp`] to completion
+    ///
+    /// This function runs the TCP server forever, unless a shutdown signal is
+    /// received or an unrecoverable error is encountered.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if binding to the assigned address fails.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let listener = TcpListener::bind(self.binding_addr).await.unwrap();
+        let listener = TcpListener::bind(self.binding_addr)
+            .await
+            .map_err(Error::Io)?;
 
         loop {
             tokio::select! {
