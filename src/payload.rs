@@ -57,6 +57,12 @@ impl From<io::Error> for Error {
 }
 
 pub trait Serialize {
+    /// Write bytes into writer, subject to `max_bytes` limitations.
+    ///
+    /// # Errors
+    ///
+    /// Most implementations are serializing data in some way. The errors that
+    /// result come from serialization crackups.
     fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,

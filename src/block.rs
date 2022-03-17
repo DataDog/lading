@@ -29,6 +29,23 @@ fn total_newlines(input: &[u8]) -> u64 {
     bytecount::count(input, b'\n') as u64
 }
 
+/// Construct a vec of block sizes that fit into `total_bytes`.
+///
+/// When calling [`construct_block_cache`] it's necessary to supply a
+/// `block_chunks` argument, defining the block sizes that will be used when
+/// serializing. Callers _generally_ will want to hit a certain total bytes
+/// number of blocks they would like to hit and getting `total_bytes` parceled
+/// up correctly is not necessarily straightforward. This utility method does
+/// the computation in cases where it would otherwise be annoying. From the
+/// allowable block sizes -- defined by `block_byte_sizes` -- a random member is
+/// chosen and is deducted from the total bytes remaining. This process
+/// continues until the total bytes remaining falls below the smallest block
+/// size. It's possible that a user could supply just the right parameters to
+/// make this loop infinitely. A more clever algorithm would be great.
+///
+/// # Panics
+///
+/// Function will panic if `block_bytes_sizes` is empty.
 pub fn chunk_bytes<R>(rng: &mut R, total_bytes: usize, block_byte_sizes: &[usize]) -> Vec<usize>
 where
     R: Rng + Sized,
@@ -54,6 +71,18 @@ where
 
 #[allow(clippy::ptr_arg)]
 #[allow(clippy::cast_precision_loss)]
+/// Construct a new block cache of form defined by `serializer`.
+///
+/// A "block cache" is a pre-made vec of serialized arbitrary instances of the
+/// data implied by `serializer`. Considering that it's not cheap, necessarily,
+/// to construct and serialize arbitrary data on the fly we want to do it ahead
+/// of time. We vary the size of blocks -- via `block_chunks` -- to allow the
+/// user to express a range of block sizes they wish to see.
+///
+/// # Panics
+///
+/// Function will panic if the `serializer` signals an error. In the futures we
+/// would like to propagate this error to the caller.
 pub fn construct_block_cache<R, S>(
     mut rng: R,
     serializer: &S,

@@ -1,5 +1,5 @@
 use argh::{FromArgValue, FromArgs};
-use lading_rig::{
+use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},

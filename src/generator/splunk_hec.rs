@@ -1,5 +1,10 @@
 mod acknowledgements;
 
+use crate::payload::SplunkHecEncoding;
+use crate::{
+    block::{chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use acknowledgements::Channels;
 use byte_unit::{Byte, ByteUnit};
 use futures::{stream, StreamExt};
@@ -13,11 +18,6 @@ use http::{
     Method, Request, Uri,
 };
 use hyper::{client::HttpConnector, Body, Client};
-use lading_common::payload::SplunkHecEncoding;
-use lading_common::{
-    block::{chunk_bytes, construct_block_cache, Block},
-    payload,
-};
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};

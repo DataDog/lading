@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Debug, Default)]
+#[allow(clippy::module_name_repetitions)]
 pub struct Syslog5424 {}
 
 const HOSTNAMES: [&str; 4] = [
@@ -141,7 +142,7 @@ impl Serialize for Syslog5424 {
         let unstructured = Unstructured::new(&entropy);
 
         let members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let encoded = members.into_iter().map(|m| m.into_string());
+        let encoded = members.into_iter().map(Member::into_string);
 
         let mut written_bytes = 0;
         for line in encoded {

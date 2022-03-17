@@ -9,6 +9,7 @@ pub struct Static<'a> {
 }
 
 impl<'a> Static<'a> {
+    #[must_use]
     pub fn new(path: &'a Path) -> Self {
         Self { path }
     }

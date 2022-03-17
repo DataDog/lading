@@ -88,7 +88,7 @@ impl<'a> Arbitrary<'a> for Event {
         let choice: u8 = u.arbitrary()?;
         let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
         let event = Event {
-            timestamp: 1606215269.333915,
+            timestamp: 1_606_215_269.333_915,
             message,
             attrs: u.arbitrary()?,
         };
@@ -121,7 +121,7 @@ impl<'a> Arbitrary<'a> for Member {
         let index = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
         let member = Member {
             event: u.arbitrary()?,
-            time: 1606215269.333915,
+            time: 1_606_215_269.333_915,
             host,
             index,
         };
@@ -159,6 +159,8 @@ pub struct SplunkHec {
 }
 
 impl SplunkHec {
+    /// Create a new instance of [`SplunkHec`]
+    #[must_use]
     pub fn new(encoding: Encoding) -> Self {
         Self { encoding }
     }

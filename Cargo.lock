@@ -489,43 +489,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "lading_common"
-version = "0.7.0"
+name = "lading"
+version = "0.8.0"
 dependencies = [
  "arbitrary",
- "bytecount",
- "metrics 0.17.1",
- "quickcheck",
- "rand",
- "rmp-serde",
- "serde",
- "serde_json",
- "serde_tuple",
- "time",
-]
-
-[[package]]
-name = "lading_rig"
-version = "0.1.0"
-dependencies = [
  "argh",
  "byte-unit",
+ "bytecount",
  "futures",
  "governor",
  "http",
  "http-serde",
  "hyper",
- "lading_common",
- "metrics 0.18.1",
+ "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "once_cell",
+ "quickcheck",
  "rand",
  "rdkafka",
+ "rmp-serde",
  "serde",
  "serde_json",
  "serde_qs",
+ "serde_tuple",
  "serde_yaml",
+ "time",
  "tokio",
  "tokio-util 0.6.9",
  "tower",
@@ -617,22 +606,12 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55586aa936c35f34ba8aa5d97356d554311206e1ce1f9e68fe7b07288e5ad827"
-dependencies = [
- "ahash 0.7.6",
- "metrics-macros 0.4.1",
-]
-
-[[package]]
-name = "metrics"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e52eb6380b6d2a10eb3434aec0885374490f5b82c8aaf5cd487a183c98be834"
 dependencies = [
  "ahash 0.7.6",
- "metrics-macros 0.5.1",
+ "metrics-macros",
 ]
 
 [[package]]
@@ -644,25 +623,12 @@ dependencies = [
  "hyper",
  "indexmap",
  "ipnet",
- "metrics 0.18.1",
+ "metrics",
  "metrics-util",
  "parking_lot",
  "quanta 0.9.3",
  "thiserror",
  "tokio",
-]
-
-[[package]]
-name = "metrics-macros"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0daa0ab3a0ae956d0e2c1f42511422850e577d36a255357d1a7d08d45ee3a2f1"
-dependencies = [
- "lazy_static",
- "proc-macro2",
- "quote",
- "regex",
- "syn",
 ]
 
 [[package]]
@@ -688,7 +654,7 @@ dependencies = [
  "crossbeam-utils",
  "hashbrown 0.11.2",
  "indexmap",
- "metrics 0.18.1",
+ "metrics",
  "num_cpus",
  "ordered-float",
  "parking_lot",
