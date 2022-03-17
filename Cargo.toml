@@ -43,7 +43,7 @@ uuid =  { version = "0.8", features = ["serde", "v4"] }
 quickcheck = "1"
 
 [[bin]]
-name = "rig"
+name = "lading"
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
