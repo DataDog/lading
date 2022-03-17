@@ -1,0 +1,6 @@
+[advisories]
+ignore = ["RUSTSEC-2020-0159"]
+
+[output]
+deny = ["unmaintained", "unsound", "yanked"]
+quiet = false
