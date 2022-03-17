@@ -1,9 +1,7 @@
 use crate::payload::{self, Serialize};
 use metrics::gauge;
-use rand::prelude::SliceRandom;
-use rand::Rng;
-use std::convert::TryInto;
-use std::num::NonZeroU32;
+use rand::{prelude::SliceRandom, Rng};
+use std::{convert::TryInto, num::NonZeroU32};
 
 #[derive(Debug)]
 pub enum Error {

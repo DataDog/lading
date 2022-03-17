@@ -1,5 +1,4 @@
-use crate::payload::common::AsciiStr;
-use crate::payload::{Error, Serialize};
+use crate::payload::{common::AsciiStr, Error, Serialize};
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
 use serde::Deserialize;
@@ -206,8 +205,7 @@ impl Serialize for SplunkHec {
 #[cfg(test)]
 mod test {
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
     use crate::payload::{Serialize, SplunkHec};

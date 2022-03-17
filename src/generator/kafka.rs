@@ -1,22 +1,25 @@
-use crate::block::{self, chunk_bytes, construct_block_cache, Block};
-use crate::payload;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use byte_unit::{Byte, ByteUnit};
-use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
-use governor::state::direct::{self, InsufficientCapacity};
-use governor::{clock, state, Quota, RateLimiter};
+use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use governor::{
+    clock, state,
+    state::direct::{self, InsufficientCapacity},
+    Quota, RateLimiter,
+};
 use metrics::{counter, increment_counter};
-use rand::prelude::StdRng;
-use rand::SeedableRng;
-use rdkafka::config::FromClientConfig;
-use rdkafka::error::KafkaError;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::types::RDKafkaErrorCode;
-use rdkafka::ClientConfig;
+use rand::{prelude::StdRng, SeedableRng};
+use rdkafka::{
+    config::FromClientConfig,
+    error::KafkaError,
+    producer::{FutureProducer, FutureRecord},
+    types::RDKafkaErrorCode,
+    ClientConfig,
+};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::num::NonZeroU32;
+use std::{collections::HashMap, convert::TryInto, num::NonZeroU32};
 use tracing::info;
 
 use crate::signals::Shutdown;

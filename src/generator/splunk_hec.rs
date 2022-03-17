@@ -1,9 +1,9 @@
 mod acknowledgements;
 
-use crate::payload::SplunkHecEncoding;
 use crate::{
     block::{chunk_bytes, construct_block_cache, Block},
     payload,
+    payload::SplunkHecEncoding,
 };
 use acknowledgements::Channels;
 use byte_unit::{Byte, ByteUnit};

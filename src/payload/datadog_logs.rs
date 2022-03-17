@@ -1,5 +1,4 @@
-use crate::payload::common::AsciiStr;
-use crate::payload::{Error, Serialize};
+use crate::payload::{common::AsciiStr, Error, Serialize};
 use arbitrary::{size_hint, Unstructured};
 use rand::Rng;
 use std::io::Write;
@@ -251,8 +250,7 @@ impl Serialize for DatadogLog {
 #[cfg(test)]
 mod test {
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
     use crate::payload::{DatadogLog, Serialize};

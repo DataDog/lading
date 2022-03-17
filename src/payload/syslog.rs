@@ -1,8 +1,7 @@
 use crate::payload::{Error, Serialize};
 use arbitrary::{size_hint, Unstructured};
 use rand::Rng;
-use std::io::Write;
-use std::time::SystemTime;
+use std::{io::Write, time::SystemTime};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Debug, Default)]
@@ -163,8 +162,7 @@ impl Serialize for Syslog5424 {
 mod test {
     use crate::payload::{Serialize, Syslog5424};
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

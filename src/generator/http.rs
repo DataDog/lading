@@ -1,21 +1,24 @@
-use crate::block::{self, chunk_bytes, construct_block_cache, Block};
-use crate::payload;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use byte_unit::{Byte, ByteUnit};
 use futures::stream::{self, StreamExt};
-use governor::state::direct::{self, InsufficientCapacity};
-use governor::{clock, state, Quota, RateLimiter};
-use hyper::client::Client;
-use hyper::client::HttpConnector;
-use hyper::header::CONTENT_LENGTH;
-use hyper::{Body, HeaderMap, Request, Uri};
+use governor::{
+    clock, state,
+    state::direct::{self, InsufficientCapacity},
+    Quota, RateLimiter,
+};
+use hyper::{
+    client::{Client, HttpConnector},
+    header::CONTENT_LENGTH,
+    Body, HeaderMap, Request, Uri,
+};
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
-use rand::prelude::StdRng;
-use rand::SeedableRng;
+use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::num::NonZeroU32;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
 use tracing::info;
 

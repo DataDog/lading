@@ -36,8 +36,7 @@ impl Serialize for Ascii {
 mod test {
     use crate::payload::{Ascii, Serialize};
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

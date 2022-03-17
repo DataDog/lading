@@ -2,8 +2,7 @@
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
 use super::common::AsciiStr;
 use crate::payload::{Error, Serialize};
-use arbitrary::size_hint;
-use arbitrary::Unstructured;
+use arbitrary::{size_hint, Unstructured};
 use rand::Rng;
 use serde_tuple::Serialize_tuple;
 use std::{collections::HashMap, io::Write};
@@ -212,8 +211,7 @@ impl Serialize for Fluent {
 mod test {
     use crate::payload::{Fluent, Serialize};
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

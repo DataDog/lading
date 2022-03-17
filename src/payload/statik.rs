@@ -1,7 +1,9 @@
 use crate::payload::{Error, Serialize};
 use rand::Rng;
-use std::io::{BufRead, Write};
-use std::path::Path;
+use std::{
+    io::{BufRead, Write},
+    path::Path,
+};
 
 #[derive(Debug)]
 pub struct Static<'a> {

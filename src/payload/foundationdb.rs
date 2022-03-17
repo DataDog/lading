@@ -1,6 +1,5 @@
 use crate::payload::{Error, Serialize};
-use arbitrary::Unstructured;
-use arbitrary::{self, Arbitrary};
+use arbitrary::{self, Arbitrary, Unstructured};
 use rand::Rng;
 use serde::Serializer;
 use std::io::Write;
@@ -146,8 +145,7 @@ impl Serialize for FoundationDb {
 mod test {
     use crate::payload::{FoundationDb, Serialize};
     use quickcheck::{QuickCheck, TestResult};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

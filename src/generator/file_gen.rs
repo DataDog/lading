@@ -1,18 +1,22 @@
-use crate::block::{self, chunk_bytes, construct_block_cache, Block};
-use crate::payload;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+};
 use byte_unit::{Byte, ByteUnit};
-use governor::state::direct::{self, InsufficientCapacity};
-use governor::{clock, state, Quota, RateLimiter};
+use governor::{
+    clock, state,
+    state::direct::{self, InsufficientCapacity},
+    Quota, RateLimiter,
+};
 use metrics::{counter, gauge};
-use rand::prelude::StdRng;
-use rand::SeedableRng;
+use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::num::NonZeroU32;
-use std::path::PathBuf;
-use std::str;
-use tokio::fs;
-use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::task::JoinHandle;
+use std::{num::NonZeroU32, path::PathBuf, str};
+use tokio::{
+    fs,
+    io::{AsyncWriteExt, BufWriter},
+    task::JoinHandle,
+};
 use tracing::info;
 
 use crate::signals::Shutdown;
