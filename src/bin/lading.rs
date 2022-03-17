@@ -40,7 +40,7 @@ impl FromArgValue for CliLabels {
 }
 
 #[derive(FromArgs)]
-/// `rig` options
+/// `lading` options
 struct Opts {
     /// path on disk to the configuration file
     #[argh(option, default = "default_config_path()")]
@@ -79,8 +79,6 @@ fn get_config() -> Config {
     }
     config
 }
-
-// TODO require healthcheck for target, use k8s approach?
 
 async fn inner_main(config: Config) {
     let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
