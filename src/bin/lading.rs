@@ -5,7 +5,7 @@ use lading::{
     config::{Config, Telemetry},
     generator,
     signals::Shutdown,
-    target::{self, Cmd},
+    target,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::{collections::HashMap, io::Read};
@@ -49,10 +49,6 @@ struct Opts {
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
     #[argh(option, default = "CliLabels::default()")]
     global_labels: CliLabels,
-    /// target command for lading to run, if not set LADING_TARGET environment
-    /// variable will be used
-    #[argh(option)]
-    target: Option<String>,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
     #[argh(option)]
@@ -76,9 +72,6 @@ fn get_config() -> Config {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    if let Some(target) = ops.target {
-        config.target.command = Cmd::Path(target);
-    }
     if let Some(prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr.parse().unwrap(),

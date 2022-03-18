@@ -12,7 +12,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    #[serde(skip_deserializing)]
+    #[serde(default)]
     pub command: Cmd,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
