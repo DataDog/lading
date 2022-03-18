@@ -172,7 +172,6 @@ impl CaptureManager {
         loop {
             tokio::select! {
                 _ = write_delay.tick() => {
-                    info!("recording captures");
                     self.record_captures().await;
                     self.index += 1;
                 }
