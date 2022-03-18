@@ -42,3 +42,12 @@ pub enum Telemetry {
         global_labels: HashMap<String, String>,
     },
 }
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self::Prometheus {
+            prometheus_addr: "0.0.0.0:9000".parse().unwrap(),
+            global_labels: HashMap::default(),
+        }
+    }
+}

@@ -2,7 +2,6 @@ worker_threads: 2
 experiment_duration: 30
 
 telemetry:
-  # prometheus_addr: "0.0.0.0:9001"
   path: "/tmp/rig.captures"
   global_labels:
     test_global: "blt"

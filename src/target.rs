@@ -12,6 +12,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(skip_deserializing)]
     pub command: Cmd,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
@@ -23,6 +24,12 @@ pub struct Config {
 pub enum Cmd {
     Path(String),
     EnvironmentVariable(String),
+}
+
+impl Default for Cmd {
+    fn default() -> Self {
+        Self::EnvironmentVariable(String::from("LADING_TARGET"))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,7 +73,15 @@ fn stdio(behavior: &Behavior) -> Stdio {
 }
 
 impl Server {
-    #[must_use]
+    /// Create a new [`Server`] instance
+    ///
+    /// The target `Server` is responsible for managing the sub-process under
+    /// examination.
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the path to the sub-process is not valid or if
+    /// the path is valid but is not to file executable by this program.
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let path = match config.command {
             Cmd::Path(p) => p,

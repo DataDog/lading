@@ -5,7 +5,7 @@ use lading::{
     config::{Config, Telemetry},
     generator,
     signals::Shutdown,
-    target,
+    target::{self, Cmd},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::{collections::HashMap, io::Read};
@@ -48,6 +48,18 @@ struct Opts {
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
     #[argh(option)]
     global_labels: CliLabels,
+    /// target command for lading to run, if not set LADING_TARGET environment
+    /// variable will be used
+    #[argh(option)]
+    target: Option<String>,
+    /// path on disk to write captures, will override prometheus-addr if both
+    /// are set
+    #[argh(option)]
+    capture_path: Option<String>,
+    /// address to bind prometheus exporter to, will be overridden by
+    /// capture-path if both are set
+    #[argh(option)]
+    prometheus_addr: Option<String>,
 }
 
 fn get_config() -> Config {
@@ -59,21 +71,36 @@ fn get_config() -> Config {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    match config.telemetry {
-        Telemetry::Prometheus {
-            ref mut global_labels,
-            ..
-        } => {
-            for (k, v) in ops.global_labels.inner {
-                global_labels.insert(k, v);
+    if let Some(target) = ops.target {
+        config.target.command = Cmd::Path(target);
+    }
+    if let Some(prom_addr) = ops.prometheus_addr {
+        config.telemetry = Telemetry::Prometheus {
+            prometheus_addr: prom_addr.parse().unwrap(),
+            global_labels: ops.global_labels.inner,
+        };
+    } else if let Some(capture_path) = ops.capture_path {
+        config.telemetry = Telemetry::Log {
+            path: capture_path.parse().unwrap(),
+            global_labels: ops.global_labels.inner,
+        };
+    } else {
+        match config.telemetry {
+            Telemetry::Prometheus {
+                ref mut global_labels,
+                ..
+            } => {
+                for (k, v) in ops.global_labels.inner {
+                    global_labels.insert(k, v);
+                }
             }
-        }
-        Telemetry::Log {
-            ref mut global_labels,
-            ..
-        } => {
-            for (k, v) in ops.global_labels.inner {
-                global_labels.insert(k, v);
+            Telemetry::Log {
+                ref mut global_labels,
+                ..
+            } => {
+                for (k, v) in ops.global_labels.inner {
+                    global_labels.insert(k, v);
+                }
             }
         }
     }
