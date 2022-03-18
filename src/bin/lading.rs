@@ -15,7 +15,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 fn default_config_path() -> String {
     "/etc/lading/rig.yaml".to_string()
@@ -64,6 +64,10 @@ struct Opts {
 
 fn get_config() -> Config {
     let ops: Opts = argh::from_env();
+    debug!(
+        "Attempting to open configuration file at: {}",
+        ops.config_path
+    );
     let mut file: std::fs::File = std::fs::OpenOptions::new()
         .read(true)
         .open(ops.config_path)
@@ -194,7 +198,10 @@ async fn inner_main(config: Config) {
 fn main() {
     tracing_subscriber::fmt().init();
 
+    info!("Starting lading run...");
     let config: Config = get_config();
+    // TODO insert logging info here to tell the users what they can expect,
+    // where things are being wrote out etc
     let runtime = Builder::new_multi_thread()
         .worker_threads(config.worker_threads as usize)
         .enable_io()
