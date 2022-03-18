@@ -123,7 +123,8 @@ async fn inner_main(config: Config) {
         generator::Server::new(config.generator, Shutdown::new(shutdown_snd.subscribe())).unwrap();
     let _gsrv = tokio::spawn(generator_server.run());
 
-    let target_server = target::Server::new(config.target, Shutdown::new(shutdown_snd.subscribe()));
+    let target_server =
+        target::Server::new(config.target, Shutdown::new(shutdown_snd.subscribe())).unwrap();
     let tsrv = tokio::spawn(target_server.run());
 
     if let Some(blackhole_conf) = config.blackhole {

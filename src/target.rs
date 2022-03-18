@@ -1,20 +1,28 @@
 use crate::signals::Shutdown;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, io, path::PathBuf, process::Stdio};
+use std::{collections::HashMap, env, fs, io, path::PathBuf, process::Stdio};
 use tokio::process::Command;
 use tracing::info;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
+    Env(env::VarError),
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub command: String,
+    pub command: Cmd,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
     pub output: Output,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Cmd {
+    Path(String),
+    EnvironmentVariable(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,8 +67,12 @@ fn stdio(behavior: &Behavior) -> Stdio {
 
 impl Server {
     #[must_use]
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
-        let mut command = Command::new(config.command);
+    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let path = match config.command {
+            Cmd::Path(p) => p,
+            Cmd::EnvironmentVariable(e) => env::var(e).map_err(Error::Env)?,
+        };
+        let mut command = Command::new(path);
         command
             .stdin(Stdio::null())
             .stdout(stdio(&config.output.stdout))
@@ -69,7 +81,7 @@ impl Server {
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(config.environment_variables.iter());
-        Self { command, shutdown }
+        Ok(Self { command, shutdown })
     }
 
     /// Run this [`Server`] to completion
