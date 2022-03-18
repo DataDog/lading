@@ -18,9 +18,10 @@ use tokio::{
 use tracing::{debug, info};
 
 fn default_config_path() -> String {
-    "/etc/lading/rig.yaml".to_string()
+    "/etc/lading/lading.yaml".to_string()
 }
 
+#[derive(Default)]
 struct CliLabels {
     inner: HashMap<String, String>,
 }
@@ -46,7 +47,7 @@ struct Opts {
     #[argh(option, default = "default_config_path()")]
     config_path: String,
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
-    #[argh(option)]
+    #[argh(option, default = "CliLabels::default()")]
     global_labels: CliLabels,
     /// target command for lading to run, if not set LADING_TARGET environment
     /// variable will be used
@@ -196,7 +197,7 @@ async fn inner_main(config: Config) {
 }
 
 fn main() {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt::init();
 
     info!("Starting lading run...");
     let config: Config = get_config();

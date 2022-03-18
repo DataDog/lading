@@ -16,6 +16,7 @@ pub struct Config {
     // how long to run for, have a maximum duration cap instead
     pub experiment_duration: u32,
     /// The method by which to express telemetry
+    #[serde(default)]
     pub telemetry: Telemetry,
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,

@@ -2,7 +2,7 @@ use crate::signals::Shutdown;
 use serde::Deserialize;
 use std::{collections::HashMap, env, fs, io, path::PathBuf, process::Stdio};
 use tokio::process::Command;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub enum Error {
@@ -118,8 +118,15 @@ impl Server {
         let wait = child.wait();
         tokio::select! {
             res = wait => {
-                info!("child exited");
-                res.map_err(Error::Io)?;
+                match res {
+                    Ok(status) => {
+                        error!("child exited with status: {}", status);
+                    }
+                    Err(err) => {
+                        error!("child exited with error: {}", err);
+                        return Err(Error::Io(err));
+                    }
+                }
             },
             _ = self.shutdown.recv() => {
                 info!("shutdown signal received");
