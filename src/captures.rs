@@ -36,6 +36,7 @@ pub struct Line<'a> {
     pub metric_name: String,
     pub metric_kind: MetricKind,
     pub value: u64,
+    #[serde(flatten)]
     pub labels: HashMap<String, String>,
 }
 
