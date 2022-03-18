@@ -22,11 +22,11 @@ fn default_config_path() -> String {
 }
 
 #[derive(Default)]
-struct CliLabels {
+struct CliKeyValues {
     inner: HashMap<String, String>,
 }
 
-impl FromArgValue for CliLabels {
+impl FromArgValue for CliKeyValues {
     fn from_arg_value(input: &str) -> Result<Self, String> {
         let pair_err = String::from("pairs must be separated by '='");
         let mut labels = HashMap::new();
@@ -47,8 +47,11 @@ struct Opts {
     #[argh(option, default = "default_config_path()")]
     config_path: String,
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
-    #[argh(option, default = "CliLabels::default()")]
-    global_labels: CliLabels,
+    #[argh(option, default = "CliKeyValues::default()")]
+    global_labels: CliKeyValues,
+    /// additional environment variables to apply to the target, format KEY=VAL,KEY2=VAL
+    #[argh(option, default = "CliKeyValues::default()")]
+    target_env_vars: CliKeyValues,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
     #[argh(option)]
@@ -72,6 +75,9 @@ fn get_config() -> Config {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
+    for (k, v) in ops.target_env_vars.inner {
+        config.target.environment_variables.insert(k, v);
+    }
     if let Some(prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr.parse().unwrap(),
