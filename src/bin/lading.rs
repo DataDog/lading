@@ -15,7 +15,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -60,9 +60,12 @@ struct Opts {
     /// capture-path if both are set
     #[argh(option)]
     prometheus_addr: Option<String>,
+    /// the maximum time to wait, in seconds, for controlled shutdown
+    #[argh(option, default = "60")]
+    max_shutdown_delay: u16,
 }
 
-fn get_config() -> Config {
+fn get_config() -> (Opts, Config) {
     let ops: Opts = argh::from_env();
     debug!(
         "Attempting to open configuration file at: {}",
@@ -70,23 +73,23 @@ fn get_config() -> Config {
     );
     let mut file: std::fs::File = std::fs::OpenOptions::new()
         .read(true)
-        .open(ops.config_path)
+        .open(&ops.config_path)
         .unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    for (k, v) in ops.target_env_vars.inner {
+    for (k, v) in ops.target_env_vars.inner.clone() {
         config.target.environment_variables.insert(k, v);
     }
-    if let Some(prom_addr) = ops.prometheus_addr {
+    if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr.parse().unwrap(),
-            global_labels: ops.global_labels.inner,
+            global_labels: ops.global_labels.inner.clone(),
         };
-    } else if let Some(capture_path) = ops.capture_path {
+    } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().unwrap(),
-            global_labels: ops.global_labels.inner,
+            global_labels: ops.global_labels.inner.clone(),
         };
     } else {
         match config.telemetry {
@@ -94,7 +97,7 @@ fn get_config() -> Config {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in ops.global_labels.inner {
+                for (k, v) in ops.global_labels.inner.clone() {
                     global_labels.insert(k, v);
                 }
             }
@@ -102,16 +105,16 @@ fn get_config() -> Config {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in ops.global_labels.inner {
+                for (k, v) in ops.global_labels.inner.clone() {
                     global_labels.insert(k, v);
                 }
             }
         }
     }
-    config
+    (ops, config)
 }
 
-async fn inner_main(config: Config) {
+async fn inner_main(opts: Opts, config: Config) {
     let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
 
     // Set up the telemetry sub-system.
@@ -184,22 +187,27 @@ async fn inner_main(config: Config) {
         }
     }
 
-    loop {
+    for i in 0..opts.max_shutdown_delay {
         let remaining: usize = shutdown_snd.receiver_count();
         if remaining != 0 {
-            sleep(Duration::from_millis(750)).await;
-            info!("waiting for {} tasks to shutdown", remaining);
+            sleep(Duration::from_secs(1)).await;
+            info!(
+                "waiting for {} tasks to shutdown, {} remaining",
+                remaining,
+                opts.max_shutdown_delay - i
+            );
         } else {
-            break;
+            return;
         }
     }
+    warn!("max shutdown delay elapsed, hard shutdown");
 }
 
 fn main() {
     tracing_subscriber::fmt::init();
 
     info!("Starting lading run...");
-    let config: Config = get_config();
+    let (opts, config): (Opts, Config) = get_config();
     // TODO insert logging info here to tell the users what they can expect,
     // where things are being wrote out etc
     let runtime = Builder::new_multi_thread()
@@ -208,5 +216,5 @@ fn main() {
         .enable_time()
         .build()
         .unwrap();
-    runtime.block_on(inner_main(config));
+    runtime.block_on(inner_main(opts, config));
 }

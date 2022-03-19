@@ -264,9 +264,12 @@ impl SplunkHec {
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
-                    // Acquire all available connections, meaning that we have
-                    // no outstanding tasks in flight.
-                    let _semaphore = CONNECTION_SEMAPHORE.get().unwrap().acquire_many(u32::from(self.parallel_connections)).await.unwrap();
+                    // When we shut down we may leave dangling, active
+                    // requests. This is acceptable. As we do not today
+                    // coordinate with the target it's possible that the target
+                    // will have been shut down and an in-flight request is
+                    // waiting for an ack from it, causing this to jam forever
+                    // if we attempt to acquire all semaphore permits.
                     return Ok(());
                 },
             }
