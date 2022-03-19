@@ -15,7 +15,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -61,7 +61,7 @@ struct Opts {
     #[argh(option)]
     prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
-    #[argh(option, default = "60")]
+    #[argh(option, default = "10")]
     max_shutdown_delay: u16,
 }
 
@@ -114,7 +114,7 @@ fn get_config() -> (Opts, Config) {
     (ops, config)
 }
 
-async fn inner_main(opts: Opts, config: Config) {
+async fn inner_main(config: Config) {
     let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
 
     // Set up the telemetry sub-system.
@@ -187,34 +187,44 @@ async fn inner_main(opts: Opts, config: Config) {
         }
     }
 
-    for i in 0..opts.max_shutdown_delay {
+    loop {
         let remaining: usize = shutdown_snd.receiver_count();
         if remaining != 0 {
+            info!("waiting for {} tasks to shutdown", remaining);
+            // For reasons that are obscure to me if we sleep here it's
+            // _possible_ for the runtime to fully lock up when the splunk_heck
+            // -- at least -- generator is running. See note below. This only
+            // seems to happen if we have a single-threaded runtime or a low
+            // number of worker threads available. I've reproduced the issue
+            // reliably with 2.
             sleep(Duration::from_secs(1)).await;
-            info!(
-                "waiting for {} tasks to shutdown, {} remaining",
-                remaining,
-                opts.max_shutdown_delay - i
-            );
         } else {
+            info!("all tasks shut down");
             return;
         }
     }
-    warn!("max shutdown delay elapsed, hard shutdown");
 }
 
 fn main() {
     tracing_subscriber::fmt::init();
 
-    info!("Starting lading run...");
+    info!("Starting lading run.");
     let (opts, config): (Opts, Config) = get_config();
-    // TODO insert logging info here to tell the users what they can expect,
-    // where things are being wrote out etc
     let runtime = Builder::new_multi_thread()
-        .worker_threads(config.worker_threads as usize)
         .enable_io()
         .enable_time()
         .build()
         .unwrap();
-    runtime.block_on(inner_main(opts, config));
+    runtime.block_on(inner_main(config));
+    // The splunk_hec generator spawns long running tasks that are not plugged
+    // into the shutdown mechanism we have here. This is a bug and needs to be
+    // addressed. However as a workaround we explicitly shutdown the
+    // runtime. Even when the splunk_hec issue is addressed we'll continue this
+    // practice as it's a reasonable safeguard.
+    info!(
+        "Shutting down runtime with a {} second delay.",
+        opts.max_shutdown_delay
+    );
+    runtime.shutdown_timeout(Duration::from_secs(opts.max_shutdown_delay.into()));
+    info!("Bye. :)");
 }

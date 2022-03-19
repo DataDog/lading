@@ -9,8 +9,6 @@ use crate::{blackhole, generator, target};
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    /// Total number of worker threads to use in this program
-    pub worker_threads: u16,
     /// The time, in seconds, to run target in-rig
     // TODO later it would be interesting to set goals and let rig figure out
     // how long to run for, have a maximum duration cap instead

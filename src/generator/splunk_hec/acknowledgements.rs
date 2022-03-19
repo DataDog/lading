@@ -175,6 +175,7 @@ impl AckService {
                         }
                         Err(err) => {
                             counter!("ack_status_request_failure", 1, "channel_id" => channel_id.clone(), "error" => err.to_string());
+                            break;
                         }
                     }
                 }
