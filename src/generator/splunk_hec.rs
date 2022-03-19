@@ -7,7 +7,6 @@ use crate::{
 };
 use acknowledgements::Channels;
 use byte_unit::{Byte, ByteUnit};
-use futures::{stream, StreamExt};
 use governor::{
     clock,
     state::{self, direct},
@@ -207,18 +206,17 @@ impl SplunkHec {
             f64::from(self.parallel_connections),
             &labels
         );
-        let mut block_stream = stream::iter(self.block_cache.iter().cycle());
+        let mut blocks = self.block_cache.iter().cycle();
         loop {
-            tokio::select! {
-                blk = block_stream.next() => {
-                    let blk = blk.unwrap();
+            let blk = blocks.next().unwrap();
+            let total_bytes = blk.total_bytes;
 
+            tokio::select! {
+                _ = rate_limiter.until_n_ready(total_bytes) => {
                     let client = client.clone();
-                    let rate_limiter = Arc::clone(&rate_limiter);
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let total_bytes = blk.total_bytes;
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
                     let (channel_id, ack_id_tx) = channel_info.next().unwrap().to_owned();
@@ -234,7 +232,6 @@ impl SplunkHec {
 
                     let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
                     tokio::spawn(async move {
-                        rate_limiter.until_n_ready(total_bytes).await.unwrap();
                         counter!("requests_sent", 1, &labels);
                         match client.request(request).await {
                             Ok(response) => {
@@ -255,7 +252,6 @@ impl SplunkHec {
                             Err(err) => {
                                 let mut error_labels = labels.clone();
                                 error_labels.push(("error".to_string(), err.to_string()));
-                                error_labels.push(("body_size".to_string(), block_length.to_string()));
                                 counter!("request_failure", 1, &error_labels);
                             }
                         }

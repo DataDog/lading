@@ -156,7 +156,6 @@ impl Tcp {
                                     .until_n_ready(blk.total_bytes)
                                     .await
                                     .unwrap();
-                                let block_length = blk.bytes.len();
                                 match client.write_all(&blk.bytes).await {
                                     Ok(()) => {
                                         counter!(
@@ -168,8 +167,6 @@ impl Tcp {
                                     Err(err) => {
                                         let mut error_labels = labels.clone();
                                         error_labels.push(("error".to_string(), err.to_string()));
-                                        error_labels
-                                            .push(("body_size".to_string(), block_length.to_string()));
                                         counter!("request_failure", 1, &error_labels);
                                         continue 'connection;
                                     }
