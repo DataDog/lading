@@ -7,6 +7,7 @@
 pub mod blackhole;
 pub mod block;
 pub mod captures;
+pub mod codec;
 pub mod config;
 pub mod generator;
 pub mod payload;
