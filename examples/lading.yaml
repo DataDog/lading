@@ -16,7 +16,8 @@ generator:
     maximum_prebuild_cache_size_bytes: "256 Mb"
 
 target:
-  command: "/home/blt/projects/com/github/vectordev/vector/target/release/vector"
+  command:
+    path: "/home/blt/projects/com/github/vectordev/vector/target/release/vector"
   arguments: ["--config", "/home/blt/soak_flake/vector.toml"]
   environment_variables: { "VECTOR_LOG": "info"}
   output:

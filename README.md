@@ -23,7 +23,8 @@ generator:
     maximum_prebuild_cache_size_bytes: "256 Mb"
 
 target:
-  command: "/usr/bin/foobar"
+  command:
+    path: "/usr/bin/foobar"
   arguments: []
   environment_variables: { "LOG_LEVEL": "trace"}
   output:
