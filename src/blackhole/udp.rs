@@ -48,7 +48,7 @@ impl Udp {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
             .map_err(Error::Io)?;
-        let mut buf: Vec<u8> = vec![0; 4096];
+        let mut buf: Vec<u8> = vec![0; 65536];
 
         loop {
             tokio::select! {
