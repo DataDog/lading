@@ -74,7 +74,7 @@ fn get_config() -> (Opts, Config) {
     let mut file: std::fs::File = std::fs::OpenOptions::new()
         .read(true)
         .open(&ops.config_path)
-        .unwrap();
+        .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", &ops.config_path));
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
