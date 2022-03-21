@@ -32,7 +32,7 @@ fn total_newlines(input: &[u8]) -> u64 {
 /// When calling [`construct_block_cache`] it's necessary to supply a
 /// `block_chunks` argument, defining the block sizes that will be used when
 /// serializing. Callers _generally_ will want to hit a certain total bytes
-/// number of blocks they would like to hit and getting `total_bytes` parceled
+/// number of blocks and getting `total_bytes` parceled
 /// up correctly is not necessarily straightforward. This utility method does
 /// the computation in cases where it would otherwise be annoying. From the
 /// allowable block sizes -- defined by `block_byte_sizes` -- a random member is
