@@ -71,50 +71,56 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 
     let (parts, body) = req.into_parts();
     let bytes = body::to_bytes(body).await?;
-    metrics::counter!("bytes_received", bytes.len() as u64);
 
-    let mut okay = Response::default();
-    *okay.status_mut() = StatusCode::OK;
-    okay.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/json"),
-    );
+    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
+        Err(response) => Ok(response),
+        Ok(body) => {
+            metrics::counter!("bytes_received", body.len() as u64);
 
-    match (parts.method, parts.uri.path()) {
-        // Path for submitting event data
-        (
-            Method::POST,
-            "/services/collector/event"
-            | "/services/collector/event/1.0"
-            | "/services/collector/raw"
-            | "/services/collector/raw/1.0",
-        ) => {
-            let ack_id = ACK_ID.fetch_add(1, Ordering::Relaxed);
-            let body_bytes = serde_json::to_vec(&HecResponse {
-                text: "Success",
-                code: 0,
-                ack_id,
-            })
-            .unwrap();
-            *okay.body_mut() = Body::from(body_bytes);
-        }
-        // Path for querying indexer acknowledgements
-        (Method::POST, "/services/collector/ack") => {
-            match serde_json::from_slice::<HecAckRequest>(&bytes) {
-                Ok(ack_request) => {
-                    let body_bytes =
-                        serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
+            let mut okay = Response::default();
+            *okay.status_mut() = StatusCode::OK;
+            okay.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("application/json"),
+            );
+
+            match (parts.method, parts.uri.path()) {
+                // Path for submitting event data
+                (
+                    Method::POST,
+                    "/services/collector/event"
+                    | "/services/collector/event/1.0"
+                    | "/services/collector/raw"
+                    | "/services/collector/raw/1.0",
+                ) => {
+                    let ack_id = ACK_ID.fetch_add(1, Ordering::Relaxed);
+                    let body_bytes = serde_json::to_vec(&HecResponse {
+                        text: "Success",
+                        code: 0,
+                        ack_id,
+                    })
+                    .unwrap();
                     *okay.body_mut() = Body::from(body_bytes);
                 }
-                Err(_) => {
-                    *okay.status_mut() = StatusCode::BAD_REQUEST;
+                // Path for querying indexer acknowledgements
+                (Method::POST, "/services/collector/ack") => {
+                    match serde_json::from_slice::<HecAckRequest>(&body) {
+                        Ok(ack_request) => {
+                            let body_bytes =
+                                serde_json::to_vec(&HecAckResponse::from(ack_request)).unwrap();
+                            *okay.body_mut() = Body::from(body_bytes);
+                        }
+                        Err(_) => {
+                            *okay.status_mut() = StatusCode::BAD_REQUEST;
+                        }
+                    }
                 }
+                _ => {}
             }
-        }
-        _ => {}
-    }
 
-    Ok(okay)
+            Ok(okay)
+        }
+    }
 }
 
 pub struct SplunkHec {
