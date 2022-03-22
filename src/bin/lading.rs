@@ -1,14 +1,18 @@
-use argh::{FromArgValue, FromArgs};
+use clap::Parser;
 use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
     generator,
     signals::Shutdown,
-    target,
+    target::{self, Behavior, Cmd, Output},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::{collections::HashMap, io::Read};
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+};
 use tokio::{
     runtime::Builder,
     signal,
@@ -21,13 +25,28 @@ fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
 }
 
-#[derive(Default)]
+fn default_target_behavior() -> Behavior {
+    Behavior::Quiet
+}
+
+#[derive(Default, Clone)]
 struct CliKeyValues {
     inner: HashMap<String, String>,
 }
 
-impl FromArgValue for CliKeyValues {
-    fn from_arg_value(input: &str) -> Result<Self, String> {
+impl Display for CliKeyValues {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        for (k, v) in self.inner.iter() {
+            write!(f, "{}={},", k, v)?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for CliKeyValues {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
         let pair_err = String::from("pairs must be separated by '='");
         let mut labels = HashMap::new();
         for kv in input.split(',') {
@@ -40,33 +59,43 @@ impl FromArgValue for CliKeyValues {
     }
 }
 
-#[derive(FromArgs)]
-/// `lading` options
+#[derive(Parser)]
+#[clap(version, about, long_about = None)]
 struct Opts {
     /// path on disk to the configuration file
-    #[argh(option, default = "default_config_path()")]
+    #[clap(long, default_value_t = default_config_path())]
     config_path: String,
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
-    #[argh(option, default = "CliKeyValues::default()")]
-    global_labels: CliKeyValues,
+    #[clap(long)]
+    global_labels: Option<CliKeyValues>,
     /// additional environment variables to apply to the target, format KEY=VAL,KEY2=VAL
-    #[argh(option, default = "CliKeyValues::default()")]
-    target_env_vars: CliKeyValues,
+    #[clap(long)]
+    target_environment_variables: Option<CliKeyValues>,
+    /// the path of the target executable
+    target_path: String,
+    /// arguments for the target executable
+    target_arguments: Vec<String>,
+    /// the path to write target's stdout
+    #[clap(long, default_value_t = default_target_behavior())]
+    target_stdout_path: Behavior,
+    /// the path to write target's stderr
+    #[clap(long, default_value_t = default_target_behavior())]
+    target_stderr_path: Behavior,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
-    #[argh(option)]
+    #[clap(long)]
     capture_path: Option<String>,
     /// address to bind prometheus exporter to, will be overridden by
     /// capture-path if both are set
-    #[argh(option)]
+    #[clap(long)]
     prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
-    #[argh(option, default = "10")]
+    #[clap(long, default_value_t = 10)]
     max_shutdown_delay: u16,
 }
 
 fn get_config() -> (Opts, Config) {
-    let ops: Opts = argh::from_env();
+    let ops: Opts = Opts::parse();
     debug!(
         "Attempting to open configuration file at: {}",
         ops.config_path
@@ -78,18 +107,30 @@ fn get_config() -> (Opts, Config) {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    for (k, v) in ops.target_env_vars.inner.clone() {
-        config.target.environment_variables.insert(k, v);
-    }
+    let target_config = target::Config {
+        command: Cmd::Path(ops.target_path.clone()),
+        arguments: ops.target_arguments.clone(),
+        environment_variables: ops
+            .target_environment_variables
+            .clone()
+            .unwrap_or_default()
+            .inner,
+        output: Output {
+            stderr: ops.target_stderr_path.clone(),
+            stdout: ops.target_stdout_path.clone(),
+        },
+    };
+    config.target = Some(target_config);
+    let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr.parse().unwrap(),
-            global_labels: ops.global_labels.inner.clone(),
+            global_labels: options_global_labels.inner.clone(),
         };
     } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().unwrap(),
-            global_labels: ops.global_labels.inner.clone(),
+            global_labels: options_global_labels.inner.clone(),
         };
     } else {
         match config.telemetry {
@@ -97,7 +138,7 @@ fn get_config() -> (Opts, Config) {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in ops.global_labels.inner.clone() {
+                for (k, v) in options_global_labels.inner.clone() {
                     global_labels.insert(k, v);
                 }
             }
@@ -105,7 +146,7 @@ fn get_config() -> (Opts, Config) {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in ops.global_labels.inner.clone() {
+                for (k, v) in options_global_labels.inner.clone() {
                     global_labels.insert(k, v);
                 }
             }
@@ -157,8 +198,11 @@ async fn inner_main(config: Config) {
         generator::Server::new(config.generator, Shutdown::new(shutdown_snd.subscribe())).unwrap();
     let _gsrv = tokio::spawn(generator_server.run());
 
-    let target_server =
-        target::Server::new(config.target, Shutdown::new(shutdown_snd.subscribe())).unwrap();
+    let target_server = target::Server::new(
+        config.target.unwrap(),
+        Shutdown::new(shutdown_snd.subscribe()),
+    )
+    .unwrap();
     let tsrv = tokio::spawn(target_server.run());
 
     if let Some(blackhole_conf) = config.blackhole {

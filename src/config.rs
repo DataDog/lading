@@ -19,7 +19,8 @@ pub struct Config {
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,
     /// The program being targetted by this rig
-    pub target: target::Config,
+    #[serde(skip_deserializing)]
+    pub target: Option<target::Config>,
     /// The blackhole to supply for the target
     pub blackhole: Option<blackhole::Config>,
 }
