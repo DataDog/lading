@@ -131,12 +131,12 @@ fn get_config() -> (Opts, Config) {
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr.parse().unwrap(),
-            global_labels: options_global_labels.inner.clone(),
+            global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().unwrap(),
-            global_labels: options_global_labels.inner.clone(),
+            global_labels: options_global_labels.inner,
         };
     } else {
         match config.telemetry {
@@ -144,7 +144,7 @@ fn get_config() -> (Opts, Config) {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in options_global_labels.inner.clone() {
+                for (k, v) in options_global_labels.inner {
                     global_labels.insert(k, v);
                 }
             }
@@ -152,7 +152,7 @@ fn get_config() -> (Opts, Config) {
                 ref mut global_labels,
                 ..
             } => {
-                for (k, v) in options_global_labels.inner.clone() {
+                for (k, v) in options_global_labels.inner {
                     global_labels.insert(k, v);
                 }
             }
