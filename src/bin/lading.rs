@@ -240,27 +240,6 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
             shutdown_snd.send(()).unwrap();
         }
     }
-
-    loop {
-        let remaining: usize = shutdown_snd.receiver_count();
-        if remaining != 0 {
-            info!("waiting for {} tasks to shutdown", remaining);
-            // For reasons that are obscure to me if we sleep here it's
-            // _possible_ for the runtime to fully lock up when the splunk_heck
-            // -- at least -- generator is running. See note below. This only
-            // seems to happen if we have a single-threaded runtime or a low
-            // number of worker threads available. I've reproduced the issue
-            // reliably with 2.
-            //
-            // NOTE until https://github.com/blt/lading/issues/155 is done we'll
-            // have this just be a busy loop.
-            //
-            // sleep(Duration::from_secs(1)).await;
-        } else {
-            info!("all tasks shut down");
-            return;
-        }
-    }
 }
 
 fn main() {

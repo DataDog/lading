@@ -15,7 +15,7 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     time::{self, Duration},
 };
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -139,7 +139,7 @@ impl CaptureManager {
                 };
                 lines.push(line);
             });
-        info!(
+        debug!(
             "Recording {} captures to {}",
             lines.len(),
             self.capture_path
