@@ -92,6 +92,12 @@ struct Opts {
     /// the maximum time to wait, in seconds, for controlled shutdown
     #[clap(long, default_value_t = 10)]
     max_shutdown_delay: u16,
+    /// the time, in seconds, to run the target and collect samples about it
+    #[clap(long, default_value_t = 120)]
+    experiment_duration_seconds: u32,
+    /// the time, in seconds, to allow the target to run without collecting samples
+    #[clap(long, default_value_t = 30)]
+    warmup_duration_seconds: u32,
 }
 
 fn get_config() -> (Opts, Config) {
@@ -155,7 +161,7 @@ fn get_config() -> (Opts, Config) {
     (ops, config)
 }
 
-async fn inner_main(config: Config) {
+async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, config: Config) {
     let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
 
     // Set up the telemetry sub-system.
@@ -214,8 +220,12 @@ async fn inner_main(config: Config) {
     // Tidy up our stray shutdown_rcv, avoiding a situation where we infinitely
     // wait to shut down.
     drop(shutdown_rcv);
-    let experiment_duration = sleep(Duration::from_secs(config.experiment_duration.into()));
 
+    info!("target is running, now sleeping for warmup");
+    sleep(warmup_duration).await;
+    info!("warmup completed, collecting samples");
+
+    let experiment_duration = sleep(experiment_duration);
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("received ctrl-c");
@@ -254,12 +264,16 @@ fn main() {
 
     info!("Starting lading run.");
     let (opts, config): (Opts, Config) = get_config();
+    let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
+    let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
+    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into());
+
     let runtime = Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .build()
         .unwrap();
-    runtime.block_on(inner_main(config));
+    runtime.block_on(inner_main(experiment_duration, warmup_duration, config));
     // The splunk_hec generator spawns long running tasks that are not plugged
     // into the shutdown mechanism we have here. This is a bug and needs to be
     // addressed. However as a workaround we explicitly shutdown the
@@ -269,6 +283,6 @@ fn main() {
         "Shutting down runtime with a {} second delay.",
         opts.max_shutdown_delay
     );
-    runtime.shutdown_timeout(Duration::from_secs(opts.max_shutdown_delay.into()));
+    runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");
 }
