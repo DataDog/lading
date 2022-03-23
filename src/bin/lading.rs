@@ -251,7 +251,11 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
             // seems to happen if we have a single-threaded runtime or a low
             // number of worker threads available. I've reproduced the issue
             // reliably with 2.
-            sleep(Duration::from_secs(1)).await;
+            //
+            // NOTE until https://github.com/blt/lading/issues/155 is done we'll
+            // have this just be a busy loop.
+            //
+            // sleep(Duration::from_secs(1)).await;
         } else {
             info!("all tasks shut down");
             return;
