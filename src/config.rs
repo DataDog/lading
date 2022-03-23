@@ -9,17 +9,14 @@ use crate::{blackhole, generator, target};
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    /// The time, in seconds, to run target in-rig
-    // TODO later it would be interesting to set goals and let rig figure out
-    // how long to run for, have a maximum duration cap instead
-    pub experiment_duration: u32,
     /// The method by which to express telemetry
     #[serde(default)]
     pub telemetry: Telemetry,
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,
     /// The program being targetted by this rig
-    pub target: target::Config,
+    #[serde(skip_deserializing)]
+    pub target: Option<target::Config>,
     /// The blackhole to supply for the target
     pub blackhole: Option<blackhole::Config>,
 }
