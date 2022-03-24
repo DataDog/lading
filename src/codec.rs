@@ -10,21 +10,25 @@ pub fn decode(
     if let Some(content_type) = content_type {
         let content_type = String::from_utf8_lossy(content_type.as_bytes());
 
-        for encoding in content_type.rsplit(',').map(str::trim) {
-            body = match encoding {
+        for encoding in content_type
+            .rsplit(',')
+            .map(str::trim)
+            .map(str::to_lowercase)
+        {
+            body = match encoding.as_ref() {
                 "identity" => body,
                 "gzip" => {
                     let mut decoded = Vec::new();
                     MultiGzDecoder::new(body.reader())
                         .read_to_end(&mut decoded)
-                        .map_err(|error| encoding_error_to_response(encoding, error))?;
+                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
                     decoded.into()
                 }
                 "deflate" => {
                     let mut decoded = Vec::new();
                     ZlibDecoder::new(body.reader())
                         .read_to_end(&mut decoded)
-                        .map_err(|error| encoding_error_to_response(encoding, error))?;
+                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
                     decoded.into()
                 }
                 encoding => {
