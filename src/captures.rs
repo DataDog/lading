@@ -15,7 +15,7 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     time::{self, Duration},
 };
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -32,7 +32,7 @@ pub struct Line<'a> {
     /// duplications of the same observational setup.
     pub run_id: Cow<'a, Uuid>,
     pub time: u128,
-    pub index: u64,
+    pub fetch_index: u64,
     pub metric_name: String,
     pub metric_kind: MetricKind,
     pub value: u64,
@@ -45,7 +45,7 @@ struct Inner {
 }
 
 pub struct CaptureManager {
-    index: u64,
+    fetch_index: u64,
     run_id: Uuid,
     capture_fp: BufWriter<File>,
     capture_path: PathBuf,
@@ -64,7 +64,7 @@ impl CaptureManager {
         let fp = File::create(&capture_path).await.unwrap();
         Self {
             run_id: Uuid::new_v4(),
-            index: 0,
+            fetch_index: 0,
             capture_fp: BufWriter::new(fp),
             capture_path,
             shutdown,
@@ -112,7 +112,7 @@ impl CaptureManager {
                 let line = Line {
                     run_id: Cow::Borrowed(&self.run_id),
                     time: now_ms,
-                    index: self.index,
+                    fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
                     metric_kind: MetricKind::Counter,
                     value: counter.load(Ordering::Relaxed),
@@ -131,7 +131,7 @@ impl CaptureManager {
                 let line = Line {
                     run_id: Cow::Borrowed(&self.run_id),
                     time: now_ms,
-                    index: self.index,
+                    fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
                     metric_kind: MetricKind::Gauge,
                     value: gauge.load(Ordering::Relaxed),
@@ -139,7 +139,7 @@ impl CaptureManager {
                 };
                 lines.push(line);
             });
-        info!(
+        debug!(
             "Recording {} captures to {}",
             lines.len(),
             self.capture_path
@@ -174,9 +174,10 @@ impl CaptureManager {
             tokio::select! {
                 _ = write_delay.tick() => {
                     self.record_captures().await;
-                    self.index += 1;
+                    self.fetch_index += 1;
                 }
                 _ = self.shutdown.recv() => {
+                    self.record_captures().await;
                     info!("shutdown signal received");
                     return Ok(())
                 }
