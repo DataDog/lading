@@ -80,35 +80,43 @@ async fn srv(
 ) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
-    let bytes = body::to_bytes(req).await?;
-    metrics::counter!("bytes_received", bytes.len() as u64);
+    let (parts, body) = req.into_parts();
 
-    let mut okay = Response::default();
-    *okay.status_mut() = StatusCode::OK;
-    okay.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/json"),
-    );
+    let bytes = body::to_bytes(body).await?;
 
-    let body_bytes = RESPONSE
-        .get_or_init(|| match body_variant {
-            BodyVariant::AwsKinesis => {
-                let response = KinesisPutRecordBatchResponse {
-                    encrypted: None,
-                    failed_put_count: 0,
-                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                        error_code: None,
-                        error_message: None,
-                        record_id: "foobar".to_string(),
-                    }],
-                };
-                serde_json::to_vec(&response).unwrap()
-            }
-            BodyVariant::Nothing => vec![],
-        })
-        .clone();
-    *okay.body_mut() = Body::from(body_bytes);
-    Ok(okay)
+    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
+        Err(response) => Ok(response),
+        Ok(body) => {
+            metrics::counter!("bytes_received", body.len() as u64);
+
+            let mut okay = Response::default();
+            *okay.status_mut() = StatusCode::OK;
+            okay.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("application/json"),
+            );
+
+            let body_bytes = RESPONSE
+                .get_or_init(|| match body_variant {
+                    BodyVariant::AwsKinesis => {
+                        let response = KinesisPutRecordBatchResponse {
+                            encrypted: None,
+                            failed_put_count: 0,
+                            request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                                error_code: None,
+                                error_message: None,
+                                record_id: "foobar".to_string(),
+                            }],
+                        };
+                        serde_json::to_vec(&response).unwrap()
+                    }
+                    BodyVariant::Nothing => vec![],
+                })
+                .clone();
+            *okay.body_mut() = Body::from(body_bytes);
+            Ok(okay)
+        }
+    }
 }
 
 pub struct Http {
