@@ -1,6 +1,13 @@
 use crate::signals::Shutdown;
+use nix::{
+    errno::Errno,
+    sys::signal::{kill, SIGTERM},
+    unistd::Pid,
+};
 use serde::Deserialize;
-use std::{collections::HashMap, env, fmt, fs, io, path::PathBuf, process::Stdio, str};
+use std::{
+    collections::HashMap, env, fmt, fs, io, path::PathBuf, process::Stdio, str, str::FromStr,
+};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -8,28 +15,24 @@ use tracing::{error, info};
 pub enum Error {
     Io(io::Error),
     Env(env::VarError),
+    Errno(Errno),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Config {
-    #[serde(default)]
     pub command: Cmd,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
     pub output: Output,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug)]
 pub enum Cmd {
     Path(String),
-    EnvironmentVariable(String),
-}
-
-impl Default for Cmd {
-    fn default() -> Self {
-        Self::EnvironmentVariable(String::from("LADING_TARGET"))
-    }
+    Perf {
+        inner_command: String,
+        perf_data_path: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -78,7 +81,7 @@ pub struct Output {
 }
 
 pub struct Server {
-    command: Command,
+    config: Config,
     shutdown: Shutdown,
 }
 
@@ -103,20 +106,7 @@ impl Server {
     /// Function will error if the path to the sub-process is not valid or if
     /// the path is valid but is not to file executable by this program.
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let path = match config.command {
-            Cmd::Path(p) => p,
-            Cmd::EnvironmentVariable(e) => env::var(e).map_err(Error::Env)?,
-        };
-        let mut command = Command::new(path);
-        command
-            .stdin(Stdio::null())
-            .stdout(stdio(&config.output.stdout))
-            .stderr(stdio(&config.output.stderr))
-            .env_clear()
-            .kill_on_drop(true)
-            .args(config.arguments)
-            .envs(config.environment_variables.iter());
-        Ok(Self { command, shutdown })
+        Ok(Self { config, shutdown })
     }
 
     /// Run this [`Server`] to completion
@@ -134,10 +124,71 @@ impl Server {
     ///
     /// None are known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let mut child = self.command.spawn().map_err(Error::Io)?;
-        let wait = child.wait();
+        let config = self.config;
+        // We setup potentially two child processes here. We always set up a
+        // 'target' sub-process to run load through. Additionally we have a
+        // 'perf' sub-process that examines the 'target' when the user requests
+        // it. Linux perf is very sensitive to how it's shut down and when it
+        // exists we SIGTERM the child, then let perf naturally shut down, which
+        // can take a non-trivial amount of time.
+        let (mut target_child, perf_child) = match config.command {
+            Cmd::Path(p) => {
+                let mut target_cmd = Command::new(p);
+                target_cmd
+                    .stdin(Stdio::null())
+                    .stdout(stdio(&config.output.stdout))
+                    .stderr(stdio(&config.output.stderr))
+                    .env_clear()
+                    .kill_on_drop(true)
+                    .args(config.arguments)
+                    .envs(config.environment_variables.iter());
+                let target_child = target_cmd.spawn().map_err(Error::Io)?;
+                (target_child, None)
+            }
+            Cmd::Perf {
+                inner_command,
+                perf_data_path,
+            } => {
+                let mut target_cmd = Command::new(inner_command);
+                target_cmd
+                    .stdin(Stdio::null())
+                    .stdout(stdio(&config.output.stdout))
+                    .stderr(stdio(&config.output.stderr))
+                    .env_clear()
+                    .kill_on_drop(true)
+                    .args(config.arguments)
+                    .envs(config.environment_variables.iter());
+                let target_child = target_cmd.spawn().map_err(Error::Io)?;
+
+                let mut perf_cmd = Command::new("perf");
+                let args = vec![
+                    "record".into(),
+                    "--verbose".into(),
+                    "--compression-level=22".into(),
+                    "--call-graph=dwarf".into(),
+                    format!("--pid={}", target_child.id().unwrap()),
+                    format!("--output={}", perf_data_path),
+                ];
+                perf_cmd
+                    .stdin(Stdio::null())
+                    .stdout(stdio(
+                        &Behavior::from_str("/tmp/captures/perf.stdout.log").unwrap(),
+                    ))
+                    .stderr(stdio(
+                        &Behavior::from_str("/tmp/captures/perf.stderr.log").unwrap(),
+                    ))
+                    .env_clear()
+                    .kill_on_drop(true)
+                    .args(args)
+                    .envs(config.environment_variables.iter());
+                let perf_child = perf_cmd.spawn().map_err(Error::Io)?;
+                (target_child, Some(perf_child))
+            }
+        };
+
+        let target_wait = target_child.wait();
         tokio::select! {
-            res = wait => {
+            res = target_wait => {
                 match res {
                     Ok(status) => {
                         error!("child exited with status: {}", status);
@@ -150,7 +201,15 @@ impl Server {
             },
             _ = self.shutdown.recv() => {
                 info!("shutdown signal received");
-                child.kill().await.map_err(Error::Io)?;
+                // Note that `Child::kill` sends SIGKILL which is not what we
+                // want. We instead send SIGTERM so that the child has a chance
+                // to clean up.
+                let pid: Pid = Pid::from_raw(target_child.id().unwrap().try_into().unwrap());
+                kill(pid, SIGTERM).map_err(Error::Errno)?;
+                target_child.wait().await.map_err(Error::Io)?;
+                if let Some(mut perf_child) = perf_child {
+                    perf_child.wait().await.map_err(Error::Io)?;
+                }
             }
         }
         Ok(())

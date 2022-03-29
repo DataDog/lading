@@ -81,6 +81,11 @@ struct Opts {
     /// the path to write target's stderr
     #[clap(long, default_value_t = default_target_behavior())]
     target_stderr_path: Behavior,
+    /// if specified, runs target under Linux perf and writes collected perf
+    /// data to this location
+    #[clap(long)]
+    #[cfg(target_os = "linux")]
+    target_perf_data_path: Option<String>,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
     #[clap(long)]
@@ -90,7 +95,7 @@ struct Opts {
     #[clap(long)]
     prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
-    #[clap(long, default_value_t = 10)]
+    #[clap(long, default_value_t = 30)]
     max_shutdown_delay: u16,
     /// the time, in seconds, to run the target and collect samples about it
     #[clap(long, default_value_t = 120)]
@@ -114,7 +119,14 @@ fn get_config() -> (Opts, Config) {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
     let target_config = target::Config {
-        command: Cmd::Path(ops.target_path.clone()),
+        command: ops
+            .target_perf_data_path
+            .clone()
+            .map(|pd| Cmd::Perf {
+                inner_command: ops.target_path.clone(),
+                perf_data_path: pd,
+            })
+            .unwrap_or_else(|| Cmd::Path(ops.target_path.clone())),
         arguments: ops.target_arguments.clone(),
         environment_variables: ops
             .target_environment_variables
@@ -238,6 +250,23 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
         tgt = tsrv => {
             info!("{:?}", tgt);
             shutdown_snd.send(()).unwrap();
+        }
+    }
+
+    loop {
+        let remaining: usize = shutdown_snd.receiver_count();
+        if remaining != 0 {
+            info!("waiting for {} tasks to shutdown", remaining);
+            // For reasons that are obscure to me if we sleep here it's
+            // _possible_ for the runtime to fully lock up when the splunk_heck
+            // -- at least -- generator is running. See note below. This only
+            // seems to happen if we have a single-threaded runtime or a low
+            // number of worker threads available. I've reproduced the issue
+            // reliably with 2.
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            info!("all tasks shut down");
+            return;
         }
     }
 }
