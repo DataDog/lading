@@ -6,7 +6,12 @@ use nix::{
 };
 use serde::Deserialize;
 use std::{
-    collections::HashMap, env, fmt, fs, io, path::PathBuf, process::Stdio, str, str::FromStr,
+    collections::HashMap,
+    env, fmt, fs, io,
+    path::PathBuf,
+    process::{ExitStatus, Stdio},
+    str,
+    str::FromStr,
 };
 use tokio::process::Command;
 use tracing::{error, info};
@@ -123,7 +128,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(mut self) -> Result<ExitStatus, Error> {
         let config = self.config;
         // We setup potentially two child processes here. We always set up a
         // 'target' sub-process to run load through. Additionally we have a
@@ -192,10 +197,11 @@ impl Server {
                 match res {
                     Ok(status) => {
                         error!("child exited with status: {}", status);
+                        Ok(status)
                     }
                     Err(err) => {
                         error!("child exited with error: {}", err);
-                        return Err(Error::Io(err));
+                        Err(Error::Io(err))
                     }
                 }
             },
@@ -206,12 +212,12 @@ impl Server {
                 // to clean up.
                 let pid: Pid = Pid::from_raw(target_child.id().unwrap().try_into().unwrap());
                 kill(pid, SIGTERM).map_err(Error::Errno)?;
-                target_child.wait().await.map_err(Error::Io)?;
+                let res = target_child.wait().await.map_err(Error::Io)?;
                 if let Some(mut perf_child) = perf_child {
                     perf_child.wait().await.map_err(Error::Io)?;
                 }
+                Ok(res)
             }
         }
-        Ok(())
     }
 }
