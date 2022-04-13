@@ -5,10 +5,10 @@ use lading::{
     config::{Config, Telemetry},
     generator, inspector,
     signals::Shutdown,
-    target::{self, Behavior, Cmd, Output},
+    target::{self, Behavior, Output},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use std::{collections::HashMap, io::Read};
+use std::{collections::HashMap, io::Read, path::PathBuf};
 use std::{
     fmt::{self, Display},
     str::FromStr,
@@ -71,7 +71,7 @@ struct Opts {
     #[clap(long)]
     target_environment_variables: Option<CliKeyValues>,
     /// the path of the target executable
-    target_path: String,
+    target_path: PathBuf,
     /// arguments for the target executable
     target_arguments: Vec<String>,
     /// the path to write target's stdout
@@ -113,7 +113,7 @@ fn get_config() -> (Opts, Config) {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
     let target_config = target::Config {
-        command: Cmd::Path(ops.target_path.clone()),
+        command: ops.target_path.clone(),
         arguments: ops.target_arguments.clone(),
         environment_variables: ops
             .target_environment_variables

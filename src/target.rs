@@ -8,6 +8,7 @@ use nix::{
 use std::{
     collections::HashMap,
     io,
+    path::PathBuf,
     process::{ExitStatus, Stdio},
 };
 use tokio::process::Command;
@@ -21,15 +22,10 @@ pub enum Error {
 
 #[derive(Debug)]
 pub struct Config {
-    pub command: Cmd,
+    pub command: PathBuf,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
     pub output: Output,
-}
-
-#[derive(Debug)]
-pub enum Cmd {
-    Path(String),
 }
 
 pub struct Server {
@@ -67,20 +63,17 @@ impl Server {
     /// None are known.
     pub async fn run(mut self) -> Result<ExitStatus, Error> {
         let config = self.config;
-        let mut target_child = match config.command {
-            Cmd::Path(p) => {
-                let mut target_cmd = Command::new(p);
-                target_cmd
-                    .stdin(Stdio::null())
-                    .stdout(stdio(&config.output.stdout))
-                    .stderr(stdio(&config.output.stderr))
-                    .env_clear()
-                    .kill_on_drop(true)
-                    .args(config.arguments)
-                    .envs(config.environment_variables.iter());
-                target_cmd.spawn().map_err(Error::Io)?
-            }
-        };
+
+        let mut target_cmd = Command::new(config.command);
+        target_cmd
+            .stdin(Stdio::null())
+            .stdout(stdio(&config.output.stdout))
+            .stderr(stdio(&config.output.stderr))
+            .env_clear()
+            .kill_on_drop(true)
+            .args(config.arguments)
+            .envs(config.environment_variables.iter());
+        let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
 
         let target_wait = target_child.wait();
         tokio::select! {
