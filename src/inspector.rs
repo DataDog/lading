@@ -1,35 +1,37 @@
-pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, signals::Shutdown};
+use std::{
+    collections::HashMap,
+    io,
+    path::PathBuf,
+    process::{ExitStatus, Stdio},
+};
+
 use nix::{
     errno::Errno,
     sys::signal::{kill, SIGTERM},
     unistd::Pid,
 };
-use std::{
-    collections::HashMap,
-    io,
-    process::{ExitStatus, Stdio},
-};
+use serde::Deserialize;
 use tokio::process::Command;
 use tracing::{error, info};
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Errno(Errno),
-}
+use crate::{
+    common::{stdio, Output},
+    signals::Shutdown,
+};
 
 #[derive(Debug)]
+pub enum Error {
+    Errno(Errno),
+    Io(io::Error),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Config {
-    pub command: Cmd,
+    pub command: PathBuf,
     pub arguments: Vec<String>,
     pub environment_variables: HashMap<String, String>,
     pub output: Output,
-}
-
-#[derive(Debug)]
-pub enum Cmd {
-    Path(String),
 }
 
 pub struct Server {
@@ -40,8 +42,9 @@ pub struct Server {
 impl Server {
     /// Create a new [`Server`] instance
     ///
-    /// The target `Server` is responsible for managing the sub-process under
-    /// examination.
+    /// The inspector `Server` is responsible for investigating the
+    /// [`target::Server`] sub-process. In the future we will likely pass the
+    /// target sub-process PID as an argument.
     ///
     /// # Errors
     ///
@@ -67,20 +70,17 @@ impl Server {
     /// None are known.
     pub async fn run(mut self) -> Result<ExitStatus, Error> {
         let config = self.config;
-        let mut target_child = match config.command {
-            Cmd::Path(p) => {
-                let mut target_cmd = Command::new(p);
-                target_cmd
-                    .stdin(Stdio::null())
-                    .stdout(stdio(&config.output.stdout))
-                    .stderr(stdio(&config.output.stderr))
-                    .env_clear()
-                    .kill_on_drop(true)
-                    .args(config.arguments)
-                    .envs(config.environment_variables.iter());
-                target_cmd.spawn().map_err(Error::Io)?
-            }
-        };
+
+        let mut target_cmd = Command::new(config.command);
+        target_cmd
+            .stdin(Stdio::null())
+            .stdout(stdio(&config.output.stdout))
+            .stderr(stdio(&config.output.stderr))
+            .env_clear()
+            .kill_on_drop(true)
+            .args(config.arguments)
+            .envs(config.environment_variables.iter());
+        let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
 
         let target_wait = target_child.wait();
         tokio::select! {

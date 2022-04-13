@@ -3,7 +3,7 @@ use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator,
+    generator, inspector,
     signals::Shutdown,
     target::{self, Behavior, Cmd, Output},
 };
@@ -80,11 +80,6 @@ struct Opts {
     /// the path to write target's stderr
     #[clap(long, default_value_t = default_target_behavior())]
     target_stderr_path: Behavior,
-    /// if specified, runs target under Linux perf and writes collected perf
-    /// data to this location
-    #[clap(long)]
-    #[cfg(target_os = "linux")]
-    target_perf_data_path: Option<String>,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
     #[clap(long)]
@@ -118,14 +113,7 @@ fn get_config() -> (Opts, Config) {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
     let target_config = target::Config {
-        command: ops
-            .target_perf_data_path
-            .clone()
-            .map(|pd| Cmd::Perf {
-                inner_command: ops.target_path.clone(),
-                perf_data_path: pd,
-            })
-            .unwrap_or_else(|| Cmd::Path(ops.target_path.clone())),
+        command: Cmd::Path(ops.target_path.clone()),
         arguments: ops.target_arguments.clone(),
         environment_variables: ops
             .target_environment_variables
@@ -220,6 +208,11 @@ async fn inner_main(
 
     let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
     let tsrv = tokio::spawn(target_server.run());
+
+    if let Some(inspector_conf) = config.inspector {
+        let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
+        let _isrv = tokio::spawn(inspector_server.run());
+    }
 
     if let Some(blackhole_conf) = config.blackhole {
         let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
