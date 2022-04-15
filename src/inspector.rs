@@ -1,26 +1,32 @@
-pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, signals::Shutdown};
-use nix::{
-    errno::Errno,
-    sys::signal::{kill, SIGTERM},
-    unistd::Pid,
-};
 use std::{
     collections::HashMap,
     io,
     path::PathBuf,
     process::{ExitStatus, Stdio},
 };
+
+use nix::{
+    errno::Errno,
+    sys::signal::{kill, SIGTERM},
+    unistd::Pid,
+};
+use serde::Deserialize;
 use tokio::process::Command;
 use tracing::{error, info};
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Errno(Errno),
-}
+use crate::{
+    common::{stdio, Output},
+    signals::Shutdown,
+};
 
 #[derive(Debug)]
+pub enum Error {
+    Errno(Errno),
+    Io(io::Error),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct Config {
     pub command: PathBuf,
     pub arguments: Vec<String>,
@@ -36,8 +42,9 @@ pub struct Server {
 impl Server {
     /// Create a new [`Server`] instance
     ///
-    /// The target `Server` is responsible for managing the sub-process under
-    /// examination.
+    /// The inspector `Server` is responsible for investigating the
+    /// [`target::Server`] sub-process. In the future we will likely pass the
+    /// target sub-process PID as an argument.
     ///
     /// # Errors
     ///

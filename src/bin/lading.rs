@@ -3,12 +3,12 @@ use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator,
+    generator, inspector,
     signals::Shutdown,
-    target::{self, Behavior, Cmd, Output},
+    target::{self, Behavior, Output},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use std::{collections::HashMap, io::Read};
+use std::{collections::HashMap, io::Read, path::PathBuf};
 use std::{
     fmt::{self, Display},
     str::FromStr,
@@ -16,10 +16,9 @@ use std::{
 use tokio::{
     runtime::Builder,
     signal,
-    sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -72,7 +71,7 @@ struct Opts {
     #[clap(long)]
     target_environment_variables: Option<CliKeyValues>,
     /// the path of the target executable
-    target_path: String,
+    target_path: PathBuf,
     /// arguments for the target executable
     target_arguments: Vec<String>,
     /// the path to write target's stdout
@@ -90,7 +89,7 @@ struct Opts {
     #[clap(long)]
     prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
-    #[clap(long, default_value_t = 10)]
+    #[clap(long, default_value_t = 30)]
     max_shutdown_delay: u16,
     /// the time, in seconds, to run the target and collect samples about it
     #[clap(long, default_value_t = 120)]
@@ -114,7 +113,7 @@ fn get_config() -> (Opts, Config) {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
     let target_config = target::Config {
-        command: Cmd::Path(ops.target_path.clone()),
+        command: ops.target_path.clone(),
         arguments: ops.target_arguments.clone(),
         environment_variables: ops
             .target_environment_variables
@@ -161,8 +160,13 @@ fn get_config() -> (Opts, Config) {
     (ops, config)
 }
 
-async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, config: Config) {
-    let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
+async fn inner_main(
+    experiment_duration: Duration,
+    warmup_duration: Duration,
+    max_shutdown_delay: Duration,
+    config: Config,
+) {
+    let shutdown = Shutdown::new();
 
     // Set up the telemetry sub-system.
     //
@@ -184,8 +188,7 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
             path,
             global_labels,
         } => {
-            let mut capture_manager =
-                CaptureManager::new(path, Shutdown::new(shutdown_snd.subscribe())).await;
+            let mut capture_manager = CaptureManager::new(path, shutdown.clone()).await;
             capture_manager.install();
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
@@ -200,26 +203,21 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
     // * the "target" which is the measured system and might push load into
     // * the "blackhole" which may or may not exist.
 
-    let generator_server =
-        generator::Server::new(config.generator, Shutdown::new(shutdown_snd.subscribe())).unwrap();
+    let generator_server = generator::Server::new(config.generator, shutdown.clone()).unwrap();
     let _gsrv = tokio::spawn(generator_server.run());
 
-    let target_server = target::Server::new(
-        config.target.unwrap(),
-        Shutdown::new(shutdown_snd.subscribe()),
-    )
-    .unwrap();
+    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
     let tsrv = tokio::spawn(target_server.run());
 
-    if let Some(blackhole_conf) = config.blackhole {
-        let blackhole_server =
-            blackhole::Server::new(blackhole_conf, Shutdown::new(shutdown_snd.subscribe()));
-        let _bsrv = tokio::spawn(blackhole_server.run());
+    if let Some(inspector_conf) = config.inspector {
+        let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
+        let _isrv = tokio::spawn(inspector_server.run());
     }
 
-    // Tidy up our stray shutdown_rcv, avoiding a situation where we infinitely
-    // wait to shut down.
-    drop(shutdown_rcv);
+    if let Some(blackhole_conf) = config.blackhole {
+        let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
+        let _bsrv = tokio::spawn(blackhole_server.run());
+    }
 
     info!("target is running, now sleeping for warmup");
     sleep(warmup_duration).await;
@@ -229,17 +227,22 @@ async fn inner_main(experiment_duration: Duration, warmup_duration: Duration, co
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("received ctrl-c");
-            shutdown_snd.send(()).unwrap();
+            shutdown.signal().unwrap();
         },
         _ = experiment_duration => {
             info!("experiment duration exceeded");
-            shutdown_snd.send(()).unwrap();
+            shutdown.signal().unwrap();
         }
         tgt = tsrv => {
-            info!("{:?}", tgt);
-            shutdown_snd.send(()).unwrap();
+            error!("target shut down unexpectedly with {:?}", tgt);
+            shutdown.signal().unwrap();
         }
     }
+    info!(
+        "Waiting for {} seconds for tasks to shutdown.",
+        max_shutdown_delay.as_secs(),
+    );
+    shutdown.wait(max_shutdown_delay).await;
 }
 
 fn main() {
@@ -249,22 +252,29 @@ fn main() {
     let (opts, config): (Opts, Config) = get_config();
     let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
-    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into());
+    // The maximum shutdown delay is shared between `inner_main` and this
+    // function, hence the divide by two.
+    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into()) / 2;
 
     let runtime = Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .build()
         .unwrap();
-    runtime.block_on(inner_main(experiment_duration, warmup_duration, config));
+    runtime.block_on(inner_main(
+        experiment_duration,
+        warmup_duration,
+        max_shutdown_delay,
+        config,
+    ));
     // The splunk_hec generator spawns long running tasks that are not plugged
     // into the shutdown mechanism we have here. This is a bug and needs to be
     // addressed. However as a workaround we explicitly shutdown the
     // runtime. Even when the splunk_hec issue is addressed we'll continue this
     // practice as it's a reasonable safeguard.
     info!(
-        "Shutting down runtime with a {} second delay.",
-        opts.max_shutdown_delay
+        "Shutting down runtime with a {} second delay. May leave orphaned tasks.",
+        max_shutdown_delay.as_secs(),
     );
     runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");

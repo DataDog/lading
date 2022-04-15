@@ -1,28 +1,46 @@
-use tokio::sync::broadcast;
+use std::sync::Arc;
+use tokio::{
+    sync::broadcast,
+    time::{interval, Duration},
+};
+use tracing::{error, info};
+
+#[derive(Debug)]
+pub enum Error {
+    Tokio(broadcast::error::SendError<()>),
+}
 
 #[derive(Debug)]
 pub struct Shutdown {
+    /// The broadcast sender, signleton for all `Shutdown` instances derived
+    /// from the same root `Shutdown`.
+    sender: Arc<broadcast::Sender<()>>,
+
+    /// The receive half of the channel used to listen for shutdown. One per
+    /// instance.
+    notify: broadcast::Receiver<()>,
+
     /// `true` if the shutdown signal has been received
     shutdown: bool,
+}
 
-    /// The receive half of the channel used to listen for shutdown.
-    notify: broadcast::Receiver<()>,
+impl Default for Shutdown {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Shutdown {
     /// Create a new `Shutdown` backed by the given `broadcast::Receiver`.
     #[must_use]
-    pub fn new(notify: broadcast::Receiver<()>) -> Shutdown {
-        Shutdown {
-            shutdown: false,
-            notify,
-        }
-    }
+    pub fn new() -> Self {
+        let (shutdown_snd, shutdown_rcv) = broadcast::channel(1);
 
-    /// Returns `true` if the shutdown signal has been received.
-    #[must_use]
-    pub fn is_shutdown(&self) -> bool {
-        self.shutdown
+        Self {
+            sender: Arc::new(shutdown_snd),
+            notify: shutdown_rcv,
+            shutdown: false,
+        }
     }
 
     /// Receive the shutdown notice, waiting if necessary.
@@ -38,5 +56,70 @@ impl Shutdown {
 
         // Remember that the signal has been received.
         self.shutdown = true;
+    }
+
+    /// Send the shutdown signal through to this and all derived `Shutdown`
+    /// instances. Returns the number of active intances, or error.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the underlying tokio broadcast
+    /// mechanism fails.
+    pub fn signal(&self) -> Result<usize, Error> {
+        self.sender.send(()).map_err(Error::Tokio)
+    }
+
+    /// Wait for all `Shutdown` instances to properly shut down. This function
+    /// is safe to call from multiple instances of a `Shutdown`.
+    ///
+    /// # Panics
+    ///
+    /// None known.
+    pub async fn wait(self, max_delay: Duration) {
+        // Tidy up our own `notify`, avoiding a situation where we infinitely wait
+        // to shut down.
+        drop(self.notify);
+
+        let mut check_pulse = interval(Duration::from_secs(1));
+        let mut max_delay = interval(max_delay);
+        // Move past the first delay. If we fail to avoid this 0th interval the
+        // program shuts down with an error incorrectly.
+        max_delay.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = check_pulse.tick() => {
+                    let remaining: usize = self.sender.receiver_count();
+                    if remaining == 0 {
+                        info!("all tasks shut down");
+                        return;
+                    }
+                    // For reasons that are obscure to me if we sleep here it's
+                    // _possible_ for the runtime to fully lock up when the splunk_heck
+                    // -- at least -- generator is running. See note below. This only
+                    // seems to happen if we have a single-threaded runtime or a low
+                    // number of worker threads available. I've reproduced the issue
+                    // reliably with 2.
+                    info!("waiting for {} tasks to shutdown", remaining);
+                }
+                _ = max_delay.tick() => {
+                    let remaining: usize = self.sender.receiver_count();
+                    error!("shutdown wait completing with {} remaining tasks", remaining);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+impl Clone for Shutdown {
+    fn clone(&self) -> Self {
+        let notify = self.sender.subscribe();
+
+        Self {
+            shutdown: self.shutdown,
+            notify,
+            sender: Arc::clone(&self.sender),
+        }
     }
 }

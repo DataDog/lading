@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
-use crate::{blackhole, generator, target};
+use crate::{blackhole, generator, inspector, target};
 
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
@@ -19,6 +19,8 @@ pub struct Config {
     pub target: Option<target::Config>,
     /// The blackhole to supply for the target
     pub blackhole: Option<blackhole::Config>,
+    /// The target inspector sub-program
+    pub inspector: Option<inspector::Config>,
 }
 
 #[derive(Debug, Deserialize)]
