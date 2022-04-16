@@ -1,18 +1,20 @@
-pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, signals::Shutdown};
-use nix::{
-    errno::Errno,
-    sys::signal::{kill, SIGTERM},
-    unistd::Pid,
-};
 use std::{
     collections::HashMap,
     io,
     path::PathBuf,
     process::{ExitStatus, Stdio},
 };
+
+use nix::{
+    errno::Errno,
+    sys::signal::{kill, SIGTERM},
+    unistd::Pid,
+};
 use tokio::process::Command;
 use tracing::{error, info};
+
+pub use crate::common::{Behavior, Output};
+use crate::{common::stdio, signals::Shutdown};
 
 #[derive(Debug)]
 pub enum Error {
@@ -28,6 +30,7 @@ pub struct Config {
     pub output: Output,
 }
 
+#[derive(Debug)]
 pub struct Server {
     config: Config,
     shutdown: Shutdown,

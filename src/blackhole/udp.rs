@@ -1,22 +1,25 @@
+use std::{io, net::SocketAddr};
+
 use metrics::counter;
 use serde::Deserialize;
-use std::{io, net::SocketAddr};
 use tokio::net::UdpSocket;
 use tracing::info;
 
 use crate::signals::Shutdown;
 
+#[derive(Debug)]
 pub enum Error {
     Io(io::Error),
 }
 
 /// Main configuration struct for this program
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct Config {
     /// address -- IP plus port -- to bind to
     pub binding_addr: SocketAddr,
 }
 
+#[derive(Debug)]
 pub struct Udp {
     binding_addr: SocketAddr,
     shutdown: Shutdown,

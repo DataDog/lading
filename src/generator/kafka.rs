@@ -1,7 +1,9 @@
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    num::{NonZeroU32, NonZeroUsize},
 };
+
 use byte_unit::{Byte, ByteUnit};
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use governor::{
@@ -19,10 +21,13 @@ use rdkafka::{
     ClientConfig,
 };
 use serde::Deserialize;
-use std::{collections::HashMap, convert::TryInto, num::NonZeroU32};
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+    signals::Shutdown,
+};
 
 /// The throughput configuration
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -30,12 +35,14 @@ use crate::signals::Shutdown;
 pub enum Throughput {
     /// The producer should run as fast as possible.
     Unlimited,
-    /// The producer is limited to sending a certain number of bytes every second.
+    /// The producer is limited to sending a certain number of bytes every
+    /// second.
     BytesPerSecond {
         /// Number of bytes.
         amount: byte_unit::Byte,
     },
-    /// The producer is limited to sending a certain number of messages every second.
+    /// The producer is limited to sending a certain number of messages every
+    /// second.
     MessagesPerSecond {
         /// Number of messages.
         amount: u32,
@@ -138,7 +145,7 @@ impl Kafka {
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let labels = vec![];
 
-        let block_sizes: Vec<usize> = config
+        let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
             .clone()
             .unwrap_or_else(|| {
@@ -154,7 +161,7 @@ impl Kafka {
                 ]
             })
             .iter()
-            .map(|sz| sz.get_bytes() as usize)
+            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
         let block_cache = generate_block_cache(
             config.maximum_prebuild_cache_size_bytes,
@@ -162,7 +169,7 @@ impl Kafka {
             config.seed,
             &block_sizes,
             &labels,
-        );
+        )?;
 
         Ok(Self {
             block_cache,
@@ -183,7 +190,8 @@ impl Kafka {
     ///
     /// # Panics
     ///
-    /// Function will panic if it is unable to produce messages to the target Kafka cluster.
+    /// Function will panic if it is unable to produce messages to the target
+    /// Kafka cluster.
     pub async fn spin(mut self) -> Result<(), Error> {
         // Configure our Kafka producer.
         let bootstrap_server = self.bootstrap_server;
@@ -263,15 +271,16 @@ fn generate_block_cache(
     cache_size: byte_unit::Byte,
     variant: Variant,
     seed: [u8; 32],
-    block_sizes: &[usize],
+    block_sizes: &[NonZeroUsize],
     #[allow(clippy::ptr_arg)] labels: &Vec<(String, String)>,
-) -> Vec<Block> {
+) -> Result<Vec<Block>, Error> {
     let mut rng = StdRng::from_seed(seed);
 
-    let total_size = cache_size.get_bytes().try_into().unwrap_or(usize::MAX);
-    let chunks = chunk_bytes(&mut rng, total_size, block_sizes);
+    let total_size = NonZeroUsize::new(cache_size.get_bytes().try_into().unwrap_or(usize::MAX))
+        .expect("bytes must be non-zero");
+    let chunks = chunk_bytes(&mut rng, total_size, block_sizes)?;
 
-    match variant {
+    let blocks = match variant {
         Variant::Ascii => {
             construct_block_cache(&mut rng, &payload::Ascii::default(), &chunks, labels)
         }
@@ -284,7 +293,8 @@ fn generate_block_cache(
         Variant::FoundationDb => {
             construct_block_cache(&mut rng, &payload::FoundationDb::default(), &chunks, labels)
         }
-    }
+    };
+    Ok(blocks)
 }
 
 fn get_rate_limiter(

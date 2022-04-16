@@ -1,3 +1,10 @@
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
+
 use hyper::{
     body, header,
     server::conn::{AddrIncoming, AddrStream},
@@ -5,12 +12,6 @@ use hyper::{
     Body, Method, Request, Response, Server, StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
 use tower::ServiceBuilder;
 use tracing::{error, info};
 
@@ -22,11 +23,12 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
+#[derive(Debug)]
 pub enum Error {
     Hyper(hyper::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 /// Main configuration struct for this program
 pub struct Config {
     /// number of concurrent HTTP connections to allow
@@ -123,6 +125,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     }
 }
 
+#[derive(Debug)]
 pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,

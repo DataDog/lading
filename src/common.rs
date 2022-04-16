@@ -1,7 +1,4 @@
-use std::path::PathBuf;
-use std::process::Stdio;
-use std::str;
-use std::{fmt, fs};
+use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 
 use serde::Deserialize;
 

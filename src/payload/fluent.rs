@@ -1,14 +1,16 @@
 //! Implements [this
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
-use super::common::AsciiStr;
-use crate::payload::{Error, Serialize};
+use std::{collections::HashMap, io::Write};
+
 use arbitrary::{size_hint, Unstructured};
 use rand::Rng;
 use serde_tuple::Serialize_tuple;
-use std::{collections::HashMap, io::Write};
 
-#[derive(Debug, Default)]
-pub struct Fluent {}
+use super::common::AsciiStr;
+use crate::payload::{Error, Serialize};
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Fluent {}
 
 #[derive(serde::Serialize)]
 #[serde(untagged)]
@@ -209,15 +211,16 @@ impl Serialize for Fluent {
 
 #[cfg(test)]
 mod test {
-    use crate::payload::{Fluent, Serialize};
-    use quickcheck::{QuickCheck, TestResult};
+    use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
+
+    use crate::payload::{Fluent, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let fluent = Fluent::default();
@@ -229,11 +232,6 @@ mod test {
                 "{:?}",
                 std::str::from_utf8(&bytes).unwrap()
             );
-
-            TestResult::passed()
         }
-        QuickCheck::new()
-            .tests(1_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }

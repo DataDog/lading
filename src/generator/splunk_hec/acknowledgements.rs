@@ -13,21 +13,22 @@ use super::{AckSettings, SPLUNK_HEC_CHANNEL_HEADER};
 
 type AckId = u64;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Error {
     AcksAlreadyEnabled,
 }
 
 /// Splunk HEC channels
-pub struct Channels {
-    /// If acknowledgements are enabled, the channel id maps to Some(Sender) used
-    /// to send ack ids to a separate task that will query for ack status
+pub(crate) struct Channels {
+    /// If acknowledgements are enabled, the channel id maps to Some(Sender)
+    /// used to send ack ids to a separate task that will query for ack
+    /// status
     ids: HashMap<String, Option<Sender<AckId>>>,
     acks_enabled: bool,
 }
 
 impl Channels {
-    pub fn new(num_channels: u16) -> Self {
+    pub(crate) fn new(num_channels: u16) -> Self {
         let ids = (0..num_channels)
             .map(|i| {
                 (
@@ -45,14 +46,14 @@ impl Channels {
         }
     }
 
-    pub fn get_channel_info(&self) -> Vec<(String, Option<Sender<AckId>>)> {
+    pub(crate) fn get_channel_info(&self) -> Vec<(String, Option<Sender<AckId>>)> {
         self.ids
             .iter()
             .map(|(channel_id, ack_id_tx)| (channel_id.clone(), ack_id_tx.clone()))
             .collect()
     }
 
-    pub fn enable_acknowledgements(
+    pub(crate) fn enable_acknowledgements(
         &mut self,
         ack_uri: Uri,
         token: String,
@@ -92,17 +93,17 @@ impl Channels {
 }
 
 struct AckService {
-    pub ack_uri: Uri,
-    pub token: String,
-    pub client: Client<HttpConnector, Body>,
-    pub ack_settings: AckSettings,
+    pub(crate) ack_uri: Uri,
+    pub(crate) token: String,
+    pub(crate) client: Client<HttpConnector, Body>,
+    pub(crate) ack_settings: AckSettings,
 }
 
 impl AckService {
     /// Spawn a tokio task that will continuously query /services/collector/ack
     /// to check on a particular Splunk channel's ack id statuses. The task
     /// receives new ack ids from [`super::worker::Worker`]
-    pub fn spawn_ack_task(&self, channel_id: String, mut ack_rx: Receiver<AckId>) {
+    pub(crate) fn spawn_ack_task(&self, channel_id: String, mut ack_rx: Receiver<AckId>) {
         let mut ack_ids = HashMap::new();
         let mut interval = tokio::time::interval(Duration::from_secs(
             self.ack_settings.ack_query_interval_seconds,

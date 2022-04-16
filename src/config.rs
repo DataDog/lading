@@ -1,8 +1,9 @@
 //! This module controls configuration parsing from the end user, providing a
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
-use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+
+use serde::Deserialize;
 
 use crate::{blackhole, generator, inspector, target};
 

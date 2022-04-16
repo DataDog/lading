@@ -1,3 +1,5 @@
+use std::{net::SocketAddr, str::FromStr, time::Duration};
+
 use hyper::{
     body, header,
     server::conn::{AddrIncoming, AddrStream},
@@ -6,7 +8,6 @@ use hyper::{
 };
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, str::FromStr, time::Duration};
 use tower::ServiceBuilder;
 use tracing::{error, info};
 
@@ -19,6 +20,7 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
+#[derive(Debug)]
 pub enum Error {
     Hyper(hyper::Error),
 }
@@ -44,7 +46,7 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::AwsKinesis
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 /// Main configuration struct for this program
 pub struct Config {
     /// number of concurrent HTTP connections to allow
@@ -119,6 +121,7 @@ async fn srv(
     }
 }
 
+#[derive(Debug)]
 pub struct Http {
     httpd_addr: SocketAddr,
     body_variant: BodyVariant,

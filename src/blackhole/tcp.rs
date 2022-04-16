@@ -1,17 +1,20 @@
-use crate::signals::Shutdown;
+use std::{io, net::SocketAddr};
+
 use futures::stream::StreamExt;
 use metrics::counter;
 use serde::Deserialize;
-use std::{io, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
+use crate::signals::Shutdown;
+
+#[derive(Debug)]
 pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct Config {
     /// address -- IP plus port -- to bind to
     binding_addr: SocketAddr,

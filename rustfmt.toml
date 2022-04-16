@@ -5,3 +5,5 @@ newline_style = "unix"
 # Nightly only features
 # unstable_features = true
 # imports_granularity = "crate"
+# group_imports = "StdExternalCrate"
+# wrap_comments = true

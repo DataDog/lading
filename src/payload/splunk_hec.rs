@@ -1,8 +1,10 @@
-use crate::payload::{common::AsciiStr, Error, Serialize};
+use std::io::Write;
+
 use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
 use serde::Deserialize;
-use std::io::Write;
+
+use crate::payload::{common::AsciiStr, Error, Serialize};
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
 const STAGES: [&str; 4] = ["production", "performance", "noprod", "staging"];
@@ -29,19 +31,19 @@ const MESSAGES: [&str; 5] = [
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Attrs {
     #[serde(rename = "systemid")]
-    pub system_id: String,
-    pub stage: String,
+    pub(crate) system_id: String,
+    pub(crate) stage: String,
     #[serde(rename = "type")]
-    pub event_type: String,
+    pub(crate) event_type: String,
     #[serde(rename = "c2cService")]
-    pub c2c_service: String,
+    pub(crate) c2c_service: String,
     #[serde(rename = "c2cPartition")]
-    pub c2c_partition: String,
+    pub(crate) c2c_partition: String,
     #[serde(rename = "c2cStage")]
-    pub c2c_stage: String, // same as
+    pub(crate) c2c_stage: String, // same as
     #[serde(rename = "c2cContainerType")]
-    pub c2c_container_type: String,
-    pub aws_account: String,
+    pub(crate) c2c_container_type: String,
+    pub(crate) aws_account: String,
 }
 
 impl<'a> Arbitrary<'a> for Attrs {
@@ -77,8 +79,8 @@ impl<'a> Arbitrary<'a> for Attrs {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Event {
-    pub timestamp: f64,
-    pub message: String,
+    pub(crate) timestamp: f64,
+    pub(crate) message: String,
     attrs: Attrs,
 }
 
@@ -107,10 +109,10 @@ impl<'a> Arbitrary<'a> for Event {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Member {
-    pub event: Event,
-    pub time: f64,
-    pub host: String,
-    pub index: String,
+    pub(crate) event: Event,
+    pub(crate) time: f64,
+    pub(crate) host: String,
+    pub(crate) index: String,
 }
 
 impl<'a> Arbitrary<'a> for Member {
@@ -139,7 +141,7 @@ impl<'a> Arbitrary<'a> for Member {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum Encoding {
     Text,
@@ -152,15 +154,15 @@ impl Default for Encoding {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SplunkHec {
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct SplunkHec {
     encoding: Encoding,
 }
 
 impl SplunkHec {
     /// Create a new instance of [`SplunkHec`]
     #[must_use]
-    pub fn new(encoding: Encoding) -> Self {
+    pub(crate) fn new(encoding: Encoding) -> Self {
         Self { encoding }
     }
 }
@@ -204,7 +206,7 @@ impl Serialize for SplunkHec {
 
 #[cfg(test)]
 mod test {
-    use quickcheck::{QuickCheck, TestResult};
+    use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
@@ -212,9 +214,9 @@ mod test {
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let hec = SplunkHec::default();
@@ -222,19 +224,14 @@ mod test {
             let mut bytes = Vec::with_capacity(max_bytes);
             hec.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             assert!(bytes.len() <= max_bytes);
-
-            TestResult::passed()
         }
-        QuickCheck::new()
-            .tests(1_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 
     // We want to know that every payload produced by this type actually
     // deserializes as splunk's hec, is not truncated etc.
-    #[test]
-    fn every_payload_deserializes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    proptest! {
+        #[test]
+        fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let hec = SplunkHec::default();
@@ -246,11 +243,6 @@ mod test {
             for msg in payload.lines() {
                 let _members: Member = serde_json::from_str(msg).unwrap();
             }
-
-            TestResult::passed()
         }
-        QuickCheck::new()
-            .tests(1_000_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }
