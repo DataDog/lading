@@ -1,13 +1,14 @@
-pub use ascii::Ascii;
-pub use datadog_logs::DatadogLog;
-pub use fluent::Fluent;
-pub use foundationdb::FoundationDb;
-pub use json::Json;
-use rand::Rng;
-pub use splunk_hec::{Encoding as SplunkHecEncoding, SplunkHec};
-pub use statik::Static;
 use std::io::{self, Write};
-pub use syslog::Syslog5424;
+
+pub(crate) use ascii::Ascii;
+pub(crate) use datadog_logs::DatadogLog;
+pub(crate) use fluent::Fluent;
+pub(crate) use foundationdb::FoundationDb;
+pub(crate) use json::Json;
+use rand::Rng;
+pub(crate) use splunk_hec::{Encoding as SplunkHecEncoding, SplunkHec};
+pub(crate) use statik::Static;
+pub(crate) use syslog::Syslog5424;
 
 mod ascii;
 mod common;
@@ -21,7 +22,7 @@ mod syslog;
 
 /// Errors related to serialization
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     /// MsgPack payload could not be encoded
     MsgPack(rmp_serde::encode::Error),
     /// Json payload could not be encoded
@@ -56,7 +57,7 @@ impl From<io::Error> for Error {
     }
 }
 
-pub trait Serialize {
+pub(crate) trait Serialize {
     /// Write bytes into writer, subject to `max_bytes` limitations.
     ///
     /// # Errors

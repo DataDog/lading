@@ -1,7 +1,9 @@
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
+    sync::Arc,
 };
+
 use byte_unit::{Byte, ByteUnit};
 use governor::{
     clock, state,
@@ -17,11 +19,14 @@ use metrics::counter;
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+    signals::Shutdown,
+};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
@@ -146,7 +151,7 @@ impl Http {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<usize> = config
+        let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
@@ -159,7 +164,7 @@ impl Http {
                 ]
             })
             .iter()
-            .map(|sz| sz.get_bytes() as usize)
+            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
@@ -171,9 +176,10 @@ impl Http {
             } => {
                 let block_chunks = chunk_bytes(
                     &mut rng,
-                    maximum_prebuild_cache_size_bytes.get_bytes() as usize,
+                    NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                        .expect("bytes must be non-zero"),
                     &block_sizes,
-                );
+                )?;
                 let block_cache = match variant {
                     Variant::Ascii => construct_block_cache(
                         &mut rng,

@@ -1,12 +1,14 @@
+use std::io::Read;
+
 use bytes::{Buf, Bytes};
 use flate2::read::{MultiGzDecoder, ZlibDecoder};
 use hyper::{Body, StatusCode};
-use std::io::Read;
 
-/// decode decodes a HTTP request body based on its Content-Encoding header. Only identity, gzip, and
-/// deflate are currently supported content encodings.
+/// decode decodes a HTTP request body based on its Content-Encoding header.
+/// Only identity, gzip, and deflate are currently supported content encodings.
 ///
-/// It supports multiple content encodings joined by ,s. They are decoded in the order provided.
+/// It supports multiple content encodings joined by ,s. They are decoded in the
+/// order provided.
 ///
 /// See [RFC7231](https://httpwg.org/specs/rfc7231.html#header.content-encoding) for more details
 /// on this header value.
@@ -19,7 +21,7 @@ use std::io::Read;
 /// * The body cannot be decoded as the specified content type
 ///
 /// This response body can be passed back as the HTTP response to the client
-pub fn decode(
+pub(crate) fn decode(
     content_encoding: Option<&hyper::header::HeaderValue>,
     mut body: Bytes,
 ) -> Result<Bytes, hyper::Response<hyper::Body>> {

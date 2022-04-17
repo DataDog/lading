@@ -1,5 +1,6 @@
-use crate::signals::Shutdown;
 use serde::Deserialize;
+
+use crate::signals::Shutdown;
 
 pub mod http;
 pub mod splunk_hec;
@@ -7,6 +8,7 @@ pub mod sqs;
 pub mod tcp;
 pub mod udp;
 
+#[derive(Debug)]
 pub enum Error {
     Tcp(tcp::Error),
     Http(http::Error),
@@ -15,7 +17,7 @@ pub enum Error {
     Sqs(sqs::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum Config {
     Tcp(tcp::Config),
@@ -25,6 +27,7 @@ pub enum Config {
     Sqs(sqs::Config),
 }
 
+#[derive(Debug)]
 pub enum Server {
     Tcp(tcp::Tcp),
     Http(http::Http),
@@ -61,7 +64,8 @@ impl Server {
     ///
     /// # Errors
     ///
-    /// Function will return an error if the underlying sub-server signals error.
+    /// Function will return an error if the underlying sub-server signals
+    /// error.
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),

@@ -1,7 +1,8 @@
-use crate::{
-    block::{chunk_bytes, construct_block_cache, Block},
-    payload,
+use std::{
+    net::{SocketAddr, ToSocketAddrs},
+    num::{NonZeroU32, NonZeroUsize},
 };
+
 use byte_unit::{Byte, ByteUnit};
 use governor::{
     clock, state,
@@ -11,14 +12,14 @@ use governor::{
 use metrics::counter;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{
-    net::{SocketAddr, ToSocketAddrs},
-    num::NonZeroU32,
-};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+    signals::Shutdown,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -36,7 +37,7 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum GeneratorVariant {
     /// Generates Fluent messages
@@ -48,6 +49,13 @@ pub enum GeneratorVariant {
 #[derive(Debug)]
 pub enum Error {
     Governor(InsufficientCapacity),
+    Block(block::Error),
+}
+
+impl From<block::Error> for Error {
+    fn from(error: block::Error) -> Self {
+        Error::Block(error)
+    }
 }
 
 impl From<InsufficientCapacity> for Error {
@@ -56,6 +64,7 @@ impl From<InsufficientCapacity> for Error {
     }
 }
 
+#[derive(Debug)]
 pub struct Tcp {
     addr: SocketAddr,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
@@ -73,12 +82,12 @@ impl Tcp {
     ///
     /// # Panics
     ///
-    /// Function will panic if user has passed non-zero values for any byte
+    /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<usize> = config
+        let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
             .clone()
             .unwrap_or_else(|| {
@@ -94,16 +103,17 @@ impl Tcp {
                 ]
             })
             .iter()
-            .map(|sz| sz.get_bytes() as usize)
+            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let labels = vec![];
         let block_chunks = chunk_bytes(
             &mut rng,
-            config.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
+            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                .expect("bytes must be non-zero"),
             &block_sizes,
-        );
+        )?;
         let block_cache = match config.variant {
             GeneratorVariant::Syslog5424 => construct_block_cache(
                 &mut rng,

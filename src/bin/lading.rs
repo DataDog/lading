@@ -1,3 +1,11 @@
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+    io::Read,
+    path::PathBuf,
+    str::FromStr,
+};
+
 use clap::Parser;
 use lading::{
     blackhole,
@@ -8,11 +16,6 @@ use lading::{
     target::{self, Behavior, Output},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use std::{collections::HashMap, io::Read, path::PathBuf};
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
 use tokio::{
     runtime::Builder,
     signal,
@@ -67,7 +70,8 @@ struct Opts {
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
     #[clap(long)]
     global_labels: Option<CliKeyValues>,
-    /// additional environment variables to apply to the target, format KEY=VAL,KEY2=VAL
+    /// additional environment variables to apply to the target, format
+    /// KEY=VAL,KEY2=VAL
     #[clap(long)]
     target_environment_variables: Option<CliKeyValues>,
     /// the path of the target executable
@@ -94,7 +98,8 @@ struct Opts {
     /// the time, in seconds, to run the target and collect samples about it
     #[clap(long, default_value_t = 120)]
     experiment_duration_seconds: u32,
-    /// the time, in seconds, to allow the target to run without collecting samples
+    /// the time, in seconds, to allow the target to run without collecting
+    /// samples
     #[clap(long, default_value_t = 30)]
     warmup_duration_seconds: u32,
 }

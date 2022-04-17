@@ -1,6 +1,3 @@
-use crate::signals::Shutdown;
-use metrics_util::registry::{AtomicStorage, Registry};
-use serde::Serialize;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -10,6 +7,9 @@ use std::{
     sync::{atomic::Ordering, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use metrics_util::registry::{AtomicStorage, Registry};
+use serde::Serialize;
 use tokio::{
     fs::File,
     io::{AsyncWriteExt, BufWriter},
@@ -17,6 +17,8 @@ use tokio::{
 };
 use tracing::{debug, info};
 use uuid::Uuid;
+
+use crate::signals::Shutdown;
 
 #[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +46,7 @@ struct Inner {
     registry: Registry<metrics::Key, AtomicStorage>,
 }
 
+#[allow(missing_debug_implementations)]
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,

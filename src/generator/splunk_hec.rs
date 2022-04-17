@@ -1,10 +1,10 @@
 mod acknowledgements;
 
-use crate::{
-    block::{chunk_bytes, construct_block_cache, Block},
-    payload,
-    payload::SplunkHecEncoding,
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    sync::Arc,
 };
+
 use acknowledgements::Channels;
 use byte_unit::{Byte, ByteUnit};
 use governor::{
@@ -21,11 +21,15 @@ use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{num::NonZeroU32, sync::Arc};
 use tokio::sync::Semaphore;
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+    payload::SplunkHecEncoding,
+    signals::Shutdown,
+};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
@@ -34,7 +38,7 @@ const SPLUNK_HEC_TEXT_PATH: &str = "/services/collector/raw";
 const SPLUNK_HEC_CHANNEL_HEADER: &str = "x-splunk-request-channel";
 
 /// Optional Splunk HEC indexer acknowledgements configuration
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 pub struct AckSettings {
     /// The time in seconds between queries to /services/collector/ack
     pub ack_query_interval_seconds: u64,
@@ -67,14 +71,22 @@ pub struct Config {
     pub parallel_connections: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Error {
     InvalidHECPath,
     Acknowledgements(acknowledgements::Error),
+    Block(block::Error),
 }
 
-/// The [`Worker`] defines a task that emits variant lines to a Splunk HEC server
-/// controlling throughput.
+impl From<block::Error> for Error {
+    fn from(error: block::Error) -> Self {
+        Error::Block(error)
+    }
+}
+
+/// The [`Worker`] defines a task that emits variant lines to a Splunk HEC
+/// server controlling throughput.
+#[derive(Debug)]
 pub struct SplunkHec {
     uri: Uri,
     token: String,
@@ -88,7 +100,7 @@ pub struct SplunkHec {
 
 /// Derive the intended path from the format configuration
 // https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_uri_by_format(base_uri: &Uri, format: &payload::SplunkHecEncoding) -> Uri {
+fn get_uri_by_format(base_uri: &Uri, format: payload::SplunkHecEncoding) -> Uri {
     let path = match format {
         payload::SplunkHecEncoding::Text => SPLUNK_HEC_TEXT_PATH,
         payload::SplunkHecEncoding::Json => SPLUNK_HEC_JSON_PATH,
@@ -116,7 +128,7 @@ impl SplunkHec {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<usize> = config
+        let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
@@ -129,18 +141,19 @@ impl SplunkHec {
                 ]
             })
             .iter()
-            .map(|sz| sz.get_bytes() as usize)
+            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let labels = vec![];
-        let uri = get_uri_by_format(&config.target_uri, &config.format);
+        let uri = get_uri_by_format(&config.target_uri, config.format);
 
         let block_chunks = chunk_bytes(
             &mut rng,
-            config.maximum_prebuild_cache_size_bytes.get_bytes() as usize,
+            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                .expect("bytes must be non-zero"),
             &block_sizes,
-        );
+        )?;
         let block_cache = construct_block_cache(
             &mut rng,
             &payload::SplunkHec::new(config.format),
@@ -168,7 +181,8 @@ impl SplunkHec {
     ///
     /// # Errors
     ///
-    /// Function will error if unable to enable acknowledgements when configured to do so.
+    /// Function will error if unable to enable acknowledgements when configured
+    /// to do so.
     ///
     /// # Panics
     ///

@@ -1,4 +1,5 @@
-use crate::signals::Shutdown;
+use std::net::SocketAddr;
+
 use hyper::{
     body,
     server::conn::{AddrIncoming, AddrStream},
@@ -7,11 +8,13 @@ use hyper::{
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
-use std::net::SocketAddr;
 use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{error, info};
 
+use crate::signals::Shutdown;
+
+#[derive(Debug)]
 pub enum Error {
     Hyper(hyper::Error),
 }
@@ -20,7 +23,7 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 /// Main configuration struct for this program
 pub struct Config {
     /// number of concurrent HTTP connections to allow
@@ -30,6 +33,7 @@ pub struct Config {
     pub binding_addr: SocketAddr,
 }
 
+#[derive(Debug)]
 pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,

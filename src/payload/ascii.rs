@@ -1,10 +1,12 @@
-use crate::payload::{common::AsciiStr, Error, Serialize};
-use arbitrary::{self, Unstructured};
-use rand::Rng;
 use std::io::Write;
 
-#[derive(Debug, Default)]
-pub struct Ascii {}
+use arbitrary::{self, Unstructured};
+use rand::Rng;
+
+use crate::payload::{common::AsciiStr, Error, Serialize};
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Ascii {}
 
 impl Serialize for Ascii {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -34,27 +36,22 @@ impl Serialize for Ascii {
 
 #[cfg(test)]
 mod test {
-    use crate::payload::{Ascii, Serialize};
-    use quickcheck::{QuickCheck, TestResult};
+    use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    use crate::payload::{Ascii, Serialize};
+
+    // The serialized size of the payload must not exceed `max_bytes`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let ascii = Ascii::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ascii.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            assert!(bytes.len() <= max_bytes);
-
-            TestResult::passed()
+            prop_assert!(bytes.len() <= max_bytes);
         }
-        QuickCheck::new()
-            .tests(1_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }

@@ -1,5 +1,6 @@
-use crate::signals::Shutdown;
 use serde::Deserialize;
+
+use crate::signals::Shutdown;
 
 pub mod file_gen;
 pub mod http;
@@ -26,6 +27,7 @@ pub enum Config {
     FileGen(file_gen::Config),
 }
 
+#[derive(Debug)]
 pub enum Server {
     Tcp(tcp::Tcp),
     Http(http::Http),
@@ -68,7 +70,8 @@ impl Server {
     ///
     /// # Errors
     ///
-    /// Function will return an error if the underlying sub-server signals error.
+    /// Function will return an error if the underlying sub-server signals
+    /// error.
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),

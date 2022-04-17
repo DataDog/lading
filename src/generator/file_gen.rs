@@ -1,7 +1,9 @@
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
+    str,
 };
+
 use byte_unit::{Byte, ByteUnit};
 use governor::{
     clock, state,
@@ -11,7 +13,6 @@ use governor::{
 use metrics::{counter, gauge};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{num::NonZeroU32, path::PathBuf, str};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
@@ -19,7 +20,11 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{
+    block::{self, chunk_bytes, construct_block_cache, Block},
+    payload,
+    signals::Shutdown,
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -122,7 +127,7 @@ impl FileGen {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<usize> = config
+        let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
@@ -135,7 +140,7 @@ impl FileGen {
                 ]
             })
             .iter()
-            .map(|sz| sz.get_bytes() as usize)
+            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
@@ -146,9 +151,10 @@ impl FileGen {
 
         let block_chunks = chunk_bytes(
             &mut rng,
-            maximum_prebuild_cache_size_bytes.get() as usize,
+            NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get() as usize)
+                .expect("bytes must be non-zero"),
             &block_sizes,
-        );
+        )?;
 
         let labels = vec![];
         let mut handles = Vec::new();
@@ -240,7 +246,7 @@ struct Child {
 }
 
 impl Child {
-    pub async fn spin(self) -> Result<(), Error> {
+    pub(crate) async fn spin(self) -> Result<(), Error> {
         let bytes_per_second = self.bytes_per_second.get() as usize;
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());

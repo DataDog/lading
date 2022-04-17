@@ -1,12 +1,14 @@
-use crate::payload::{Error, Serialize};
+use std::{io::Write, time::SystemTime};
+
 use arbitrary::{size_hint, Unstructured};
 use rand::Rng;
-use std::{io::Write, time::SystemTime};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-#[derive(Debug, Default)]
+use crate::payload::{Error, Serialize};
+
+#[derive(Debug, Default, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
-pub struct Syslog5424 {}
+pub(crate) struct Syslog5424 {}
 
 const HOSTNAMES: [&str; 4] = [
     "troutwine.us",
@@ -160,15 +162,16 @@ impl Serialize for Syslog5424 {
 
 #[cfg(test)]
 mod test {
-    use crate::payload::{Serialize, Syslog5424};
-    use quickcheck::{QuickCheck, TestResult};
+    use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
+
+    use crate::payload::{Serialize, Syslog5424};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let syslog = Syslog5424::default();
@@ -180,11 +183,6 @@ mod test {
                 "{:?}",
                 std::str::from_utf8(&bytes).unwrap()
             );
-
-            TestResult::passed()
         }
-        QuickCheck::new()
-            .tests(1_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }

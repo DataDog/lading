@@ -34,6 +34,7 @@ pub struct Config {
     pub output: Output,
 }
 
+#[derive(Debug)]
 pub struct Server {
     config: Config,
     shutdown: Shutdown,

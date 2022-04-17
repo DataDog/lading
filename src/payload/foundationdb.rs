@@ -1,8 +1,10 @@
-use crate::payload::{Error, Serialize};
+use std::io::Write;
+
 use arbitrary::{self, Arbitrary, Unstructured};
 use rand::Rng;
 use serde::Serializer;
-use std::io::Write;
+
+use crate::payload::{Error, Serialize};
 
 #[derive(Arbitrary, Debug)]
 struct StrF32 {
@@ -112,8 +114,8 @@ enum Member {
     },
 }
 
-#[derive(Debug, Default)]
-pub struct FoundationDb {}
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct FoundationDb {}
 
 impl Serialize for FoundationDb {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -143,15 +145,16 @@ impl Serialize for FoundationDb {
 
 #[cfg(test)]
 mod test {
-    use crate::payload::{FoundationDb, Serialize};
-    use quickcheck::{QuickCheck, TestResult};
+    use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
+
+    use crate::payload::{FoundationDb, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        fn inner(seed: u64, max_bytes: u16) -> TestResult {
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let fdb = FoundationDb::default();
@@ -159,11 +162,6 @@ mod test {
             let mut bytes = Vec::with_capacity(max_bytes);
             fdb.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             assert!(bytes.len() <= max_bytes);
-
-            TestResult::passed()
         }
-        QuickCheck::new()
-            .tests(1_000)
-            .quickcheck(inner as fn(u64, u16) -> TestResult);
     }
 }

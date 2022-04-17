@@ -1,18 +1,20 @@
-use crate::payload::{Error, Serialize};
-use rand::Rng;
 use std::{
     io::{BufRead, Write},
     path::Path,
 };
 
+use rand::Rng;
+
+use crate::payload::{Error, Serialize};
+
 #[derive(Debug)]
-pub struct Static<'a> {
+pub(crate) struct Static<'a> {
     path: &'a Path,
 }
 
 impl<'a> Static<'a> {
     #[must_use]
-    pub fn new(path: &'a Path) -> Self {
+    pub(crate) fn new(path: &'a Path) -> Self {
         Self { path }
     }
 }
