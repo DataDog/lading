@@ -1,3 +1,13 @@
+//! Manage the target inspector sub-process
+//!
+//! The interogation that lading does of the target sub-process is intentionally
+//! limited to in-process concerns. For instance, lading is able to measure the
+//! bytes written per second to a target becase lading itself is writing the
+//! bytes. It's valuable to have further information about the target
+//! sub-process and that's the responsibility of the inspector. Consider that
+//! you can get a Linux `perf` sample of the target by means of having inspector
+//! run an appropriate shell script, or take samples of the target's CPU use.
+
 use std::{
     collections::HashMap,
     io,
@@ -20,21 +30,37 @@ use crate::{
 };
 
 #[derive(Debug)]
+/// Errors produced by [`Server`]
 pub enum Error {
+    /// Wrapper for [`nix::errno::Errno`]
     Errno(Errno),
+    /// Wrapper for [`std::io::Error`]
     Io(io::Error),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
 pub struct Config {
+    /// The path to the inspector executable.
     pub command: PathBuf,
+    /// Arguments for the inspector sub-process.
     pub arguments: Vec<String>,
+    /// Environment variables to set for the inspector sub-process. Lading's own
+    /// environment variables are not propagated to the sub-process.
     pub environment_variables: HashMap<String, String>,
+    /// Manages stderr, stdout of the inspector sub-process.
     pub output: Output,
 }
 
 #[derive(Debug)]
+/// The inspector sub-process server.
+///
+/// This struct manages a sub-process that can be used to do further examination
+/// of the [`crate::target::Server`] by means of operating system facilities. The
+/// sub-process is not created until [`Server::run`] is called. It is assumed
+/// that only one instance of this struct will ever exist at a time, although
+/// there are no protections for that.
 pub struct Server {
     config: Config,
     shutdown: Shutdown,
@@ -44,7 +70,7 @@ impl Server {
     /// Create a new [`Server`] instance
     ///
     /// The inspector `Server` is responsible for investigating the
-    /// [`target::Server`] sub-process. In the future we will likely pass the
+    /// [`crate::target::Server`] sub-process. In the future we will likely pass the
     /// target sub-process PID as an argument.
     ///
     /// # Errors

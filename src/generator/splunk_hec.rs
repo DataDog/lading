@@ -1,3 +1,5 @@
+//! The Splunk HEC generator.
+
 mod acknowledgements;
 
 use std::{
@@ -47,7 +49,7 @@ pub struct AckSettings {
     pub ack_timeout_seconds: u64,
 }
 
-/// The [`Target`] instance from which to derive workers
+/// Configuration for [`SplunkHec`]
 #[derive(Deserialize, Debug)]
 pub struct Config {
     /// The seed for random operations against this target
@@ -72,9 +74,13 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Errors produced by [`SplunkHec`].
 pub enum Error {
+    /// User supplied HEC path is invalid.
     InvalidHECPath,
+    /// Interior acknowledgement error.
     Acknowledgements(acknowledgements::Error),
+    /// Creation of payload blocks failed.
     Block(block::Error),
 }
 
@@ -84,8 +90,8 @@ impl From<block::Error> for Error {
     }
 }
 
-/// The [`Worker`] defines a task that emits variant lines to a Splunk HEC
-/// server controlling throughput.
+/// Defines a task that emits variant lines to a Splunk HEC server controlling
+/// throughput.
 #[derive(Debug)]
 pub struct SplunkHec {
     uri: Uri,
@@ -115,7 +121,7 @@ fn get_uri_by_format(base_uri: &Uri, format: payload::SplunkHecEncoding) -> Uri 
 }
 
 impl SplunkHec {
-    /// Create a new [`Worker`] instance
+    /// Create a new [`SplunkHec`] instance
     ///
     /// # Errors
     ///
@@ -177,7 +183,7 @@ impl SplunkHec {
         })
     }
 
-    /// Enter the main loop of this [`Worker`]
+    /// Run [`SplunkHec`] to completion or until a shutdown signal is received.
     ///
     /// # Errors
     ///

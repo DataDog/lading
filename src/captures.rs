@@ -1,3 +1,12 @@
+//! Capture and record lading's internal metrics
+//!
+//! The manner in which lading instruments its target is pretty simple: we use
+//! the [`metrics`] library to record factual things about interaction with the
+//! target and then write all that out to disk for later analysis. This means
+//! that the generator, blackhole etc code are unaware of anything other than
+//! their [`metrics`] integration while [`CaptureManager`] need only hook into
+//! that same crate.
+
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -22,23 +31,36 @@ use crate::signals::Shutdown;
 
 #[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
+/// The kinds of metrics that are recorded in [`Line`].
 pub enum MetricKind {
+    /// A monotonically increasing value.
     Counter,
+    /// A point-at-time value.
     Gauge,
 }
 
 #[derive(Debug, Serialize)]
+/// The structure of a capture file line.
 pub struct Line<'a> {
     #[serde(borrow)]
     /// An id that is mostly unique to this run, allowing us to distinguish
     /// duplications of the same observational setup.
     pub run_id: Cow<'a, Uuid>,
+    /// The time in milliseconds that this line was written.
     pub time: u128,
+    /// The "fetch index". Previous versions of lading scraped prometheus
+    /// metrics from their targets and kept an increment index of polls. Now
+    /// this records the number of times the internal metrics cache has been
+    /// flushed.
     pub fetch_index: u64,
+    /// The name of the metric recorded by this line.
     pub metric_name: String,
+    /// The kind of metric recorded by this line.
     pub metric_kind: MetricKind,
+    /// The value of the metric on this line.
     pub value: u64,
     #[serde(flatten)]
+    /// The labels associated with this metric.
     pub labels: HashMap<String, String>,
 }
 
@@ -47,6 +69,10 @@ struct Inner {
 }
 
 #[allow(missing_debug_implementations)]
+/// Wrangles internal metrics into capture files
+///
+/// This struct is responsible for capturing all internal metrics sent through
+/// [`metrics`] and periodically writing them to disk with format [`Line`].
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,
@@ -90,6 +116,7 @@ impl CaptureManager {
         metrics::set_boxed_recorder(Box::new(recorder)).unwrap();
     }
 
+    /// Add a global label to all metrics managed by [`CaptureManager`].
     pub fn add_global_label<K, V>(&mut self, key: K, value: V)
     where
         K: Into<String>,

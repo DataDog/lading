@@ -1,3 +1,5 @@
+//! The UDP protocol speaking blackhole.
+
 use std::{io, net::SocketAddr};
 
 use metrics::counter;
@@ -8,18 +10,21 @@ use tracing::info;
 use crate::signals::Shutdown;
 
 #[derive(Debug)]
+/// Errors produced by [`Udp`].
 pub enum Error {
+    /// Wrapper for [`std::io::Error`].
     Io(io::Error),
 }
 
-/// Main configuration struct for this program
 #[derive(Debug, Deserialize, Clone, Copy)]
+/// Configuration for [`Udp`].
 pub struct Config {
     /// address -- IP plus port -- to bind to
     pub binding_addr: SocketAddr,
 }
 
 #[derive(Debug)]
+/// The UDP blackhole.
 pub struct Udp {
     binding_addr: SocketAddr,
     shutdown: Shutdown,

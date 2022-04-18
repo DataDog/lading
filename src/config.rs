@@ -27,13 +27,18 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(untagged)]
+/// Defines the manner of lading's telemetry.
 pub enum Telemetry {
+    /// In prometheus mode lading will emit its internal telemetry for scraping
+    /// at a prometheus poll endpoint.
     Prometheus {
         /// Address and port for prometheus exporter
         prometheus_addr: SocketAddr,
         /// Additional labels to include in every metric
         global_labels: HashMap<String, String>,
     },
+    /// In log mode lading will emit its internal telemetry to a structured log
+    /// file, the "capture" file.
     Log {
         /// Location on disk to write captures
         path: PathBuf,

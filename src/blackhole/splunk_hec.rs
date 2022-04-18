@@ -1,3 +1,5 @@
+//! The Splunk HEC protocol speaking blackhole.
+
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -24,12 +26,14 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 #[derive(Debug)]
+/// Errors produced by [`SplunkHec`].
 pub enum Error {
+    /// Wrapper for [`hyper::Error`].
     Hyper(hyper::Error),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
-/// Main configuration struct for this program
+/// Configuration for [`SplunkHec`].
 pub struct Config {
     /// number of concurrent HTTP connections to allow
     #[serde(default = "default_concurrent_requests_max")]
@@ -126,6 +130,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 }
 
 #[derive(Debug)]
+/// The Splunk HEC blackhole.
 pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,
