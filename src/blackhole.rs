@@ -1,3 +1,10 @@
+//! Lading blackholes
+//!
+//! For targets that need to push bytes themselves lading has b'blackhole'
+//! support. These are listening servers that catch payloads from the target, do
+//! as little as possible with them and respond as minimally as possible in
+//! order to avoid overhead.
+
 use serde::Deserialize;
 
 use crate::signals::Shutdown;
@@ -9,30 +16,51 @@ pub mod tcp;
 pub mod udp;
 
 #[derive(Debug)]
+/// Errors produced by [`Server`].
 pub enum Error {
+    /// See [`crate::blackhole::tcp::Error`] for details.
     Tcp(tcp::Error),
+    /// See [`crate::blackhole::http::Error`] for details.
     Http(http::Error),
+    /// See [`crate::blackhole::splunk_hec::Error`] for details.
     SplunkHec(splunk_hec::Error),
+    /// See [`crate::blackhole::udp::Error`] for details.
     Udp(udp::Error),
+    /// See [`crate::blackhole::sqs::Error`] for details.
     Sqs(sqs::Error),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
 pub enum Config {
+    /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::blackhole::http::Config`] for details.
     Http(http::Config),
+    /// See [`crate::blackhole::splunk_hec::Config`] for details.
     SplunkHec(splunk_hec::Config),
+    /// See [`crate::blackhole::udp::Config`] for details.
     Udp(udp::Config),
+    /// See [`crate::blackhole::sqs::Config`] for details.
     Sqs(sqs::Config),
 }
 
 #[derive(Debug)]
+/// The blackhole server.
+///
+/// All blackholes supported by lading are a variant of this enum. Please see
+/// variant documentation for details.
 pub enum Server {
+    /// See [`crate::blackhole::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::blackhole::http::Http`] for details.
     Http(http::Http),
+    /// See [`crate::blackhole::splunk_hec::SplunkHec`] for details.
     SplunkHec(splunk_hec::SplunkHec),
+    /// See [`crate::blackhole::udp::Udp`] for details.
     Udp(udp::Udp),
+    /// See [`crate::blackhole::sqs::Sqs`] for details.
     Sqs(sqs::Sqs),
 }
 

@@ -1,3 +1,14 @@
+//! Manage the target sub-process
+//!
+//! The lading 'target' is the sub-process that lading inspects by pushing load
+//! into from a [`crate::generator::Server`] and possibly into a
+//! [`crate::blackhole::Server`]. A [`crate::inspector::Server`] is intended to
+//! read operating system details about the target sub-process.
+//!
+//! It is lading's responsibility to start the target sub-process and shut it
+//! down cleanly by signaling SIGTERM to it. If the target crashes this is also
+//! detected and lading does a controlled shutdown.
+
 use std::{
     collections::HashMap,
     io,
@@ -17,20 +28,35 @@ pub use crate::common::{Behavior, Output};
 use crate::{common::stdio, signals::Shutdown};
 
 #[derive(Debug)]
+/// Errors produced by [`Server`]
 pub enum Error {
+    /// Wrapper for [`std::io::Error`]
     Io(io::Error),
+    /// Wrapper for [`nix::errno::Errno`]
     Errno(Errno),
 }
 
 #[derive(Debug)]
+/// Configuration for [`Server`]
 pub struct Config {
+    /// The path to the target executable.
     pub command: PathBuf,
+    /// Arguments for the target sub-process.
     pub arguments: Vec<String>,
+    /// Environment variables to set for the target sub-process. Lading's own
+    /// environment variables are not propagated to the target sub-process.
     pub environment_variables: HashMap<String, String>,
+    /// Manages stderr, stdout of the target sub-process.
     pub output: Output,
 }
 
 #[derive(Debug)]
+/// The target sub-process server.
+///
+/// This struct manages the sub-process under examination by lading. The
+/// sub-process is not created until [`Server::run`] is called. It is assumed
+/// that only one instance of this struct will ever exist at a time, although
+/// there are no protections for that.
 pub struct Server {
     config: Config,
     shutdown: Shutdown,

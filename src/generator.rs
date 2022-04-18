@@ -1,3 +1,15 @@
+//! Lading generators
+//!
+//! The lading generator is responsible for pushing load into the target
+//! sub-process via a small handful of protocols, the variants of
+//! [`Server`]. Each generator variant works in the same basic way: a block of
+//! payloads are pre-computed at generator start time which are then spammed
+//! into the target according to a user-defined rate limit in a cyclic
+//! manner. That is, we avoid runtime delays in payload generation by, well,
+//! building a lot of payloads in one shot and rotating through them
+//! indefinately, paying higher memory and longer startup for better
+//! experimental control.
+
 use serde::Deserialize;
 
 use crate::signals::Shutdown;
@@ -9,30 +21,51 @@ pub mod splunk_hec;
 pub mod tcp;
 
 #[derive(Debug)]
+/// Errors produced by [`Server`].
 pub enum Error {
+    /// See [`crate::generator::tcp::Error`] for details.
     Tcp(tcp::Error),
+    /// See [`crate::generator::http::Error`] for details.
     Http(http::Error),
+    /// See [`crate::generator::splunk_hec::Error`] for details.
     SplunkHec(splunk_hec::Error),
+    /// See [`crate::generator::kafka::Error`] for details.
     Kafka(kafka::Error),
+    /// See [`crate::generator::file_gen::Error`] for details.
     FileGen(file_gen::Error),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
 pub enum Config {
+    /// See [`crate::generator::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::generator::http::Config`] for details.
     Http(http::Config),
+    /// See [`crate::generator::splunk_hec::Config`] for details.
     SplunkHec(splunk_hec::Config),
+    /// See [`crate::generator::kafka::Config`] for details.
     Kafka(kafka::Config),
+    /// See [`crate::generator::file_gen::Config`] for details.
     FileGen(file_gen::Config),
 }
 
 #[derive(Debug)]
+/// The generator server.
+///
+/// All generators supported by lading are a variant of this enum. Please see
+/// variant documentation for details.
 pub enum Server {
+    /// See [`crate::generator::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::generator::http::Http`] for details.
     Http(http::Http),
+    /// See [`crate::generator::splunk_hec::SplunkHec`] for details.
     SplunkHec(splunk_hec::SplunkHec),
+    /// See [`crate::generator::kafka::Kafka`] for details.
     Kafka(kafka::Kafka),
+    /// See [`crate::generator::file_gen::FileGen`] for details.
     FileGen(file_gen::FileGen),
 }
 

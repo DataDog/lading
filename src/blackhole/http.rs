@@ -1,3 +1,5 @@
+//! The HTTP protocol speaking blackhole.
+
 use std::{net::SocketAddr, str::FromStr, time::Duration};
 
 use hyper::{
@@ -21,13 +23,18 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 #[derive(Debug)]
+/// Errors produced by [`Http`].
 pub enum Error {
+    /// Wrapper for [`hyper::Error`].
     Hyper(hyper::Error),
 }
 
 #[derive(Debug, Copy, Clone, Deserialize)]
+/// Body variant supported by this blackhole.
 pub enum BodyVariant {
+    /// All response bodies will be empty.
     Nothing,
+    /// All response bodies will mimic AWS Kinesis.
     AwsKinesis,
 }
 
@@ -47,7 +54,7 @@ fn default_body_variant() -> BodyVariant {
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
-/// Main configuration struct for this program
+/// Configuration for [`Http`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow
     #[serde(default = "default_concurrent_requests_max")]
@@ -122,6 +129,7 @@ async fn srv(
 }
 
 #[derive(Debug)]
+/// The HTTP blackhole.
 pub struct Http {
     httpd_addr: SocketAddr,
     body_variant: BodyVariant,

@@ -1,3 +1,5 @@
+//! The TCP protocol speaking generator.
+
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
@@ -22,6 +24,7 @@ use crate::{
 };
 
 #[derive(Debug, Deserialize)]
+/// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
@@ -39,6 +42,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
+/// Variants supported by this generator.
 pub enum GeneratorVariant {
     /// Generates Fluent messages
     Fluent,
@@ -47,8 +51,12 @@ pub enum GeneratorVariant {
 }
 
 #[derive(Debug)]
+/// Errors produced by [`Tcp`].
 pub enum Error {
+    /// Rate limiter has insuficient capacity for payload. Indicates a serious
+    /// bug.
     Governor(InsufficientCapacity),
+    /// Creation of payload blocks failed.
     Block(block::Error),
 }
 
@@ -65,6 +73,9 @@ impl From<InsufficientCapacity> for Error {
 }
 
 #[derive(Debug)]
+/// The TCP generator.
+///
+/// This generator is responsible for connecting to the target via TCP
 pub struct Tcp {
     addr: SocketAddr,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
@@ -74,7 +85,7 @@ pub struct Tcp {
 }
 
 impl Tcp {
-    /// Create a new [`Server`] instance
+    /// Create a new [`Tcp`] instance
     ///
     /// # Errors
     ///
@@ -144,7 +155,7 @@ impl Tcp {
         })
     }
 
-    /// Enter the main loop of this [`Worker`]
+    /// Run [`Tcp`] to completion or until a shutdown signal is received.
     ///
     /// # Errors
     ///

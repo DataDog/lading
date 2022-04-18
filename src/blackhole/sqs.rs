@@ -1,3 +1,5 @@
+//! The [SQS](https://aws.amazon.com/sqs/) protocol speaking blackhole.
+
 use std::net::SocketAddr;
 
 use hyper::{
@@ -15,7 +17,9 @@ use tracing::{error, info};
 use crate::signals::Shutdown;
 
 #[derive(Debug)]
+/// Errors produced by [`Sqs`]
 pub enum Error {
+    /// Wrapper for [`hyper::Error`].
     Hyper(hyper::Error),
 }
 
@@ -24,7 +28,7 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
-/// Main configuration struct for this program
+/// Configuration for [`Sqs`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow
     #[serde(default = "default_concurrent_requests_max")]
@@ -34,6 +38,7 @@ pub struct Config {
 }
 
 #[derive(Debug)]
+/// The [SQS](https://aws.amazon.com/sqs/) blackhole.
 pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,
@@ -96,24 +101,29 @@ impl Sqs {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub struct Action {
+struct Action {
     action: String,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub struct ReceiveMessage {
-    pub version: String,
-    pub queue_url: String,
-    pub max_number_of_messages: u32,
-    pub wait_time_seconds: u32,
+struct ReceiveMessage {
+    #[allow(dead_code)]
+    version: String,
+    #[allow(dead_code)]
+    queue_url: String,
+    max_number_of_messages: u32,
+    #[allow(dead_code)]
+    wait_time_seconds: u32,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub struct DeleteMessageBatch {
-    pub version: String,
-    pub queue_url: String,
+struct DeleteMessageBatch {
+    #[allow(dead_code)]
+    version: String,
+    #[allow(dead_code)]
+    queue_url: String,
 
     // a Vec isn't properly deserialized here
     #[serde(rename = "DeleteMessageBatchRequestEntry.1.Id")]
@@ -140,7 +150,7 @@ pub struct DeleteMessageBatch {
 
 impl DeleteMessageBatch {
     #[must_use]
-    pub fn get_entry_ids(&self) -> Vec<&String> {
+    fn get_entry_ids(&self) -> Vec<&String> {
         let mut output = vec![];
         if let Some(x) = &self.entry_1_id {
             output.push(x);
@@ -176,7 +186,7 @@ impl DeleteMessageBatch {
     }
 
     #[must_use]
-    pub fn generate_response(&self) -> String {
+    fn generate_response(&self) -> String {
         let mut entries = String::new();
         for id in self.get_entry_ids() {
             entries += &format!(
@@ -230,7 +240,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 }
 
 #[must_use]
-pub fn random_string(len: usize) -> String {
+fn random_string(len: usize) -> String {
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(len)

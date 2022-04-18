@@ -3,22 +3,24 @@ use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+/// Defines how sub-process stderr and stdout are handled.
 pub struct Output {
     #[serde(default)]
+    /// Determines how stderr is routed.
     pub stderr: Behavior,
     #[serde(default)]
+    /// Determines how stderr is routed.
     pub stdout: Behavior,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
+/// Defines the [`Output`] behavior for stderr and stdout.
 pub enum Behavior {
     /// Redirect stdout, stderr to /dev/null
     Quiet,
-    Log(
-        /// Location to write stdio/stderr
-        PathBuf,
-    ),
+    /// Write to a location on-disk.
+    Log(PathBuf),
 }
 
 impl Default for Behavior {

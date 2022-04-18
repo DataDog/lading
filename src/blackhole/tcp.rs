@@ -1,3 +1,5 @@
+//! The TCP protocol speaking blackhole.
+
 use std::{io, net::SocketAddr};
 
 use futures::stream::StreamExt;
@@ -10,17 +12,21 @@ use tracing::info;
 use crate::signals::Shutdown;
 
 #[derive(Debug)]
+/// Errors emitted by [`Tcp`]
 pub enum Error {
+    /// Wrapper for [`std::io::Error`].
     Io(io::Error),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
+/// Configuration for [`Tcp`]
 pub struct Config {
     /// address -- IP plus port -- to bind to
     binding_addr: SocketAddr,
 }
 
 #[derive(Debug)]
+/// The TCP blackhole.
 pub struct Tcp {
     binding_addr: SocketAddr,
     shutdown: Shutdown,

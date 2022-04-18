@@ -1,3 +1,5 @@
+//! The HTTP protocol speaking generator.
+
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
@@ -45,6 +47,7 @@ pub enum Method {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Variants supported by this generator.
 pub enum Variant {
     /// Generates Splunk HEC messages
     SplunkHec,
@@ -65,6 +68,7 @@ pub enum Variant {
 }
 
 #[derive(Debug, Deserialize)]
+/// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
@@ -85,11 +89,18 @@ pub struct Config {
 }
 
 #[derive(Debug)]
+/// Errors produced by [`Http`].
 pub enum Error {
+    /// Rate limiter has insuficient capacity for payload. Indicates a serious
+    /// bug.
     Governor(InsufficientCapacity),
+    /// Wrapper around [`std::io::Error`].
     Io(::std::io::Error),
+    /// Creation of payload blocks failed.
     Block(block::Error),
+    /// Wrapper around [`hyper::Error`].
     Hyper(hyper::Error),
+    /// Wrapper around [`hyper::http::Error`].
     Http(hyper::http::Error),
 }
 
@@ -123,8 +134,10 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-/// The [`Worker`] defines a task that emits variant lines to an HTTP server
-/// controlling throughput.
+/// The HTTP generator.
+///
+/// This generator is reposnsible for connecting to the target via HTTP. Today
+/// only POST and GET are supported.
 #[derive(Debug)]
 pub struct Http {
     uri: Uri,
@@ -138,7 +151,7 @@ pub struct Http {
 }
 
 impl Http {
-    /// Create a new [`Worker`] instance
+    /// Create a new [`Http`] instance
     ///
     /// # Errors
     ///
@@ -237,7 +250,7 @@ impl Http {
         }
     }
 
-    /// Enter the main loop of this [`Worker`]
+    /// Run [`Http`] to completion or until a shutdown signal is received.
     ///
     /// # Errors
     ///

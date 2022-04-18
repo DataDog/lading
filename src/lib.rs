@@ -1,3 +1,10 @@
+//! The lading daemon load generation and introspection tool.
+//!
+//! This library support the lading binary found elsewhere in this project. The
+//! bits and pieces here are not intended to be used outside of supporting
+//! lading, although if they are helpful in other domains that's a nice
+//! surprise.
+
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
 #![deny(clippy::pedantic)]
@@ -6,6 +13,7 @@
 #![deny(unused_assignments)]
 #![deny(unused_comparisons)]
 #![deny(unreachable_pub)]
+#![deny(missing_docs)]
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 #![allow(clippy::cast_precision_loss)]

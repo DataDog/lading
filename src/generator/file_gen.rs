@@ -1,3 +1,9 @@
+//! The file generator.
+//!
+//! Unlike the other generators the file generator does not "connect" however
+//! losely to the target but instead, without coordination, merely writes files
+//! on disk.
+
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
@@ -27,9 +33,14 @@ use crate::{
 };
 
 #[derive(Debug)]
+/// Errors produced by [`FileGen`].
 pub enum Error {
+    /// Rate limiter has insuficient capacity for payload. Indicates a serious
+    /// bug.
     Governor(InsufficientCapacity),
+    /// Wrapper around [`std::io::Error`].
     Io(::std::io::Error),
+    /// Creation of payload blocks failed.
     Block(block::Error),
 }
 
@@ -51,9 +62,7 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-/// Variant of the [`LogTarget`]
-///
-/// This variant controls what kind of line text is created by this program.
+/// Variants supported by this generator.
 #[derive(Debug, Deserialize, Clone)]
 pub enum Variant {
     /// Generates Datadog Logs JSON messages
@@ -73,11 +82,12 @@ pub enum Variant {
 }
 
 #[derive(Debug, Deserialize)]
+/// Configuration of [`FileGen`]
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
-    /// The path template for [`LogTarget`]. "%NNN%" will be replaced in the
-    /// template with the duplicate number.
+    /// The path template for logs. "%NNN%" will be replaced in the template
+    /// with the duplicate number.
     pub path_template: String,
     /// Total number of duplicates to make from this template.
     pub duplicates: u8,
@@ -104,17 +114,17 @@ pub struct Config {
 }
 
 #[derive(Debug)]
+/// The file generator.
+///
+/// This generator writes files to disk, rotating them as appropriate. It does
+/// this without coordination to the target.
 pub struct FileGen {
     handles: Vec<JoinHandle<Result<(), Error>>>,
     shutdown: Shutdown,
 }
 
 impl FileGen {
-    /// Create a new [`Log`]
-    ///
-    /// A new instance of this type requires a random generator, its name and
-    /// the [`LogTarget`] for this task. The name will be used in telemetry and
-    /// should be unique, though no check is done here to ensure that it is.
+    /// Create a new [`FileGen`]
     ///
     /// # Errors
     ///
@@ -215,7 +225,7 @@ impl FileGen {
         Ok(Self { handles, shutdown })
     }
 
-    /// Enter the main loop of this [`LogTarget`]
+    /// Run [`FileGen`] to completion or until a shutdown signal is received.
     ///
     /// In this loop the target file will be populated with lines of the variant
     /// dictated by the end user.

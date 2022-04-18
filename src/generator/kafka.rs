@@ -1,3 +1,5 @@
+//! The Kafka generator.
+
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -29,7 +31,7 @@ use crate::{
     signals::Shutdown,
 };
 
-/// The throughput configuration
+/// Configuration for generator throughput.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Throughput {
@@ -49,7 +51,7 @@ pub enum Throughput {
     },
 }
 
-/// Variant of the [`TargetTemplate`]
+/// Payload variants supported by this generator.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Variant {
@@ -64,6 +66,7 @@ pub enum Variant {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+/// Configuration for [`Kafka`]
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
@@ -85,12 +88,17 @@ pub struct Config {
 }
 
 #[derive(Debug)]
+/// Errors produced by [`Kafka`]
 pub enum Error {
+    /// Rate limiter has insuficient capacity for payload. Indicates a serious
+    /// bug.
     Governor(InsufficientCapacity),
+    /// Wrapper for [`std::io::Error`]
     Io(::std::io::Error),
+    /// Creation of payload blocks failed.
     Block(block::Error),
+    /// Wrapper around [`rdkafka::error::KafkaError`].
     Kafka(rdkafka::error::KafkaError),
-    MpscClosed,
 }
 
 impl From<block::Error> for Error {
@@ -117,9 +125,8 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-/// The [`Worker`] defines a task that emits variant lines to an HTTP server
-/// controlling throughput.
 #[derive(Debug)]
+/// The Kafka generator.
 pub struct Kafka {
     block_cache: Vec<Block>,
     labels: Vec<(String, String)>,
@@ -131,7 +138,7 @@ pub struct Kafka {
 }
 
 impl Kafka {
-    /// Create a new [`Worker`] instance
+    /// Create a new [`Kafka`] instance
     ///
     /// # Errors
     ///
@@ -182,7 +189,7 @@ impl Kafka {
         })
     }
 
-    /// Enter the main loop of this [`Worker`]
+    /// Run [`Kafka`] to completion or until a shutdown signal is received.
     ///
     /// # Errors
     ///
