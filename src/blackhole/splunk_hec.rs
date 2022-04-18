@@ -130,7 +130,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 }
 
 #[derive(Debug)]
-/// The SplunkHec blackhole.
+/// The Splunk HEC blackhole.
 pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,

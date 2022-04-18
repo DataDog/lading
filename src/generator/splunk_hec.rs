@@ -1,4 +1,4 @@
-//! The SplunkHec generator.
+//! The Splunk HEC generator.
 
 mod acknowledgements;
 
