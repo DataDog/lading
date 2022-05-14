@@ -19,6 +19,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::{
     runtime::Builder,
     signal,
+    sync::broadcast,
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info};
@@ -207,22 +208,33 @@ async fn inner_main(
     // * the "generator" which pushes load into
     // * the "target" which is the measured system and might push load into
     // * the "blackhole" which may or may not exist.
+    //
+    // There is also, maybe:
+    //
+    // * the "inspector" which is a sub-process that users can rig to inspect
+    //   the target.
 
-    let generator_server = generator::Server::new(config.generator, shutdown.clone()).unwrap();
-    let _gsrv = tokio::spawn(generator_server.run());
+    let (tgt_snd, _) = broadcast::channel(1);
 
-    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
-    let tsrv = tokio::spawn(target_server.run());
+    {
+        let tgt_rcv = tgt_snd.subscribe();
+        let generator_server = generator::Server::new(config.generator, shutdown.clone()).unwrap();
+        let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
+    }
 
     if let Some(inspector_conf) = config.inspector {
+        let tgt_rcv = tgt_snd.subscribe();
         let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
-        let _isrv = tokio::spawn(inspector_server.run());
+        let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
     }
 
     if let Some(blackhole_conf) = config.blackhole {
         let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
         let _bsrv = tokio::spawn(blackhole_server.run());
     }
+
+    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
+    let tsrv = tokio::spawn(target_server.run(tgt_snd));
 
     info!("target is running, now sleeping for warmup");
     sleep(warmup_duration).await;

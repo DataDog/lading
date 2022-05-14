@@ -21,7 +21,7 @@ use nix::{
     sys::signal::{kill, SIGTERM},
     unistd::Pid,
 };
-use tokio::process::Command;
+use tokio::{process::Command, sync::broadcast::Sender};
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
@@ -82,6 +82,9 @@ impl Server {
     /// a shutdown signal is received. Child exit status does not currently
     /// propagate. This is less than ideal.
     ///
+    /// Target server will use the `broadcast::Sender` passed here to transmit
+    /// its PID.
+    ///
     /// # Errors
     ///
     /// Function will return an error if the underlying program cannot be waited
@@ -90,7 +93,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(mut self) -> Result<ExitStatus, Error> {
+    pub async fn run(mut self, pid_snd: Sender<u32>) -> Result<ExitStatus, Error> {
         let config = self.config;
 
         let mut target_cmd = Command::new(config.command);
@@ -103,6 +106,11 @@ impl Server {
             .args(config.arguments)
             .envs(config.environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
+        let target_id = target_child.id().expect("target must have PID");
+        pid_snd
+            .send(target_id)
+            .expect("target server unable to transmit PID, catastrophic failure");
+        drop(pid_snd);
 
         let target_wait = target_child.wait();
         tokio::select! {
@@ -123,7 +131,7 @@ impl Server {
                 // Note that `Child::kill` sends SIGKILL which is not what we
                 // want. We instead send SIGTERM so that the child has a chance
                 // to clean up.
-                let pid: Pid = Pid::from_raw(target_child.id().unwrap().try_into().unwrap());
+                let pid: Pid = Pid::from_raw(target_id.try_into().unwrap());
                 kill(pid, SIGTERM).map_err(Error::Errno)?;
                 let res = target_child.wait().await.map_err(Error::Io)?;
                 Ok(res)

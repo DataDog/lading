@@ -11,6 +11,7 @@
 //! experimental control.
 
 use serde::Deserialize;
+use tokio::sync::broadcast::Receiver;
 
 use crate::signals::Shutdown;
 
@@ -99,13 +100,21 @@ impl Server {
     /// Run this [`Server`] to completion
     ///
     /// This function runs the sub-server its completion, or until a shutdown
-    /// signal is received.
+    /// signal is received. Target server will transmit its pid via `pid_snd`
+    /// once the sub-process has started. This server will only begin once that
+    /// PID is sent, implying that the target is online.
     ///
     /// # Errors
     ///
     /// Function will return an error if the underlying sub-server signals
     /// error.
-    pub async fn run(self) -> Result<(), Error> {
+    pub async fn run(self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
+        let _ = pid_snd
+            .recv()
+            .await
+            .expect("target failed to transmit PID, catastrophic failure");
+        drop(pid_snd);
+
         match self {
             Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),
             Server::Http(inner) => inner.spin().await.map_err(Error::Http),
