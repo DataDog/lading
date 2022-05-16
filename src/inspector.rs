@@ -21,7 +21,7 @@ use nix::{
     unistd::Pid,
 };
 use serde::Deserialize;
-use tokio::process::Command;
+use tokio::{process::Command, sync::broadcast::Receiver};
 use tracing::{error, info};
 
 use crate::{
@@ -70,8 +70,7 @@ impl Server {
     /// Create a new [`Server`] instance
     ///
     /// The inspector `Server` is responsible for investigating the
-    /// [`crate::target::Server`] sub-process. In the future we will likely pass the
-    /// target sub-process PID as an argument.
+    /// [`crate::target::Server`] sub-process.
     ///
     /// # Errors
     ///
@@ -87,6 +86,9 @@ impl Server {
     /// a shutdown signal is received. Child exit status does not currently
     /// propagate. This is less than ideal.
     ///
+    /// Target server will use the `broadcast::Sender` passed here to transmit
+    /// its PID. This PID is passed to the sub-process as the first argument.
+    ///
     /// # Errors
     ///
     /// Function will return an error if the underlying program cannot be waited
@@ -95,17 +97,25 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(mut self) -> Result<ExitStatus, Error> {
-        let config = self.config;
+    pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<ExitStatus, Error> {
+        let target_pid = pid_snd
+            .recv()
+            .await
+            .expect("target failed to transmit PID, catastrophic failure");
+        drop(pid_snd);
+
+        let mut config = self.config;
 
         let mut target_cmd = Command::new(config.command);
+        let mut arguments = vec![target_pid.to_string()];
+        arguments.append(&mut config.arguments);
         target_cmd
             .stdin(Stdio::null())
             .stdout(stdio(&config.output.stdout))
             .stderr(stdio(&config.output.stderr))
             .env_clear()
             .kill_on_drop(true)
-            .args(config.arguments)
+            .args(arguments)
             .envs(config.environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
 
