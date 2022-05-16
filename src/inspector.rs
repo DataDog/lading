@@ -104,19 +104,20 @@ impl Server {
             .expect("target failed to transmit PID, catastrophic failure");
         drop(pid_snd);
 
-        let mut config = self.config;
+        let config = self.config;
 
         let mut target_cmd = Command::new(config.command);
-        let mut arguments = vec![target_pid.to_string()];
-        arguments.append(&mut config.arguments);
+        let mut environment_variables = config.environment_variables.clone();
+        environment_variables.insert(String::from("TARGET_PID"), target_pid.to_string());
+
         target_cmd
             .stdin(Stdio::null())
             .stdout(stdio(&config.output.stdout))
             .stderr(stdio(&config.output.stderr))
             .env_clear()
             .kill_on_drop(true)
-            .args(arguments)
-            .envs(config.environment_variables.iter());
+            .args(config.arguments)
+            .envs(environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
 
         let target_wait = target_child.wait();
