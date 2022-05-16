@@ -40,7 +40,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
-uuid =  { version = "0.8", features = ["serde", "v4"] }
+uuid =  { version = "1.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
 proptest = "1.0"
