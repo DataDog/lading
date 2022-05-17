@@ -103,6 +103,9 @@ struct Opts {
     /// samples
     #[clap(long, default_value_t = 30)]
     warmup_duration_seconds: u32,
+    /// whether to ignore inspector configuration, if present, and not run the inspector
+    #[clap(long)]
+    disable_inspector: bool,
 }
 
 fn get_config() -> (Opts, Config) {
@@ -170,6 +173,7 @@ async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
     max_shutdown_delay: Duration,
+    disable_inspector: bool,
     config: Config,
 ) {
     let shutdown = Shutdown::new();
@@ -223,9 +227,12 @@ async fn inner_main(
     }
 
     if let Some(inspector_conf) = config.inspector {
-        let tgt_rcv = tgt_snd.subscribe();
-        let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
-        let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
+        if !disable_inspector {
+            let tgt_rcv = tgt_snd.subscribe();
+            let inspector_server =
+                inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
+            let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
+        }
     }
 
     if let Some(blackhole_conf) = config.blackhole {
@@ -272,6 +279,7 @@ fn main() {
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
     let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into()) / 2;
+    let disable_inspector = opts.disable_inspector;
 
     let runtime = Builder::new_multi_thread()
         .enable_io()
@@ -282,6 +290,7 @@ fn main() {
         experiment_duration,
         warmup_duration,
         max_shutdown_delay,
+        disable_inspector,
         config,
     ));
     // The splunk_hec generator spawns long running tasks that are not plugged
