@@ -27,6 +27,7 @@ mod common;
 pub mod config;
 pub mod generator;
 pub mod inspector;
+pub mod observer;
 pub(crate) mod payload;
 pub mod signals;
 pub mod target;

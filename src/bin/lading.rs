@@ -11,7 +11,7 @@ use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator, inspector,
+    generator, inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
 };
@@ -217,6 +217,8 @@ async fn inner_main(
     //
     // * the "inspector" which is a sub-process that users can rig to inspect
     //   the target.
+    // * the "observer" which reads procfs on Linux and reports relevant process
+    //   detail to the capture log
 
     let (tgt_snd, _) = broadcast::channel(1);
 
@@ -239,6 +241,10 @@ async fn inner_main(
         let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
         let _bsrv = tokio::spawn(blackhole_server.run());
     }
+
+    let obs_rcv = tgt_snd.subscribe();
+    let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
+    let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
     let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
     let tsrv = tokio::spawn(target_server.run(tgt_snd));
