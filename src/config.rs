@@ -5,7 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use serde::Deserialize;
 
-use crate::{blackhole, generator, inspector, target};
+use crate::{blackhole, generator, inspector, observer, target};
 
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,9 @@ pub struct Config {
     pub telemetry: Telemetry,
     /// The generator to apply to the target in-rig
     pub generator: generator::Config,
+    /// The observer that watches the target
+    #[serde(skip_deserializing)]
+    pub observer: observer::Config,
     /// The program being targetted by this rig
     #[serde(skip_deserializing)]
     pub target: Option<target::Config>,
