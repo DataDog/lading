@@ -167,32 +167,18 @@ impl Tcp {
     pub async fn spin(mut self) -> Result<(), Error> {
         let labels = self.metric_labels;
 
-        'connection: loop {
+        let mut connection = None;
+        let mut blocks = self.block_cache.iter().cycle();
+
+        loop {
+            let blk = blocks.next().unwrap();
+            let total_bytes = blk.total_bytes;
+
             tokio::select! {
-                conn = TcpStream::connect(self.addr) => {
+                conn = TcpStream::connect(self.addr), if connection.is_none() => {
                     match conn {
-                        Ok(mut client) => {
-                            for blk in self.block_cache.iter().cycle() {
-                                self.rate_limiter
-                                    .until_n_ready(blk.total_bytes)
-                                    .await
-                                    .unwrap();
-                                match client.write_all(&blk.bytes).await {
-                                    Ok(()) => {
-                                        counter!(
-                                            "bytes_written",
-                                            u64::from(blk.total_bytes.get()),
-                                            &labels
-                                        );
-                                    }
-                                    Err(err) => {
-                                        let mut error_labels = labels.clone();
-                                        error_labels.push(("error".to_string(), err.to_string()));
-                                        counter!("request_failure", 1, &error_labels);
-                                        continue 'connection;
-                                    }
-                                }
-                            }
+                        Ok(client) => {
+                            connection = Some(client);
                         }
                         Err(err) => {
                             let mut error_labels = labels.clone();
@@ -201,11 +187,29 @@ impl Tcp {
                         }
                     }
                 }
+                _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
+                    let mut client = connection.unwrap();
+                    match client.write_all(&blk.bytes).await {
+                        Ok(()) => {
+                            counter!(
+                                "bytes_written",
+                                u64::from(blk.total_bytes.get()),
+                                &labels
+                            );
+                            connection = Some(client);
+                        }
+                        Err(err) => {
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("request_failure", 1, &error_labels);
+                            connection = None;
+                        }
+                    }
+                }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(());
                 },
-
             }
         }
     }
