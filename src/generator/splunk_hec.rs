@@ -5,6 +5,7 @@ mod acknowledgements;
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     sync::Arc,
+    time::Duration,
 };
 
 use acknowledgements::Channels;
@@ -23,11 +24,15 @@ use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
+use tokio::{
+    sync::{Semaphore, SemaphorePermit},
+    time::timeout,
+};
 use tracing::info;
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
+    generator::splunk_hec::acknowledgements::Channel,
     payload,
     payload::SplunkHecEncoding,
     signals::Shutdown,
@@ -100,7 +105,7 @@ pub struct SplunkHec {
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
-    ack_settings: Option<AckSettings>,
+    channels: Channels,
     shutdown: Shutdown,
 }
 
@@ -167,18 +172,29 @@ impl SplunkHec {
             &labels,
         );
 
+        let mut channels = Channels::new(config.parallel_connections);
+        if let Some(ack_settings) = config.acknowledgements {
+            let ack_uri = Uri::builder()
+                .authority(uri.authority().unwrap().to_string())
+                .scheme("http")
+                .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
+                .build()
+                .unwrap();
+            channels.enable_acknowledgements(ack_uri, config.token.clone(), ack_settings);
+        }
+
         CONNECTION_SEMAPHORE
             .set(Semaphore::new(config.parallel_connections as usize))
             .unwrap();
 
         Ok(Self {
+            channels,
             parallel_connections: config.parallel_connections,
             uri,
             token: config.token,
             block_cache,
             rate_limiter,
             metric_labels: labels,
-            ack_settings: config.acknowledgements,
             shutdown,
         })
     }
@@ -203,31 +219,18 @@ impl SplunkHec {
 
         let rate_limiter = Arc::new(self.rate_limiter);
         let uri = self.uri;
-        let token = self.token;
         let labels = self.metric_labels;
 
-        let mut channels = Channels::new(self.parallel_connections);
-        if let Some(ack_settings) = self.ack_settings {
-            let ack_uri = Uri::builder()
-                .authority(uri.authority().unwrap().to_string())
-                .scheme("http")
-                .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
-                .build()
-                .unwrap();
-            channels
-                .enable_acknowledgements(ack_uri, token.clone(), ack_settings)
-                .map_err(Error::Acknowledgements)?;
-        }
-
-        let channel_info = channels.get_channel_info();
-        let mut channel_info = channel_info.iter().cycle();
         gauge!(
             "maximum_requests",
             f64::from(self.parallel_connections),
             &labels
         );
         let mut blocks = self.block_cache.iter().cycle();
+        let mut channels = self.channels.iter().cycle();
+
         loop {
+            let channel: Channel = channels.next().unwrap().clone();
             let blk = blocks.next().unwrap();
             let total_bytes = blk.total_bytes;
 
@@ -239,44 +242,23 @@ impl SplunkHec {
 
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
-                    let (channel_id, ack_id_tx) = channel_info.next().unwrap().to_owned();
 
                     let request: Request<Body> = Request::builder()
                         .method(Method::POST)
                         .uri(uri)
-                        .header(AUTHORIZATION, format!("Splunk {}", token))
+                        .header(AUTHORIZATION, format!("Splunk {}", self.token))
                         .header(CONTENT_LENGTH, block_length)
-                        .header(SPLUNK_HEC_CHANNEL_HEADER, channel_id)
+                        .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
                         .body(body)
                         .unwrap();
 
+                    // NOTE once JoinSet is in tokio stable we can make this
+                    // much, much tidier by spawning requests in the JoinSet. I
+                    // think we could also possibly have the send request return
+                    // the AckID, meaning we could just keep the channel logic
+                    // in this main loop here and avoid the AckService entirely.
                     let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
-                    tokio::spawn(async move {
-                        counter!("requests_sent", 1, &labels);
-                        match client.request(request).await {
-                            Ok(response) => {
-                                counter!("bytes_written", block_length as u64, &labels);
-                                let (parts, body) = response.into_parts();
-                                let status = parts.status;
-                                let mut status_labels = labels.clone();
-                                status_labels
-                                    .push(("status_code".to_string(), status.as_u16().to_string()));
-                                counter!("request_ok", 1, &status_labels);
-                                if let Some(mut ack_id_tx) = ack_id_tx {
-                                    let body_bytes = hyper::body::to_bytes(body).await.unwrap();
-                                    let hec_ack_response =
-                                        serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
-                                    let _ = ack_id_tx.try_send(hec_ack_response.ack_id);
-                                }
-                            }
-                            Err(err) => {
-                                let mut error_labels = labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", 1, &error_labels);
-                            }
-                        }
-                        drop(permit);
-                    });
+                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request));
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
@@ -291,6 +273,50 @@ impl SplunkHec {
             }
         }
     }
+}
+
+async fn send_hec_request(
+    permit: SemaphorePermit<'_>,
+    block_length: usize,
+    labels: Vec<(String, String)>,
+    channel: Channel,
+    client: Client<HttpConnector>,
+    request: Request<Body>,
+) {
+    counter!("requests_sent", 1, &labels);
+    let work = client.request(request);
+
+    match timeout(Duration::from_secs(1), work).await {
+        Ok(tm) => match tm {
+            Ok(response) => {
+                counter!("bytes_written", block_length as u64, &labels);
+                let (parts, body) = response.into_parts();
+                let status = parts.status;
+                let mut status_labels = labels.clone();
+                status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
+                counter!("request_ok", 1, &status_labels);
+                channel
+                    .send(async {
+                        let body_bytes = hyper::body::to_bytes(body).await.unwrap();
+                        let hec_ack_response =
+                            serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
+                        hec_ack_response.ack_id
+                    })
+                    .await;
+            }
+            Err(err) => {
+                let mut error_labels = labels.clone();
+                error_labels.push(("error".to_string(), err.to_string()));
+                counter!("request_failure", 1, &error_labels);
+            }
+        },
+        Err(err) => {
+            let mut error_labels = labels.clone();
+            error_labels.push(("error".to_string(), err.to_string()));
+            counter!("request_timeout", 1, &error_labels);
+        }
+    }
+    drop(permit);
 }
 
 #[derive(Deserialize, Debug)]
