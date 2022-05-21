@@ -21,7 +21,9 @@ pub enum Error {}
 
 #[derive(Debug, Clone)]
 pub(crate) enum Channel {
+    /// Variant that communicates acks to underlying AckService.
     Ack { id: String, tx: Sender<AckId> },
+    /// Variant that does no ack'ing.
     NoAck { id: String },
 }
 
@@ -49,9 +51,6 @@ impl Channel {
 /// Splunk HEC channels
 #[derive(Debug)]
 pub(crate) struct Channels {
-    /// If acknowledgements are enabled, the channel id maps to Some(Sender)
-    /// used to send ack ids to a separate task that will query for ack
-    /// status
     channels: Vec<Channel>,
 }
 
@@ -115,6 +114,10 @@ impl<'a, V> Iterator for Iter<'a, V> {
 }
 
 #[derive(Debug, Clone)]
+/// Responsible for querying /services/collector/ack periodically. AckService is
+/// bounded to a single Channel -- via the `channel_id` parameter on
+/// AckService::spin -- and is created by Channel. That is, this service is
+/// purely an implementation detail.
 struct AckService {
     pub(crate) ack_uri: Uri,
     pub(crate) token: String,
@@ -123,7 +126,7 @@ struct AckService {
 }
 
 impl AckService {
-    /// Spawn a tokio task that will continuously query /services/collector/ack
+    /// Spawn a tokio task that will continuously query
     /// to check on a particular Splunk channel's ack id statuses. The task
     /// receives new ack ids from [`super::worker::Worker`]
     pub(crate) async fn spin<'a>(self, channel_id: String, mut ack_rx: Receiver<AckId>) {
