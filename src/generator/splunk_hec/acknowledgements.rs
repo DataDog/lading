@@ -114,10 +114,10 @@ impl<'a, V> Iterator for Iter<'a, V> {
 }
 
 #[derive(Debug, Clone)]
-/// Responsible for querying /services/collector/ack periodically. AckService is
-/// bounded to a single Channel -- via the `channel_id` parameter on
-/// AckService::spin -- and is created by Channel. That is, this service is
-/// purely an implementation detail.
+/// Responsible for querying /services/collector/ack
+/// periodically. [`AckService`] is bounded to a single Channel -- via the
+/// `channel_id` parameter on [`AckService::spin`] -- and is created by
+/// Channel. That is, this service is purely an implementation detail.
 struct AckService {
     pub(crate) ack_uri: Uri,
     pub(crate) token: String,
