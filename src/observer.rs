@@ -86,7 +86,7 @@ impl Server {
     pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
         use std::time::Duration;
 
-        use metrics::{counter, gauge};
+        use metrics::gauge;
 
         let target_pid = pid_snd
             .recv()
@@ -123,12 +123,12 @@ impl Server {
                         gauge!("num_threads", stat.num_threads as f64);
                         // The number of ticks -- reference ticks_per_second -- that the
                         // process has spent scheduled in user-mode.
-                        counter!("utime_ticks", stat.utime);
+                        gauge!("utime_ticks", stat.utime as f64);
                         // The number of ticks -- reference ticks_per_second -- that the
                         // process has spent scheduled in kernel-mode.
-                        counter!("stime_ticks", stat.stime);
+                        gauge!("stime_ticks", stat.stime as f64);
                         // The size in bytes of the process in virtual memory.
-                        counter!("vsize_bytes", stat.vsize);
+                        gauge!("vsize_bytes", stat.vsize as f64);
                     }
                 }
                 _ = self.shutdown.recv() => {
