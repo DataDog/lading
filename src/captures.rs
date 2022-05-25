@@ -39,6 +39,16 @@ pub enum MetricKind {
     Gauge,
 }
 
+#[derive(Debug, Serialize, Clone, Copy)]
+/// The value for [`Line`].
+#[serde(untagged)]
+pub enum LineValue {
+    /// A signless integer, 64 bits wide
+    Int(u64),
+    /// A floating point, 64 bits wide
+    Float(f64),
+}
+
 #[derive(Debug, Serialize)]
 /// The structure of a capture file line.
 pub struct Line<'a> {
@@ -58,7 +68,7 @@ pub struct Line<'a> {
     /// The kind of metric recorded by this line.
     pub metric_kind: MetricKind,
     /// The value of the metric on this line.
-    pub value: u64,
+    pub value: LineValue,
     #[serde(flatten)]
     /// The labels associated with this metric.
     pub labels: HashMap<String, String>,
@@ -145,7 +155,7 @@ impl CaptureManager {
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
                     metric_kind: MetricKind::Counter,
-                    value: counter.load(Ordering::Relaxed),
+                    value: LineValue::Int(counter.load(Ordering::Relaxed)),
                     labels,
                 };
                 lines.push(line);
@@ -158,13 +168,14 @@ impl CaptureManager {
                     // TODO we're allocating the same small strings over and over most likely
                     labels.insert(lbl.key().into(), lbl.value().into());
                 }
+                let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
                 let line = Line {
                     run_id: Cow::Borrowed(&self.run_id),
                     time: now_ms,
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
                     metric_kind: MetricKind::Gauge,
-                    value: gauge.load(Ordering::Relaxed),
+                    value: LineValue::Float(value),
                     labels,
                 };
                 lines.push(line);

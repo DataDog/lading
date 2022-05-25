@@ -82,11 +82,13 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
+    #[allow(clippy::similar_names)]
     #[cfg(target_os = "linux")]
     pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
         use std::time::Duration;
 
-        use metrics::{counter, gauge};
+        use metrics::gauge;
+        use procfs::Uptime;
 
         let target_pid = pid_snd
             .recv()
@@ -97,17 +99,11 @@ impl Server {
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
 
-        let ticks_per_second: u64 = procfs::ticks_per_second()
-            .expect("cannot determine ticks per second")
-            .try_into()
-            .expect("cannot convert ticks to u64");
-        let page_size: u64 = procfs::page_size()
-            .expect("cannot determinte page size")
-            .try_into()
-            .expect("cannot convert page size to u64");
+        let ticks_per_second: f64 =
+            procfs::ticks_per_second().expect("cannot determine ticks per second") as f64;
+        let page_size: i64 = procfs::page_size().expect("cannot determinte page size");
 
-        gauge!("page_size", page_size as f64);
-        gauge!("ticks_per_second", ticks_per_second as f64);
+        gauge!("ticks_per_second", ticks_per_second);
 
         let mut procfs_delay = time::interval(Duration::from_secs(1));
 
@@ -115,20 +111,37 @@ impl Server {
             tokio::select! {
                 _ = procfs_delay.tick() => {
                     if let Ok(stat) = process.stat() {
+                        // Calculate process uptime. We have two pieces of
+                        // information from the kernel: computer uptime and
+                        // process starttime relative to power-on of the
+                        // computer.
+                        let process_starttime_ticks: u64 = stat.starttime;
+                        let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second as f64;
+                        let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
+                        let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
+
+                        let cutime: u64 = stat.cutime.try_into().expect("could not convert cutime to u64");
+                        let cstime: u64 = stat.cstime.try_into().expect("could not convert cstime to u64");
+                        let utime: u64 = stat.utime;
+                        let stime: u64 = stat.stime;
+
+                        let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
+                        let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
+
+                        // The time spent in kernel-space in seconds.
+                        gauge!("kernel_time_seconds", kernel_time_seconds);
+                        // The time spent in user-space in seconds.
+                        gauge!("user_time_seconds", user_time_seconds);
+                        // The uptime of the process in fractional seconds.
+                        gauge!("uptime_seconds", process_uptime_seconds);
                         // Number of pages that the process has in real memory.
-                        gauge!("rss_pages", stat.rss as f64);
+                        gauge!("rss_bytes", (stat.rss * page_size) as f64);
                         // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
                         gauge!("rsslim_bytes", stat.rsslim as f64);
+                        // The size in bytes of the process in virtual memory.
+                        gauge!("vsize_bytes", stat.vsize as f64);
                         // Number of threads this process has active.
                         gauge!("num_threads", stat.num_threads as f64);
-                        // The number of ticks -- reference ticks_per_second -- that the
-                        // process has spent scheduled in user-mode.
-                        counter!("utime_ticks", stat.utime);
-                        // The number of ticks -- reference ticks_per_second -- that the
-                        // process has spent scheduled in kernel-mode.
-                        counter!("stime_ticks", stat.stime);
-                        // The size in bytes of the process in virtual memory.
-                        counter!("vsize_bytes", stat.vsize);
                     }
                 }
                 _ = self.shutdown.recv() => {
