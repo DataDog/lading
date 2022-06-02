@@ -15,14 +15,14 @@ byte-unit = { version = "4.0", features = ["serde"] }
 bytecount = "0.6"
 bytes = { version = "1.1.0", default-features = false }
 clap = { version = "3.1", features = ["derive"] }
-flate2 = { version = "1.0.23", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.0.24", default-features = false, features = ["rust_backend"] }
 futures = "0.3.19"
 governor = { version = "0.4", features = ["std", "jitter", "quanta"] }
 http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 metrics = { version = "0.18", default-features = false }
-metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"] }
+metrics-exporter-prometheus = { version = "0.10.0", default-features = false, features = ["http-listener"] }
 metrics-util = { version = "0.12" }
 nix = { version = "0.24" }
 once_cell = "1.12"
