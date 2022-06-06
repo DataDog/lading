@@ -35,7 +35,7 @@ serde_qs = "0.9"
 serde_tuple = { version = "0.5", default-features = false }
 serde_yaml = "0.8"
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1.18", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
+tokio = { version = "1.19", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = "0.1"
