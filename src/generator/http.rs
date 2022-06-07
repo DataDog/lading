@@ -65,6 +65,11 @@ pub enum Variant {
     Ascii,
     /// Generates a json encoded line
     Json,
+    /// Generates a payload that conforms to a regular expression
+    Pattern {
+        /// The pattern that will be used to generate data instances.
+        pattern: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +202,12 @@ impl Http {
                     Variant::Ascii => construct_block_cache(
                         &mut rng,
                         &payload::Ascii::default(),
+                        &block_chunks,
+                        &labels,
+                    ),
+                    Variant::Pattern { ref pattern } => construct_block_cache(
+                        &mut rng,
+                        &payload::Pattern::new(pattern),
                         &block_chunks,
                         &labels,
                     ),
