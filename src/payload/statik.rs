@@ -1,46 +1,92 @@
 use std::{
+    fs,
     io::{BufRead, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
-use rand::Rng;
+use rand::{prelude::IteratorRandom, Rng};
 
 use crate::payload::{Error, Serialize};
 
 #[derive(Debug)]
-pub(crate) struct Static<'a> {
-    path: &'a Path,
+struct Source {
+    byte_size: u64,
+    path: PathBuf,
 }
 
-impl<'a> Static<'a> {
+#[derive(Debug)]
+pub(crate) struct Static {
+    sources: Vec<Source>,
+}
+
+impl Static {
     #[must_use]
-    pub(crate) fn new(path: &'a Path) -> Self {
-        Self { path }
+    pub(crate) fn new(path: &Path) -> Self {
+        let mut sources = Vec::with_capacity(16);
+
+        if path.is_file() {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .open(path)
+                .expect("could not open file");
+            let byte_size = file.metadata().expect("could not read file metadata").len();
+            sources.push(Source {
+                byte_size,
+                path: path.to_owned(),
+            });
+        } else if path.is_dir() {
+            for entry in fs::read_dir(path).expect("could not read directory") {
+                let entry = entry.unwrap();
+                let entry_pth = entry.path();
+                if entry_pth.is_dir() {
+                    // intentionally skip sub-directories
+                    continue;
+                } else {
+                    let file = std::fs::OpenOptions::new()
+                        .read(true)
+                        .open(&entry_pth)
+                        .expect("could not open file");
+                    let byte_size = file.metadata().expect("could not read file metadata").len();
+                    sources.push(Source {
+                        byte_size,
+                        path: entry_pth.to_owned(),
+                    });
+                }
+            }
+        } else {
+            panic!("discovered a path to something that is neither file nor directory");
+        }
+
+        Self { sources }
     }
 }
 
-impl<'a> Serialize for Static<'a> {
-    fn to_bytes<W, R>(&self, _rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+impl Serialize for Static {
+    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
     {
-        // Read lines from `static_path` until such time as the total byte
-        // length of the lines read exceeds `bytes_max`. If the path contains
-        // more bytes than `bytes_max` the tail of the file will be chopped off.
-        let file = std::fs::OpenOptions::new().read(true).open(self.path)?;
-        let mut reader = std::io::BufReader::new(file);
+        // Filter available static files to those with size less than
+        // max_bytes. Of the remaining, randomly choose one and write it out. We
+        // do not change the structure of the file in any respect; it is
+        // faithfully transmitted.
 
-        let mut bytes_remaining = max_bytes;
-        let mut line = String::new();
-        while bytes_remaining > 0 {
-            let len = reader.read_line(&mut line)?;
-            if len > bytes_remaining {
-                break;
-            }
+        let subset = self
+            .sources
+            .iter()
+            .filter(|src| src.byte_size < max_bytes as u64);
+        if let Some(source) = subset.choose(&mut rng) {
+            // Read lines from `static_path` until such time as the total byte
+            // length of the lines read exceeds `bytes_max`. If the path contains
+            // more bytes than `bytes_max` the tail of the file will be chopped off.
+            let file = std::fs::OpenOptions::new().read(true).open(&source.path)?;
 
-            writer.write_all(line.as_bytes())?;
-            bytes_remaining = bytes_remaining.saturating_sub(line.len());
+            let mut reader = std::io::BufReader::new(file);
+            let buffer = reader.fill_buf()?;
+            let buffer_length = buffer.len();
+            writer.write_all(buffer)?;
+            reader.consume(buffer_length);
         }
 
         Ok(())
