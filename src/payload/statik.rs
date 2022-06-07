@@ -24,37 +24,29 @@ impl Static {
     pub(crate) fn new(path: &Path) -> Self {
         let mut sources = Vec::with_capacity(16);
 
-        if path.is_file() {
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .open(path)
-                .expect("could not open file");
-            let byte_size = file.metadata().expect("could not read file metadata").len();
-            sources.push(Source {
-                byte_size,
-                path: path.to_owned(),
-            });
-        } else if path.is_dir() {
-            for entry in fs::read_dir(path).expect("could not read directory") {
-                let entry = entry.unwrap();
-                let entry_pth = entry.path();
-                if entry_pth.is_dir() {
-                    // intentionally skip sub-directories
-                    continue;
-                } else {
-                    let file = std::fs::OpenOptions::new()
-                        .read(true)
-                        .open(&entry_pth)
-                        .expect("could not open file");
-                    let byte_size = file.metadata().expect("could not read file metadata").len();
-                    sources.push(Source {
-                        byte_size,
-                        path: entry_pth.to_owned(),
-                    });
+        // Attempt to open the path, if this fails we assume that it is a directory.
+        match std::fs::OpenOptions::new().read(true).open(path) {
+            Ok(file) => {
+                let byte_size = file.metadata().expect("could not read file metadata").len();
+                sources.push(Source {
+                    byte_size,
+                    path: path.to_owned(),
+                });
+            }
+            Err(_) => {
+                for entry in fs::read_dir(path).expect("could not read directory") {
+                    let entry = entry.unwrap();
+                    let entry_pth = entry.path();
+                    if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
+                        let byte_size =
+                            file.metadata().expect("could not read file metadata").len();
+                        sources.push(Source {
+                            byte_size,
+                            path: entry_pth.clone(),
+                        });
+                    }
                 }
             }
-        } else {
-            panic!("discovered a path to something that is neither file nor directory");
         }
 
         Self { sources }
