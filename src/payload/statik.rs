@@ -5,6 +5,7 @@ use std::{
 };
 
 use rand::{prelude::IteratorRandom, Rng};
+use tracing::info;
 
 use crate::payload::{Error, Serialize};
 
@@ -25,6 +26,7 @@ impl Static {
         let mut sources = Vec::with_capacity(16);
 
         // Attempt to open the path, if this fails we assume that it is a directory.
+        info!("attempting to open {} as file", path.display());
         match std::fs::OpenOptions::new().read(true).open(path) {
             Ok(file) => {
                 let byte_size = file.metadata().expect("could not read file metadata").len();
@@ -37,6 +39,7 @@ impl Static {
                 for entry in fs::read_dir(path).expect("could not read directory") {
                     let entry = entry.unwrap();
                     let entry_pth = entry.path();
+                    info!("attempting to open {} as file", entry_pth.display());
                     if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
                         let byte_size =
                             file.metadata().expect("could not read file metadata").len();
@@ -69,9 +72,7 @@ impl Serialize for Static {
             .iter()
             .filter(|src| src.byte_size < max_bytes as u64);
         if let Some(source) = subset.choose(&mut rng) {
-            // Read lines from `static_path` until such time as the total byte
-            // length of the lines read exceeds `bytes_max`. If the path contains
-            // more bytes than `bytes_max` the tail of the file will be chopped off.
+            info!("attempting to open {} as file", &source.path.display());
             let file = std::fs::OpenOptions::new().read(true).open(&source.path)?;
 
             let mut reader = std::io::BufReader::new(file);
