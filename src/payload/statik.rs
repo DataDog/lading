@@ -5,7 +5,7 @@ use std::{
 };
 
 use rand::{prelude::IteratorRandom, Rng};
-use tracing::info;
+use tracing::debug;
 
 use crate::payload::{Error, Serialize};
 
@@ -26,28 +26,26 @@ impl Static {
         let mut sources = Vec::with_capacity(16);
 
         // Attempt to open the path, if this fails we assume that it is a directory.
-        info!("attempting to open {} as file", path.display());
-        match std::fs::OpenOptions::new().read(true).open(path) {
-            Ok(file) => {
-                let byte_size = file.metadata().expect("could not read file metadata").len();
-                sources.push(Source {
-                    byte_size,
-                    path: path.to_owned(),
-                });
-            }
-            Err(_) => {
-                for entry in fs::read_dir(path).expect("could not read directory") {
-                    let entry = entry.unwrap();
-                    let entry_pth = entry.path();
-                    info!("attempting to open {} as file", entry_pth.display());
-                    if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
-                        let byte_size =
-                            file.metadata().expect("could not read file metadata").len();
-                        sources.push(Source {
-                            byte_size,
-                            path: entry_pth.clone(),
-                        });
-                    }
+        let metadata = fs::metadata(path).unwrap();
+        if metadata.is_file() {
+            debug!("Static path {} is a file.", path.display());
+            let byte_size = metadata.len();
+            sources.push(Source {
+                byte_size,
+                path: path.to_owned(),
+            });
+        } else if metadata.is_dir() {
+            debug!("Static path {} is a directory.", path.display());
+            for entry in fs::read_dir(path).expect("could not read directory") {
+                let entry = entry.unwrap();
+                let entry_pth = entry.path();
+                debug!("Attempting to open {} as file.", entry_pth.display());
+                if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
+                    let byte_size = file.metadata().expect("could not read file metadata").len();
+                    sources.push(Source {
+                        byte_size,
+                        path: entry_pth.clone(),
+                    });
                 }
             }
         }
@@ -72,7 +70,7 @@ impl Serialize for Static {
             .iter()
             .filter(|src| src.byte_size < max_bytes as u64);
         if let Some(source) = subset.choose(&mut rng) {
-            info!("attempting to open {} as file", &source.path.display());
+            debug!("Opening {} static file.", &source.path.display());
             let file = std::fs::OpenOptions::new().read(true).open(&source.path)?;
 
             let mut reader = std::io::BufReader::new(file);
