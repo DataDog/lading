@@ -22,7 +22,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -239,7 +239,12 @@ async fn inner_main(
 
     if let Some(blackhole_conf) = config.blackhole {
         let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
-        let _bsrv = tokio::spawn(blackhole_server.run());
+        let _bsrv = tokio::spawn(async {
+            match blackhole_server.run().await {
+                Ok(()) => debug!("blackhole shut down successfully"),
+                Err(err) => warn!("blackhole failed with {:?}", err),
+            }
+        });
     }
 
     let obs_rcv = tgt_snd.subscribe();

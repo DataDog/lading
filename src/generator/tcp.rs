@@ -3,6 +3,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -40,7 +41,7 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 /// Variants supported by this generator.
 pub enum GeneratorVariant {
@@ -48,6 +49,12 @@ pub enum GeneratorVariant {
     Fluent,
     /// Generates syslog5424 messages
     Syslog5424,
+    /// Generates a static, user supplied data
+    Static {
+        /// Defines the file path to read static variant data from. Content is
+        /// assumed to be line-oriented but no other claim is made on the file.
+        static_path: PathBuf,
+    },
 }
 
 #[derive(Debug)]
@@ -125,7 +132,7 @@ impl Tcp {
                 .expect("bytes must be non-zero"),
             &block_sizes,
         )?;
-        let block_cache = match config.variant {
+        let block_cache = match &config.variant {
             GeneratorVariant::Syslog5424 => construct_block_cache(
                 &mut rng,
                 &payload::Syslog5424::default(),
@@ -135,6 +142,12 @@ impl Tcp {
             GeneratorVariant::Fluent => construct_block_cache(
                 &mut rng,
                 &payload::Fluent::default(),
+                &block_chunks,
+                &labels,
+            ),
+            GeneratorVariant::Static { static_path } => construct_block_cache(
+                &mut rng,
+                &payload::Static::new(static_path),
                 &block_chunks,
                 &labels,
             ),

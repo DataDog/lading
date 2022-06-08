@@ -11,7 +11,7 @@ use hyper::{
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::signals::Shutdown;
 
@@ -163,7 +163,10 @@ impl Http {
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request| srv(self.body_variant, request)))
+            Ok::<_, hyper::Error>(service_fn(move |request| {
+                debug!("REQUEST: {:?}", request);
+                srv(self.body_variant, request)
+            }))
         });
         let svc = ServiceBuilder::new()
             .load_shed()
