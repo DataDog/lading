@@ -8,6 +8,10 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
     str,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -81,6 +85,10 @@ pub enum Variant {
     Json,
 }
 
+fn default_rotation() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 /// Configuration of [`FileGen`]
 pub struct Config {
@@ -111,6 +119,11 @@ pub struct Config {
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
+    /// Determines whether the file generator mimics log rotation or not. If
+    /// true, files will be rotated. If false, it is the responsibility of
+    /// tailing software to remove old files.
+    #[serde(default = "default_rotation")]
+    rotate: bool,
 }
 
 #[derive(Debug)]
@@ -168,7 +181,8 @@ impl FileGen {
 
         let labels = vec![];
         let mut handles = Vec::new();
-        for duplicate in 0..config.duplicates {
+        let file_index = Arc::new(AtomicU32::new(0));
+        for _ in 0..config.duplicates {
             let rate_limiter: RateLimiter<
                 direct::NotKeyed,
                 state::InMemoryState,
@@ -208,15 +222,14 @@ impl FileGen {
                 ),
             };
 
-            let duplicate = format!("{}", duplicate);
-            let full_path = config.path_template.replace("%NNN%", &duplicate);
-            let path = PathBuf::from(full_path);
             let child = Child {
-                path,
+                path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 bytes_per_second,
                 rate_limiter,
                 block_cache,
+                file_index: Arc::clone(&file_index),
+                rotate: config.rotate,
             };
 
             handles.push(tokio::spawn(child.spin()));
@@ -248,11 +261,13 @@ impl FileGen {
 }
 
 struct Child {
-    path: PathBuf,
+    path_template: String,
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
+    rotate: bool,
+    file_index: Arc<AtomicU32>,
 }
 
 impl Child {
@@ -261,13 +276,16 @@ impl Child {
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
+        let mut file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
+        let mut path = path_from_template(&self.path_template, file_index);
+
         let mut fp = BufWriter::with_capacity(
             bytes_per_second,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(&self.path)
+                .open(&path)
                 .await?,
         );
 
@@ -291,19 +309,23 @@ impl Child {
             }
 
             if bytes_written > maximum_bytes_per_file {
-                // Delete file, leaving any open file handlers intact. This
-                // includes our own `fp` for the time being.
-                fs::remove_file(&self.path).await?;
-                // Open a new fp to `self.path`, replacing `fp`. Any holders of
-                // the file pointer still have it but the file no longer has a
-                // name.
+                if self.rotate {
+                    // Delete file, leaving any open file handlers intact. This
+                    // includes our own `fp` for the time being.
+                    fs::remove_file(&path).await?;
+                }
+                // Update `path` to point to the next indexed file.
+                file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
+                path = path_from_template(&self.path_template, file_index);
+                // Open a new fp to `path`, replacing `fp`. Any holders of the
+                // file pointer still have it but the file no longer has a name.
                 fp = BufWriter::with_capacity(
                     bytes_per_second,
                     fs::OpenOptions::new()
                         .create(true)
                         .truncate(false)
                         .write(true)
-                        .open(&self.path)
+                        .open(&path)
                         .await?,
                 );
                 bytes_written = 0;
@@ -312,4 +334,11 @@ impl Child {
         }
         unreachable!()
     }
+}
+
+#[inline]
+fn path_from_template(path_template: &str, index: u32) -> PathBuf {
+    let fidx = format!("{:04}", index);
+    let full_path = path_template.replace("%NNN%", &fidx);
+    PathBuf::from(full_path)
 }
