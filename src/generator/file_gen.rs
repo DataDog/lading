@@ -298,6 +298,7 @@ impl Child {
 
             {
                 fp.write_all(block).await?;
+                fp.flush().await?;
                 // block.len() and total_bytes are the same numeric value but we
                 // avoid needing to get a plain value from a non-zero by calling
                 // len here.
