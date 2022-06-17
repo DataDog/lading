@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+pub(crate) use apache_common::ApacheCommon;
 pub(crate) use ascii::Ascii;
 pub(crate) use datadog_logs::DatadogLog;
 pub(crate) use fluent::Fluent;
@@ -10,6 +11,7 @@ pub(crate) use splunk_hec::{Encoding as SplunkHecEncoding, SplunkHec};
 pub(crate) use statik::Static;
 pub(crate) use syslog::Syslog5424;
 
+mod apache_common;
 mod ascii;
 mod common;
 mod datadog_logs;

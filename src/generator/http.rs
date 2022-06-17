@@ -65,6 +65,8 @@ pub enum Variant {
     Ascii,
     /// Generates a json encoded line
     Json,
+    /// Generates a Apache Common log lines
+    ApacheCommon,
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +199,12 @@ impl Http {
                     Variant::Ascii => construct_block_cache(
                         &mut rng,
                         &payload::Ascii::default(),
+                        &block_chunks,
+                        &labels,
+                    ),
+                    Variant::ApacheCommon => construct_block_cache(
+                        &mut rng,
+                        &payload::ApacheCommon::default(),
                         &block_chunks,
                         &labels,
                     ),
