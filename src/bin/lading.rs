@@ -10,7 +10,7 @@ use clap::Parser;
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{Config, Telemetry},
+    config::{self, Config, Telemetry},
     generator, inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
@@ -222,12 +222,27 @@ async fn inner_main(
 
     let (tgt_snd, _) = broadcast::channel(1);
 
-    {
-        let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(config.generator, shutdown.clone()).unwrap();
-        let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
+    //
+    // GENERATOR
+    //
+    match config.generator {
+        config::Generator::One(cfg) => {
+            let tgt_rcv = tgt_snd.subscribe();
+            let generator_server = generator::Server::new(*cfg, shutdown.clone()).unwrap();
+            let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
+        }
+        config::Generator::Many(cfgs) => {
+            for cfg in cfgs {
+                let tgt_rcv = tgt_snd.subscribe();
+                let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
+                let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
+            }
+        }
     }
 
+    //
+    // INSPECTOR
+    //
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
@@ -237,16 +252,36 @@ async fn inner_main(
         }
     }
 
-    if let Some(blackhole_conf) = config.blackhole {
-        let blackhole_server = blackhole::Server::new(blackhole_conf, shutdown.clone());
-        let _bsrv = tokio::spawn(async {
-            match blackhole_server.run().await {
-                Ok(()) => debug!("blackhole shut down successfully"),
-                Err(err) => warn!("blackhole failed with {:?}", err),
+    //
+    // BLACKHOLE
+    //
+    match config.blackhole {
+        Some(config::Blackhole::One(cfg)) => {
+            let blackhole_server = blackhole::Server::new(*cfg, shutdown.clone());
+            let _bsrv = tokio::spawn(async {
+                match blackhole_server.run().await {
+                    Ok(()) => debug!("blackhole shut down successfully"),
+                    Err(err) => warn!("blackhole failed with {:?}", err),
+                }
+            });
+        }
+        Some(config::Blackhole::Many(cfgs)) => {
+            for cfg in cfgs {
+                let blackhole_server = blackhole::Server::new(cfg, shutdown.clone());
+                let _bsrv = tokio::spawn(async {
+                    match blackhole_server.run().await {
+                        Ok(()) => debug!("blackhole shut down successfully"),
+                        Err(err) => warn!("blackhole failed with {:?}", err),
+                    }
+                });
             }
-        });
+        }
+        None => {}
     }
 
+    //
+    // OBSERVER
+    //
     let obs_rcv = tgt_snd.subscribe();
     let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
     let _osrv = tokio::spawn(observer_server.run(obs_rcv));
