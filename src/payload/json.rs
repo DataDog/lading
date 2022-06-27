@@ -51,6 +51,7 @@ impl<'a> Arbitrary<'a> for Member {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Json {}
 
 impl Serialize for Json {

@@ -143,6 +143,7 @@ impl<'a> Arbitrary<'a> for Member {
 
 #[derive(Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub enum Encoding {
     Text,
     Json,
@@ -155,6 +156,7 @@ impl Default for Encoding {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct SplunkHec {
     encoding: Encoding,
 }

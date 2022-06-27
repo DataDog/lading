@@ -3,7 +3,6 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
-    path::PathBuf,
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -32,29 +31,13 @@ pub struct Config {
     /// The address for the target, must be a valid SocketAddr
     pub addr: String,
     /// The payload variant
-    pub variant: GeneratorVariant,
+    pub variant: payload::Config,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-/// Variants supported by this generator.
-pub enum GeneratorVariant {
-    /// Generates Fluent messages
-    Fluent,
-    /// Generates syslog5424 messages
-    Syslog5424,
-    /// Generates a static, user supplied data
-    Static {
-        /// Defines the file path to read static variant data from. Content is
-        /// assumed to be line-oriented but no other claim is made on the file.
-        static_path: PathBuf,
-    },
 }
 
 #[derive(Debug)]
@@ -132,26 +115,7 @@ impl Tcp {
                 .expect("bytes must be non-zero"),
             &block_sizes,
         )?;
-        let block_cache = match &config.variant {
-            GeneratorVariant::Syslog5424 => construct_block_cache(
-                &mut rng,
-                &payload::Syslog5424::default(),
-                &block_chunks,
-                &labels,
-            ),
-            GeneratorVariant::Fluent => construct_block_cache(
-                &mut rng,
-                &payload::Fluent::default(),
-                &block_chunks,
-                &labels,
-            ),
-            GeneratorVariant::Static { static_path } => construct_block_cache(
-                &mut rng,
-                &payload::Static::new(static_path),
-                &block_chunks,
-                &labels,
-            ),
-        };
+        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
         let addr = config
             .addr

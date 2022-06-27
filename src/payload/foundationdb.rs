@@ -115,6 +115,7 @@ enum Member {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct FoundationDb {}
 
 impl Serialize for FoundationDb {

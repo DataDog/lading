@@ -6,7 +6,7 @@ use std::{
 use metrics::gauge;
 use rand::{prelude::SliceRandom, Rng};
 
-use crate::payload::Serialize;
+use crate::payload::{self, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Error {
@@ -91,6 +91,64 @@ where
     Ok(chunks)
 }
 
+pub(crate) fn construct_block_cache<R>(
+    mut rng: R,
+    payload: &payload::Config,
+    block_chunks: &[usize],
+    labels: &Vec<(String, String)>,
+) -> Vec<Block>
+where
+    R: Rng,
+{
+    match payload {
+        payload::Config::Syslog5424 => construct_block_cache_inner(
+            &mut rng,
+            &payload::Syslog5424::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::Fluent => {
+            construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
+        }
+        payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
+            &mut rng,
+            &payload::SplunkHec::new(*encoding),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::ApacheCommon => construct_block_cache_inner(
+            &mut rng,
+            &payload::ApacheCommon::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::Ascii => {
+            construct_block_cache_inner(&mut rng, &payload::Ascii::default(), block_chunks, labels)
+        }
+        payload::Config::DatadogLog => construct_block_cache_inner(
+            &mut rng,
+            &payload::DatadogLog::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::Json => {
+            construct_block_cache_inner(&mut rng, &payload::Json::default(), block_chunks, labels)
+        }
+        payload::Config::FoundationDb => construct_block_cache_inner(
+            &mut rng,
+            &payload::FoundationDb::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::Static { ref static_path } => construct_block_cache_inner(
+            &mut rng,
+            &payload::Static::new(static_path),
+            block_chunks,
+            labels,
+        ),
+    }
+}
+
 #[allow(clippy::ptr_arg)]
 #[allow(clippy::cast_precision_loss)]
 /// Construct a new block cache of form defined by `serializer`.
@@ -105,7 +163,8 @@ where
 ///
 /// Function will panic if the `serializer` signals an error. In the futures we
 /// would like to propagate this error to the caller.
-pub(crate) fn construct_block_cache<R, S>(
+#[inline]
+fn construct_block_cache_inner<R, S>(
     mut rng: R,
     serializer: &S,
     block_chunks: &[usize],

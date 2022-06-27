@@ -2,7 +2,6 @@
 
 use std::{
     num::{NonZeroU32, NonZeroUsize},
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -39,34 +38,10 @@ pub enum Method {
     /// Make HTTP Post requests
     Post {
         /// The payload generator to use for this target
-        variant: Variant,
+        variant: payload::Config,
         /// The maximum size in bytes of the cache of prebuilt messages
         maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     },
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-/// Variants supported by this generator.
-pub enum Variant {
-    /// Generates Splunk HEC messages
-    SplunkHec,
-    /// Generates Datadog Logs JSON messages
-    DatadogLog,
-    /// Generates a limited subset of FoundationDB logs
-    FoundationDb,
-    /// Generates a static, user supplied data
-    Static {
-        /// Defines the file path to read static variant data from. Content is
-        /// assumed to be line-oriented but no other claim is made on the file.
-        static_path: PathBuf,
-    },
-    /// Generates a line of printable ascii characters
-    Ascii,
-    /// Generates a json encoded line
-    Json,
-    /// Generates a Apache Common log lines
-    ApacheCommon,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,50 +170,7 @@ impl Http {
                         .expect("bytes must be non-zero"),
                     &block_sizes,
                 )?;
-                let block_cache = match variant {
-                    Variant::Ascii => construct_block_cache(
-                        &mut rng,
-                        &payload::Ascii::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::ApacheCommon => construct_block_cache(
-                        &mut rng,
-                        &payload::ApacheCommon::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::SplunkHec => construct_block_cache(
-                        &mut rng,
-                        &payload::SplunkHec::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::DatadogLog => construct_block_cache(
-                        &mut rng,
-                        &payload::DatadogLog::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::Json => construct_block_cache(
-                        &mut rng,
-                        &payload::Json::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::FoundationDb => construct_block_cache(
-                        &mut rng,
-                        &payload::FoundationDb::default(),
-                        &block_chunks,
-                        &labels,
-                    ),
-                    Variant::Static { static_path } => construct_block_cache(
-                        &mut rng,
-                        &payload::Static::new(&static_path),
-                        &block_chunks,
-                        &labels,
-                    ),
-                };
+                let block_cache = construct_block_cache(&mut rng, &variant, &block_chunks, &labels);
 
                 CONNECTION_SEMAPHORE
                     .set(Semaphore::new(config.parallel_connections as usize))

@@ -8,6 +8,7 @@ use crate::payload::{Error, Serialize};
 
 #[derive(Debug, Default, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Syslog5424 {}
 
 const HOSTNAMES: [&str; 4] = [

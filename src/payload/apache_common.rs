@@ -223,6 +223,7 @@ impl fmt::Display for Member {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct ApacheCommon {}
 
 impl Serialize for ApacheCommon {
