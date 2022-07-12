@@ -7,6 +7,12 @@ on:
       - main
 
 jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: EmbarkStudios/cargo-deny-action@v1
+
   check:
     name: Check
     runs-on: ubuntu-latest
