@@ -165,7 +165,7 @@ impl Server {
     ///
     /// None are known.
     #[cfg(not(target_os = "linux"))]
-    pub async fn run(mut self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
+    pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");
         Ok(())
     }
