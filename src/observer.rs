@@ -48,6 +48,7 @@ pub struct Config {}
 pub struct Server {
     #[allow(dead_code)] // config is not actively used, left as a stub
     config: Config,
+    #[allow(dead_code)] // this field is unused when target_os is not "linux"
     shutdown: Shutdown,
 }
 
