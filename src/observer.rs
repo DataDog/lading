@@ -13,7 +13,7 @@ use std::io;
 use nix::errno::Errno;
 use serde::Deserialize;
 use tokio::{sync::broadcast::Receiver, time};
-use tracing::{info, warn};
+use tracing;
 
 use crate::signals::Shutdown;
 
@@ -145,7 +145,7 @@ impl Server {
                     }
                 }
                 _ = self.shutdown.recv() => {
-                    info!("shutdown signal received");
+                    tracing::info!("shutdown signal received");
                     return Ok(());
                 }
             }
@@ -166,7 +166,7 @@ impl Server {
     /// None are known.
     #[cfg(not(target_os = "linux"))]
     pub async fn run(mut self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
-        warn!("observer unavailable on non-Linux system");
+        tracing::warn!("observer unavailable on non-Linux system");
         Ok(())
     }
 }
