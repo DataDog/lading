@@ -13,7 +13,7 @@ use std::io;
 use nix::errno::Errno;
 use serde::Deserialize;
 use tokio::{sync::broadcast::Receiver, time};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::signals::Shutdown;
 
