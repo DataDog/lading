@@ -12,8 +12,8 @@ use std::io;
 
 use nix::errno::Errno;
 use serde::Deserialize;
-use tokio::{sync::broadcast::Receiver, time};
-use tracing::info;
+use tokio::{self, sync::broadcast::Receiver};
+use tracing;
 
 use crate::signals::Shutdown;
 
@@ -48,6 +48,7 @@ pub struct Config {}
 pub struct Server {
     #[allow(dead_code)] // config is not actively used, left as a stub
     config: Config,
+    #[allow(dead_code)] // this field is unused when target_os is not "linux"
     shutdown: Shutdown,
 }
 
@@ -105,7 +106,7 @@ impl Server {
 
         gauge!("ticks_per_second", ticks_per_second);
 
-        let mut procfs_delay = time::interval(Duration::from_secs(1));
+        let mut procfs_delay = tokio::time::interval(Duration::from_secs(1));
 
         loop {
             tokio::select! {
@@ -145,14 +146,28 @@ impl Server {
                     }
                 }
                 _ = self.shutdown.recv() => {
-                    info!("shutdown signal received");
+                    tracing::info!("shutdown signal received");
                     return Ok(());
                 }
             }
         }
     }
+
+    /// "Run" this [`Server`] to completion
+    ///
+    /// On non-Linux systems, this function is a no-op that logs a warning
+    /// indicating observer capabilities are unavailable on these systems.
+    ///
+    /// # Errors
+    ///
+    /// None are known.
+    ///
+    /// # Panics
+    ///
+    /// None are known.
     #[cfg(not(target_os = "linux"))]
-    pub async fn run(mut self, _pid_snd: Receiver<u32>) -> Result<ExitStatus, Error> {
-        warn!("observer unavailable on non-Linux system");
+    pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
+        tracing::warn!("observer unavailable on non-Linux system");
+        Ok(())
     }
 }
