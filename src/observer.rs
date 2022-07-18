@@ -151,8 +151,22 @@ impl Server {
             }
         }
     }
+
+    /// "Run" this [`Server`] to completion
+    ///
+    /// On non-Linux systems, this function is a no-op that logs a warning
+    /// indicating observer capabilities are unavailable on these systems.
+    ///
+    /// # Errors
+    ///
+    /// None are known.
+    ///
+    /// # Panics
+    ///
+    /// None are known.
     #[cfg(not(target_os = "linux"))]
-    pub async fn run(mut self, _pid_snd: Receiver<u32>) -> Result<ExitStatus, Error> {
+    pub async fn run(mut self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
         warn!("observer unavailable on non-Linux system");
+        Ok(())
     }
 }
