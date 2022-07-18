@@ -12,7 +12,7 @@ use std::io;
 
 use nix::errno::Errno;
 use serde::Deserialize;
-use tokio::{sync::broadcast::Receiver, time};
+use tokio::{self, sync::broadcast::Receiver};
 use tracing;
 
 use crate::signals::Shutdown;
@@ -105,7 +105,7 @@ impl Server {
 
         gauge!("ticks_per_second", ticks_per_second);
 
-        let mut procfs_delay = time::interval(Duration::from_secs(1));
+        let mut procfs_delay = tokio::time::interval(Duration::from_secs(1));
 
         loop {
             tokio::select! {
