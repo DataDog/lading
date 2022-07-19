@@ -1,6 +1,6 @@
 //! The [SQS](https://aws.amazon.com/sqs/) protocol speaking blackhole.
 
-use std::net::SocketAddr;
+use std::{fmt::Write, net::SocketAddr};
 
 use hyper::{
     body,
@@ -189,10 +189,12 @@ impl DeleteMessageBatch {
     fn generate_response(&self) -> String {
         let mut entries = String::new();
         for id in self.get_entry_ids() {
-            entries += &format!(
+            write!(
+                &mut entries,
                 "<DeleteMessageBatchResultEntry><Id>{}Id></DeleteMessageBatchResultEntry>",
                 id
-            );
+            )
+            .expect("This write shouldn't fail");
         }
         format!("<DeleteMessageBatchResponse><DeleteMessageBatchResult>{}</DeleteMessageBatchResult><ResponseMetadata><RequestId>5EH8IGJZI4VZQTZ2VQ3KQN1AOMNA81OZ3AL1S4RHKII94ZD4FPG8</RequestId></ResponseMetadata></DeleteMessageBatchResponse>", entries)
     }
