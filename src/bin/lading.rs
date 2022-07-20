@@ -192,7 +192,7 @@ async fn inner_main(
             for (k, v) in global_labels {
                 builder = builder.add_global_label(k, v);
             }
-            let _: () = builder.install().unwrap();
+            builder.install().unwrap()
         }
         Telemetry::Log {
             path,
