@@ -1,4 +1,4 @@
-FROM docker.io/rust:1.58-bullseye@sha256:e4979d36d5d30838126ea5ef05eb59c4c25ede7f064985e676feb21402d0661b as builder
+FROM docker.io/rust:1.62.1-bullseye@sha256:9bdedf91cf0ae0a76cc6b17b333898926dcace17dee3a50974242684b386cc23 as builder
 
 WORKDIR /app
 COPY . /app
