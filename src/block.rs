@@ -57,10 +57,6 @@ pub enum ChunkError {
 ///
 /// Function will return an error if `block_byte_sizes` is empty or if a member
 /// of `block_byte_sizes` is large than `total_bytes`.
-///
-/// # Panics
-///
-/// Function will panic if `block_bytes_sizes` is empty.
 pub(crate) fn chunk_bytes<R>(
     rng: &mut R,
     total_bytes: NonZeroUsize,
