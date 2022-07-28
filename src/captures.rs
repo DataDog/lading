@@ -17,6 +17,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use metrics::SharedString;
 use metrics_util::registry::{AtomicStorage, Registry};
 use serde::Serialize;
 use tokio::{
@@ -236,7 +237,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: SharedString,
     ) {
         // nothing, intentionally
     }
@@ -245,7 +246,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: SharedString,
     ) {
         // nothing, intentionally
     }
@@ -254,7 +255,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: SharedString,
     ) {
         // nothing, intentionally
     }
