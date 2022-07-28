@@ -37,7 +37,8 @@ config file, targets on the command line. This is, at first glance, awkward but
 does allow for `lading` to be used in dynamic environments like CI without
 foreknowledge of the target.
 
-That "push" can be as direct as network IO into the target, as indirect as doing file operations for a target whose
+That "push" can be as direct as network IO into the target or as indirect as
+doing file operations for a target who's tracing with BPF.
 
 Consider the following `lading.yaml`:
 
