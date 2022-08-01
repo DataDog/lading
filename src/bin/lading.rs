@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{self, Display},
     io::Read,
+    num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
 };
@@ -10,8 +11,8 @@ use clap::Parser;
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{self, Config, Telemetry},
-    generator, inspector, observer,
+    config::{self, Config, Target, Telemetry},
+    external_target, generator, inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
 };
@@ -71,12 +72,14 @@ struct Opts {
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
     #[clap(long)]
     global_labels: Option<CliKeyValues>,
+    /// measure an externally-launched process by PID
+    external_target_pid: Option<NonZeroU32>,
     /// additional environment variables to apply to the target, format
     /// KEY=VAL,KEY2=VAL
     #[clap(long)]
     target_environment_variables: Option<CliKeyValues>,
     /// the path of the target executable
-    target_path: PathBuf,
+    target_path: Option<PathBuf>,
     /// arguments for the target executable
     target_arguments: Vec<String>,
     /// the path to write target's stdout
@@ -121,20 +124,36 @@ fn get_config() -> (Opts, Config) {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    let target_config = target::Config {
-        command: ops.target_path.clone(),
-        arguments: ops.target_arguments.clone(),
-        environment_variables: ops
-            .target_environment_variables
-            .clone()
-            .unwrap_or_default()
-            .inner,
-        output: Output {
-            stderr: ops.target_stderr_path.clone(),
-            stdout: ops.target_stdout_path.clone(),
-        },
+
+    if ops.external_target_pid.is_some() && ops.target_path.is_some() {
+        error!(
+            "Conflicting target configuration: target path and external target PID cannot be used together"
+        );
+        std::process::exit(-1);
+    }
+    let target = if let Some(pid) = ops.external_target_pid {
+        Target::PID(external_target::Config { pid })
+    } else if let Some(path) = &ops.target_path {
+        let target_config = target::Config {
+            command: path.clone(),
+            arguments: ops.target_arguments.clone(),
+            environment_variables: ops
+                .target_environment_variables
+                .clone()
+                .unwrap_or_default()
+                .inner,
+            output: Output {
+                stderr: ops.target_stderr_path.clone(),
+                stdout: ops.target_stdout_path.clone(),
+            },
+        };
+        Target::Binary(target_config)
+    } else {
+        error!("No target specified");
+        std::process::exit(-1);
     };
-    config.target = Some(target_config);
+    config.target = Some(target);
+
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
@@ -286,8 +305,28 @@ async fn inner_main(
     let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
     let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
-    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
-    let tsrv = tokio::spawn(target_server.run(tgt_snd));
+    let target_fut = async {
+        match config.target.unwrap() {
+            Target::Binary(cfg) => {
+                let target_server = target::Server::new(cfg, shutdown.clone()).unwrap();
+                let tsrv = tokio::spawn(target_server.run(tgt_snd));
+                let res = tsrv.await;
+                match res {
+                    Ok(Ok(status)) => info!("process exited with {:?}", status),
+                    Ok(Err(e)) => error!("target shut down with {:?}", e),
+                    Err(e) => error!("internal error: {:?}", e),
+                }
+            }
+            Target::PID(cfg) => {
+                let target_server = external_target::Server::new(cfg, shutdown.clone());
+                let tsrv = tokio::spawn(target_server.run(tgt_snd));
+                let res = tsrv.await;
+                if let Ok(Err(e)) = res {
+                    error!("pid target shut down with {:?}", e);
+                }
+            }
+        }
+    };
 
     info!("target is running, now sleeping for warmup");
     sleep(warmup_duration).await;
@@ -303,8 +342,8 @@ async fn inner_main(
             info!("experiment duration exceeded");
             shutdown.signal().unwrap();
         }
-        tgt = tsrv => {
-            error!("target shut down unexpectedly with {:?}", tgt);
+        _ = target_fut => {
+            error!("target shut down unexpectedly");
             shutdown.signal().unwrap();
         }
     }

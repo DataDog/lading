@@ -31,3 +31,4 @@ pub mod observer;
 pub(crate) mod payload;
 pub mod signals;
 pub mod target;
+pub mod external_target;

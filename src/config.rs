@@ -5,7 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use serde::Deserialize;
 
-use crate::{blackhole, generator, inspector, observer, target};
+use crate::{blackhole, external_target, generator, inspector, observer, target};
 
 /// Generator configuration for this program.
 ///
@@ -39,6 +39,15 @@ pub enum Blackhole {
     Many(Vec<blackhole::Config>),
 }
 
+/// Target configuration
+#[derive(Debug)]
+pub enum Target {
+    /// A binary that will be launched and managed directly
+    Binary(target::Config),
+    /// An existing process that is managed externally
+    PID(external_target::Config),
+}
+
 /// Main configuration struct for this program
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -52,7 +61,7 @@ pub struct Config {
     pub observer: observer::Config,
     /// The program being targetted by this rig
     #[serde(skip_deserializing)]
-    pub target: Option<target::Config>,
+    pub target: Option<Target>,
     /// The blackhole to supply for the target
     pub blackhole: Option<Blackhole>,
     /// The target inspector sub-program
