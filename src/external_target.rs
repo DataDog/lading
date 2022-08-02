@@ -7,10 +7,10 @@
 //! An alternative to the lading-managed binary target,
 //! [`crate::target::Server`].
 
-use std::{io, num::NonZeroU32, time::Duration};
+use std::{io, num::NonZeroU32};
 
 use nix::{errno::Errno, libc::kill};
-use tokio::{sync::broadcast::Sender, time::sleep};
+use tokio::sync::broadcast::Sender;
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
@@ -71,11 +71,13 @@ impl Server {
     pub async fn run(mut self, pid_snd: Sender<u32>) -> Result<(), Error> {
         let config = self.config;
 
+        // Convert pid config value to a plain i32 (no truncation concerns;
+        // PID_MAX_LIMIT is 2^22)
         let pid = config
             .pid
             .get()
             .try_into()
-            .map_err(|_| Error::PIDNotFound)?; // Invalid PID: PID_MAX_LIMIT is 2^22
+            .map_err(|_| Error::PIDNotFound)?;
 
         // Safety: no safety concerns
         let ret = unsafe { kill(pid, 0) };
@@ -83,14 +85,23 @@ impl Server {
             return Err(Error::PIDNotFound);
         }
 
-        pid_snd
-            .send(config.pid.get())
-            .expect("target server unable to transmit PID, catastrophic failure");
-        drop(pid_snd);
+        #[cfg(target_os = "linux")]
+        let target_wait = {
+            use async_pidfd::AsyncPidFd;
+            let pidfd = AsyncPidFd::from_pid(pid).map_err(Error::Io)?;
+            async move {
+                let res = pidfd.wait().await;
+                match res {
+                    Ok(exit) => error!("target exited unexpectedly with status {}", exit.status()),
+                    Err(e) => error!("unable to wait for target exit: {}", e),
+                };
+            }
+        };
 
-        // TODO: Wait for PID to exit and receive exit code on linux.
-        // Try https://crates.io/crates/async-pidfd
+        #[cfg(not(target_os = "linux"))]
         let target_wait = async {
+            use std::time::Duration;
+            use tokio::time::sleep;
             loop {
                 // Safety: no safety concerns
                 let ret = unsafe { kill(pid, 0) };
@@ -99,11 +110,16 @@ impl Server {
                 }
                 sleep(Duration::from_secs(1)).await;
             }
+            error!("target exited unexpectedly");
         };
+
+        pid_snd
+            .send(config.pid.get())
+            .expect("target server unable to transmit PID, catastrophic failure");
+        drop(pid_snd);
 
         tokio::select! {
             _ = target_wait => {
-                error!("child exited unexpectedly");
                 Err(Error::TargetExited)
             },
             _ = self.shutdown.recv() => {
