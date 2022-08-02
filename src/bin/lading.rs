@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use lading::{
     blackhole,
     captures::CaptureManager,
@@ -65,6 +65,11 @@ impl FromStr for CliKeyValues {
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
+#[clap(group(
+    ArgGroup::new("target")
+        .required(true)
+        .args(&["target-path", "target-pid"]),
+))]
 struct Opts {
     /// path on disk to the configuration file
     #[clap(long, default_value_t = default_config_path())]
@@ -73,20 +78,23 @@ struct Opts {
     #[clap(long)]
     global_labels: Option<CliKeyValues>,
     /// measure an externally-launched process by PID
-    external_target_pid: Option<NonZeroU32>,
+    #[clap(long)]
+    target_pid: Option<NonZeroU32>,
+    /// the path of the target executable
+    #[clap(long, group = "binary-target")]
+    target_path: Option<PathBuf>,
     /// additional environment variables to apply to the target, format
     /// KEY=VAL,KEY2=VAL
-    #[clap(long)]
+    #[clap(long, requires = "binary-target")]
     target_environment_variables: Option<CliKeyValues>,
-    /// the path of the target executable
-    target_path: Option<PathBuf>,
     /// arguments for the target executable
+    #[clap(requires = "binary-target")]
     target_arguments: Vec<String>,
     /// the path to write target's stdout
-    #[clap(long, default_value_t = default_target_behavior())]
+    #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stdout_path: Behavior,
     /// the path to write target's stderr
-    #[clap(long, default_value_t = default_target_behavior())]
+    #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stderr_path: Behavior,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
@@ -125,13 +133,7 @@ fn get_config() -> (Opts, Config) {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
 
-    if ops.external_target_pid.is_some() && ops.target_path.is_some() {
-        error!(
-            "Conflicting target configuration: target path and external target PID cannot be used together"
-        );
-        std::process::exit(-1);
-    }
-    let target = if let Some(pid) = ops.external_target_pid {
+    let target = if let Some(pid) = ops.target_pid {
         Target::PID(external_target::Config { pid })
     } else if let Some(path) = &ops.target_path {
         let target_config = target::Config {
@@ -149,8 +151,7 @@ fn get_config() -> (Opts, Config) {
         };
         Target::Binary(target_config)
     } else {
-        error!("No target specified");
-        std::process::exit(-1);
+        unreachable!("clap ensures that exactly one target option is selected");
     };
     config.target = Some(target);
 
