@@ -42,7 +42,7 @@ pub enum Error {
     /// Wrapper for [`nix::errno::Errno`]
     Errno(Errno),
     /// The target PID does not exist or is invalid
-    PIDNotFound,
+    PIDNotFound(u32),
     /// The target process exited unexpectedly
     TargetExited(Option<ExitStatus>),
 }
@@ -161,13 +161,13 @@ impl Server {
             .pid
             .get()
             .try_into()
-            .map_err(|_| Error::PIDNotFound)?;
+            .map_err(|_| Error::PIDNotFound(config.pid.get()))?;
         let pid = Pid::from_raw(raw_pid);
 
         // Verify that the given PID is valid
         let ret = kill(pid, None);
         if ret.is_err() {
-            return Err(Error::PIDNotFound);
+            return Err(Error::PIDNotFound(config.pid.get()));
         }
 
         pid_snd
