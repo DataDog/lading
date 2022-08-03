@@ -135,7 +135,7 @@ impl Server {
         // Note that each target mode has different expectations around target
         // exit. PID mode expects the target to continue running; any exit is
         // a critical error. Binary mode expects the target to run until
-        // signalled, at which point it would prefer to see a graceful exit.
+        // signalled to exit.
         match config {
             Config::Pid(config) => {
                 Self::watch(config, pid_snd, self.shutdown).await?;
