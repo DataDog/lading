@@ -2,11 +2,12 @@ use std::{
     collections::HashMap,
     fmt::{self, Display},
     io::Read,
+    num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
 };
 
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use lading::{
     blackhole,
     captures::CaptureManager,
@@ -64,6 +65,11 @@ impl FromStr for CliKeyValues {
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
+#[clap(group(
+    ArgGroup::new("target")
+        .required(true)
+        .args(&["target-path", "target-pid"]),
+))]
 struct Opts {
     /// path on disk to the configuration file
     #[clap(long, default_value_t = default_config_path())]
@@ -71,19 +77,24 @@ struct Opts {
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
     #[clap(long)]
     global_labels: Option<CliKeyValues>,
+    /// measure an externally-launched process by PID
+    #[clap(long)]
+    target_pid: Option<NonZeroU32>,
+    /// the path of the target executable
+    #[clap(long, group = "binary-target")]
+    target_path: Option<PathBuf>,
     /// additional environment variables to apply to the target, format
     /// KEY=VAL,KEY2=VAL
-    #[clap(long)]
+    #[clap(long, requires = "binary-target")]
     target_environment_variables: Option<CliKeyValues>,
-    /// the path of the target executable
-    target_path: PathBuf,
     /// arguments for the target executable
+    #[clap(requires = "binary-target")]
     target_arguments: Vec<String>,
     /// the path to write target's stdout
-    #[clap(long, default_value_t = default_target_behavior())]
+    #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stdout_path: Behavior,
     /// the path to write target's stderr
-    #[clap(long, default_value_t = default_target_behavior())]
+    #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stderr_path: Behavior,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
@@ -121,20 +132,28 @@ fn get_config() -> (Opts, Config) {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
-    let target_config = target::Config {
-        command: ops.target_path.clone(),
-        arguments: ops.target_arguments.clone(),
-        environment_variables: ops
-            .target_environment_variables
-            .clone()
-            .unwrap_or_default()
-            .inner,
-        output: Output {
-            stderr: ops.target_stderr_path.clone(),
-            stdout: ops.target_stdout_path.clone(),
-        },
+
+    let target = if let Some(pid) = ops.target_pid {
+        target::Config::Pid(target::PidConfig { pid })
+    } else if let Some(path) = &ops.target_path {
+        target::Config::Binary(target::BinaryConfig {
+            command: path.clone(),
+            arguments: ops.target_arguments.clone(),
+            environment_variables: ops
+                .target_environment_variables
+                .clone()
+                .unwrap_or_default()
+                .inner,
+            output: Output {
+                stderr: ops.target_stderr_path.clone(),
+                stdout: ops.target_stdout_path.clone(),
+            },
+        })
+    } else {
+        unreachable!("clap ensures that exactly one target option is selected");
     };
-    config.target = Some(target_config);
+    config.target = Some(target);
+
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
@@ -286,7 +305,7 @@ async fn inner_main(
     let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
     let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
-    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone()).unwrap();
+    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone());
     let tsrv = tokio::spawn(target_server.run(tgt_snd));
 
     info!("target is running, now sleeping for warmup");
@@ -303,8 +322,8 @@ async fn inner_main(
             info!("experiment duration exceeded");
             shutdown.signal().unwrap();
         }
-        tgt = tsrv => {
-            error!("target shut down unexpectedly with {:?}", tgt);
+        _ = tsrv => {
+            error!("target shut down unexpectedly");
             shutdown.signal().unwrap();
         }
     }

@@ -69,15 +69,23 @@ throughput, although the target might not be able to cope with that load and
 `lading` will consume 256 Mb of RAM to accommodate pre-build payloads. The
 blackhole in this configuration responds with an empty body 200 OK.
 
-`lading` acts like a wrapper around the target, so running `lading` one
-specifies where on disk the configuration is, the path to the target and its
-arguments. `--target-stderr-path` and `--target-stdout-path` allow the target's
-stdout, stderr to be forwarded into files. At runtime `lading` will output
-diagnostic information on its stdout about the current state of the target. The
-data `lading` captures at runtime can be pulled by polling `lading`'s prometheus
-endpoint -- configurable with `--prometheus-addr` -- or can be written to disk
-by lading by specifying `--capture-path`. The captured data, when written to
-disk, is newline delimited json payloads.
+`lading` supports two types of targets, binary launch mode and PID watch mode.
+In binary launch mode, `lading` acts like a wrapper around the target. To use
+this mode, one specifies where on disk the configuration is, the path to the
+target and its arguments. `--target-stderr-path` and `--target-stdout-path`
+allow the target's stdout, stderr to be forwarded into files. At runtime
+`lading` will output diagnostic information on its stdout about the current
+state of the target.
+
+In PID watch mode, `lading` monitors a process that is already running on the
+system. `lading` does not handle any target orchestration in this mode. The
+target should be launched before running `lading` and terminated once `lading`
+exits.
+
+The data `lading` captures at runtime can be pulled by polling `lading`'s
+prometheus endpoint -- configurable with `--prometheus-addr` -- or can be
+written to disk by lading by specifying `--capture-path`. The captured data,
+when written to disk, is newline delimited json payloads.
 
 ## Contributing
 
