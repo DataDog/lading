@@ -1,0 +1,13 @@
+[package]
+name = "sheepdog"
+version = "0.1.0"
+edition = "2021"
+description = "The integration test harness for lading"
+
+[dependencies]
+assert_fs = "1.0.7"
+escargot = "0.5.7"
+shared = { path = "../shared" }
+thiserror = "1.0"
+serde_json = "1.0"
+anyhow = "1.0"

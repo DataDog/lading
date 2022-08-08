@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    "./",
+    "integration/sheepdog",
+    "integration/ducks",
+]
+
+
 [package]
 name = "lading"
 version = "0.9.1"
