@@ -236,7 +236,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: metrics::SharedString,
     ) {
         // nothing, intentionally
     }
@@ -245,7 +245,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: metrics::SharedString,
     ) {
         // nothing, intentionally
     }
@@ -254,7 +254,7 @@ impl metrics::Recorder for CaptureRecorder {
         &self,
         _key: metrics::KeyName,
         _unit: Option<metrics::Unit>,
-        _description: &'static str,
+        _description: metrics::SharedString,
     ) {
         // nothing, intentionally
     }
