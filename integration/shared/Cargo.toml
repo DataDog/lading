@@ -2,6 +2,15 @@
 name = "shared"
 version = "0.1.0"
 edition = "2021"
+authors = ["Single Machine Performance Team"]
+license = "MIT"
+description = "Shared code for lading integration tests"
+publish = false
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+tonic = "0.8"
+prost = "0.11"
+
+[build-dependencies]
+tonic-build = "0.8"

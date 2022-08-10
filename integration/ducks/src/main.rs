@@ -19,18 +19,16 @@ use hyper::{
     Body, Request, Response, Server, StatusCode,
 };
 use once_cell::sync::OnceCell;
-use shared::{DucksConfig, GenericHttpMetrics};
-use sketches_ddsketch::DDSketch;
-use std::{
-    io::{Read, Write},
-    net::SocketAddr,
-    os::unix::net::UnixStream,
-    sync::{Arc, Mutex},
-    time::Duration,
+use shared::{
+    integration_api::{integration_client::IntegrationClient, ListenInfo, MetricsReport},
+    DucksConfig,
 };
-use tokio::runtime::Builder;
+use sketches_ddsketch::DDSketch;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::{net::UnixStream, sync::Mutex};
+use tonic::{transport::Endpoint, IntoRequest};
 use tower::ServiceBuilder;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 #[derive(Debug)]
 enum Error {
@@ -64,15 +62,25 @@ impl Default for GenericHttpCounters {
         }
     }
 }
+impl IntoRequest<MetricsReport> for &GenericHttpCounters {
+    fn into_request(self) -> tonic::Request<MetricsReport> {
+        tonic::Request::new(MetricsReport {
+            request_count: self.request_count,
+            total_bytes: self.total_bytes,
+            median_entropy: self.entropy.quantile(0.5).unwrap().unwrap_or_default(),
+            median_size: self.body_size.quantile(0.5).unwrap().unwrap_or_default(),
+        })
+    }
+}
 
-#[tracing::instrument]
+#[tracing::instrument(level = "trace")]
 async fn http_req_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     let (_parts, body) = req.into_parts();
     let body = body::to_bytes(body).await?;
 
     {
-        let metric = GENERIC_HTTP_COUNTERS.get().unwrap().clone();
-        let mut m = metric.lock().unwrap();
+        let metric = GENERIC_HTTP_COUNTERS.get().unwrap();
+        let mut m = metric.lock().await;
         m.request_count += 1;
 
         m.total_bytes = body.len() as u64;
@@ -95,7 +103,7 @@ async fn http_server(addr: AddrIncoming) -> Result<(), Error> {
 
     let service = make_service_fn(|_: &AddrStream| async move {
         Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
-            debug!("REQUEST: {:?}", request);
+            trace!("REQUEST: {:?}", request);
 
             http_req_handler(request)
         }))
@@ -110,83 +118,51 @@ async fn http_server(addr: AddrIncoming) -> Result<(), Error> {
     server.await.map_err(Error::Hyper)
 }
 
-fn http_listen(mut sock: UnixStream, config: DucksConfig) -> Result<(), anyhow::Error> {
-    let runtime = Builder::new_current_thread()
-        .enable_time()
-        .enable_io()
-        .build()
-        .unwrap();
-
+async fn http_listen(
+    mut client: IntegrationClient<tonic::transport::Channel>,
+    _config: DucksConfig,
+) -> Result<(), anyhow::Error> {
     // bind to a random open TCP port
-    let addr = runtime.block_on(async {
-        let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
-        let addr = AddrIncoming::bind(&bind_addr).map(|addr| {
-            // addr.set_keepalive(Some(Duration::from_secs(60)));
-            addr
-        })?;
-        Result::<_, hyper::Error>::Ok(addr)
-    })?;
-    let port = addr.local_addr().port();
+    let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
+    let addr = AddrIncoming::bind(&bind_addr)?;
+    let port = addr.local_addr().port() as u32;
 
     // let the harness know what port this duck is listening on
-    sock.write_all(serde_json::to_string(&shared::DucksMessage::OpenPort(port))?.as_bytes())?;
+    client.listening(ListenInfo { port }).await?;
 
     // start serving requests
-    runtime.spawn(http_server(addr));
+    tokio::spawn(http_server(addr));
 
-    // runtime shuts down on drop. Spin until we receive a shutdown message.
-    // TODO: actually deserialize the shutdown message.
-    runtime.block_on(async {
-        loop {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-
-            let mut buf = [0; 16];
-            let read = sock.read(&mut buf);
-            if read.is_ok() {
-                info!("Message received");
-                break;
-            }
-        }
-    });
-    drop(runtime);
+    // this request will block until `sheepdog` is ready for the test to end
+    info!("Waiting for shutdown signal");
+    client.await_shutdown(()).await?;
 
     info!("Ducks is finishing up");
 
     // Report interesting metrics / test results
 
     let metric = GENERIC_HTTP_COUNTERS.get().unwrap();
-    let m = {
-        let metric = metric.clone();
-        let m = metric.lock().unwrap();
-
-        GenericHttpMetrics {
-            request_count: m.request_count,
-            total_bytes: m.total_bytes,
-            median_entropy: m.entropy.quantile(0.5).unwrap().unwrap(),
-            median_size: m.body_size.quantile(0.5).unwrap().unwrap(),
-        }
-    };
-
-    sock.write_all(
-        serde_json::to_string(&shared::DucksMessage::MetricsReport(m))
-            .unwrap()
-            .as_bytes(),
-    )
-    .unwrap();
+    let m = metric.lock().await;
+    client.report_metrics(&*m).await?;
 
     Ok(())
 }
 
-fn main() -> Result<(), anyhow::Error> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     debug!("Hello from ducks");
 
-    let comms = std::env::args().nth(1).unwrap();
-    let sock = UnixStream::connect(comms).unwrap();
-    sock.set_nonblocking(true)?;
+    let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
+        .connect_with_connector(tower::service_fn(|_| {
+            let path = std::env::args().nth(1).unwrap();
+            UnixStream::connect(path)
+        }))
+        .await?;
+    let client = IntegrationClient::new(channel);
     debug!("Ducks is connected");
 
-    // todo Wait for a DucksConfig
+    // todo Ask for a DucksConfig
 
     let config = DucksConfig {
         listen: shared::ListenConfig::Http,
@@ -196,7 +172,7 @@ fn main() -> Result<(), anyhow::Error> {
     };
 
     match config.listen {
-        shared::ListenConfig::Http => http_listen(sock, config)?,
+        shared::ListenConfig::Http => http_listen(client, config).await?,
     }
 
     Ok(())

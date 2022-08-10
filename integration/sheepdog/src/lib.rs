@@ -13,17 +13,22 @@
 //! - Attempt to validate lading's data rate consistency
 //! - Verify that lading generates meaningful data (is entropy a good enough signal?)
 
-use std::{
-    io::{Read, Write},
-    os::unix::net::UnixListener,
-    path::PathBuf,
-    process::{Command, Stdio},
-    time::Duration,
-};
+use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::Context;
 use assert_fs::TempDir;
-use shared::DucksMessage;
+use shared::integration_api::{
+    integration_server::{Integration, IntegrationServer},
+    Empty, ListenInfo, MetricsReport,
+};
+use tokio::{
+    net::UnixListener,
+    process::Command,
+    sync::{mpsc, oneshot, Mutex},
+};
+use tokio_stream::wrappers::UnixListenerStream;
+use tonic::{transport::Server, Response, Status};
+use tracing::{debug, info};
 
 /// Run a cargo build of ducks and return the path of the output binary
 pub fn build_ducks() -> Result<PathBuf, anyhow::Error> {
@@ -54,15 +59,70 @@ pub fn build_lading() -> Result<PathBuf, anyhow::Error> {
     Ok(bin)
 }
 
-pub struct DucksRun {
+/// Thin shim between tonic RPCs and the async test task
+pub struct IntegrationServerImpl {
+    listen_tx: Mutex<Option<oneshot::Sender<u16>>>,
+    shutdown_rx: Mutex<Option<oneshot::Receiver<()>>>,
+    results_tx: mpsc::Sender<MetricsReport>,
+}
+
+#[tonic::async_trait]
+impl Integration for IntegrationServerImpl {
+    #[tracing::instrument(skip(self))]
+    async fn listening(
+        &self,
+        req: tonic::Request<ListenInfo>,
+    ) -> Result<tonic::Response<shared::integration_api::Empty>, Status> {
+        let sender = self.listen_tx.lock().await.take().ok_or_else(|| {
+            Status::internal(
+                "`Listening` has already been called. It may only be called a single time.",
+            )
+        })?;
+        debug!(
+            "Integration target is listening on port {}",
+            req.get_ref().port
+        );
+        sender.send(req.get_ref().port as u16).unwrap();
+        Ok(Response::new(Empty {}))
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn await_shutdown(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<tonic::Response<shared::integration_api::Empty>, Status> {
+        let rx = self.shutdown_rx.lock().await.take().ok_or_else(|| {
+            Status::internal(
+                "`AwaitShutdown` has already been called. It may only be called a single time.",
+            )
+        })?;
+        rx.await.unwrap();
+        Ok(Response::new(Empty {}))
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn report_metrics(
+        &self,
+        req: tonic::Request<MetricsReport>,
+    ) -> Result<tonic::Response<shared::integration_api::Empty>, Status> {
+        self.results_tx
+            .send(req.into_inner())
+            .await
+            .map_err(|_| Status::internal("unable to accept metrics report"))?;
+        Ok(Response::new(Empty {}))
+    }
+}
+
+pub struct IntegrationTest {
     lading_config_template: String,
     tempdir: TempDir,
     experiment_duration: Duration,
     experiment_warmup: Duration,
 }
 
-impl DucksRun {
+impl IntegrationTest {
     pub fn new<S: ToString>(lading_config: S) -> Result<Self, anyhow::Error> {
+        let _ = tracing_subscriber::fmt::try_init();
         let tempdir = TempDir::new().context("create tempdir")?;
 
         Ok(Self {
@@ -73,7 +133,7 @@ impl DucksRun {
         })
     }
 
-    pub fn run(self) -> Result<DucksMessage, anyhow::Error> {
+    pub async fn run(self) -> Result<MetricsReport, anyhow::Error> {
         // Build and launch ducks. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
         // only run this a single time though.
@@ -82,31 +142,36 @@ impl DucksRun {
         // Every ducks-sheepdog pair is connected by a unique socket file
         let ducks_comm_file = self.tempdir.join("ducks_socket");
         let ducks_comm = UnixListener::bind(&ducks_comm_file).context("bind to ducks_socket")?;
+        let ducks_comm = UnixListenerStream::new(ducks_comm);
+
+        let (port_tx, port_rx) = oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (results_tx, mut results_rx) = mpsc::channel(1);
+
+        let server = IntegrationServerImpl {
+            listen_tx: Mutex::new(Some(port_tx)),
+            shutdown_rx: Mutex::new(Some(shutdown_rx)),
+            results_tx,
+        };
+
+        let _server_task = tokio::task::spawn(async move {
+            let result = Server::builder()
+                .add_service(IntegrationServer::new(server))
+                .serve_with_incoming(ducks_comm)
+                .await;
+            if let Err(e) = result {
+                panic!("Server error: {}", e);
+            }
+        });
 
         let mut ducks = Command::new(ducks)
+            // switch Stdio to `inherit()` to see ducks logs in your terminal
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "info") // switch stdout to inherit to have these messages printed directly to your terminal
+            .env("RUST_LOG", "ducks=debug,info")
             .arg(ducks_comm_file.to_str().unwrap())
             .spawn()
             .context("launch ducks")?;
-
-        let mut ducks_comm = ducks_comm
-            .incoming()
-            .next()
-            .unwrap()
-            .context("wait for ducks connection")?;
-
-        // TODO: this is terrible. Improve it.
-        let mut buf = [0; 36];
-        let read = ducks_comm.read(&mut buf).unwrap();
-        let buf = String::from_utf8(buf[0..read].to_vec()).unwrap();
-        println!("buf: {}", buf);
-        let ducks_report = serde_json::from_str(&buf)?;
-        let port = if let DucksMessage::OpenPort(port) = ducks_report {
-            port
-        } else {
-            panic!("expected open port")
-        };
+        let port = port_rx.await?;
 
         let lading_config_file = self.tempdir.join("lading.yaml");
         let mut file =
@@ -119,13 +184,14 @@ impl DucksRun {
 
         let lading = build_lading()?;
 
-        // Run lading in PID mode
+        // Run lading against the ducks process that was started above
         let captures_file = self.tempdir.join("captures");
         let mut lading = Command::new(lading)
+            // switch Stdio to `inherit()` to see lading logs in your terminal
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "warn") // switch stdout to inherit to have these messages printed directly to your terminal
+            .env("RUST_LOG", "info")
             .arg("--target-pid")
-            .arg(ducks.id().to_string())
+            .arg(ducks.id().unwrap().to_string())
             .arg("--config-path")
             .arg(lading_config_file.to_str().unwrap())
             .arg("--experiment-duration-seconds")
@@ -136,30 +202,26 @@ impl DucksRun {
             .arg(captures_file.to_str().unwrap())
             .spawn()
             .unwrap();
-        println!("lading running");
 
-        // Have lading push some load. It will exit on its own.
-        let _status = lading.wait();
+        // Wait for lading to push some load. It will exit on its own.
+        debug!("lading running");
+        let _status = lading.wait().await?;
 
-        println!("lading shutdown");
         // Ask ducks to shutdown
-        ducks_comm.write_all(b"pls shutdown\n").unwrap();
+        debug!("send shutdown command");
+        shutdown_tx
+            .send(())
+            .expect("failed to send shutdown command");
 
-        println!("shutdown sent");
-        // Have ducks report on the load
-        let mut buf = Vec::new();
-        ducks_comm.read_to_end(&mut buf).unwrap();
-
-        println!("lading done");
-        ducks.wait().unwrap();
-
-        let buf = String::from_utf8(buf).unwrap();
-        println!("buf: {}", buf);
+        // Ducks will report its metrics and then exit
+        // todo: kill process after timeout
+        debug!("lading done");
+        ducks.wait().await.unwrap();
 
         // todo: report captures file / provide some utilities for asserting against it
-
-        let ducks_report = serde_json::from_str(&buf)?;
-        Ok(ducks_report)
+        let results = results_rx.recv().await.unwrap();
+        info!("Test result: {:?}", results);
+        Ok(results)
     }
 }
 
@@ -167,9 +229,9 @@ impl DucksRun {
 mod tests {
     use super::*;
 
-    #[test]
-    fn simple_test() -> Result<(), anyhow::Error> {
-        let simple_run = DucksRun::new(
+    #[tokio::test]
+    async fn http_apache_common() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
             r#"
 generator:
   http:
@@ -177,28 +239,24 @@ generator:
       59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
     headers: {}
     target_uri: "http://localhost:{{port_number}}/"
-    bytes_per_second: "500 Mb"
-    parallel_connections: 10
+    bytes_per_second: "100 Mb"
+    parallel_connections: 5
     method:
       post:
-        maximum_prebuild_cache_size_bytes: "256 Mb"
+        maximum_prebuild_cache_size_bytes: "64 Mb"
         variant: "apache_common"
         "#,
         )?;
 
-        let result = simple_run.run()?;
+        let reqs = test.run().await?;
 
-        if let DucksMessage::MetricsReport(reqs) = result {
-            assert!(reqs.request_count > 10);
-        } else {
-            panic!("unexpected ducks message");
-        }
+        assert!(reqs.request_count > 10);
         Ok(())
     }
 
-    #[test]
-    fn simple_test2() -> Result<(), anyhow::Error> {
-        let simple_run = DucksRun::new(
+    #[tokio::test]
+    async fn http_ascii() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
             r#"
 generator:
   http:
@@ -206,23 +264,18 @@ generator:
       59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
     headers: {}
     target_uri: "http://localhost:{{port_number}}/"
-    bytes_per_second: "500 Mb"
-    parallel_connections: 10
+    bytes_per_second: "100 Mb"
+    parallel_connections: 5
     method:
       post:
-        maximum_prebuild_cache_size_bytes: "256 Mb"
-        variant: "apache_common"
+        maximum_prebuild_cache_size_bytes: "64 Mb"
+        variant: "ascii"
         "#,
         )?;
 
-        let result = simple_run.run()?;
+        let reqs = test.run().await?;
 
-        if let DucksMessage::MetricsReport(reqs) = result {
-            assert!(reqs.request_count > 10);
-            println!("{:?}", reqs)
-        } else {
-            panic!("unexpected ducks message");
-        }
+        assert!(reqs.request_count > 10);
         Ok(())
     }
 }

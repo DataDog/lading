@@ -1,5 +1,17 @@
 use serde::{Deserialize, Serialize};
 
+pub mod integration_api {
+    use tonic::IntoRequest;
+
+    tonic::include_proto!("integration_api");
+
+    impl IntoRequest<Empty> for () {
+        fn into_request(self) -> tonic::Request<Empty> {
+            tonic::Request::new(Empty {})
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ListenConfig {
     Http,
@@ -26,20 +38,4 @@ pub struct DucksConfig {
     pub measurements: MeasurementConfig,
     pub emit: EmitConfig,
     pub assertions: AssertionConfig,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub struct GenericHttpMetrics {
-    pub request_count: u64,
-    pub total_bytes: u64,
-    pub median_entropy: f64,
-    pub median_size: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum DucksMessage {
-    OpenPort(u16),
-    Message(String),
-    RequestShutdown,
-    MetricsReport(GenericHttpMetrics),
 }

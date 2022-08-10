@@ -1,0 +1,28 @@
+syntax = "proto3";
+package integration_api;
+
+// Sheepdog hosts this service
+service Integration {
+  // Inform the test harness about this target's open ports
+  rpc Listening (ListenInfo) returns (Empty) {}
+
+  // Wait for the test harness to signal shutdown. This RPC
+  // will resolve when shutdown is desired.
+  rpc AwaitShutdown (Empty) returns (Empty) {}
+
+  // Report metrics recorded during the test run
+  rpc ReportMetrics (MetricsReport) returns (Empty) {}
+}
+
+message ListenInfo {
+  uint32 port = 1;
+}
+
+message Empty {}
+
+message MetricsReport {
+  uint64 RequestCount = 1;
+  uint64 TotalBytes = 2;
+  double MedianEntropy = 3;
+  double MedianSize = 4;
+}
