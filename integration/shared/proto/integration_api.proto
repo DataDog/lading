@@ -1,24 +1,25 @@
 syntax = "proto3";
 package integration_api;
 
-// Ducks hosts this service
+// Integration test target service. This is hosted by Ducks.
 service IntegrationTarget {
-  rpc Shutdown (Empty) returns (Empty) {}
-
+  // Launch a test endpoint
   rpc StartTest (TestConfig) returns (ListenInfo) {}
 
+  // Request all recorded measurements
   rpc GetTestResults (Empty) returns (MetricsReport) {}
+
+  // Shut down all operations and exit
+  rpc Shutdown (Empty) returns (Empty) {}
 }
+
+message TestConfig {}
 
 message ListenInfo {
   uint32 port = 1;
 }
 
 message Empty {}
-
-message TestConfig {
-  // todo
-}
 
 message MetricsReport {
   uint64 RequestCount = 1;

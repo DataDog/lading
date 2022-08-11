@@ -6,11 +6,12 @@
 //!
 //! Currently, ducks can perform these tasks:
 //! - Receive data
-//! - Emit metrics with relevant counters
+//! - Emit metrics collected during a test
 //!
 //! Upcoming goals:
 //! - Validate some forms of received data
-//! - Send data
+//! - Send data to lading
+//! - Receive data on other protocols & formats
 
 use anyhow::Context;
 use hyper::{
@@ -38,11 +39,6 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{IntoRequest, Status};
 use tower::ServiceBuilder;
 use tracing::{debug, trace};
-
-#[derive(Debug)]
-enum Error {
-    Hyper(hyper::Error),
-}
 
 static GENERIC_HTTP_COUNTERS: OnceCell<Arc<Mutex<GenericHttpCounters>>> = OnceCell::new();
 
@@ -118,13 +114,12 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
 }
 
 #[tracing::instrument]
-async fn http_server(addr: AddrIncoming) -> Result<(), Error> {
+async fn http_server(addr: AddrIncoming) -> Result<(), anyhow::Error> {
     GENERIC_HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(GenericHttpCounters::default())));
 
     let service = make_service_fn(|_: &AddrStream| async move {
         Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
             trace!("REQUEST: {:?}", request);
-
             http_req_handler(request)
         }))
     });
@@ -135,20 +130,27 @@ async fn http_server(addr: AddrIncoming) -> Result<(), Error> {
         .service(service);
 
     let server = hyper::Server::builder(addr).serve(svc);
-    server.await.map_err(Error::Hyper)
+    server.await?;
+    Ok(())
 }
 
+/// Descries an HTTP test
 struct HttpTest {
     _task: JoinHandle<Result<(), anyhow::Error>>,
 }
 
+/// Describes the currently running ducks test
 enum RunningTest {
     None,
     Http(HttpTest),
 }
 
+/// Tracks state for a ducks instance
 pub struct DucksTarget {
+    /// Stores state information for the current test.
     running_test: Mutex<RunningTest>,
+
+    /// Shutdown channel. Send on this to exit the process immediately.
     shutdown_tx: mpsc::Sender<()>,
 }
 
@@ -208,7 +210,7 @@ impl IntegrationTarget for DucksTarget {
 impl DucksTarget {
     async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
         // start serving requests
-        tokio::spawn(http_server(addr));
+        http_server(addr).await?;
 
         Ok(())
     }
@@ -222,7 +224,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Every ducks-sheepdog pair is connected by a unique socket file
     let ducks_comm_file = std::env::args().nth(1).unwrap();
     let ducks_comm =
-        UnixListener::bind(&ducks_comm_file).context("failed to bind to ducks_socket")?;
+        UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);

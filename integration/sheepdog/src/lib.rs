@@ -1,8 +1,8 @@
 //! Sheepdog is an integration testing harness for lading.
 //!
-//! Sheepdog performs correctness testing on lading by running it against ducks.
-//! Ducks exhibits testable behavior and exposes measurements for sheepdog to
-//! assert against.
+//! Sheepdog performs integration and correctness testing on lading by running
+//! it against ducks. Ducks exhibits testable behavior and maintains
+//! measurements for sheepdog to assert against.
 //!
 //! Currently, sheepdog performs these tasks:
 //! - Via ducks, verify that lading produces data
@@ -17,12 +17,14 @@ use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::Context;
 use assert_fs::TempDir;
-use shared::integration_api::{MetricsReport, TestConfig, integration_target_client::IntegrationTargetClient};
+use shared::integration_api::{
+    integration_target_client::IntegrationTargetClient, MetricsReport, TestConfig,
+};
 use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
 use tracing::{debug, info};
 
-/// Run a cargo build of ducks and return the path of the output binary
+/// Build ducks and return the path of the output binary
 pub fn build_ducks() -> Result<PathBuf, anyhow::Error> {
     let bin = escargot::CargoBuild::new()
         .bin("ducks")
@@ -36,8 +38,7 @@ pub fn build_ducks() -> Result<PathBuf, anyhow::Error> {
     Ok(bin)
 }
 
-/// Run a cargo build of lading and return the path of the output binary
-// tbh not sure if we should be building lading or accepting a binary
+/// Build lading and return the path of the output binary
 pub fn build_lading() -> Result<PathBuf, anyhow::Error> {
     let bin = escargot::CargoBuild::new()
         .bin("lading")
@@ -51,14 +52,17 @@ pub fn build_lading() -> Result<PathBuf, anyhow::Error> {
     Ok(bin)
 }
 
+/// Defines an individual integration test
 pub struct IntegrationTest {
     lading_config_template: String,
-    tempdir: TempDir,
     experiment_duration: Duration,
     experiment_warmup: Duration,
+
+    tempdir: TempDir,
 }
 
 impl IntegrationTest {
+    /// Create an integration test for the given lading configuration
     pub fn new<S: ToString>(lading_config: S) -> Result<Self, anyhow::Error> {
         let _ = tracing_subscriber::fmt::try_init();
         let tempdir = TempDir::new().context("create tempdir")?;
@@ -72,10 +76,11 @@ impl IntegrationTest {
     }
 
     pub async fn run(self) -> Result<MetricsReport, anyhow::Error> {
-        // Build and launch ducks. Cargo's locking is sufficient for this to
+        // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
         // only run this a single time though.
         let ducks_binary = build_ducks()?;
+        let lading_binary = build_lading()?;
 
         // Every ducks-sheepdog pair is connected by a unique socket file
         let ducks_comm_file = self.tempdir.join("ducks_socket");
@@ -88,9 +93,9 @@ impl IntegrationTest {
             .spawn()
             .context("launch ducks")?;
 
-        // wait for ducks to bring up its RPC server
+        // wait for ducks to bring up its RPC server and then connect
         while !std::path::Path::exists(&ducks_comm_file) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
             .connect_with_connector(tower::service_fn(move |_| {
@@ -98,8 +103,10 @@ impl IntegrationTest {
             }))
             .await?;
         let mut ducks_rpc = IntegrationTargetClient::new(channel);
-        debug!("Connetcted to ducks");
+        debug!("connected to ducks");
 
+        // instruct ducks to start the test (this is currently hardcoded to a
+        // http sink test but will be configurable in the future)
         let test = ducks_rpc.start_test(TestConfig {}).await?.into_inner();
         let port = test.port as u16;
 
@@ -113,10 +120,9 @@ impl IntegrationTest {
         file.write_all(lading_config.as_bytes())
             .context("write lading config")?;
 
-        // Run lading against the ducks process that was started above
-        let lading = build_lading()?;
+        // run lading against the ducks process that was started above
         let captures_file = self.tempdir.join("captures");
-        let mut lading = Command::new(lading)
+        let mut lading = Command::new(lading_binary)
             // switch Stdio to `inherit()` to see lading logs in your terminal
             .stdout(Stdio::piped())
             .env("RUST_LOG", "info")
@@ -134,21 +140,21 @@ impl IntegrationTest {
             .unwrap();
 
         // wait for lading to push some load. It will exit on its own.
-        debug!("lading running");
+        debug!("lading is running");
         let _lading_exit_status = lading.wait().await?;
 
-        // get metrics from ducks
+        // get test results from ducks
         let test_rpc = ducks_rpc.get_test_results(());
         let results = test_rpc.await?.into_inner();
 
-        // ask ducks to shutdown
+        // ask ducks to shutdown and wait for its process to exit
         debug!("send shutdown command");
         ducks_rpc.shutdown(()).await?;
         drop(ducks_rpc);
         ducks_process.wait().await.unwrap();
 
-        // todo: report captures file / provide some utilities for asserting against it
-        info!("Test result: {:?}", results);
+        // todo: report captures file & provide some utilities for asserting against it
+        info!("test result: {:?}", results);
         Ok(results)
     }
 }
