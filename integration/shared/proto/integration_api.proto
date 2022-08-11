@@ -1,17 +1,13 @@
 syntax = "proto3";
 package integration_api;
 
-// Sheepdog hosts this service
-service Integration {
-  // Inform the test harness about this target's open ports
-  rpc Listening (ListenInfo) returns (Empty) {}
+// Ducks hosts this service
+service IntegrationTarget {
+  rpc Shutdown (Empty) returns (Empty) {}
 
-  // Wait for the test harness to signal shutdown. This RPC
-  // will resolve when shutdown is desired.
-  rpc AwaitShutdown (Empty) returns (Empty) {}
+  rpc StartTest (TestConfig) returns (ListenInfo) {}
 
-  // Report metrics recorded during the test run
-  rpc ReportMetrics (MetricsReport) returns (Empty) {}
+  rpc GetTestResults (Empty) returns (MetricsReport) {}
 }
 
 message ListenInfo {
@@ -19,6 +15,10 @@ message ListenInfo {
 }
 
 message Empty {}
+
+message TestConfig {
+  // todo
+}
 
 message MetricsReport {
   uint64 RequestCount = 1;

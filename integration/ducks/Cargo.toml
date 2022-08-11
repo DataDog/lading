@@ -22,6 +22,7 @@ serde_json = "1"
 shared = { path = "../shared" }
 sketches-ddsketch = "0.1"
 tokio = { version = "1.20", features = ["rt", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.8"
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = "0.1"

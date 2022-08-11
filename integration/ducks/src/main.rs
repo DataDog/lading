@@ -12,23 +12,32 @@
 //! - Validate some forms of received data
 //! - Send data
 
+use anyhow::Context;
 use hyper::{
     body,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
+    Body, Request, StatusCode,
 };
 use once_cell::sync::OnceCell;
 use shared::{
-    integration_api::{integration_client::IntegrationClient, ListenInfo, MetricsReport},
+    integration_api::{
+        integration_target_server::{IntegrationTarget, IntegrationTargetServer},
+        Empty, ListenInfo, MetricsReport, TestConfig,
+    },
     DucksConfig,
 };
 use sketches_ddsketch::DDSketch;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{net::UnixStream, sync::Mutex};
-use tonic::{transport::Endpoint, IntoRequest};
+use tokio::{
+    net::UnixListener,
+    sync::{mpsc, Mutex},
+    task::JoinHandle,
+};
+use tokio_stream::wrappers::UnixListenerStream;
+use tonic::{IntoRequest, Status};
 use tower::ServiceBuilder;
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 #[derive(Debug)]
 enum Error {
@@ -73,8 +82,19 @@ impl IntoRequest<MetricsReport> for &GenericHttpCounters {
     }
 }
 
+impl Into<MetricsReport> for &GenericHttpCounters {
+    fn into(self) -> MetricsReport {
+        MetricsReport {
+            request_count: self.request_count,
+            total_bytes: self.total_bytes,
+            median_entropy: self.entropy.quantile(0.5).unwrap().unwrap_or_default(),
+            median_size: self.body_size.quantile(0.5).unwrap().unwrap_or_default(),
+        }
+    }
+}
+
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
     let (_parts, body) = req.into_parts();
     let body = body::to_bytes(body).await?;
 
@@ -89,7 +109,7 @@ async fn http_req_handler(req: Request<Body>) -> Result<Response<Body>, hyper::E
         m.body_size.add(body.len() as f64);
     }
 
-    let mut okay = Response::default();
+    let mut okay = hyper::Response::default();
     *okay.status_mut() = StatusCode::OK;
 
     let body_bytes = vec![];
@@ -114,38 +134,84 @@ async fn http_server(addr: AddrIncoming) -> Result<(), Error> {
         .timeout(Duration::from_secs(1))
         .service(service);
 
-    let server = Server::builder(addr).serve(svc);
+    let server = hyper::Server::builder(addr).serve(svc);
     server.await.map_err(Error::Hyper)
 }
 
-async fn http_listen(
-    mut client: IntegrationClient<tonic::transport::Channel>,
-    _config: DucksConfig,
-) -> Result<(), anyhow::Error> {
-    // bind to a random open TCP port
-    let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
-    let addr = AddrIncoming::bind(&bind_addr)?;
-    let port = addr.local_addr().port() as u32;
+struct HttpTest {
+    _task: JoinHandle<Result<(), anyhow::Error>>,
+}
 
-    // let the harness know what port this duck is listening on
-    client.listening(ListenInfo { port }).await?;
+enum RunningTest {
+    None,
+    Http(HttpTest),
+}
 
-    // start serving requests
-    tokio::spawn(http_server(addr));
+pub struct DucksTarget {
+    running_test: Mutex<RunningTest>,
+    shutdown_tx: mpsc::Sender<()>,
+}
 
-    // this request will block until `sheepdog` is ready for the test to end
-    info!("Waiting for shutdown signal");
-    client.await_shutdown(()).await?;
+#[tonic::async_trait]
+impl IntegrationTarget for DucksTarget {
+    #[tracing::instrument(skip(self))]
+    async fn shutdown(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<tonic::Response<shared::integration_api::Empty>, Status> {
+        self.shutdown_tx.send(()).await.unwrap();
+        Ok(tonic::Response::new(Empty {}))
+    }
 
-    info!("Ducks is finishing up");
+    #[tracing::instrument(skip(self))]
+    async fn start_test(
+        &self,
+        _config: tonic::Request<TestConfig>,
+    ) -> Result<tonic::Response<shared::integration_api::ListenInfo>, Status> {
+        // todo get this from `config`
+        let config = DucksConfig {
+            listen: shared::ListenConfig::Http,
+            measurements: shared::MeasurementConfig::GenericHttp,
+            emit: shared::EmitConfig::None,
+            assertions: shared::AssertionConfig::None,
+        };
 
-    // Report interesting metrics / test results
+        // bind to a random open TCP port
+        let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
+        let addr = AddrIncoming::bind(&bind_addr)
+            .map_err(|_e| Status::internal("unable to bind a port"))?;
+        let port = addr.local_addr().port() as u32;
 
-    let metric = GENERIC_HTTP_COUNTERS.get().unwrap();
-    let m = metric.lock().await;
-    client.report_metrics(&*m).await?;
+        match config.listen {
+            shared::ListenConfig::Http => {
+                let task = tokio::spawn(Self::http_listen(config, addr));
 
-    Ok(())
+                let mut state = self.running_test.lock().await;
+                *state = RunningTest::Http(HttpTest { _task: task });
+            }
+        }
+
+        Ok(tonic::Response::new(ListenInfo { port }))
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn get_test_results(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<tonic::Response<shared::integration_api::MetricsReport>, Status> {
+        let metric = GENERIC_HTTP_COUNTERS.get().unwrap();
+        let m = metric.lock().await;
+        return Ok(tonic::Response::new((&*m).into()));
+    }
+}
+
+impl DucksTarget {
+    async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
+        // start serving requests
+        tokio::spawn(http_server(addr));
+
+        Ok(())
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -153,26 +219,30 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     debug!("Hello from ducks");
 
-    let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
-        .connect_with_connector(tower::service_fn(|_| {
-            let path = std::env::args().nth(1).unwrap();
-            UnixStream::connect(path)
-        }))
-        .await?;
-    let client = IntegrationClient::new(channel);
-    debug!("Ducks is connected");
+    // Every ducks-sheepdog pair is connected by a unique socket file
+    let ducks_comm_file = std::env::args().nth(1).unwrap();
+    let ducks_comm =
+        UnixListener::bind(&ducks_comm_file).context("failed to bind to ducks_socket")?;
+    let ducks_comm = UnixListenerStream::new(ducks_comm);
 
-    // todo Ask for a DucksConfig
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
-    let config = DucksConfig {
-        listen: shared::ListenConfig::Http,
-        measurements: shared::MeasurementConfig::GenericHttp,
-        emit: shared::EmitConfig::None,
-        assertions: shared::AssertionConfig::None,
+    let server = DucksTarget {
+        running_test: Mutex::new(RunningTest::None),
+        shutdown_tx,
     };
 
-    match config.listen {
-        shared::ListenConfig::Http => http_listen(client, config).await?,
+    let rpc_server = tonic::transport::Server::builder()
+        .add_service(IntegrationTargetServer::new(server))
+        .serve_with_incoming(ducks_comm);
+
+    tokio::select! {
+        result = rpc_server => {
+            if let Err(e) = result {
+                panic!("Server error: {}", e);
+            }
+        },
+        _ = shutdown_rx.recv() => {},
     }
 
     Ok(())
