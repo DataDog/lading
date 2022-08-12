@@ -48,7 +48,7 @@ struct GenericHttpCounters {
     entropy: DDSketch,
     request_count: u64,
     total_bytes: u64,
-    // record http methods received
+    // todo: record http methods received
 }
 
 impl Default for GenericHttpCounters {
