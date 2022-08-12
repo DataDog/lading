@@ -79,7 +79,6 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          - name: Install xmllint
       - name: Install protobuf (Apt)
         run: sudo apt-get install -y protobuf-compiler
         if: matrix.os == 'ubuntu-latest'
