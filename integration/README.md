@@ -15,6 +15,12 @@ Set `PROTOC=/opt/homebrew/bin/protoc` in your shell
 
 Install `protoc` with apt: `apt install protobuf-compiler`
 
+## Run Tests
+
+Integration tests are implemented as rust tests in the `sheepdog` project.
+
+Run them with: `cargo test -p sheepdog`
+
 ## Test Flow
 
 Each test's entry point is a normal async rust test in the `sheepdog` crate. The
