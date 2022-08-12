@@ -85,9 +85,6 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - name: Setup protobuf (Brew)
-        run: echo "PROTOC=/opt/homebrew/bin/protoc" >> $GITHUB_ENV
-        if: matrix.os == 'macos-latest'
       - uses: actions-rs/cargo@v1
         with:
           command: test
