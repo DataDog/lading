@@ -12,7 +12,7 @@ aws-config = "0.46"
 aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rustls", "rt-tokio"] }
 aws-sdk-sqs = { version = "0.16", default-features = false, features = ["rustls", "rt-tokio"] }
 aws-smithy-http = { version = "0.46", default-features = false, features = ["rt-tokio"] }
-aws-types = { version = "0.46", default-features = false, features = [] }
+aws-types = { version = "0.47", default-features = false, features = [] }
 
 anyhow = "1.0"
 entropy = "0.4"
