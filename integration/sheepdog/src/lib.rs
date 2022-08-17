@@ -278,6 +278,7 @@ generator:
 
         let reqs = test.run().await?;
 
+        assert!(reqs.tcp.total_bytes > 0);
         assert!(reqs.tcp.total_bytes > 100_000);
         Ok(())
     }
