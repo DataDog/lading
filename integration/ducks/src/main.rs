@@ -189,10 +189,10 @@ impl IntegrationTarget for DucksTarget {
             shared::ListenConfig::None => Ok(tonic::Response::new(ListenInfo { port: 0 })),
             shared::ListenConfig::Tcp => {
                 let listener = TcpListener::bind("127.0.0.1:0").await?;
-                let port = listener.local_addr()?.port();
+                let port = listener.local_addr()?.port() as u32;
                 tokio::spawn(Self::tcp_listen(config, listener));
 
-                Ok(tonic::Response::new(ListenInfo { port: port as u32 }))
+                Ok(tonic::Response::new(ListenInfo { port }))
             }
         }
     }
