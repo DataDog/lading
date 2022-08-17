@@ -263,8 +263,6 @@ impl DucksTarget {
                 m.read_count += 1;
                 m.total_bytes += buffer.len() as u64;
                 m.entropy.add(entropy::metric_entropy(&buffer) as f64);
-
-                // TODO: data rate metrics & a way to measure consistency
             }
 
             buffer.clear();
