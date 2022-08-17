@@ -138,22 +138,8 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
     Ok(okay)
 }
 
-enum ActiveListener {
-    None,
-    Http,
-    Tcp,
-}
-
-/// Describes the currently running ducks test
-struct TestState {
-    listener: ActiveListener,
-}
-
 /// Tracks state for a ducks instance
 pub struct DucksTarget {
-    /// Stores state information for the current test.
-    running_test: Mutex<TestState>,
-
     /// Shutdown channel. Send on this to exit the process immediately.
     shutdown_tx: mpsc::Sender<()>,
 }
@@ -198,22 +184,14 @@ impl IntegrationTarget for DucksTarget {
                 let port = addr.local_addr().port() as u32;
                 tokio::spawn(Self::http_listen(config, addr));
 
-                let mut state = self.running_test.lock().await;
-                state.listener = ActiveListener::Http;
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
-            shared::ListenConfig::None => {
-                let mut state = self.running_test.lock().await;
-                state.listener = ActiveListener::None;
-                Ok(tonic::Response::new(ListenInfo { port: 0 }))
-            }
+            shared::ListenConfig::None => Ok(tonic::Response::new(ListenInfo { port: 0 })),
             shared::ListenConfig::Tcp => {
                 let listener = TcpListener::bind("0.0.0.0:0").await?;
                 let port = listener.local_addr()?.port();
                 tokio::spawn(Self::tcp_listen(config, listener));
 
-                let mut state = self.running_test.lock().await;
-                state.listener = ActiveListener::Tcp;
                 Ok(tonic::Response::new(ListenInfo { port: port as u32 }))
             }
         }
@@ -317,12 +295,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
-    let server = DucksTarget {
-        running_test: Mutex::new(TestState {
-            listener: ActiveListener::None,
-        }),
-        shutdown_tx,
-    };
+    let server = DucksTarget { shutdown_tx };
 
     let rpc_server = tonic::transport::Server::builder()
         .add_service(IntegrationTargetServer::new(server))
