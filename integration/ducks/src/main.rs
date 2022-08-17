@@ -178,7 +178,7 @@ impl IntegrationTarget for DucksTarget {
         match config.listen {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
-                let bind_addr = SocketAddr::from(([0, 0, 0, 0], 0));
+                let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
                 let addr = AddrIncoming::bind(&bind_addr)
                     .map_err(|_e| Status::internal("unable to bind a port"))?;
                 let port = addr.local_addr().port() as u32;
@@ -188,7 +188,7 @@ impl IntegrationTarget for DucksTarget {
             }
             shared::ListenConfig::None => Ok(tonic::Response::new(ListenInfo { port: 0 })),
             shared::ListenConfig::Tcp => {
-                let listener = TcpListener::bind("0.0.0.0:0").await?;
+                let listener = TcpListener::bind("127.0.0.1:0").await?;
                 let port = listener.local_addr()?.port();
                 tokio::spawn(Self::tcp_listen(config, listener));
 
