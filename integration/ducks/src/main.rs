@@ -283,7 +283,7 @@ impl DucksTarget {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
-    debug!("Hello from ducks");
+    debug!("hello from ducks");
 
     // Every ducks-sheepdog pair is connected by a unique socket file
     let ducks_comm_file = std::env::args().nth(1).unwrap();
@@ -307,6 +307,7 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         _ = shutdown_rx.recv() => {},
     }
+    debug!("shutting down");
 
     Ok(())
 }
