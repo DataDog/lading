@@ -256,7 +256,7 @@ generator:
     }
 
     #[tokio::test]
-    async fn tcp_wip() -> Result<(), anyhow::Error> {
+    async fn tcp_fluent() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
             DucksConfig {
                 listen: shared::ListenConfig::Tcp,
