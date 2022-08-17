@@ -107,7 +107,7 @@ impl IntegrationTest {
 
         let mut ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "ducks=debug,info")
+            .env("RUST_LOG", "ducks=trace,info")
             .arg(ducks_comm_file.to_str().unwrap())
             .spawn()
             .context("launch ducks")?;
@@ -143,7 +143,7 @@ impl IntegrationTest {
         let captures_file = self.tempdir.join("captures");
         let mut lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "info")
+            .env("RUST_LOG", "trace")
             .arg("--target-pid")
             .arg(ducks_process.id().unwrap().to_string())
             .arg("--config-path")
