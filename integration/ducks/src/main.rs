@@ -248,7 +248,7 @@ impl DucksTarget {
     }
 
     async fn tcp_handler(mut socket: TcpStream) -> Result<(), anyhow::Error> {
-        // 500KB input buffer per connection (this can probably be smaller)
+        // 500KiB input buffer per connection (this can probably be smaller)
         let mut buffer = BytesMut::with_capacity(524_288);
         trace!("TCP connection received");
 
