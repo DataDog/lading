@@ -270,7 +270,7 @@ impl DucksTarget {
     }
 
     async fn tcp_listen(_config: DucksConfig, incoming: TcpListener) -> Result<(), anyhow::Error> {
-        debug!("TCP listener active");
+        debug!("TCP listener active on {}", incoming.local_addr()?);
         TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(TcpCounters::default())));
 
         loop {
