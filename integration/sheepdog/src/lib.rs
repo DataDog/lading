@@ -143,7 +143,7 @@ impl IntegrationTest {
         let captures_file = self.tempdir.join("captures");
         let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "trace")
+            .env("RUST_LOG", "lading=trace,info")
             .arg("--target-pid")
             .arg(ducks_process.id().unwrap().to_string())
             .arg("--config-path")
