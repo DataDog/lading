@@ -266,7 +266,7 @@ generator:
   tcp:
     seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
       59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    addr: "localhost:{{port_number}}"
+    addr: "127.0.0.1:{{port_number}}"
     bytes_per_second: "100 Mb"
     block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
     variant: fluent
