@@ -21,7 +21,7 @@ use shared::{
     integration_api::{self, integration_target_client::IntegrationTargetClient},
     DucksConfig,
 };
-use tokio::{io::AsyncReadExt, net::UnixStream, process::Command};
+use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
 use tracing::debug;
 
