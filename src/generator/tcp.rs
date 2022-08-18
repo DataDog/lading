@@ -194,7 +194,7 @@ impl Tcp {
                             connection = Some(client);
                         }
                         Err(err) => {
-                            trace!("connect failed: {}", err);
+                            trace!("connection to {} failed: {}", self.addr, err);
 
                             let mut error_labels = labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
