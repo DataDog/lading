@@ -16,7 +16,7 @@ use metrics::counter;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
-use tracing::info;
+use tracing::{info, trace};
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
@@ -194,6 +194,8 @@ impl Tcp {
                             connection = Some(client);
                         }
                         Err(err) => {
+                            trace!("connection to {} failed: {}", self.addr, err);
+
                             let mut error_labels = labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("connection_failure", 1, &error_labels);
@@ -212,6 +214,8 @@ impl Tcp {
                             connection = Some(client);
                         }
                         Err(err) => {
+                            trace!("write failed: {}", err);
+
                             let mut error_labels = labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);

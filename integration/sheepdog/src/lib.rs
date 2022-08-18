@@ -17,12 +17,27 @@ use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::Context;
 use assert_fs::TempDir;
-use shared::integration_api::{
-    integration_target_client::IntegrationTargetClient, MetricsReport, TestConfig,
+use shared::{
+    integration_api::{self, integration_target_client::IntegrationTargetClient},
+    DucksConfig,
 };
 use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
-use tracing::{debug, info};
+use tracing::debug;
+
+pub struct Metrics {
+    pub http: integration_api::HttpMetrics,
+    pub tcp: integration_api::TcpMetrics,
+}
+
+impl From<integration_api::Metrics> for Metrics {
+    fn from(metrics: integration_api::Metrics) -> Self {
+        Self {
+            tcp: metrics.tcp.unwrap_or_default(),
+            http: metrics.http.unwrap_or_default(),
+        }
+    }
+}
 
 /// Build ducks and return the path of the output binary
 pub fn build_ducks() -> Result<PathBuf, anyhow::Error> {
@@ -57,25 +72,30 @@ pub struct IntegrationTest {
     lading_config_template: String,
     experiment_duration: Duration,
     experiment_warmup: Duration,
+    ducks_config: DucksConfig,
 
     tempdir: TempDir,
 }
 
 impl IntegrationTest {
     /// Create an integration test for the given lading configuration
-    pub fn new<S: ToString>(lading_config: S) -> Result<Self, anyhow::Error> {
+    pub fn new<S: ToString>(
+        ducks_config: DucksConfig,
+        lading_config: S,
+    ) -> Result<Self, anyhow::Error> {
         let _ = tracing_subscriber::fmt::try_init();
         let tempdir = TempDir::new().context("create tempdir")?;
 
         Ok(Self {
             lading_config_template: lading_config.to_string(),
+            ducks_config,
             tempdir,
             experiment_duration: Duration::from_secs(1),
             experiment_warmup: Duration::from_secs(0),
         })
     }
 
-    pub async fn run(self) -> Result<MetricsReport, anyhow::Error> {
+    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
         // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
         // only run this a single time though.
@@ -85,8 +105,7 @@ impl IntegrationTest {
         // Every ducks-sheepdog pair is connected by a unique socket file
         let ducks_comm_file = self.tempdir.join("ducks_socket");
 
-        let mut ducks_process = Command::new(ducks_binary)
-            // switch Stdio to `inherit()` to see ducks logs in your terminal
+        let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "ducks=debug,info")
             .arg(ducks_comm_file.to_str().unwrap())
@@ -107,7 +126,7 @@ impl IntegrationTest {
 
         // instruct ducks to start the test (this is currently hardcoded to a
         // http sink test but will be configurable in the future)
-        let test = ducks_rpc.start_test(TestConfig {}).await?.into_inner();
+        let test = ducks_rpc.start_test(self.ducks_config).await?.into_inner();
         let port = test.port as u16;
 
         // template & write lading config
@@ -122,8 +141,7 @@ impl IntegrationTest {
 
         // run lading against the ducks process that was started above
         let captures_file = self.tempdir.join("captures");
-        let mut lading = Command::new(lading_binary)
-            // switch Stdio to `inherit()` to see lading logs in your terminal
+        let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "info")
             .arg("--target-pid")
@@ -141,21 +159,33 @@ impl IntegrationTest {
 
         // wait for lading to push some load. It will exit on its own.
         debug!("lading is running");
-        let _lading_exit_status = lading.wait().await?;
+        let lading_output = lading.wait_with_output().await?;
 
         // get test results from ducks
-        let test_rpc = ducks_rpc.get_test_results(());
-        let results = test_rpc.await?.into_inner();
+        let metrics = ducks_rpc.get_metrics(());
+        let metrics = metrics.await?.into_inner();
+
+        let metrics = Metrics::from(metrics);
 
         // ask ducks to shutdown and wait for its process to exit
         debug!("send shutdown command");
         ducks_rpc.shutdown(()).await?;
         drop(ducks_rpc);
-        ducks_process.wait().await.unwrap();
+        let ducks_output = ducks_process.wait_with_output().await?;
+
+        let ducks_stdout = ducks_output.stdout;
+        let ducks_stdout = String::from_utf8(ducks_stdout)?;
+        println!("ducks output:\n{}", ducks_stdout);
+
+        let lading_stdout = lading_output.stdout;
+        let lading_stdout = String::from_utf8(lading_stdout)?;
+        println!("lading output:\n{}", lading_stdout);
+
+        println!("test result: (todo)");
 
         // todo: report captures file & provide some utilities for asserting against it
-        info!("test result: {:?}", results);
-        Ok(results)
+        // info!("test result: {:?}", metrics);
+        Ok(metrics)
     }
 }
 
@@ -166,6 +196,11 @@ mod tests {
     #[tokio::test]
     async fn http_apache_common() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Http,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
             r#"
 generator:
   http:
@@ -177,20 +212,25 @@ generator:
     parallel_connections: 5
     method:
       post:
-        maximum_prebuild_cache_size_bytes: "64 Mb"
+        maximum_prebuild_cache_size_bytes: "8 Mb"
         variant: "apache_common"
         "#,
         )?;
 
         let reqs = test.run().await?;
 
-        assert!(reqs.request_count > 10);
+        assert!(reqs.http.request_count > 10);
         Ok(())
     }
 
     #[tokio::test]
     async fn http_ascii() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Http,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
             r#"
 generator:
   http:
@@ -202,14 +242,42 @@ generator:
     parallel_connections: 5
     method:
       post:
-        maximum_prebuild_cache_size_bytes: "64 Mb"
+        maximum_prebuild_cache_size_bytes: "8 Mb"
         variant: "ascii"
         "#,
         )?;
 
         let reqs = test.run().await?;
 
-        assert!(reqs.request_count > 10);
+        assert!(reqs.http.request_count > 10);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tcp_fluent() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Tcp,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
+            r#"
+generator:
+  tcp:
+    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+    addr: "127.0.0.1:{{port_number}}"
+    bytes_per_second: "100 Mb"
+    block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
+    variant: fluent
+    maximum_prebuild_cache_size_bytes: "8 Mb"
+        "#,
+        )?;
+
+        let reqs = test.run().await?;
+
+        assert!(reqs.tcp.total_bytes > 0);
+        assert!(reqs.tcp.total_bytes > 100_000);
         Ok(())
     }
 }
