@@ -105,7 +105,7 @@ impl IntegrationTest {
         // Every ducks-sheepdog pair is connected by a unique socket file
         let ducks_comm_file = self.tempdir.join("ducks_socket");
 
-        let mut ducks_process = Command::new(ducks_binary)
+        let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "ducks=trace,info")
             .arg(ducks_comm_file.to_str().unwrap())
@@ -141,7 +141,7 @@ impl IntegrationTest {
 
         // run lading against the ducks process that was started above
         let captures_file = self.tempdir.join("captures");
-        let mut lading = Command::new(lading_binary)
+        let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "trace")
             .arg("--target-pid")
@@ -159,7 +159,7 @@ impl IntegrationTest {
 
         // wait for lading to push some load. It will exit on its own.
         debug!("lading is running");
-        let _lading_exit_status = lading.wait().await?;
+        let lading_output = lading.wait_with_output().await?;
 
         // get test results from ducks
         let metrics = ducks_rpc.get_metrics(());
@@ -171,17 +171,15 @@ impl IntegrationTest {
         debug!("send shutdown command");
         ducks_rpc.shutdown(()).await?;
         drop(ducks_rpc);
-        ducks_process.wait().await.unwrap();
+        let ducks_output = ducks_process.wait_with_output().await?;
 
-        let mut stdout = ducks_process.stdout.unwrap();
-        let mut stdout_buf = String::new();
-        stdout.read_to_string(&mut stdout_buf).await?;
-        println!("ducks output:\n{}", stdout_buf);
+        let ducks_stdout = ducks_output.stdout;
+        let ducks_stdout = String::from_utf8(ducks_stdout)?;
+        println!("ducks output:\n{}", ducks_stdout);
 
-        let mut stdout = lading.stdout.unwrap();
-        let mut stdout_buf = String::new();
-        stdout.read_to_string(&mut stdout_buf).await?;
-        println!("lading output:\n{}", stdout_buf);
+        let lading_stdout = lading_output.stdout;
+        let lading_stdout = String::from_utf8(lading_stdout)?;
+        println!("lading output:\n{}", lading_stdout);
 
         println!("test result: (todo)");
 
