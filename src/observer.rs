@@ -102,7 +102,7 @@ impl Server {
 
         let ticks_per_second: f64 =
             procfs::ticks_per_second().expect("cannot determine ticks per second") as f64;
-        let page_size: i64 = procfs::page_size().expect("cannot determinte page size");
+        let page_size = procfs::page_size().expect("cannot determinte page size");
 
         gauge!("ticks_per_second", ticks_per_second);
 
