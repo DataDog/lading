@@ -2,6 +2,7 @@ use integration_api::TestConfig;
 use serde::{Deserialize, Serialize};
 use tonic::{IntoRequest, Request};
 
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub mod integration_api {
     use tonic::IntoRequest;
 
@@ -57,8 +58,8 @@ impl IntoRequest<TestConfig> for DucksConfig {
     }
 }
 
-impl Into<DucksConfig> for TestConfig {
-    fn into(self) -> DucksConfig {
-        serde_json::from_str(&self.json_blob).unwrap()
+impl From<TestConfig> for DucksConfig {
+    fn from(val: TestConfig) -> Self {
+        serde_json::from_str(&val.json_blob).unwrap()
     }
 }

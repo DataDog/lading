@@ -71,13 +71,13 @@ impl Default for HttpCounters {
     }
 }
 
-impl Into<HttpMetrics> for &HttpCounters {
-    fn into(self) -> HttpMetrics {
+impl From<&HttpCounters> for HttpMetrics {
+    fn from(val: &HttpCounters) -> Self {
         HttpMetrics {
-            request_count: self.request_count,
-            total_bytes: self.total_bytes,
-            median_entropy: self.entropy.quantile(0.5).unwrap().unwrap_or_default(),
-            median_size: self.body_size.quantile(0.5).unwrap().unwrap_or_default(),
+            request_count: val.request_count,
+            total_bytes: val.total_bytes,
+            median_entropy: val.entropy.quantile(0.5).unwrap().unwrap_or_default(),
+            median_size: val.body_size.quantile(0.5).unwrap().unwrap_or_default(),
         }
     }
 }
@@ -101,12 +101,12 @@ impl Default for TcpCounters {
     }
 }
 
-impl Into<TcpMetrics> for &TcpCounters {
-    fn into(self) -> TcpMetrics {
+impl From<&TcpCounters> for TcpMetrics {
+    fn from(val: &TcpCounters) -> Self {
         TcpMetrics {
-            read_count: self.read_count,
-            total_bytes: self.total_bytes,
-            median_entropy: self.entropy.quantile(0.5).unwrap().unwrap_or_default(),
+            read_count: val.read_count,
+            total_bytes: val.total_bytes,
+            median_entropy: val.entropy.quantile(0.5).unwrap().unwrap_or_default(),
         }
     }
 }
@@ -254,7 +254,7 @@ impl DucksTarget {
 
         // Read & count metrics until connection closes (closes on any error)
         loop {
-            let _ = socket.readable().await?;
+            socket.readable().await?;
             socket.read_buf(&mut buffer).await?;
 
             {
