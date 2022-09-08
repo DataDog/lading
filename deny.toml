@@ -21,6 +21,7 @@ vulnerability = "deny"
 unmaintained = "deny"
 notice = "deny"
 unsound = "deny"
+ignore = [ "RUSTSEC-2021-0139" ]
 
 [bans]
 multiple-versions = "allow"
