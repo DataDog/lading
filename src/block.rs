@@ -154,9 +154,9 @@ mod test {
 
     use crate::block::{chunk_bytes, ChunkError, Error};
 
-    /// Construct our block_bytes_sizes vector and the total_bytes value. We are
-    /// careful to never generate an empty vector nor a total_bytes that is less
-    /// than any value in block_bytes_sizes.
+    /// Construct our `block_bytes_sizes` vector and the `total_bytes` value. We are
+    /// careful to never generate an empty vector nor a `total_bytes` that is less
+    /// than any value in `block_bytes_sizes`.
     fn total_bytes_and_block_bytes() -> impl Strategy<Value = (NonZeroUsize, Vec<NonZeroUsize>)> {
         (1..usize::MAX).prop_flat_map(|total_bytes| {
             (
@@ -188,7 +188,7 @@ mod test {
         fn chunks_never_empty(seed: u64, (total_bytes, block_bytes_sizes) in total_bytes_and_block_bytes()) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let chunks = chunk_bytes(&mut rng, total_bytes, &block_bytes_sizes).unwrap();
-            prop_assert!(!chunks.is_empty())
+            prop_assert!(!chunks.is_empty());
         }
     }
 
