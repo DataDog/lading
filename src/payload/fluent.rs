@@ -10,6 +10,7 @@ use super::common::AsciiStr;
 use crate::payload::{Error, Serialize};
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Fluent {}
 
 #[derive(serde::Serialize)]

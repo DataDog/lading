@@ -165,12 +165,10 @@ impl SplunkHec {
                 .expect("bytes must be non-zero"),
             &block_sizes,
         )?;
-        let block_cache = construct_block_cache(
-            &mut rng,
-            &payload::SplunkHec::new(config.format),
-            &block_chunks,
-            &labels,
-        );
+        let payload_config = payload::Config::SplunkHec {
+            encoding: config.format,
+        };
+        let block_cache = construct_block_cache(&mut rng, &payload_config, &block_chunks, &labels);
 
         let mut channels = Channels::new(config.parallel_connections);
         if let Some(ack_settings) = config.acknowledgements {

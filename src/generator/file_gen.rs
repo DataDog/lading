@@ -66,25 +66,6 @@ impl From<::std::io::Error> for Error {
     }
 }
 
-/// Variants supported by this generator.
-#[derive(Debug, Deserialize, Clone)]
-pub enum Variant {
-    /// Generates Datadog Logs JSON messages
-    DatadogLog,
-    /// Generates a limited subset of FoundationDB logs
-    FoundationDb,
-    /// Generates a static, user supplied data
-    Static {
-        /// Defines the file path to read static variant data from. Content is
-        /// assumed to be line-oriented but no other claim is made on the file.
-        static_path: PathBuf,
-    },
-    /// Generates a line of printable ascii characters
-    Ascii,
-    /// Generates a json encoded line
-    Json,
-}
-
 fn default_rotation() -> bool {
     true
 }
@@ -99,8 +80,8 @@ pub struct Config {
     pub path_template: String,
     /// Total number of duplicates to make from this template.
     pub duplicates: u8,
-    /// Sets the [`Variant`] of this template.
-    pub variant: Variant,
+    /// Sets the [`lading::payload::Config`] of this template.
+    pub variant: payload::Config,
     /// Sets the **soft** maximum bytes to be written into the `LogTarget`. This
     /// limit is soft, meaning a burst may go beyond this limit by no more than
     /// `maximum_token_burst`.
@@ -189,38 +170,8 @@ impl FileGen {
                 clock::QuantaClock,
             > = RateLimiter::direct(Quota::per_second(bytes_per_second));
 
-            let block_cache = match config.variant {
-                Variant::Ascii => construct_block_cache(
-                    &mut rng,
-                    &payload::Ascii::default(),
-                    &block_chunks,
-                    &labels,
-                ),
-                Variant::DatadogLog => construct_block_cache(
-                    &mut rng,
-                    &payload::DatadogLog::default(),
-                    &block_chunks,
-                    &labels,
-                ),
-                Variant::Json => construct_block_cache(
-                    &mut rng,
-                    &payload::Json::default(),
-                    &block_chunks,
-                    &labels,
-                ),
-                Variant::FoundationDb => construct_block_cache(
-                    &mut rng,
-                    &payload::FoundationDb::default(),
-                    &block_chunks,
-                    &labels,
-                ),
-                Variant::Static { ref static_path } => construct_block_cache(
-                    &mut rng,
-                    &payload::Static::new(static_path),
-                    &block_chunks,
-                    &labels,
-                ),
-            };
+            let block_cache =
+                construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
             let child = Child {
                 path_template: config.path_template.clone(),

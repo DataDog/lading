@@ -51,20 +51,6 @@ pub enum Throughput {
     },
 }
 
-/// Payload variants supported by this generator.
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Variant {
-    /// Generates Datadog Logs JSON messages
-    DatadogLog,
-    /// Generates a limited subset of FoundationDB logs
-    FoundationDb,
-    /// Generates a line of printable ascii characters
-    Ascii,
-    /// Generates a json encoded line
-    Json,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 /// Configuration for [`Kafka`]
 pub struct Config {
@@ -76,7 +62,7 @@ pub struct Config {
     /// Topic to produce to.
     pub topic: String,
     /// The payload generator to use for this target
-    pub variant: Variant,
+    pub variant: payload::Config,
     /// The throughput configuration
     pub throughput: Throughput,
     /// The maximum size in bytes of the cache of prebuilt messages
@@ -172,7 +158,7 @@ impl Kafka {
             .collect();
         let block_cache = generate_block_cache(
             config.maximum_prebuild_cache_size_bytes,
-            config.variant,
+            &config.variant,
             config.seed,
             &block_sizes,
             &labels,
@@ -276,7 +262,7 @@ impl Kafka {
 
 fn generate_block_cache(
     cache_size: byte_unit::Byte,
-    variant: Variant,
+    variant: &payload::Config,
     seed: [u8; 32],
     block_sizes: &[NonZeroUsize],
     #[allow(clippy::ptr_arg)] labels: &Vec<(String, String)>,
@@ -287,20 +273,7 @@ fn generate_block_cache(
         .expect("bytes must be non-zero");
     let chunks = chunk_bytes(&mut rng, total_size, block_sizes)?;
 
-    let blocks = match variant {
-        Variant::Ascii => {
-            construct_block_cache(&mut rng, &payload::Ascii::default(), &chunks, labels)
-        }
-        Variant::DatadogLog => {
-            construct_block_cache(&mut rng, &payload::DatadogLog::default(), &chunks, labels)
-        }
-        Variant::Json => {
-            construct_block_cache(&mut rng, &payload::Json::default(), &chunks, labels)
-        }
-        Variant::FoundationDb => {
-            construct_block_cache(&mut rng, &payload::FoundationDb::default(), &chunks, labels)
-        }
-    };
+    let blocks = construct_block_cache(&mut rng, variant, &chunks, labels);
     Ok(blocks)
 }
 
