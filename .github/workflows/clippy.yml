@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v1
       - run: rustup component add clippy
+      - name: Install protobuf (Apt)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        if: matrix.os == 'ubuntu-latest'
+      - name: Install protobuf (Brew)
+        run: brew install protobuf
+        if: matrix.os == 'macos-latest'
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

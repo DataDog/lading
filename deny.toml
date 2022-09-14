@@ -10,7 +10,7 @@ allow = [
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "Zlib",
-  "Unicode-DFS-2016"
+  "Unicode-DFS-2016",
 ]
 
 copyleft = "deny"
@@ -21,7 +21,12 @@ vulnerability = "deny"
 unmaintained = "deny"
 notice = "deny"
 unsound = "deny"
-ignore = [ "RUSTSEC-2021-0139" ]
+ignore = [
+  # ansi_term is unmaintained
+  "RUSTSEC-2021-0139",
+  # axum-core denial of service
+  "RUSTSEC-2022-0055",
+]
 
 [bans]
 multiple-versions = "allow"

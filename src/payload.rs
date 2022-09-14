@@ -3,14 +3,18 @@ use std::{
     path::PathBuf,
 };
 
+use rand::Rng;
+use serde::Deserialize;
+
 pub(crate) use apache_common::ApacheCommon;
 pub(crate) use ascii::Ascii;
 pub(crate) use datadog_logs::DatadogLog;
 pub(crate) use fluent::Fluent;
 pub(crate) use foundationdb::FoundationDb;
 pub(crate) use json::Json;
-use rand::Rng;
-use serde::Deserialize;
+pub(crate) use opentelemetry_log::OpentelemetryLogs;
+pub(crate) use opentelemetry_metric::OpentelemetryMetrics;
+pub(crate) use opentelemetry_trace::OpentelemetryTraces;
 pub(crate) use splunk_hec::{Encoding as SplunkHecEncoding, SplunkHec};
 pub(crate) use statik::Static;
 pub(crate) use syslog::Syslog5424;
@@ -22,6 +26,9 @@ mod datadog_logs;
 mod fluent;
 mod foundationdb;
 mod json;
+mod opentelemetry_log;
+mod opentelemetry_metric;
+mod opentelemetry_trace;
 mod splunk_hec;
 mod statik;
 mod syslog;
@@ -102,6 +109,12 @@ pub enum Config {
     Json,
     /// Generates a Apache Common log lines
     ApacheCommon,
+    /// Generates OpenTelemetry traces
+    OpentelemetryTraces,
+    /// Generates OpenTelemetry logs
+    OpentelemetryLogs,
+    /// Generates OpenTelemetry metrics
+    OpentelemetryMetrics,
 }
 
 #[derive(Debug)]
@@ -120,6 +133,9 @@ pub(crate) enum Payload {
     // generating this variant entirely.
     Static(Static),
     Syslog(Syslog5424),
+    OtelTraces(OpentelemetryTraces),
+    OtelLogs(OpentelemetryLogs),
+    OtelMetrics(OpentelemetryMetrics),
 }
 
 impl Payload {}
@@ -140,6 +156,9 @@ impl Serialize for Payload {
             Payload::SplunkHec(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Static(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Syslog(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 }
@@ -163,8 +182,10 @@ mod test {
             payload.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             debug_assert!(
                 bytes.len() <= max_bytes,
-                "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                "{} > max of {}. Payload: {:?}",
+                bytes.len(),
+                max_bytes,
+                std::str::from_utf8(&bytes).unwrap_or("<failed to utf8 encode payload>")
             );
         }
     }

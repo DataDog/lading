@@ -6,6 +6,12 @@ generation across a variety of protocols. The ambition is to be a worry-free
 component of a larger performance testing strategy for complex programs. The
 [Vector][vector] project uses lading in their 'soak' tests.
 
+## Development Setup
+
+`lading` requires the protobuf compiler to build. See
+[installation instructions](https://grpc.io/docs/protoc-installation/) from the
+protobuf docs.
+
 ## Operating Model
 
 `lading` operates on three conceptual components:

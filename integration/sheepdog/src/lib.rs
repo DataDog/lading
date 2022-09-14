@@ -254,6 +254,96 @@ generator:
     }
 
     #[tokio::test]
+    async fn http_otel_logs() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Http,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
+            r#"
+generator:
+  http:
+    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+    headers: {}
+    target_uri: "http://localhost:{{port_number}}/"
+    bytes_per_second: "100 Mb"
+    parallel_connections: 5
+    method:
+      post:
+        maximum_prebuild_cache_size_bytes: "8 Mb"
+        variant: "opentelemetry_logs"
+        "#,
+        )?;
+
+        let reqs = test.run().await?;
+
+        assert!(reqs.http.request_count > 10);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn http_otel_traces() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Http,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
+            r#"
+generator:
+  http:
+    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+    headers: {}
+    target_uri: "http://localhost:{{port_number}}/"
+    bytes_per_second: "100 Mb"
+    parallel_connections: 5
+    method:
+      post:
+        maximum_prebuild_cache_size_bytes: "8 Mb"
+        variant: "opentelemetry_traces"
+        "#,
+        )?;
+
+        let reqs = test.run().await?;
+
+        assert!(reqs.http.request_count > 10);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn http_otel_metrics() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Http,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
+            r#"
+generator:
+  http:
+    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+    headers: {}
+    target_uri: "http://localhost:{{port_number}}/"
+    bytes_per_second: "100 Mb"
+    parallel_connections: 5
+    method:
+      post:
+        maximum_prebuild_cache_size_bytes: "8 Mb"
+        variant: "opentelemetry_metrics"
+        "#,
+        )?;
+
+        let reqs = test.run().await?;
+
+        assert!(reqs.http.request_count > 10);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn tcp_fluent() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
             DucksConfig {

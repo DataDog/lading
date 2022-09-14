@@ -5,7 +5,6 @@ members = [
     "integration/ducks",
 ]
 
-
 [package]
 name = "lading"
 version = "0.9.1"
@@ -34,6 +33,8 @@ metrics-exporter-prometheus = { version = "0.11.0", default-features = false, fe
 metrics-util = { version = "0.14" }
 nix = { version = "0.25" }
 once_cell = "1.14"
+opentelemetry-proto = { version = "0.1", features = ["traces", "metrics", "logs", "gen-tonic"] }
+prost = "0.11"
 rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng"] }
 rdkafka = "0.28"
 rmp-serde = { version = "1.1", default-features = false }
