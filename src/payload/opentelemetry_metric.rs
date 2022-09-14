@@ -40,9 +40,6 @@ struct Metric(v1::Metric);
 struct NumberDataPoint(v1::NumberDataPoint);
 struct Gauge(v1::Gauge);
 struct Sum(v1::Sum);
-struct Histogram(v1::Histogram);
-struct ExponentialHistogram(v1::ExponentialHistogram);
-struct Summary(v1::Summary);
 
 impl<'a> Arbitrary<'a> for ExportMetricsServiceRequest {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
@@ -132,32 +129,6 @@ impl<'a> Arbitrary<'a> for Sum {
     }
 }
 
-// impl<'a> Arbitrary<'a> for Histogram {
-//     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-//         let len = u.arbitrary_len::<NumberDataPoint>()?;
-//         let mut data_points = Vec::new();
-//         for _ in 0..len {
-//             data_points.push(u.arbitrary::<NumberDataPoint>()?.0);
-//         }
-//         Ok(Self(v1::Histogram {
-//             data_points,
-//             aggregation_temporality: *u.choose(&[1, 2])?,
-//         }))
-//     }
-// }
-
-// impl<'a> Arbitrary<'a> for ExponentialHistogram {
-//     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-//         todo!()
-//     }
-// }
-
-// impl<'a> Arbitrary<'a> for Summary {
-//     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-//         todo!()
-//     }
-// }
-
 impl<'a> Arbitrary<'a> for Metric {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let name = u.arbitrary()?;
@@ -167,9 +138,7 @@ impl<'a> Arbitrary<'a> for Metric {
         let data = match u.int_in_range(0u8..=1)? {
             0 => v1::metric::Data::Gauge(u.arbitrary::<Gauge>()?.0),
             1 => v1::metric::Data::Sum(u.arbitrary::<Sum>()?.0),
-            // 2 => v1::metric::Data::Histogram(u.arbitrary::<Histogram>()?.0),
-            // 3 => v1::metric::Data::ExponentialHistogram(u.arbitrary::<ExponentialHistogram>()?.0),
-            // 4 => v1::metric::Data::Summary(u.arbitrary::<Summary>()?.0),
+            // Currently unsupported: Histogram, ExponentialHistogram, Summary
             _ => unreachable!(),
         };
 
@@ -194,9 +163,6 @@ impl<'a> Arbitrary<'a> for Metric {
                     size_hint::or_all(&[
                         <Gauge as Arbitrary>::size_hint(depth),
                         <Sum as Arbitrary>::size_hint(depth),
-                        // <Histogram as Arbitrary>::size_hint(depth),
-                        // <ExponentialHistogram as Arbitrary>::size_hint(depth),
-                        // <Summary as Arbitrary>::size_hint(depth),
                     ]),
                 ])
                 .0,
