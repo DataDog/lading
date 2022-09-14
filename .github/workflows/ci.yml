@@ -99,7 +99,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --features
+          args: --all-features
 
   integration-test:
     name: Integration Tests
