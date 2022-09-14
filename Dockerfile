@@ -1,5 +1,9 @@
 FROM docker.io/rust:1.63.0-bullseye@sha256:d7e3f69edcdcd03b145d8d9361765b816656755e49c1c1fe28224a4505f91b0a as builder
 
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY . /app
 RUN cargo build --release --locked
