@@ -146,6 +146,24 @@ where
             block_chunks,
             labels,
         ),
+        payload::Config::OpentelemetryTraces => construct_block_cache_inner(
+            rng,
+            &payload::OpentelemetryTraces::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::OpentelemetryLogs => construct_block_cache_inner(
+            rng,
+            &payload::OpentelemetryLogs::default(),
+            block_chunks,
+            labels,
+        ),
+        payload::Config::OpentelemetryMetrics => construct_block_cache_inner(
+            rng,
+            &payload::OpentelemetryMetrics::default(),
+            block_chunks,
+            labels,
+        ),
     }
 }
 
