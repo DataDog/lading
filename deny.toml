@@ -24,8 +24,6 @@ unsound = "deny"
 ignore = [
   # ansi_term is unmaintained
   "RUSTSEC-2021-0139",
-  # axum-core denial of service
-  "RUSTSEC-2022-0055",
 ]
 
 [bans]
