@@ -19,6 +19,15 @@ impl From<ChunkError> for Error {
     }
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            Error::Chunk(e) => std::fmt::Display::fmt(e, f),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
 #[derive(Debug)]
 pub(crate) struct Block {
     pub(crate) total_bytes: NonZeroU32,
@@ -38,6 +47,21 @@ pub enum ChunkError {
     /// The `total_bytes` parameter is insufficient.
     InsufficientTotalBytes,
 }
+
+impl std::fmt::Display for ChunkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            ChunkError::EmptyBlockBytes => write!(
+                f,
+                "the slice of byte sizes given to `chunk_bytes` was empty"
+            ),
+            ChunkError::InsufficientTotalBytes => {
+                write!(f, "the `total_bytes` parameter is insufficient")
+            }
+        }
+    }
+}
+impl std::error::Error for ChunkError {}
 
 /// Construct a vec of block sizes that fit into `total_bytes`.
 ///

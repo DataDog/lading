@@ -16,6 +16,7 @@ use tokio::sync::broadcast::Receiver;
 use crate::signals::Shutdown;
 
 pub mod file_gen;
+pub mod grpc;
 pub mod http;
 pub mod kafka;
 pub mod splunk_hec;
@@ -34,6 +35,8 @@ pub enum Error {
     Kafka(kafka::Error),
     /// See [`crate::generator::file_gen::Error`] for details.
     FileGen(file_gen::Error),
+    /// See [`crate::generator::grpc::Error`] for details.
+    Grpc(grpc::Error),
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +53,8 @@ pub enum Config {
     Kafka(kafka::Config),
     /// See [`crate::generator::file_gen::Config`] for details.
     FileGen(file_gen::Config),
+    /// See [`crate::generator::grpc::Config`] for details.
+    Grpc(grpc::Config),
 }
 
 #[derive(Debug)]
@@ -68,6 +73,8 @@ pub enum Server {
     Kafka(kafka::Kafka),
     /// See [`crate::generator::file_gen::FileGen`] for details.
     FileGen(file_gen::FileGen),
+    /// See [`crate::generator::grpc::Grpc`] for details.
+    Grpc(grpc::Grpc),
 }
 
 impl Server {
@@ -93,6 +100,7 @@ impl Server {
             Config::FileGen(conf) => {
                 Self::FileGen(file_gen::FileGen::new(conf, shutdown).map_err(Error::FileGen)?)
             }
+            Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
         };
         Ok(srv)
     }
@@ -121,6 +129,7 @@ impl Server {
             Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
             Server::Kafka(inner) => inner.spin().await.map_err(Error::Kafka),
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
+            Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
         }
     }
 }
