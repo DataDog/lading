@@ -96,23 +96,23 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }
 
-/// No-op tonic codec. Passes raw bytes through in either direction.
+/// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
 #[derive(Debug, Clone, Default, Copy)]
 pub struct NoopCodec;
 
 impl tonic::codec::Codec for NoopCodec {
     type Encode = Bytes;
-    type Decode = Bytes;
+    type Decode = usize;
 
     type Encoder = Self;
-    type Decoder = Self;
+    type Decoder = CountingDecoder;
 
     fn encoder(&mut self) -> Self::Encoder {
         Self
     }
 
     fn decoder(&mut self) -> Self::Decoder {
-        Self
+        CountingDecoder
     }
 }
 
@@ -126,13 +126,15 @@ impl Encoder for NoopCodec {
     }
 }
 
-impl Decoder for NoopCodec {
-    type Item = Bytes;
+/// This decoder returns the number of bytes received
+#[derive(Debug, Clone, Default, Copy)]
+pub struct CountingDecoder;
+impl Decoder for CountingDecoder {
+    type Item = usize;
     type Error = Status;
 
-    fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
-        // todo: can this be made zero copy?
-        Ok(Some(buf.copy_to_bytes(buf.remaining())))
+    fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<usize>, Self::Error> {
+        Ok(Some(buf.remaining()))
     }
 }
 
@@ -215,8 +217,6 @@ impl Grpc {
 
     /// Establish a connection with the configured RPC server
     async fn connect(&self) -> Result<tonic::client::Grpc<tonic::transport::Channel>, Error> {
-        // TODO: Does the URI need to be chopped down to the base, or does Endpoint handle that?
-        // TODO: Does endpoint support connection pooling?
         let conn = tonic::transport::Endpoint::new(self.target_uri.clone())?
             .connect()
             .await?;
@@ -230,7 +230,7 @@ impl Grpc {
         client: &mut tonic::client::Grpc<tonic::transport::Channel>,
         rpc_path: http::uri::PathAndQuery,
         request: Bytes,
-    ) -> Result<Response<Bytes>, tonic::Status> {
+    ) -> Result<Response<usize>, tonic::Status> {
         client.ready().await.map_err(|e| {
             tonic::Status::new(
                 tonic::Code::Unknown,
@@ -280,7 +280,7 @@ impl Grpc {
                         Ok(res) => {
                             counter!("bytes_written", block_length as u64, &labels);
                             counter!("request_ok", 1, &labels);
-                            counter!("response_bytes", res.get_ref().len() as u64, &labels);
+                            counter!("response_bytes", res.into_inner() as u64, &labels);
                         }
                         Err(err) => {
                             let mut error_labels = labels.clone();
