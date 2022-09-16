@@ -913,6 +913,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+ "tonic",
  "tower",
  "tracing",
  "tracing-subscriber",
