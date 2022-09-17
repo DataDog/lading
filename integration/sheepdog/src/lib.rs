@@ -203,17 +203,17 @@ mod tests {
             },
             r#"
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    headers: {}
-    target_uri: "http://localhost:{{port_number}}/"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 5
-    method:
-      post:
-        maximum_prebuild_cache_size_bytes: "8 Mb"
-        variant: "apache_common"
+  - http:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        headers: {}
+        target_uri: "http://localhost:{{port_number}}/"
+        bytes_per_second: "100 Mb"
+        parallel_connections: 5
+        method:
+          post:
+            maximum_prebuild_cache_size_bytes: "8 Mb"
+            variant: "apache_common"
         "#,
         )?;
 
@@ -233,17 +233,17 @@ generator:
             },
             r#"
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    headers: {}
-    target_uri: "http://localhost:{{port_number}}/"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 5
-    method:
-      post:
-        maximum_prebuild_cache_size_bytes: "8 Mb"
-        variant: "ascii"
+  - http:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        headers: {}
+        target_uri: "http://localhost:{{port_number}}/"
+        bytes_per_second: "100 Mb"
+        parallel_connections: 5
+        method:
+          post:
+            maximum_prebuild_cache_size_bytes: "8 Mb"
+            variant: "ascii"
         "#,
         )?;
 
@@ -263,19 +263,19 @@ generator:
             },
             r#"
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    headers: {}
-    target_uri: "http://localhost:{{port_number}}/v1/logs"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 5
-    method:
-      post:
-        maximum_prebuild_cache_size_bytes: "8 Mb"
-        variant: "opentelemetry_logs"
-        headers:
-            Content-Type: "application/x-protobuf"
+  - http:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        headers: {}
+        target_uri: "http://localhost:{{port_number}}/v1/logs"
+        bytes_per_second: "100 Mb"
+        parallel_connections: 5
+        method:
+          post:
+            maximum_prebuild_cache_size_bytes: "8 Mb"
+            variant: "opentelemetry_logs"
+            headers:
+                Content-Type: "application/x-protobuf"
         "#,
         )?;
 
@@ -295,19 +295,19 @@ generator:
             },
             r#"
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    headers: {}
-    target_uri: "http://localhost:{{port_number}}/v1/traces"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 5
-    method:
-      post:
-        maximum_prebuild_cache_size_bytes: "8 Mb"
-        variant: "opentelemetry_traces"
-        headers:
-            Content-Type: "application/x-protobuf"
+  - http:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        headers: {}
+        target_uri: "http://localhost:{{port_number}}/v1/traces"
+        bytes_per_second: "100 Mb"
+        parallel_connections: 5
+        method:
+          post:
+            maximum_prebuild_cache_size_bytes: "8 Mb"
+            variant: "opentelemetry_traces"
+            headers:
+                Content-Type: "application/x-protobuf"
         "#,
         )?;
 
@@ -327,19 +327,19 @@ generator:
             },
             r#"
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    headers: {}
-    target_uri: "http://localhost:{{port_number}}/v1/metrics"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 5
-    method:
-      post:
-        maximum_prebuild_cache_size_bytes: "8 Mb"
-        variant: "opentelemetry_metrics"
-        headers:
-            Content-Type: "application/x-protobuf"
+  - http:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        headers: {}
+        target_uri: "http://localhost:{{port_number}}/v1/metrics"
+        bytes_per_second: "100 Mb"
+        parallel_connections: 5
+        method:
+          post:
+            maximum_prebuild_cache_size_bytes: "8 Mb"
+            variant: "opentelemetry_metrics"
+            headers:
+                Content-Type: "application/x-protobuf"
         "#,
         )?;
 
@@ -359,14 +359,14 @@ generator:
             },
             r#"
 generator:
-  tcp:
-    seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
-      59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-    addr: "127.0.0.1:{{port_number}}"
-    bytes_per_second: "100 Mb"
-    block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
-    variant: fluent
-    maximum_prebuild_cache_size_bytes: "8 Mb"
+  - tcp:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        addr: "127.0.0.1:{{port_number}}"
+        bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
+        variant: fluent
+        maximum_prebuild_cache_size_bytes: "8 Mb"
         "#,
         )?;
 

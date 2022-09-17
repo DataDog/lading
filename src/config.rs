@@ -7,46 +7,15 @@ use serde::Deserialize;
 
 use crate::{blackhole, generator, inspector, observer, target};
 
-/// Generator configuration for this program.
-///
-/// We have many uses that exist prior to the introduction of multiple
-/// generators, meaning many configs that _assume_ there is only one generator
-/// and that they do not exist in an array. In order to avoid breaking those
-/// configs we support this goofy structure. A deprecation cycle here is in
-/// order someday.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Generator {
-    /// Load in only one generator
-    One(Box<generator::Config>),
-    /// Load in one or more generators
-    Many(Vec<generator::Config>),
-}
-
-/// Blackhole configuration for this program.
-///
-/// We have many uses that exist prior to the introduction of multiple
-/// blackholes, meaning many configs that _assume_ there is only one bloackhole
-/// and that they do not exist in an array. In order to avoid breaking those
-/// configs we support this goofy structure. A deprecation cycle here is in
-/// order someday.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Blackhole {
-    /// Load in only one generator
-    One(Box<blackhole::Config>),
-    /// Load in one or more generators
-    Many(Vec<blackhole::Config>),
-}
-
 /// Main configuration struct for this program
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct Config {
     /// The method by which to express telemetry
     #[serde(default)]
     pub telemetry: Telemetry,
     /// The generator to apply to the target in-rig
-    pub generator: Generator,
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub generator: Vec<generator::Config>,
     /// The observer that watches the target
     #[serde(skip_deserializing)]
     pub observer: observer::Config,
@@ -54,12 +23,14 @@ pub struct Config {
     #[serde(skip_deserializing)]
     pub target: Option<target::Config>,
     /// The blackhole to supply for the target
-    pub blackhole: Option<Blackhole>,
+    #[serde(default)]
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub blackhole: Option<Vec<blackhole::Config>>,
     /// The target inspector sub-program
     pub inspector: Option<inspector::Config>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(untagged)]
 /// Defines the manner of lading's telemetry.
@@ -88,5 +59,69 @@ impl Default for Telemetry {
             prometheus_addr: "0.0.0.0:9000".parse().unwrap(),
             global_labels: HashMap::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn config_deserializes() {
+        let contents = r#"
+generator:
+  - http:
+      seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+      headers: {}
+      target_uri: "http://localhost:1000/"
+      bytes_per_second: "100 Mb"
+      parallel_connections: 5
+      method:
+        post:
+          maximum_prebuild_cache_size_bytes: "8 Mb"
+          variant: "fluent"
+blackhole:
+  - tcp:
+      binding_addr: "127.0.0.1:1000"
+  - tcp:
+      binding_addr: "127.0.0.1:1001"
+"#;
+        let config: Config = serde_yaml::from_str(&contents).unwrap();
+        assert_eq!(
+            config,
+            Config {
+                generator: vec![generator::Config::Http(generator::http::Config {
+                    seed: Default::default(),
+                    target_uri: "http://localhost:1000/".try_into().unwrap(),
+                    method: generator::http::Method::Post {
+                        variant: crate::payload::Config::Fluent,
+                        maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
+                            8_f64,
+                            byte_unit::ByteUnit::MB
+                        )
+                        .unwrap()
+                    },
+                    headers: Default::default(),
+                    bytes_per_second: byte_unit::Byte::from_unit(100_f64, byte_unit::ByteUnit::MB)
+                        .unwrap(),
+                    block_sizes: Default::default(),
+                    parallel_connections: 5,
+                })],
+                blackhole: Some(vec![
+                    blackhole::Config::Tcp(blackhole::tcp::Config {
+                        binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                    }),
+                    blackhole::Config::Tcp(blackhole::tcp::Config {
+                        binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
+                    })
+                ]),
+                target: Default::default(),
+                telemetry: Default::default(),
+                observer: Default::default(),
+                inspector: Default::default(),
+            },
+        )
     }
 }

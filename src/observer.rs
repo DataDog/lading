@@ -32,7 +32,7 @@ pub enum Error {
     ProcError(procfs::ProcError),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub struct Config {}

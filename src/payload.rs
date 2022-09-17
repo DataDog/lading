@@ -84,7 +84,7 @@ pub(crate) trait Serialize {
 }
 
 /// Configuration for `Payload`
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Config {
     /// Generates Fluent messages

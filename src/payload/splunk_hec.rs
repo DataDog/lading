@@ -141,7 +141,7 @@ impl<'a> Arbitrary<'a> for Member {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub enum Encoding {

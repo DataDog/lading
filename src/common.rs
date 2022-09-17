@@ -2,7 +2,7 @@ use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 /// Defines how sub-process stderr and stdout are handled.
 pub struct Output {
     #[serde(default)]
@@ -13,7 +13,7 @@ pub struct Output {
     pub stdout: Behavior,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 /// Defines the [`Output`] behavior for stderr and stdout.
 pub enum Behavior {

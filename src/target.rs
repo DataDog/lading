@@ -49,14 +49,14 @@ pub enum Error {
 
 /// Configuration for PID target mode
 #[allow(missing_copy_implementations)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PidConfig {
     /// PID to watch
     pub pid: NonZeroU32,
 }
 
 /// Configuration for binary launch mode
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BinaryConfig {
     /// The path to the target executable.
     pub command: PathBuf,
@@ -70,7 +70,7 @@ pub struct BinaryConfig {
 }
 
 /// Configuration for [`Server`]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Config {
     /// An existing process that is managed externally
     Pid(PidConfig),

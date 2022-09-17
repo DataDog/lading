@@ -18,11 +18,11 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 /// Configuration for [`Tcp`]
 pub struct Config {
     /// address -- IP plus port -- to bind to
-    binding_addr: SocketAddr,
+    pub binding_addr: SocketAddr,
 }
 
 #[derive(Debug)]
