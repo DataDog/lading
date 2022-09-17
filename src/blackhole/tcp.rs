@@ -45,8 +45,11 @@ impl Tcp {
     async fn handle_connection(socket: TcpStream) {
         let mut stream = ReaderStream::new(socket);
 
-        while stream.next().await.is_some() {
+        while let Some(msg) = stream.next().await {
             counter!("message_received", 1);
+            if let Ok(msg) = msg {
+                counter!("bytes_received", msg.len() as u64)
+            }
         }
     }
 
