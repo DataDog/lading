@@ -54,6 +54,9 @@ impl FromStr for CliKeyValues {
         let pair_err = String::from("pairs must be separated by '='");
         let mut labels = HashMap::new();
         for kv in input.split(',') {
+            if kv.is_empty() {
+                continue;
+            }
             let mut pair = kv.split('=');
             let key = pair.next().ok_or_else(|| pair_err.clone())?;
             let value = pair.next().ok_or_else(|| pair_err.clone())?;
@@ -369,4 +372,35 @@ fn main() {
     );
     runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_key_values_deserializes_empty_string_to_empty_set() {
+        let val = "";
+        let deser = CliKeyValues::from_str(val);
+        let deser = deser.unwrap().to_string();
+        assert_eq!(deser, "");
+    }
+
+    #[test]
+    fn cli_key_values_deserializes_kv_list() {
+        let val = "first=one,second=two";
+        let deser = CliKeyValues::from_str(val);
+        let deser = deser.unwrap().to_string();
+        // CliKeyValues does not preserve order. That's okay! It's just less
+        // convenient to assert against.
+        assert!(deser == "first=one,second=two," || deser == "second=two,first=one,");
+    }
+
+    #[test]
+    fn cli_key_values_deserializes_kv_list_trailing_comma() {
+        let val = "first=one,";
+        let deser = CliKeyValues::from_str(val);
+        let deser = deser.unwrap().to_string();
+        assert_eq!(deser, "first=one,");
+    }
 }
