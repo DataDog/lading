@@ -245,7 +245,7 @@ async fn inner_main(
     // GENERATOR
     //
     assert!(
-        config.generator.len() >= 1,
+        !config.generator.is_empty(),
         "lading requires at least one generator in order to run"
     );
     for cfg in config.generator {
