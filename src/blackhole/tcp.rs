@@ -48,7 +48,7 @@ impl Tcp {
         while let Some(msg) = stream.next().await {
             counter!("message_received", 1);
             if let Ok(msg) = msg {
-                counter!("bytes_received", msg.len() as u64)
+                counter!("bytes_received", msg.len() as u64);
             }
         }
     }
