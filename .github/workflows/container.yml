@@ -1,4 +1,4 @@
-name: Release
+name: Container
 
 on:
   push:
@@ -38,6 +38,9 @@ jobs:
           tags: |
             type=sha,format=long
             type=ref,event=tag
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=semver,pattern={{major}},event=tag
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image (${{ matrix.platform }})
