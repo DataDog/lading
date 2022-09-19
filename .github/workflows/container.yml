@@ -38,6 +38,7 @@ jobs:
           tags: |
             type=sha,format=long
             type=ref,event=tag
+            type=ref,prefix=pr-,event=pr
             type=semver,pattern={{version}},event=tag
             type=semver,pattern={{major}}.{{minor}},event=tag
             type=semver,pattern={{major}},event=tag
