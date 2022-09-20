@@ -40,7 +40,7 @@ jobs:
             type=ref,prefix=pr-,event=pr
             type=semver,pattern={{version}},event=tag
             type=semver,pattern={{major}}.{{minor}},event=tag
-            type=semver,pattern={{major}},event=tag
+            type=semver,pattern={{major}},event=tag,enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image (${{ matrix.platform }})
