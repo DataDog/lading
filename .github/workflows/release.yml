@@ -24,29 +24,73 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux Aarch64 cross build. librdkafka needs explicit cc/cxx in the
+          # env.
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            cc: 'aarch64-linux-gnu-gcc'
+            cxx: 'aarch64-linux-gnu-g++'
+
+          # Mac M1 cross build. Uses protobuf compiler on the host. librdkafka
+          # needs explicit cross env vars.
           - target: aarch64-apple-darwin
             os: macos-latest
+            cflags: '-target arm64-apple-macos'
+            cxxflags: '-target arm64-apple-macos'
+            cc: 'clang'
+            cxx: 'clang++'
+
+          # Normal x86-64 Linux build
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+
+          # Normal Intel Mac build
           - target: x86_64-apple-darwin
             os: macos-latest
+
+      # Try to complete every job in the matrix, even if one fails.
       fail-fast: false
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v2
 
+      # Install cross compilation rust toolchain for Arm64 Mac
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: ${{ matrix.target }}
+        if: matrix.target == 'aarch64-apple-darwin'
+
+      # Run linux aarch64 build in a cross-rs qemu environment
+      - name: Install cross-compilation tools
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+
+      # Install the protobuf compiler for linux builds
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
         if: matrix.os == 'ubuntu-latest'
+
+      # Install the protobuf compiler for mac builds
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
 
+      # Run the build & upload artifacts
       - name: Build and upload lading binaries
         uses: taiki-e/upload-rust-binary-action@v1
+
+        env:
+          CFLAGS: ${{ matrix.cflags }}
+          CXXFLAGS: ${{ matrix.cxxflags }}
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+
         with:
           bin: lading
           target: ${{ matrix.target }}
