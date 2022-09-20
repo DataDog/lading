@@ -6,3 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2020-10-20
+### Added
+- New payload: Apache Common
+- New payload: OpenTelemetry protobufs for metrics, traces, and logs
+- New generator: gRPC over HTTP/2
+- Collect CPU, memory, and scheduling information about the target process
+- Target processes may now be launched externally and watched by PID
+
+### Changed
+- **Breaking change:** Support multiple generators and blackholes. These config
+sections are now lists.
+- **Breaking change:** Share the same payload configuration across all
+generators. In alignment with other generators, the file generator now requires
+snake-cased payload names.
+- HTTP and Splunk HEC blackholes support gzip decoding based on incoming headers
+- TCP blackhole counts bytes recieved and publishes a `bytes_received` metric
+- Ignore empty strings in CLI key-value arguments. This was previously an error.
+- The static payload can accept a directory of files
+- The file generator's file rotation behavior can be configured
+
+### Fixed
+- Improve startup sequencing
+- Fix TCP generator shutdown for long lived connections
