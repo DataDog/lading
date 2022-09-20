@@ -39,7 +39,7 @@ pub enum Error {
     Grpc(grpc::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Config {

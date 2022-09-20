@@ -11,7 +11,7 @@ use clap::{ArgGroup, Parser};
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{self, Config, Telemetry},
+    config::{Config, Telemetry},
     generator, inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
@@ -247,19 +247,14 @@ async fn inner_main(
     //
     // GENERATOR
     //
-    match config.generator {
-        config::Generator::One(cfg) => {
-            let tgt_rcv = tgt_snd.subscribe();
-            let generator_server = generator::Server::new(*cfg, shutdown.clone()).unwrap();
-            let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
-        }
-        config::Generator::Many(cfgs) => {
-            for cfg in cfgs {
-                let tgt_rcv = tgt_snd.subscribe();
-                let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
-                let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
-            }
-        }
+    assert!(
+        !config.generator.is_empty(),
+        "lading requires at least one generator in order to run"
+    );
+    for cfg in config.generator {
+        let tgt_rcv = tgt_snd.subscribe();
+        let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
+        let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
     }
 
     //
@@ -278,16 +273,7 @@ async fn inner_main(
     // BLACKHOLE
     //
     match config.blackhole {
-        Some(config::Blackhole::One(cfg)) => {
-            let blackhole_server = blackhole::Server::new(*cfg, shutdown.clone());
-            let _bsrv = tokio::spawn(async {
-                match blackhole_server.run().await {
-                    Ok(()) => debug!("blackhole shut down successfully"),
-                    Err(err) => warn!("blackhole failed with {:?}", err),
-                }
-            });
-        }
-        Some(config::Blackhole::Many(cfgs)) => {
+        Some(cfgs) => {
             for cfg in cfgs {
                 let blackhole_server = blackhole::Server::new(cfg, shutdown.clone());
                 let _bsrv = tokio::spawn(async {

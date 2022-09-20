@@ -23,7 +23,7 @@ use crate::{
     signals::Shutdown,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target

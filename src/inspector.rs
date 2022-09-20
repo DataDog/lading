@@ -38,7 +38,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub struct Config {

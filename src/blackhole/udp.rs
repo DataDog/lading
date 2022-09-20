@@ -16,7 +16,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 /// Configuration for [`Udp`].
 pub struct Config {
     /// address -- IP plus port -- to bind to

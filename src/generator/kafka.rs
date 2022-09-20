@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// Configuration for generator throughput.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Throughput {
     /// The producer should run as fast as possible.
@@ -51,7 +51,7 @@ pub enum Throughput {
     },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 /// Configuration for [`Kafka`]
 pub struct Config {
     /// The seed for random operations against this target

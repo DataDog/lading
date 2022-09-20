@@ -30,7 +30,7 @@ pub enum Error {
     Sqs(sqs::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Config {

@@ -27,7 +27,7 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 /// Configuration for [`Sqs`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow

@@ -29,7 +29,7 @@ pub enum Error {
     Hyper(hyper::Error),
 }
 
-#[derive(Debug, Copy, Clone, Deserialize)]
+#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq)]
 /// Body variant supported by this blackhole.
 pub enum BodyVariant {
     /// All response bodies will be empty.
@@ -53,7 +53,7 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::AwsKinesis
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 /// Configuration for [`Http`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow

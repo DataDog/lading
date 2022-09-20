@@ -79,7 +79,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// Config for [`Grpc`]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Config {
     /// The gRPC URI. Looks like http://host/service.path/endpoint
     pub target_uri: String,
