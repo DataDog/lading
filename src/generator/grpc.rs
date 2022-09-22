@@ -217,9 +217,9 @@ impl Grpc {
 
     /// Establish a connection with the configured RPC server
     async fn connect(&self) -> Result<tonic::client::Grpc<tonic::transport::Channel>, Error> {
-        let conn = tonic::transport::Endpoint::new(self.target_uri.clone())?
-            .connect()
-            .await?;
+        let mut parts = self.target_uri.clone().into_parts();
+        parts.path_and_query = Some(PathAndQuery::from_static(""));
+        let uri = Uri::from_parts(parts).unwrap();
         let conn = tonic::client::Grpc::new(conn);
 
         Ok(conn)
