@@ -272,19 +272,16 @@ async fn inner_main(
     //
     // BLACKHOLE
     //
-    match config.blackhole {
-        Some(cfgs) => {
-            for cfg in cfgs {
-                let blackhole_server = blackhole::Server::new(cfg, shutdown.clone());
-                let _bsrv = tokio::spawn(async {
-                    match blackhole_server.run().await {
-                        Ok(()) => debug!("blackhole shut down successfully"),
-                        Err(err) => warn!("blackhole failed with {:?}", err),
-                    }
-                });
-            }
+    if let Some(cfgs) = config.blackhole {
+        for cfg in cfgs {
+            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone());
+            let _bsrv = tokio::spawn(async {
+                match blackhole_server.run().await {
+                    Ok(()) => debug!("blackhole shut down successfully"),
+                    Err(err) => warn!("blackhole failed with {:?}", err),
+                }
+            });
         }
-        None => {}
     }
 
     //
