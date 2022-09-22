@@ -165,6 +165,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
+    #[allow(clippy::unused_async)]
     #[cfg(not(target_os = "linux"))]
     pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");

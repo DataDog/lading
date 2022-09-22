@@ -204,15 +204,12 @@ impl Server {
 
         tokio::select! {
             target_exit = target_wait => {
-                match target_exit {
-                    Some(code) => {
-                        error!("target exited unexpectedly with code {}", code);
-                        Err(Error::TargetExited(Some(code)))
-                    },
-                    None => {
-                        error!("target exited unexpectedly; exit code unavailable");
-                        Err(Error::TargetExited(None))
-                    },
+                if let Some(code) = target_exit{
+                    error!("target exited unexpectedly with code {}", code);
+                    Err(Error::TargetExited(Some(code)))
+                } else {
+                    error!("target exited unexpectedly; exit code unavailable");
+                    Err(Error::TargetExited(None))
                 }
             },
             _ = shutdown.recv() => {
