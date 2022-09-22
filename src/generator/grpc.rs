@@ -220,7 +220,13 @@ impl Grpc {
         let mut parts = self.target_uri.clone().into_parts();
         parts.path_and_query = Some(PathAndQuery::from_static(""));
         let uri = Uri::from_parts(parts).unwrap();
+
+        let endpoint = tonic::transport::Endpoint::new(uri)?;
+        let endpoint = endpoint.connect_timeout(Duration::from_secs(1));
+        let conn = endpoint.connect().await?;
         let conn = tonic::client::Grpc::new(conn);
+
+        debug!("gRPC generator connected");
 
         Ok(conn)
     }
