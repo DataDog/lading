@@ -3,6 +3,7 @@
 use std::{
     convert::TryFrom,
     num::{NonZeroU32, NonZeroUsize},
+    time::Duration,
 };
 
 use bytes::{Buf, BufMut, Bytes};
@@ -20,7 +21,7 @@ use tonic::{
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
     Request, Response, Status,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
@@ -261,7 +262,14 @@ impl Grpc {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let mut client = self.connect().await?;
+        let mut client = loop {
+            match self.connect().await {
+                Ok(c) => break c,
+                Err(e) => debug!("Failed to connect gRPC generator (will retry): {}", e),
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
 
         let mut blocks = self.block_cache.iter().cycle();
         let rpc_path = self.rpc_path;
