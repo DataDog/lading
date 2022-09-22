@@ -12,6 +12,7 @@
 
 use serde::Deserialize;
 use tokio::sync::broadcast::Receiver;
+use tracing::error;
 
 use crate::signals::Shutdown;
 
@@ -123,13 +124,18 @@ impl Server {
             .expect("target failed to transmit PID, catastrophic failure");
         drop(pid_snd);
 
-        match self {
+        let res = match self {
             Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),
             Server::Http(inner) => inner.spin().await.map_err(Error::Http),
             Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
             Server::Kafka(inner) => inner.spin().await.map_err(Error::Kafka),
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
             Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
+        };
+
+        if let Err(e) = &res {
+            error!("Generator error: {:?}", e);
         }
+        res
     }
 }
