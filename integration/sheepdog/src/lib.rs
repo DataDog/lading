@@ -98,7 +98,7 @@ impl IntegrationTest {
         })
     }
 
-    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
+    async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
         // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
         // only run this a single time though.
@@ -187,6 +187,13 @@ impl IntegrationTest {
         // todo: report captures file & provide some utilities for asserting against it
         println!("test result: {:?}", metrics);
         Ok(metrics)
+    }
+
+    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
+        tokio::select! {
+            res = self.run_inner() => { res }
+            _ = tokio::time::sleep(Duration::from_secs(600)) => { panic!("test timed out") }
+        }
     }
 }
 

@@ -343,6 +343,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
         },
         _ = shutdown_rx.recv() => {},
+        _ = tokio::time::sleep(Duration::from_secs(60)) => { warn!("timed out") }
     }
     debug!("shutting down");
 
