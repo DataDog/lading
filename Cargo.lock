@@ -911,6 +911,7 @@ dependencies = [
  "serde_qs",
  "serde_tuple",
  "serde_yaml",
+ "thiserror",
  "time",
  "tokio",
  "tokio-util",

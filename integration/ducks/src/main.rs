@@ -26,7 +26,7 @@ use shared::{
     integration_api::{
         self,
         integration_target_server::{IntegrationTarget, IntegrationTargetServer},
-        Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, TcpMetrics, TestConfig,
+        Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
     },
     DucksConfig,
 };
@@ -34,16 +34,17 @@ use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncReadExt,
-    net::{TcpListener, TcpStream, UnixListener},
+    net::{TcpListener, TcpStream, UdpSocket, UnixListener},
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
 use tonic::Status;
 use tower::ServiceBuilder;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
-static TCP_COUNTERS: OnceCell<Arc<Mutex<TcpCounters>>> = OnceCell::new();
+static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
+static UDP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
 
 struct HttpCounters {
     body_size: DDSketch,
@@ -82,13 +83,13 @@ impl From<&HttpCounters> for HttpMetrics {
     }
 }
 
-struct TcpCounters {
+struct SocketCounters {
     entropy: DDSketch,
     read_count: u64,
     total_bytes: u64,
 }
 
-impl Default for TcpCounters {
+impl Default for SocketCounters {
     fn default() -> Self {
         let config = sketches_ddsketch::Config::defaults();
         let entropy = DDSketch::new(config);
@@ -101,9 +102,9 @@ impl Default for TcpCounters {
     }
 }
 
-impl From<&TcpCounters> for TcpMetrics {
-    fn from(val: &TcpCounters) -> Self {
-        TcpMetrics {
+impl From<&SocketCounters> for SocketMetrics {
+    fn from(val: &SocketCounters) -> Self {
+        SocketMetrics {
             read_count: val.read_count,
             total_bytes: val.total_bytes,
             median_entropy: val.entropy.quantile(0.5).unwrap().unwrap_or_default(),
@@ -194,6 +195,13 @@ impl IntegrationTarget for DucksTarget {
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
+            shared::ListenConfig::Udp => {
+                let listener = UdpSocket::bind("127.0.0.1:0").await?;
+                let port = listener.local_addr()?.port() as u32;
+                tokio::spawn(Self::udp_listen(config, listener));
+
+                Ok(tonic::Response::new(ListenInfo { port }))
+            }
         }
     }
 
@@ -218,9 +226,18 @@ impl IntegrationTarget for DucksTarget {
                 None
             }
         };
+        let udp_metric = {
+            if let Some(metric) = UDP_COUNTERS.get() {
+                let m = metric.lock().await;
+                Some((&*m).into())
+            } else {
+                None
+            }
+        };
         Ok(tonic::Response::new(Metrics {
             http: http_metric,
             tcp: tcp_metric,
+            udp: udp_metric,
         }))
     }
 }
@@ -271,11 +288,31 @@ impl DucksTarget {
 
     async fn tcp_listen(_config: DucksConfig, incoming: TcpListener) -> Result<(), anyhow::Error> {
         debug!("TCP listener active on {}", incoming.local_addr()?);
-        TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(TcpCounters::default())));
+        TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
 
         loop {
             let (socket, _remote) = incoming.accept().await?;
             tokio::spawn(Self::tcp_handler(socket));
+        }
+    }
+
+    async fn udp_listen(_config: DucksConfig, incoming: UdpSocket) -> Result<(), anyhow::Error> {
+        debug!("UDP listener active on {}", incoming.local_addr()?);
+        UDP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
+        let mut buf = [0u8; 1500];
+
+        loop {
+            trace!("Waiting for incoming data");
+            let (count, _remote) = incoming.recv_from(&mut buf).await?;
+            trace!("Got {} B from {}", count, _remote);
+
+            {
+                let metric = UDP_COUNTERS.get().unwrap();
+                let mut m = metric.lock().await;
+                m.read_count += 1;
+                m.total_bytes += count as u64;
+                m.entropy.add(entropy::metric_entropy(&buf) as f64);
+            }
         }
     }
 }

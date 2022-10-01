@@ -23,6 +23,8 @@ pub enum ListenConfig {
     Http,
     /// Listen on a random port for TCP messages
     Tcp,
+    /// Listen on a random port for UDP messages
+    Udp,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

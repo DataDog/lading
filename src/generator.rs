@@ -22,12 +22,15 @@ pub mod http;
 pub mod kafka;
 pub mod splunk_hec;
 pub mod tcp;
+pub mod udp;
 
 #[derive(Debug)]
 /// Errors produced by [`Server`].
 pub enum Error {
     /// See [`crate::generator::tcp::Error`] for details.
     Tcp(tcp::Error),
+    /// See [`crate::generator::udp::Error`] for details.
+    Udp(udp::Error),
     /// See [`crate::generator::http::Error`] for details.
     Http(http::Error),
     /// See [`crate::generator::splunk_hec::Error`] for details.
@@ -46,6 +49,8 @@ pub enum Error {
 pub enum Config {
     /// See [`crate::generator::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::generator::udp::Config`] for details.
+    Udp(udp::Config),
     /// See [`crate::generator::http::Config`] for details.
     Http(http::Config),
     /// See [`crate::generator::splunk_hec::Config`] for details.
@@ -66,6 +71,8 @@ pub enum Config {
 pub enum Server {
     /// See [`crate::generator::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::generator::udp::Udp`] for details.
+    Udp(udp::Udp),
     /// See [`crate::generator::http::Http`] for details.
     Http(http::Http),
     /// See [`crate::generator::splunk_hec::SplunkHec`] for details.
@@ -91,6 +98,7 @@ impl Server {
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let srv = match config {
             Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown).map_err(Error::Tcp)?),
+            Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown).map_err(Error::Udp)?),
             Config::Http(conf) => Self::Http(http::Http::new(conf, shutdown).map_err(Error::Http)?),
             Config::SplunkHec(conf) => Self::SplunkHec(
                 splunk_hec::SplunkHec::new(conf, shutdown).map_err(Error::SplunkHec)?,
@@ -126,6 +134,7 @@ impl Server {
 
         let res = match self {
             Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),
+            Server::Udp(inner) => inner.spin().await.map_err(Error::Udp),
             Server::Http(inner) => inner.spin().await.map_err(Error::Http),
             Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
             Server::Kafka(inner) => inner.spin().await.map_err(Error::Kafka),
