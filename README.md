@@ -50,20 +50,20 @@ Consider the following `lading.yaml`:
 
 ```yaml
 generator:
-  http:
-    seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
-    target_uri: "http://localhost:8282/"
-    bytes_per_second: "100 Mb"
-    parallel_connections: 10
-    method:
-      post:
-        variant: "fluent"
-        maximum_prebuild_cache_size_bytes: "256 Mb"
-    headers: {}
+  - http:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      target_uri: "http://localhost:8282/"
+      bytes_per_second: "100 Mb"
+      parallel_connections: 10
+      method:
+        post:
+          variant: "fluent"
+          maximum_prebuild_cache_size_bytes: "256 Mb"
+      headers: {}
 
 blackhole:
-  http:
-    binding_addr: "0.0.0.0:8080"
+  - http:
+      binding_addr: "0.0.0.0:8080"
 ```
 
 In this setup `lading` is configured to run one generator and one blackhole. In
