@@ -40,7 +40,7 @@ message HttpMetrics {
   double MedianSize = 4;
 }
 
-message TcpMetrics {
+message SocketMetrics {
   uint64 ReadCount = 1;
   uint64 TotalBytes = 2;
   double MedianEntropy = 3;
@@ -48,5 +48,6 @@ message TcpMetrics {
 
 message Metrics {
   HttpMetrics http = 1;
-  TcpMetrics tcp = 2;
+  SocketMetrics tcp = 2;
+  SocketMetrics udp = 3;
 }

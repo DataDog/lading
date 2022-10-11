@@ -25,15 +25,18 @@ use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
 use tracing::debug;
 
+#[derive(Debug)]
 pub struct Metrics {
     pub http: integration_api::HttpMetrics,
-    pub tcp: integration_api::TcpMetrics,
+    pub tcp: integration_api::SocketMetrics,
+    pub udp: integration_api::SocketMetrics,
 }
 
 impl From<integration_api::Metrics> for Metrics {
     fn from(metrics: integration_api::Metrics) -> Self {
         Self {
             tcp: metrics.tcp.unwrap_or_default(),
+            udp: metrics.udp.unwrap_or_default(),
             http: metrics.http.unwrap_or_default(),
         }
     }
@@ -95,7 +98,7 @@ impl IntegrationTest {
         })
     }
 
-    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
+    async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
         // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
         // only run this a single time though.
@@ -143,7 +146,7 @@ impl IntegrationTest {
         let captures_file = self.tempdir.join("captures");
         let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
-            .env("RUST_LOG", "info")
+            .env("RUST_LOG", "lading=debug,info")
             .arg("--target-pid")
             .arg(ducks_process.id().unwrap().to_string())
             .arg("--config-path")
@@ -181,11 +184,16 @@ impl IntegrationTest {
         let lading_stdout = String::from_utf8(lading_stdout)?;
         println!("lading output:\n{}", lading_stdout);
 
-        println!("test result: (todo)");
-
         // todo: report captures file & provide some utilities for asserting against it
-        // info!("test result: {:?}", metrics);
+        println!("test result: {:?}", metrics);
         Ok(metrics)
+    }
+
+    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
+        tokio::select! {
+            res = self.run_inner() => { res }
+            _ = tokio::time::sleep(Duration::from_secs(600)) => { panic!("test timed out") }
+        }
     }
 }
 
@@ -372,8 +380,38 @@ generator:
 
         let reqs = test.run().await?;
 
+        // TODO: Verify that lading's bytes out == ducks bytes in
+
         assert!(reqs.tcp.total_bytes > 0);
         assert!(reqs.tcp.total_bytes > 100_000);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn udp_ascii() -> Result<(), anyhow::Error> {
+        let test = IntegrationTest::new(
+            DucksConfig {
+                listen: shared::ListenConfig::Udp,
+                emit: shared::EmitConfig::None,
+                assertions: shared::AssertionConfig::None,
+            },
+            r#"
+generator:
+  - udp:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+          59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        addr: "127.0.0.1:{{port_number}}"
+        bytes_per_second: "100 Mb"
+        block_sizes: ["1Kb"]
+        variant: ascii
+        maximum_prebuild_cache_size_bytes: "8 Mb"
+        "#,
+        )?;
+
+        let reqs = test.run().await?;
+
+        assert!(reqs.udp.total_bytes > 0);
+        assert!(reqs.udp.total_bytes > 100_000);
         Ok(())
     }
 }
