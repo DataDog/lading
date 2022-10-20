@@ -193,7 +193,13 @@ impl Http {
         // A very weird dance to satisfy the borrow checker for moving into & out of an FnMut.
         let content_type = self.content_type_header.clone();
         let content_type = Box::new(content_type);
-        // Turn the mutable ref from `leak` into an immutable ref so it's Copy
+        // Turn the mutable ref from `leak` into an immutable ref so it's Copy.
+        //
+        // This memory is intentionally leaked for the life of the process. This
+        // is acceptable because it only runs once at startup (for each
+        // configured `Http` generator). These generators are expected to stay
+        // active until the program shuts down. The memory is left for the OS
+        // to clean up.
         let content_type = &*Box::leak::<'static>(content_type);
 
         let service = make_service_fn(|_: &AddrStream| async move {
