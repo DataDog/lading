@@ -50,7 +50,7 @@ impl FromStr for BodyVariant {
 }
 
 fn default_body_variant() -> BodyVariant {
-    BodyVariant::AwsKinesis
+    BodyVariant::Nothing
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
