@@ -98,7 +98,7 @@ struct KinesisPutRecordBatchResponse {
 async fn srv(
     body_variant: BodyVariant,
     req: Request<Body>,
-    content_type: &Option<HeaderValue>,
+    content_type: Option<HeaderValue>,
 ) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
@@ -115,7 +115,7 @@ async fn srv(
             *okay.status_mut() = StatusCode::OK;
 
             if let Some(val) = content_type {
-                okay.headers_mut().insert(header::CONTENT_TYPE, val.clone());
+                okay.headers_mut().insert(header::CONTENT_TYPE, val);
             }
 
             let body_bytes = RESPONSE
@@ -190,23 +190,14 @@ impl Http {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        // A very weird dance to satisfy the borrow checker for moving into & out of an FnMut.
-        let content_type = self.content_type_header.clone();
-        let content_type = Box::new(content_type);
-        // Turn the mutable ref from `leak` into an immutable ref so it's Copy.
-        //
-        // This memory is intentionally leaked for the life of the process. This
-        // is acceptable because it only runs once at startup (for each
-        // configured `Http` generator). These generators are expected to stay
-        // active until the program shuts down. The memory is left for the OS
-        // to clean up.
-        let content_type = &*Box::leak::<'static>(content_type);
-
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request| {
-                debug!("REQUEST: {:?}", request);
-                srv(self.body_variant, request, content_type)
-            }))
+        let service = make_service_fn(|_: &AddrStream| {
+            let content_type = self.content_type_header.clone();
+            async move {
+                Ok::<_, hyper::Error>(service_fn(move |request| {
+                    debug!("REQUEST: {:?}", request);
+                    srv(self.body_variant, request, content_type.clone())
+                }))
+            }
         });
         let svc = ServiceBuilder::new()
             .load_shed()
