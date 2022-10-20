@@ -14,7 +14,7 @@ generator:
       max_nodes: 200
       name_len: 10
       root: /tmp/rusty
-      node_per_second: 10
+      open_per_second: 10
       rename_per_second: 1
 
 blackhole:

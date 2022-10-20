@@ -9,6 +9,7 @@ use rand::{
     seq::SliceRandom,
 };
 use std::{
+    collections::VecDeque,
     num::{NonZeroU32, NonZeroUsize},
     path,
     path::Path,
@@ -20,7 +21,7 @@ use governor::{Quota, RateLimiter};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::signals::Shutdown;
 
@@ -56,8 +57,8 @@ pub struct Config {
     pub name_len: NonZeroUsize,
     /// The root folder where the nodes will be created
     pub root: String,
-    /// The number of nodes created/accessed per second
-    pub node_per_second: NonZeroU32,
+    /// The number of nodes opened per second
+    pub open_per_second: NonZeroU32,
     /// The number of rename per second
     pub rename_per_second: NonZeroU32,
 }
@@ -68,15 +69,10 @@ pub struct Config {
 /// This generator generates a file tree and generates random access/rename operations,
 /// this without coordination to the target.
 pub struct FileTree {
-    max_depth: NonZeroUsize,
-
-    max_sub_folders: NonZeroU32,
-    max_files: NonZeroU32,
-    max_nodes: NonZeroU32,
     name_len: NonZeroUsize,
-    root: String,
-    node_per_second: NonZeroU32,
+    open_per_second: NonZeroU32,
     rename_per_second: NonZeroU32,
+    nodes: VecDeque<PathBuf>,
     rng: StdRng,
     shutdown: Shutdown,
 }
@@ -88,18 +84,15 @@ impl FileTree {
     ///
     /// Creation will fail if the target file/folder cannot be opened for writing.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let rng = StdRng::from_seed(config.seed);
+    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let mut rng = StdRng::from_seed(config.seed);
+        let nodes = generate_tree(&mut rng, config);
 
         Ok(Self {
-            max_depth: config.max_depth,
-            max_files: config.max_files,
-            max_nodes: config.max_nodes,
-            max_sub_folders: config.max_sub_folders,
             name_len: config.name_len,
-            node_per_second: config.node_per_second,
+            open_per_second: config.open_per_second,
             rename_per_second: config.rename_per_second,
-            root: config.root,
+            nodes,
             rng,
             shutdown,
         })
@@ -119,62 +112,30 @@ impl FileTree {
     ///
     /// Function will panic if one node is not path is not populated properly
     pub async fn spin(mut self) -> Result<(), Error> {
-        let node_rate_limiter = RateLimiter::direct(Quota::per_second(self.node_per_second));
+        let open_rate_limiter = RateLimiter::direct(Quota::per_second(self.open_per_second));
         let rename_rate_limiter = RateLimiter::direct(Quota::per_second(self.rename_per_second));
 
         // store files and folders once generated for further access
         let mut files = Vec::new();
         let mut folders = Vec::new();
 
-        let mut total_node = 0;
-        let root_depth = self.root.matches(path::MAIN_SEPARATOR).count();
-
-        // init the stack with the root node
-        let mut stack = Vec::new();
-        stack.push(PathBuf::from(self.root));
-
         loop {
             tokio::select! {
-                _ = node_rate_limiter.until_ready() => {
-                    match stack.pop() {
+                _ = open_rate_limiter.until_ready() => {
+                    match self.nodes.pop_front() {
                         Some(node) => {
-                            debug!("create {}", node.display());
-
                             // create the node. can be either a file or a folder
                             create_node(&node).await?;
 
                             if is_file(&node) {
                                 files.push(node);
                             } else {
-                                // generate files
-                                for _n in 0..self.max_files.get() {
-                                    if total_node < self.max_nodes.get() {
-                                        let file = rnd_file_name(&mut self.rng, &node, self.name_len.get());
-                                        stack.push(file);
-                                        total_node += 1;
-                                    }
-                                }
-
-                                let curr_depth = node.to_str().unwrap().matches(path::MAIN_SEPARATOR).count()-root_depth;
-
-                                // generate sub folders
-                                if curr_depth < self.max_depth.get() {
-                                    for _n in 0..self.max_sub_folders.get() {
-                                        if total_node < self.max_nodes.get() {
-                                            let dir = rnd_node_name(&mut self.rng, &node, self.name_len.get());
-                                            stack.push(dir);
-                                            total_node += 1;
-                                        }
-                                    }
-                                }
                                 folders.push(node);
                             }
                         },
                         _ => {
                             // randomly generate an access
                             if let Some(node) = files.choose(&mut self.rng) {
-                                debug!("access {}", node.display());
-
                                 File::open(node.as_path()).await?;
                             }
                         }
@@ -185,7 +146,8 @@ impl FileTree {
                         let parent = PathBuf::from(folder.parent().unwrap());
                         let dir = rnd_node_name(&mut self.rng, &parent, self.name_len.get());
 
-                        debug!("rename {}", folder.display());
+                        // rename twice to keep the original folder name so that future file access
+                        // in the folder will still work
                         rename(&folder, &dir).await?;
                         rename(&dir, &folder).await?;
                     }
@@ -197,6 +159,49 @@ impl FileTree {
             }
         }
         Ok(())
+    }
+}
+
+fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<PathBuf> {
+    let mut nodes = VecDeque::new();
+
+    let mut total_node = 0;
+    let root_depth = config.root.matches(path::MAIN_SEPARATOR).count();
+
+    let mut stack = Vec::new();
+    stack.push(PathBuf::from(config.root.clone()));
+
+    loop {
+        if let Some(node) = stack.pop() {
+            if !is_file(&node) {
+                // generate files
+                for _n in 0..config.max_files.get() {
+                    if total_node < config.max_nodes.get() {
+                        let file = rnd_file_name(rng, &node, config.name_len.get());
+                        stack.push(file);
+                        total_node += 1;
+                    }
+                }
+
+                let curr_depth =
+                    node.to_str().unwrap().matches(path::MAIN_SEPARATOR).count() - root_depth;
+
+                // generate sub folders
+                if curr_depth < config.max_depth.get() {
+                    for _n in 0..config.max_sub_folders.get() {
+                        if total_node < config.max_nodes.get() {
+                            let dir = rnd_node_name(rng, &node, config.name_len.get());
+                            stack.push(dir);
+                            total_node += 1;
+                        }
+                    }
+                }
+            }
+
+            nodes.push_back(node);
+        } else {
+            return nodes;
+        }
     }
 }
 
@@ -220,9 +225,7 @@ async fn create_node(node: &Path) -> Result<(), Error> {
 #[inline]
 fn rnd_node_name(rng: &mut StdRng, dir: &Path, len: usize) -> PathBuf {
     let name = Alphanumeric.sample_string(rng, len);
-    let mut node = dir.to_path_buf();
-    node.push(name);
-    node
+    dir.join(name)
 }
 
 #[inline]

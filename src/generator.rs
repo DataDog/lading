@@ -117,7 +117,7 @@ impl Server {
                 Self::FileGen(file_gen::FileGen::new(conf, shutdown).map_err(Error::FileGen)?)
             }
             Config::FileTree(conf) => {
-                Self::FileTree(file_tree::FileTree::new(conf, shutdown).map_err(Error::FileTree)?)
+                Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
             }
             Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
         };
