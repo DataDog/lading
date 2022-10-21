@@ -17,6 +17,7 @@ use tracing::error;
 use crate::signals::Shutdown;
 
 pub mod file_gen;
+pub mod file_tree;
 pub mod grpc;
 pub mod http;
 pub mod kafka;
@@ -39,6 +40,8 @@ pub enum Error {
     Kafka(kafka::Error),
     /// See [`crate::generator::file_gen::Error`] for details.
     FileGen(file_gen::Error),
+    /// See [`crate::generator::file_tree_gen::Error`] for details.
+    FileTree(file_tree::Error),
     /// See [`crate::generator::grpc::Error`] for details.
     Grpc(grpc::Error),
 }
@@ -59,6 +62,8 @@ pub enum Config {
     Kafka(kafka::Config),
     /// See [`crate::generator::file_gen::Config`] for details.
     FileGen(file_gen::Config),
+    /// See [`crate::generator::file_tree_gen::Config`] for details.
+    FileTree(file_tree::Config),
     /// See [`crate::generator::grpc::Config`] for details.
     Grpc(grpc::Config),
 }
@@ -81,6 +86,8 @@ pub enum Server {
     Kafka(kafka::Kafka),
     /// See [`crate::generator::file_gen::FileGen`] for details.
     FileGen(file_gen::FileGen),
+    /// See [`crate::generator::file_tree_gen::FileTree`] for details.
+    FileTree(file_tree::FileTree),
     /// See [`crate::generator::grpc::Grpc`] for details.
     Grpc(grpc::Grpc),
 }
@@ -108,6 +115,9 @@ impl Server {
             }
             Config::FileGen(conf) => {
                 Self::FileGen(file_gen::FileGen::new(conf, shutdown).map_err(Error::FileGen)?)
+            }
+            Config::FileTree(conf) => {
+                Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
             }
             Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
         };
@@ -139,6 +149,7 @@ impl Server {
             Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
             Server::Kafka(inner) => inner.spin().await.map_err(Error::Kafka),
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
+            Server::FileTree(inner) => inner.spin().await.map_err(Error::FileTree),
             Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
         };
 
