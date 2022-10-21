@@ -274,7 +274,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone());
+            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone()).unwrap();
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),

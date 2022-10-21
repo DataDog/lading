@@ -2,6 +2,7 @@
 
 use std::{net::SocketAddr, str::FromStr, time::Duration};
 
+use http::{header::InvalidHeaderValue, HeaderValue};
 use hyper::{
     body, header,
     server::conn::{AddrIncoming, AddrStream},
@@ -22,11 +23,15 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug)]
 /// Errors produced by [`Http`].
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
+    #[error("HTTP server error: {0}")]
     Hyper(hyper::Error),
+    /// The configured content type value was not valid.
+    #[error("The configured content type value was not valid: {0}")]
+    InvalidContentType(InvalidHeaderValue),
 }
 
 #[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq)]
@@ -53,7 +58,11 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::Nothing
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+fn default_content_type() -> String {
+    "application/json".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 /// Configuration for [`Http`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow
@@ -64,6 +73,9 @@ pub struct Config {
     /// the body variant to respond with, default nothing
     #[serde(default = "default_body_variant")]
     pub body_variant: BodyVariant,
+    /// the content-type header to respond with, defaults to application/json
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
 }
 
 #[derive(Serialize)]
@@ -86,6 +98,7 @@ struct KinesisPutRecordBatchResponse {
 async fn srv(
     body_variant: BodyVariant,
     req: Request<Body>,
+    content_type: Option<HeaderValue>,
 ) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
@@ -100,10 +113,10 @@ async fn srv(
 
             let mut okay = Response::default();
             *okay.status_mut() = StatusCode::OK;
-            okay.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("application/json"),
-            );
+
+            if let Some(val) = content_type {
+                okay.headers_mut().insert(header::CONTENT_TYPE, val);
+            }
 
             let body_bytes = RESPONSE
                 .get_or_init(|| match body_variant {
@@ -135,18 +148,32 @@ pub struct Http {
     body_variant: BodyVariant,
     concurrency_limit: usize,
     shutdown: Shutdown,
+    content_type_header: Option<HeaderValue>,
 }
 
 impl Http {
     /// Create a new [`Http`] server instance
-    #[must_use]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid.
+    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let content_type_header = if config.content_type.is_empty() {
+            None
+        } else {
+            Some(
+                header::HeaderValue::from_str(&config.content_type)
+                    .map_err(Error::InvalidContentType)?,
+            )
+        };
+
+        Ok(Self {
             httpd_addr: config.binding_addr,
             body_variant: config.body_variant,
             concurrency_limit: config.concurrent_requests_max,
             shutdown,
-        }
+            content_type_header,
+        })
     }
 
     /// Run [`Http`] to completion
@@ -156,17 +183,21 @@ impl Http {
     ///
     /// # Errors
     ///
-    /// Function will return an error if receiving a packet fails.
+    /// Function will return an error if the configuration is invalid or if
+    /// receiving a packet fails.
     ///
     /// # Panics
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request| {
-                debug!("REQUEST: {:?}", request);
-                srv(self.body_variant, request)
-            }))
+        let service = make_service_fn(|_: &AddrStream| {
+            let content_type = self.content_type_header.clone();
+            async move {
+                Ok::<_, hyper::Error>(service_fn(move |request| {
+                    debug!("REQUEST: {:?}", request);
+                    srv(self.body_variant, request, content_type.clone())
+                }))
+            }
         });
         let svc = ServiceBuilder::new()
             .load_shed()

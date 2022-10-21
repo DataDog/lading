@@ -30,7 +30,7 @@ pub enum Error {
     Sqs(sqs::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Config {
@@ -74,15 +74,17 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
-    #[must_use]
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
-        match config {
+    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let server = match config {
             Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown)),
-            Config::Http(conf) => Self::Http(http::Http::new(&conf, shutdown)),
+            Config::Http(conf) => {
+                Self::Http(http::Http::new(&conf, shutdown).map_err(Error::Http)?)
+            }
             Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown)),
             Config::Sqs(conf) => Self::Sqs(sqs::Sqs::new(&conf, shutdown)),
             Config::SplunkHec(conf) => Self::SplunkHec(splunk_hec::SplunkHec::new(&conf, shutdown)),
-        }
+        };
+        Ok(server)
     }
 
     /// Runs this [`Server`] to completion
