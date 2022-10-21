@@ -40,25 +40,60 @@ impl From<::std::io::Error> for Error {
     }
 }
 
+fn default_max_depth() -> NonZeroUsize {
+    NonZeroUsize::new(10).unwrap()
+}
+
+fn default_max_sub_folders() -> NonZeroU32 {
+    NonZeroU32::new(5).unwrap()
+}
+
+fn default_max_files() -> NonZeroU32 {
+    NonZeroU32::new(5).unwrap()
+}
+
+fn default_max_nodes() -> NonZeroUsize {
+    NonZeroUsize::new(100).unwrap()
+}
+
+fn default_name_len() -> NonZeroUsize {
+    NonZeroUsize::new(8).unwrap()
+}
+
+fn default_open_per_second() -> NonZeroU32 {
+    NonZeroU32::new(8).unwrap()
+}
+
+fn default_rename_per_name() -> NonZeroU32 {
+    NonZeroU32::new(1).unwrap()
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 /// Configuration of [`FileTree`]
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
     /// The maximum depth of the file tree
+    #[serde(default = "default_max_depth")]
     pub max_depth: NonZeroUsize,
     /// The maximum number of sub folders
+    #[serde(default = "default_max_sub_folders")]
     pub max_sub_folders: NonZeroU32,
     /// The maximum number of files per folder
+    #[serde(default = "default_max_files")]
     pub max_files: NonZeroU32,
     /// The maximum number of nodes (folder/file) created
-    pub max_nodes: NonZeroU32,
+    #[serde(default = "default_max_nodes")]
+    pub max_nodes: NonZeroUsize,
     /// The name length of the nodes (folder/file) without the extension
+    #[serde(default = "default_name_len")]
     pub name_len: NonZeroUsize,
     /// The root folder where the nodes will be created
     pub root: String,
     /// The number of nodes opened per second
+    #[serde(default = "default_open_per_second")]
     pub open_per_second: NonZeroU32,
+    #[serde(default = "default_rename_per_name")]
     /// The number of rename per second
     pub rename_per_second: NonZeroU32,
 }
@@ -72,6 +107,7 @@ pub struct FileTree {
     name_len: NonZeroUsize,
     open_per_second: NonZeroU32,
     rename_per_second: NonZeroU32,
+    total_folder: usize,
     nodes: VecDeque<PathBuf>,
     rng: StdRng,
     shutdown: Shutdown,
@@ -86,12 +122,13 @@ impl FileTree {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let nodes = generate_tree(&mut rng, config);
+        let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config);
 
         Ok(Self {
             name_len: config.name_len,
             open_per_second: config.open_per_second,
             rename_per_second: config.rename_per_second,
+            total_folder,
             nodes,
             rng,
             shutdown,
@@ -115,41 +152,26 @@ impl FileTree {
         let open_rate_limiter = RateLimiter::direct(Quota::per_second(self.open_per_second));
         let rename_rate_limiter = RateLimiter::direct(Quota::per_second(self.rename_per_second));
 
-        // store files and folders once generated for further access
-        let mut files = Vec::new();
-        let mut folders = Vec::new();
+        let mut iter = self.nodes.iter().cycle();
+        let mut folders = Vec::with_capacity(self.total_folder);
 
         loop {
             tokio::select! {
                 _ = open_rate_limiter.until_ready() => {
-                    match self.nodes.pop_front() {
-                        Some(node) => {
-                            // create the node. can be either a file or a folder
-                            create_node(&node).await?;
+                    let node = iter.next().unwrap();
+                    if node.exists() {
+                        File::open(node.as_path()).await?;
+                    } else {
+                        create_node(node).await?;
 
-                            if is_file(&node) {
-                                files.push(node);
-                            } else {
-                                folders.push(node);
-                            }
-                        },
-                        _ => {
-                            // randomly generate an access
-                            if let Some(node) = files.choose(&mut self.rng) {
-                                File::open(node.as_path()).await?;
-                            }
+                        if is_folder(node) {
+                            folders.push(node);
                         }
                     }
                 },
                 _ = rename_rate_limiter.until_ready() => {
-                    if let Some(folder) = folders.choose_mut(&mut self.rng) {
-                        let parent = PathBuf::from(folder.parent().unwrap());
-                        let dir = rnd_node_name(&mut self.rng, &parent, self.name_len.get());
-
-                        // rename twice to keep the original folder name so that future file access
-                        // in the folder will still work
-                        rename(&folder, &dir).await?;
-                        rename(&dir, &folder).await?;
+                     if let Some(folder) = folders.choose_mut(&mut self.rng) {
+                        rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }
                 }
                 _ = self.shutdown.recv() => {
@@ -162,24 +184,26 @@ impl FileTree {
     }
 }
 
-fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<PathBuf> {
+fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize, usize) {
     let mut nodes = VecDeque::new();
 
-    let mut total_node = 0;
     let root_depth = config.root.matches(path::MAIN_SEPARATOR).count();
+
+    let mut total_file: usize = 0;
+    let mut total_folder: usize = 0;
 
     let mut stack = Vec::new();
     stack.push(PathBuf::from(config.root.clone()));
 
     loop {
         if let Some(node) = stack.pop() {
-            if !is_file(&node) {
+            if is_folder(&node) {
                 // generate files
                 for _n in 0..config.max_files.get() {
-                    if total_node < config.max_nodes.get() {
+                    if total_file + total_folder < config.max_nodes.get() {
                         let file = rnd_file_name(rng, &node, config.name_len.get());
                         stack.push(file);
-                        total_node += 1;
+                        total_file += 1;
                     }
                 }
 
@@ -189,10 +213,10 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<PathBuf> {
                 // generate sub folders
                 if curr_depth < config.max_depth.get() {
                     for _n in 0..config.max_sub_folders.get() {
-                        if total_node < config.max_nodes.get() {
+                        if total_file + total_folder < config.max_nodes.get() {
                             let dir = rnd_node_name(rng, &node, config.name_len.get());
                             stack.push(dir);
-                            total_node += 1;
+                            total_folder += 1;
                         }
                     }
                 }
@@ -200,24 +224,34 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<PathBuf> {
 
             nodes.push_back(node);
         } else {
-            return nodes;
+            return (nodes, total_file, total_folder);
         }
     }
 }
 
 #[inline]
-fn is_file(node: &Path) -> bool {
-    node.extension().is_some()
+async fn rename_folder(rng: &mut StdRng, folder: &Path, len: usize) -> Result<(), Error> {
+    let parent = PathBuf::from(folder.parent().unwrap());
+    let dir = rnd_node_name(rng, &parent, len);
+
+    // rename twice to keep the original folder name so that future file access
+    // in the folder will still work
+    rename(&folder, &dir).await?;
+    rename(&dir, &folder).await?;
+    Ok(())
+}
+
+#[inline]
+fn is_folder(node: &Path) -> bool {
+    node.extension().is_none()
 }
 
 #[inline]
 async fn create_node(node: &Path) -> Result<(), Error> {
-    if !node.exists() {
-        if is_file(node) {
-            File::create(node).await?;
-        } else {
-            create_dir(node).await?;
-        }
+    if is_folder(node) {
+        create_dir(node).await?;
+    } else {
+        File::create(node).await?;
     }
     Ok(())
 }
