@@ -150,6 +150,11 @@ impl Udp {
             );
 
             tokio::select! {
+                biased;
+                _ = self.shutdown.recv() => {
+                    info!("shutdown signal received");
+                    return Ok(());
+                },
                 sock = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
                     debug!("UDP port bound");
 
@@ -187,10 +192,6 @@ impl Udp {
                         }
                     }
                 }
-                _ = self.shutdown.recv() => {
-                    info!("shutdown signal received");
-                    return Ok(());
-                },
             }
         }
     }
