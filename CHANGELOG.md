@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2022-11-02
+### Fixed
+- Works around an issue where the UDP generator would cause lading to never
+exit.
+
 ## [0.10.2] - 2022-10-21
 ### Fixed
 - No notable code changes. Addresses issues with the release workflow.
