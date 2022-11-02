@@ -149,6 +149,7 @@ impl Udp {
                     "UDP packet too large (over 65507 B)"
                 );
                 if let Some(sock) = &connection {
+                    tokio::task::yield_now().await;
                     self.rate_limiter.until_n_ready(total_bytes).await.unwrap();
 
                     match sock.send_to(&blk.bytes, self.addr).await {
