@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderValue};
+use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
     body, header,
     server::conn::{AddrIncoming, AddrStream},
@@ -53,12 +53,14 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::Nothing
 }
 
-fn default_content_type() -> String {
-    "application/json".to_string()
-}
-
 fn default_status_code() -> u16 {
     StatusCode::OK.as_u16()
+}
+
+fn default_headers() -> HeaderMap {
+    let mut map = HeaderMap::new();
+    map.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    map
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -72,9 +74,9 @@ pub struct Config {
     /// the body variant to respond with, default nothing
     #[serde(default = "default_body_variant")]
     pub body_variant: BodyVariant,
-    /// the content-type header to respond with, defaults to application/json
-    #[serde(default = "default_content_type")]
-    pub content_type: String,
+    /// Headers to include in the response; default is `Content-Type: application/json`
+    #[serde(with = "http_serde::header_map", default = "default_headers")]
+    pub headers: HeaderMap,
     /// the content-type header to respond with, defaults to 200
     #[serde(default = "default_status_code")]
     pub status: u16,
@@ -101,7 +103,7 @@ async fn srv(
     status: StatusCode,
     body_variant: BodyVariant,
     req: Request<Body>,
-    content_type: Option<HeaderValue>,
+    headers: HeaderMap,
 ) -> Result<Response<Body>, hyper::Error> {
     metrics::counter!("requests_received", 1);
 
@@ -117,9 +119,7 @@ async fn srv(
             let mut okay = Response::default();
             *okay.status_mut() = status;
 
-            if let Some(val) = content_type {
-                okay.headers_mut().insert(header::CONTENT_TYPE, val);
-            }
+            *okay.headers_mut() = headers;
 
             let body_bytes = RESPONSE
                 .get_or_init(|| match body_variant {
@@ -152,7 +152,7 @@ pub struct Http {
     body_variant: BodyVariant,
     concurrency_limit: usize,
     shutdown: Shutdown,
-    content_type_header: Option<HeaderValue>,
+    headers: HeaderMap,
     status: StatusCode,
 }
 
@@ -163,24 +163,15 @@ impl Http {
     ///
     /// Returns an error if the configuration is invalid.
     pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let content_type_header = if config.content_type.is_empty() {
-            None
-        } else {
-            Some(
-                header::HeaderValue::from_str(&config.content_type)
-                    .map_err(Error::InvalidContentType)?,
-            )
-        };
-
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
         Ok(Self {
             httpd_addr: config.binding_addr,
             body_variant: config.body_variant.clone(),
             concurrency_limit: config.concurrent_requests_max,
+            headers: config.headers.clone(),
             status,
             shutdown,
-            content_type_header,
         })
     }
 
@@ -200,16 +191,11 @@ impl Http {
     pub async fn run(mut self) -> Result<(), Error> {
         let service = make_service_fn(|_: &AddrStream| {
             let body_variant = self.body_variant.clone();
-            let content_type = self.content_type_header.clone();
+            let headers = self.headers.clone();
             async move {
                 Ok::<_, hyper::Error>(service_fn(move |request| {
                     debug!("REQUEST: {:?}", request);
-                    srv(
-                        self.status,
-                        body_variant.clone(),
-                        request,
-                        content_type.clone(),
-                    )
+                    srv(self.status, body_variant.clone(), request, headers.clone())
                 }))
             }
         });
