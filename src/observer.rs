@@ -111,7 +111,27 @@ impl Server {
         loop {
             tokio::select! {
                 _ = procfs_delay.tick() => {
+                    fn get_tree(process: Process) -> Vec<Process> {
+                        process
+                            .tasks()
+                            .unwrap()
+                            .flatten()
+                            .map(|t| t.children().unwrap())
+                            .flatten()
+                            .map(|proc|
+                                Process::new(proc.try_into().unwrap()).unwrap()
+                            )
+                            .map(|proc| get_tree(proc))
+                            .flatten()
+                            .chain(std::iter::once(process))
+                            .collect()
+                    }
+
+                    let target_and_children = get_tree(Process::new(process.pid()).unwrap());
+                    let stats = target_and_children.iter().map(|proc| proc.stat().unwrap()).collect::<Vec<_>>();
+
                     if let Ok(stat) = process.stat() {
+
                         // Calculate process uptime. We have two pieces of
                         // information from the kernel: computer uptime and
                         // process starttime relative to power-on of the
@@ -121,10 +141,10 @@ impl Server {
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 
-                        let cutime: u64 = stat.cutime.try_into().expect("could not convert cutime to u64");
-                        let cstime: u64 = stat.cstime.try_into().expect("could not convert cstime to u64");
-                        let utime: u64 = stat.utime;
-                        let stime: u64 = stat.stime;
+                        let cutime: u64 = stats.iter().map(|stat| stat.cutime as u64).sum();
+                        let cstime: u64 = stats.iter().map(|stat| stat.cstime as u64).sum();
+                        let utime: u64 = stats.iter().map(|stat| stat.utime).sum();
+                        let stime: u64 = stats.iter().map(|stat| stat.stime).sum();
 
                         let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
                         let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
@@ -135,14 +155,23 @@ impl Server {
                         gauge!("user_time_seconds", user_time_seconds);
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
+
+                        let rss: u64 = stats.iter().map(|stat| stat.rss).sum();
+                        let rsslim: u64 = stats.iter().map(|stat| stat.rsslim as u64).sum();
+                        let vsize: u64 = stats.iter().map(|stat| stat.vsize).sum();
+                        let num_threads: u64 = stats.iter().map(|stat| stat.num_threads as u64).sum();
+
                         // Number of pages that the process has in real memory.
-                        gauge!("rss_bytes", (stat.rss * page_size) as f64);
+                        gauge!("rss_bytes", (rss * page_size) as f64);
                         // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
-                        gauge!("rsslim_bytes", stat.rsslim as f64);
+                        gauge!("rsslim_bytes", rsslim as f64);
                         // The size in bytes of the process in virtual memory.
-                        gauge!("vsize_bytes", stat.vsize as f64);
+                        gauge!("vsize_bytes", vsize as f64);
                         // Number of threads this process has active.
-                        gauge!("num_threads", stat.num_threads as f64);
+                        gauge!("num_threads", num_threads as f64);
+
+                        // Number of processes this target has active
+                        gauge!("num_processes", target_and_children.len() as f64);
                     }
                 }
                 _ = self.shutdown.recv() => {
