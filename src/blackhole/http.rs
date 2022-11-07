@@ -1,8 +1,8 @@
 //! The HTTP protocol speaking blackhole.
 
-use std::{net::SocketAddr, str::FromStr, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
-use http::{header::InvalidHeaderValue, HeaderValue};
+use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderValue};
 use hyper::{
     body, header,
     server::conn::{AddrIncoming, AddrStream},
@@ -32,26 +32,21 @@ pub enum Error {
     /// The configured content type value was not valid.
     #[error("The configured content type value was not valid: {0}")]
     InvalidContentType(InvalidHeaderValue),
+    /// The configured status code was not valid.
+    #[error("The configured status code was not valid: {0}")]
+    InvalidStatusCode(InvalidStatusCode),
 }
 
-#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq)]
 /// Body variant supported by this blackhole.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum BodyVariant {
     /// All response bodies will be empty.
     Nothing,
     /// All response bodies will mimic AWS Kinesis.
     AwsKinesis,
-}
-
-impl FromStr for BodyVariant {
-    type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "nothing" => Ok(BodyVariant::Nothing),
-            "aws_kinesis" | "kinesis" => Ok(BodyVariant::AwsKinesis),
-            _ => Err("unknown variant"),
-        }
-    }
+    /// Respond with a hardcoded string value
+    Static(String),
 }
 
 fn default_body_variant() -> BodyVariant {
@@ -60,6 +55,10 @@ fn default_body_variant() -> BodyVariant {
 
 fn default_content_type() -> String {
     "application/json".to_string()
+}
+
+fn default_status_code() -> u16 {
+    StatusCode::OK.as_u16()
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -76,6 +75,9 @@ pub struct Config {
     /// the content-type header to respond with, defaults to application/json
     #[serde(default = "default_content_type")]
     pub content_type: String,
+    /// the content-type header to respond with, defaults to 200
+    #[serde(default = "default_status_code")]
+    pub status: u16,
 }
 
 #[derive(Serialize)]
@@ -96,6 +98,7 @@ struct KinesisPutRecordBatchResponse {
 
 #[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(
+    status: StatusCode,
     body_variant: BodyVariant,
     req: Request<Body>,
     content_type: Option<HeaderValue>,
@@ -112,7 +115,7 @@ async fn srv(
             metrics::counter!("bytes_received", body.len() as u64);
 
             let mut okay = Response::default();
-            *okay.status_mut() = StatusCode::OK;
+            *okay.status_mut() = status;
 
             if let Some(val) = content_type {
                 okay.headers_mut().insert(header::CONTENT_TYPE, val);
@@ -133,6 +136,7 @@ async fn srv(
                         serde_json::to_vec(&response).unwrap()
                     }
                     BodyVariant::Nothing => vec![],
+                    BodyVariant::Static(val) => val.as_bytes().to_vec(),
                 })
                 .clone();
             *okay.body_mut() = Body::from(body_bytes);
@@ -149,6 +153,7 @@ pub struct Http {
     concurrency_limit: usize,
     shutdown: Shutdown,
     content_type_header: Option<HeaderValue>,
+    status: StatusCode,
 }
 
 impl Http {
@@ -167,10 +172,13 @@ impl Http {
             )
         };
 
+        let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
+
         Ok(Self {
             httpd_addr: config.binding_addr,
-            body_variant: config.body_variant,
+            body_variant: config.body_variant.clone(),
             concurrency_limit: config.concurrent_requests_max,
+            status,
             shutdown,
             content_type_header,
         })
@@ -191,11 +199,17 @@ impl Http {
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let service = make_service_fn(|_: &AddrStream| {
+            let body_variant = self.body_variant.clone();
             let content_type = self.content_type_header.clone();
             async move {
                 Ok::<_, hyper::Error>(service_fn(move |request| {
                     debug!("REQUEST: {:?}", request);
-                    srv(self.body_variant, request, content_type.clone())
+                    srv(
+                        self.status,
+                        body_variant.clone(),
+                        request,
+                        content_type.clone(),
+                    )
                 }))
             }
         });
