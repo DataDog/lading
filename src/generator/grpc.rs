@@ -95,6 +95,8 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The total number of parallel connections to maintain
+    pub parallel_connections: u16,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -144,7 +146,7 @@ impl Decoder for CountingDecoder {
 /// This generator is able to connect to targets via gRPC.
 #[derive(Debug)]
 pub struct Grpc {
-    _config: Config,
+    config: Config,
     target_uri: Uri,
     rpc_path: PathAndQuery,
     shutdown: Shutdown,
@@ -208,7 +210,7 @@ impl Grpc {
         Ok(Self {
             target_uri,
             rpc_path,
-            _config: config,
+            config,
             shutdown,
             block_cache,
             rate_limiter,
@@ -223,6 +225,7 @@ impl Grpc {
         let uri = Uri::from_parts(parts).unwrap();
 
         let endpoint = tonic::transport::Endpoint::new(uri)?;
+        let endpoint = endpoint.concurrency_limit(self.config.parallel_connections as usize);
         let endpoint = endpoint.connect_timeout(Duration::from_secs(1));
         let conn = endpoint.connect().await?;
         let conn = tonic::client::Grpc::new(conn);
