@@ -111,40 +111,46 @@ impl Server {
         loop {
             tokio::select! {
                 _ = procfs_delay.tick() => {
-                    fn get_tree(process: Process) -> Vec<Process> {
-                        process
-                            .tasks()
-                            .unwrap()
-                            .flatten()
-                            .map(|t| t.children().unwrap())
-                            .flatten()
-                            .map(|proc|
-                                Process::new(proc.try_into().unwrap()).unwrap()
-                            )
-                            .map(|proc| get_tree(proc))
-                            .flatten()
-                            .chain(std::iter::once(process))
-                            .collect()
+                    fn get_tree(process: Process) -> Result<Vec<Process>, Error> {
+                        let tree = process
+                            .tasks() // threads of `process` / item is result-wrapped
+                            .map_err(Error::ProcError)?
+                            .flatten() // flatten to Ok variants
+                            .flat_map(|t| t.children()) // thread's child process IDs & flatten to Ok variants
+                            .flatten() // flatten to Ok variants
+                            .flat_map(TryInto::try_into) // pid u32 to i32 & flatten to Ok variants
+                            .flat_map(Process::new) // pid to `Process` & flatten to Ok variants
+                            .flat_map(get_tree) // Repeat for each child process & flatten to Ok variants
+                            .flatten() // flatten to Ok variants
+                            .chain(std::iter::once(process)) // include the current process
+                            .collect();
+                        Ok(tree)
                     }
 
-                    let target_and_children = get_tree(Process::new(process.pid()).unwrap());
-                    let stats = target_and_children.iter().map(|proc| proc.stat().unwrap()).collect::<Vec<_>>();
+                    fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
+                        let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
+                        let target_and_children = get_tree(target_process)?;
+                        let stats = target_and_children.into_iter()
+                            .map(|p| p.stat())
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(Error::ProcError)?;
+                        Ok(stats)
+                    }
 
-                    if let Ok(stat) = process.stat() {
-
+                    if let (Ok(parent_stat), Ok(all_stats)) = (process.stat(), get_proc_stats(&process)) {
                         // Calculate process uptime. We have two pieces of
                         // information from the kernel: computer uptime and
                         // process starttime relative to power-on of the
                         // computer.
-                        let process_starttime_ticks: u64 = stat.starttime;
+                        let process_starttime_ticks: u64 = parent_stat.starttime;
                         let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second as f64;
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 
-                        let cutime: u64 = stats.iter().map(|stat| stat.cutime as u64).sum();
-                        let cstime: u64 = stats.iter().map(|stat| stat.cstime as u64).sum();
-                        let utime: u64 = stats.iter().map(|stat| stat.utime).sum();
-                        let stime: u64 = stats.iter().map(|stat| stat.stime).sum();
+                        let cutime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cutime).unwrap()).sum();
+                        let cstime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cstime).unwrap()).sum();
+                        let utime: u64 = all_stats.iter().map(|stat| stat.utime).sum();
+                        let stime: u64 = all_stats.iter().map(|stat| stat.stime).sum();
 
                         let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
                         let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
@@ -156,10 +162,10 @@ impl Server {
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
 
-                        let rss: u64 = stats.iter().map(|stat| stat.rss).sum();
-                        let rsslim: u64 = stats.iter().map(|stat| stat.rsslim as u64).sum();
-                        let vsize: u64 = stats.iter().map(|stat| stat.vsize).sum();
-                        let num_threads: u64 = stats.iter().map(|stat| stat.num_threads as u64).sum();
+                        let rss: u64 = all_stats.iter().map(|stat| stat.rss).sum();
+                        let rsslim: u64 = all_stats.iter().map(|stat| stat.rsslim).sum();
+                        let vsize: u64 = all_stats.iter().map(|stat| stat.vsize).sum();
+                        let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.num_threads).unwrap()).sum();
 
                         // Number of pages that the process has in real memory.
                         gauge!("rss_bytes", (rss * page_size) as f64);
@@ -171,7 +177,7 @@ impl Server {
                         gauge!("num_threads", num_threads as f64);
 
                         // Number of processes this target has active
-                        gauge!("num_processes", target_and_children.len() as f64);
+                        gauge!("num_processes", all_stats.len() as f64);
                     }
                 }
                 _ = self.shutdown.recv() => {
