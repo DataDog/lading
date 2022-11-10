@@ -66,6 +66,7 @@ impl Server {
         Ok(Self { config, shutdown })
     }
 
+    #[cfg(target_os = "linux")]
     fn get_tree(process: Process) -> Result<Vec<Process>, Error> {
         let tree = process
             .tasks() // threads of `process` / item is result-wrapped
@@ -82,6 +83,7 @@ impl Server {
         Ok(tree)
     }
 
+    #[cfg(target_os = "linux")]
     fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
         let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
         let target_and_children = Self::get_tree(target_process)?;
@@ -215,6 +217,7 @@ mod tests {
     use std::{process::Command, time::Duration};
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn observer_observes_process_hierarchy() {
         let mut test_proc = Command::new("/bin/sh")
             .args(["-c", "sleep 1"])
