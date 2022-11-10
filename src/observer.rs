@@ -66,6 +66,33 @@ impl Server {
         Ok(Self { config, shutdown })
     }
 
+    fn get_tree(process: Process) -> Result<Vec<Process>, Error> {
+        let tree = process
+            .tasks() // threads of `process` / item is result-wrapped
+            .map_err(Error::ProcError)?
+            .flatten() // flatten to Ok variants
+            .flat_map(|t| t.children()) // thread's child process IDs & flatten to Ok variants
+            .flatten() // flatten to Ok variants
+            .flat_map(TryInto::try_into) // pid u32 to i32 & flatten to Ok variants
+            .flat_map(Process::new) // pid to `Process` & flatten to Ok variants
+            .flat_map(Self::get_tree) // Repeat for each child process & flatten to Ok variants
+            .flatten() // flatten to Ok variants
+            .chain(std::iter::once(process)) // include the current process
+            .collect();
+        Ok(tree)
+    }
+
+    fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
+        let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
+        let target_and_children = Self::get_tree(target_process)?;
+        let stats = target_and_children
+            .into_iter()
+            .map(|p| p.stat())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::ProcError)?;
+        Ok(stats)
+    }
+
     /// Run this [`Server`] to completion
     ///
     /// This function runs the user supplied program to its completion, or until
@@ -111,33 +138,7 @@ impl Server {
         loop {
             tokio::select! {
                 _ = procfs_delay.tick() => {
-                    fn get_tree(process: Process) -> Result<Vec<Process>, Error> {
-                        let tree = process
-                            .tasks() // threads of `process` / item is result-wrapped
-                            .map_err(Error::ProcError)?
-                            .flatten() // flatten to Ok variants
-                            .flat_map(|t| t.children()) // thread's child process IDs & flatten to Ok variants
-                            .flatten() // flatten to Ok variants
-                            .flat_map(TryInto::try_into) // pid u32 to i32 & flatten to Ok variants
-                            .flat_map(Process::new) // pid to `Process` & flatten to Ok variants
-                            .flat_map(get_tree) // Repeat for each child process & flatten to Ok variants
-                            .flatten() // flatten to Ok variants
-                            .chain(std::iter::once(process)) // include the current process
-                            .collect();
-                        Ok(tree)
-                    }
-
-                    fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
-                        let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
-                        let target_and_children = get_tree(target_process)?;
-                        let stats = target_and_children.into_iter()
-                            .map(|p| p.stat())
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(Error::ProcError)?;
-                        Ok(stats)
-                    }
-
-                    if let (Ok(parent_stat), Ok(all_stats)) = (process.stat(), get_proc_stats(&process)) {
+                    if let (Ok(parent_stat), Ok(all_stats)) = (process.stat(), Self::get_proc_stats(&process)) {
                         // Calculate process uptime. We have two pieces of
                         // information from the kernel: computer uptime and
                         // process starttime relative to power-on of the
@@ -205,5 +206,33 @@ impl Server {
     pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{process::Command, time::Duration};
+
+    #[test]
+    fn observer_observes_process_hierarchy() {
+        let mut test_proc = Command::new("/bin/sh")
+            .args(["-c", "sleep 1"])
+            .spawn()
+            .expect("launch child process");
+
+        // wait for `sh` to launch `sleep`
+        std::thread::sleep(Duration::from_millis(250));
+
+        let proc =
+            Process::new(test_proc.id().try_into().unwrap()).expect("create Process from PID");
+        let stats = Server::get_proc_stats(&proc).expect("get proc stat hierarchy");
+
+        test_proc.kill().unwrap();
+
+        let mut bins = stats.iter().map(|s| s.comm.clone()).collect::<Vec<_>>();
+        bins.sort();
+
+        assert_eq!(&bins, &[String::from("sh"), String::from("sleep")]);
     }
 }
