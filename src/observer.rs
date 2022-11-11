@@ -218,12 +218,12 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::{process::Command, time::Duration};
-
     #[test]
     #[cfg(target_os = "linux")]
     fn observer_observes_process_hierarchy() {
+        use super::*;
+        use std::{process::Command, time::Duration};
+
         let mut test_proc = Command::new("/bin/sh")
             .args(["-c", "sleep 1"])
             .spawn()
