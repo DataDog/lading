@@ -66,27 +66,32 @@ impl Server {
         Ok(Self { config, shutdown })
     }
 
+    /// Get all children of the specified process.
+    ///
+    /// This ignores most errors in favor of creating a best-effort list of
+    /// children.
     #[cfg(target_os = "linux")]
-    fn get_tree(process: Process) -> Result<Vec<Process>, Error> {
+    fn get_all_children(process: Process) -> Result<Vec<Process>, Error> {
         let tree = process
-            .tasks() // threads of `process` / item is result-wrapped
+            .tasks()
             .map_err(Error::ProcError)?
-            .flatten() // flatten to Ok variants
-            .flat_map(|t| t.children()) // thread's child process IDs & flatten to Ok variants
-            .flatten() // flatten to Ok variants
-            .flat_map(TryInto::try_into) // pid u32 to i32 & flatten to Ok variants
-            .flat_map(Process::new) // pid to `Process` & flatten to Ok variants
-            .flat_map(Self::get_tree) // Repeat for each child process & flatten to Ok variants
-            .flatten() // flatten to Ok variants
-            .chain(std::iter::once(process)) // include the current process
+            .flatten()
+            .flat_map(|t| t.children())
+            .flatten()
+            .flat_map(TryInto::try_into)
+            .flat_map(Process::new)
+            .flat_map(Self::get_all_children)
+            .flatten()
+            .chain(std::iter::once(process))
             .collect();
         Ok(tree)
     }
 
+    /// Get process stats for the given process and all of its children.
     #[cfg(target_os = "linux")]
     fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
         let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
-        let target_and_children = Self::get_tree(target_process)?;
+        let target_and_children = Self::get_all_children(target_process)?;
         let stats = target_and_children
             .into_iter()
             .map(|p| p.stat())
