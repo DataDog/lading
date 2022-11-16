@@ -96,3 +96,16 @@ jobs:
           target: ${{ matrix.target }}
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Auth for the S3 upload
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1-node16
+        with:
+          aws-access-key-id: ${{ secrets.LADING_RELEASE_BOT_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.LADING_RELEASE_BOT_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      # Copy from cargo target directory to S3 release bucket
+      - name: Upload binary to S3
+        run: |
+          aws s3 cp target/${{ matrix.target }}/release/lading s3://lading-releases/${{  github.ref_name }}/${{ matrix.target }}/lading
