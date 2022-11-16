@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.4] - 2022-11-16
+## [0.10.4-rc] - 2022-11-16
 ### Added
 - HTTP blackhole can be configured with arbitrary response body, headers and
 status code
