@@ -66,6 +66,40 @@ impl Server {
         Ok(Self { config, shutdown })
     }
 
+    /// Get all children of the specified process.
+    ///
+    /// This ignores most errors in favor of creating a best-effort list of
+    /// children.
+    #[cfg(target_os = "linux")]
+    fn get_all_children(process: Process) -> Result<Vec<Process>, Error> {
+        let tree = process
+            .tasks()
+            .map_err(Error::ProcError)?
+            .flatten()
+            .flat_map(|t| t.children())
+            .flatten()
+            .flat_map(TryInto::try_into)
+            .flat_map(Process::new)
+            .flat_map(Self::get_all_children)
+            .flatten()
+            .chain(std::iter::once(process))
+            .collect();
+        Ok(tree)
+    }
+
+    /// Get process stats for the given process and all of its children.
+    #[cfg(target_os = "linux")]
+    fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
+        let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
+        let target_and_children = Self::get_all_children(target_process)?;
+        let stats = target_and_children
+            .into_iter()
+            .map(|p| p.stat())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::ProcError)?;
+        Ok(stats)
+    }
+
     /// Run this [`Server`] to completion
     ///
     /// This function runs the user supplied program to its completion, or until
@@ -111,20 +145,20 @@ impl Server {
         loop {
             tokio::select! {
                 _ = procfs_delay.tick() => {
-                    if let Ok(stat) = process.stat() {
+                    if let (Ok(parent_stat), Ok(all_stats)) = (process.stat(), Self::get_proc_stats(&process)) {
                         // Calculate process uptime. We have two pieces of
                         // information from the kernel: computer uptime and
                         // process starttime relative to power-on of the
                         // computer.
-                        let process_starttime_ticks: u64 = stat.starttime;
+                        let process_starttime_ticks: u64 = parent_stat.starttime;
                         let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second as f64;
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 
-                        let cutime: u64 = stat.cutime.try_into().expect("could not convert cutime to u64");
-                        let cstime: u64 = stat.cstime.try_into().expect("could not convert cstime to u64");
-                        let utime: u64 = stat.utime;
-                        let stime: u64 = stat.stime;
+                        let cutime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cutime).unwrap()).sum();
+                        let cstime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cstime).unwrap()).sum();
+                        let utime: u64 = all_stats.iter().map(|stat| stat.utime).sum();
+                        let stime: u64 = all_stats.iter().map(|stat| stat.stime).sum();
 
                         let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
                         let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
@@ -135,14 +169,23 @@ impl Server {
                         gauge!("user_time_seconds", user_time_seconds);
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
+
+                        let rss: u64 = all_stats.iter().map(|stat| stat.rss).sum();
+                        let rsslim: u64 = all_stats.iter().map(|stat| stat.rsslim).sum();
+                        let vsize: u64 = all_stats.iter().map(|stat| stat.vsize).sum();
+                        let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.num_threads).unwrap()).sum();
+
                         // Number of pages that the process has in real memory.
-                        gauge!("rss_bytes", (stat.rss * page_size) as f64);
+                        gauge!("rss_bytes", (rss * page_size) as f64);
                         // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
-                        gauge!("rsslim_bytes", stat.rsslim as f64);
+                        gauge!("rsslim_bytes", rsslim as f64);
                         // The size in bytes of the process in virtual memory.
-                        gauge!("vsize_bytes", stat.vsize as f64);
+                        gauge!("vsize_bytes", vsize as f64);
                         // Number of threads this process has active.
-                        gauge!("num_threads", stat.num_threads as f64);
+                        gauge!("num_threads", num_threads as f64);
+
+                        // Number of processes this target has active
+                        gauge!("num_processes", all_stats.len() as f64);
                     }
                 }
                 _ = self.shutdown.recv() => {
@@ -170,5 +213,34 @@ impl Server {
     pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn observer_observes_process_hierarchy() {
+        use super::*;
+        use std::{process::Command, time::Duration};
+
+        let mut test_proc = Command::new("/bin/sh")
+            .args(["-c", "sleep 1"])
+            .spawn()
+            .expect("launch child process");
+
+        // wait for `sh` to launch `sleep`
+        std::thread::sleep(Duration::from_millis(250));
+
+        let proc =
+            Process::new(test_proc.id().try_into().unwrap()).expect("create Process from PID");
+        let stats = Server::get_proc_stats(&proc).expect("get proc stat hierarchy");
+
+        test_proc.kill().unwrap();
+
+        let mut bins = stats.iter().map(|s| s.comm.clone()).collect::<Vec<_>>();
+        bins.sort();
+
+        assert_eq!(&bins, &[String::from("sh"), String::from("sleep")]);
     }
 }

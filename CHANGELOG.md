@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP blackhole can be configured with arbitrary response body, headers and
 status code
 - gRPC HTTP2 client concurrency can now be configured
+- Observer now measures child processes of the target
 
 ## [0.10.3] - 2022-11-02
 ### Fixed
