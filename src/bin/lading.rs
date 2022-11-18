@@ -294,23 +294,33 @@ async fn inner_main(
     let target_server = target::Server::new(config.target.unwrap(), shutdown.clone());
     let tsrv = tokio::spawn(target_server.run(tgt_snd));
 
-    info!("target is running, now sleeping for warmup");
-    sleep(warmup_duration).await;
-    info!("warmup completed, collecting samples");
+    let experiment_sleep = async move {
+        info!("target is running, now sleeping for warmup");
+        sleep(warmup_duration).await;
+        info!("warmup completed, collecting samples");
+        sleep(experiment_duration).await;
+    };
 
-    let experiment_duration = sleep(experiment_duration);
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("received ctrl-c");
             shutdown.signal().unwrap();
         },
-        _ = experiment_duration => {
+        _ = experiment_sleep => {
             info!("experiment duration exceeded");
             shutdown.signal().unwrap();
         }
-        _ = tsrv => {
-            error!("target shut down unexpectedly");
-            shutdown.signal().unwrap();
+        res = tsrv => {
+            match res {
+                Ok(Err(e)) => {
+                    error!("target shut down unexpectedly: {e}");
+                    std::process::exit(1);
+                }
+                Ok(Ok(())) | Err(_) => {
+                    // JoinError or a shutdown signal arrived
+                    shutdown.signal().unwrap();
+                }
+            }
         }
     }
     info!(

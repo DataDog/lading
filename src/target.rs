@@ -34,16 +34,26 @@ use tracing::{error, info};
 pub use crate::common::{Behavior, Output};
 use crate::{common::stdio, signals::Shutdown};
 
-#[derive(Debug)]
 /// Errors produced by [`Server`]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Wrapper for [`std::io::Error`]
-    Io(io::Error),
-    /// Wrapper for [`nix::errno::Errno`]
-    Errno(Errno),
+    /// Unable to spawn target
+    #[error("unable to spawn target: {0}")]
+    TargetSpawn(io::Error),
+    /// Unable to await target exit
+    #[error("unable to wait for target exit: {0}")]
+    TargetWait(io::Error),
+    /// Unable to create PidFd from raw PID
+    #[error("unable to create PidFd: {0}")]
+    PidConversion(io::Error),
+    /// SIGTERM error
+    #[error("unable to terminate target process: {0}")]
+    SigTerm(Errno),
     /// The target PID does not exist or is invalid
+    #[error("PID not found: {0}")]
     PidNotFound(u32),
     /// The target process exited unexpectedly
+    #[error("target exited unexpectedly: {0:?}")]
     TargetExited(Option<ExitStatus>),
 }
 
@@ -179,7 +189,7 @@ impl Server {
         #[cfg(target_os = "linux")]
         let target_wait = {
             use async_pidfd::AsyncPidFd;
-            let pidfd = AsyncPidFd::from_pid(raw_pid).map_err(Error::Io)?;
+            let pidfd = AsyncPidFd::from_pid(raw_pid).map_err(Error::PidConversion)?;
             async move {
                 let exit_info = pidfd.wait().await;
                 exit_info.map(|info| info.status()).ok()
@@ -235,7 +245,7 @@ impl Server {
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(config.environment_variables.iter());
-        let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
+        let mut target_child = target_cmd.spawn().map_err(Error::TargetSpawn)?;
         let target_id = target_child.id().expect("target must have PID");
         pid_snd
             .send(target_id)
@@ -261,8 +271,8 @@ impl Server {
                 // want. We instead send SIGTERM so that the child has a chance
                 // to clean up.
                 let pid: Pid = Pid::from_raw(target_id.try_into().unwrap());
-                kill(pid, SIGTERM).map_err(Error::Errno)?;
-                let res = target_child.wait().await.map_err(Error::Io)?;
+                kill(pid, SIGTERM).map_err(Error::SigTerm)?;
+                let res = target_child.wait().await.map_err(Error::TargetWait)?;
                 Ok(res)
             }
         }
