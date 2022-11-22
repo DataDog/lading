@@ -1189,8 +1189,7 @@ checksum = "86f0b0d4bf799edbc74508c1e8bf170ff5f41238e5f8225603ca7caaae2b7860"
 [[package]]
 name = "opentelemetry"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69d6c3d7288a106c0a363e4b0e8d308058d56902adefb16f4936f417ffef086e"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust/?rev=6078e32#6078e32ab4d19d5978e97025fdd2e7c75264d36d"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
@@ -1199,22 +1198,19 @@ dependencies = [
 [[package]]
 name = "opentelemetry-proto"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d61a2f56df5574508dd86aaca016c917489e589ece4141df1b5e349af8d66c28"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust/?rev=6078e32#6078e32ab4d19d5978e97025fdd2e7c75264d36d"
 dependencies = [
  "futures",
  "futures-util",
  "opentelemetry",
  "prost",
  "tonic",
- "tonic-build",
 ]
 
 [[package]]
 name = "opentelemetry_api"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c24f96e21e7acc813c7a8394ee94978929db2bcc46cf6b5014fc612bf7760c22"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust/?rev=6078e32#6078e32ab4d19d5978e97025fdd2e7c75264d36d"
 dependencies = [
  "fnv",
  "futures-channel",
@@ -1229,8 +1225,7 @@ dependencies = [
 [[package]]
 name = "opentelemetry_sdk"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ca41c4933371b61c2a2f214bf16931499af4ec90543604ec828f7a625c09113"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust/?rev=6078e32#6078e32ab4d19d5978e97025fdd2e7c75264d36d"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
