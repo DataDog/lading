@@ -36,7 +36,7 @@ once_cell = "1.16"
 opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-rust/", rev = "6078e32", features = ["traces", "metrics", "logs", "gen-tonic"] }
 prost = "0.11"
 rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng"] }
-rdkafka = { version = "0.28", optional = true }
+rdkafka = { version = "0.29", optional = true }
 rmp-serde = { version = "1.1", default-features = false }
 serde = { version = "1.0", features = ["std", "derive"] }
 serde_json = { version = "1.0", features = ["std"] }
