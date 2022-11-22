@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.1-rc3] - 2022-11-22
+## [0.11.1] - 2022-11-22
 ### Added
 - Releases now include x86-64 musl binaries
 - The musl build does not support kafka
