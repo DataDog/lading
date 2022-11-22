@@ -28,6 +28,7 @@ jobs:
           # env.
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            features: kafka
             cc: 'aarch64-linux-gnu-gcc'
             cxx: 'aarch64-linux-gnu-g++'
 
@@ -35,6 +36,7 @@ jobs:
           # needs explicit cross env vars.
           - target: aarch64-apple-darwin
             os: macos-latest
+            features: kafka
             cflags: '-target arm64-apple-macos'
             cxxflags: '-target arm64-apple-macos'
             cc: 'clang'
@@ -43,10 +45,20 @@ jobs:
           # Normal x86-64 Linux build
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            features: kafka
+
+          # Musl x86-64 Linux build. Assume librdkafka needs cc/cxx.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            # the musl build does not support kafka
+            features: ''
+            cc: 'musl-gcc'
+            cxx: 'explicitly-unset'
 
           # Normal Intel Mac build
           - target: x86_64-apple-darwin
             os: macos-latest
+            features: kafka
 
       # Try to complete every job in the matrix, even if one fails.
       fail-fast: false
@@ -71,15 +83,10 @@ jobs:
           target: ${{ matrix.target }}
         if: matrix.target == 'aarch64-unknown-linux-gnu'
 
-      # Install the protobuf compiler for linux builds
-      - name: Install protobuf (Apt)
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        if: matrix.os == 'ubuntu-latest'
-
-      # Install the protobuf compiler for mac builds
-      - name: Install protobuf (Brew)
-        run: brew install protobuf
-        if: matrix.os == 'macos-latest'
+      # Install musl tools for musl builds
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
 
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
@@ -93,6 +100,8 @@ jobs:
 
         with:
           bin: lading
+          no_default_features: true
+          features: ${{ matrix.features || '' }}
           target: ${{ matrix.target }}
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -20,10 +20,12 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
-pub mod kafka;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
+
+#[cfg(feature = "kafka")]
+pub mod kafka;
 
 #[derive(Debug)]
 /// Errors produced by [`Server`].
@@ -37,6 +39,7 @@ pub enum Error {
     /// See [`crate::generator::splunk_hec::Error`] for details.
     SplunkHec(splunk_hec::Error),
     /// See [`crate::generator::kafka::Error`] for details.
+    #[cfg(feature = "kafka")]
     Kafka(kafka::Error),
     /// See [`crate::generator::file_gen::Error`] for details.
     FileGen(file_gen::Error),
@@ -59,6 +62,7 @@ pub enum Config {
     /// See [`crate::generator::splunk_hec::Config`] for details.
     SplunkHec(splunk_hec::Config),
     /// See [`crate::generator::kafka::Config`] for details.
+    #[cfg(feature = "kafka")]
     Kafka(kafka::Config),
     /// See [`crate::generator::file_gen::Config`] for details.
     FileGen(file_gen::Config),
@@ -83,6 +87,7 @@ pub enum Server {
     /// See [`crate::generator::splunk_hec::SplunkHec`] for details.
     SplunkHec(splunk_hec::SplunkHec),
     /// See [`crate::generator::kafka::Kafka`] for details.
+    #[cfg(feature = "kafka")]
     Kafka(kafka::Kafka),
     /// See [`crate::generator::file_gen::FileGen`] for details.
     FileGen(file_gen::FileGen),
@@ -110,6 +115,7 @@ impl Server {
             Config::SplunkHec(conf) => Self::SplunkHec(
                 splunk_hec::SplunkHec::new(conf, shutdown).map_err(Error::SplunkHec)?,
             ),
+            #[cfg(feature = "kafka")]
             Config::Kafka(conf) => {
                 Self::Kafka(kafka::Kafka::new(conf, shutdown).map_err(Error::Kafka)?)
             }
@@ -147,6 +153,7 @@ impl Server {
             Server::Udp(inner) => inner.spin().await.map_err(Error::Udp),
             Server::Http(inner) => inner.spin().await.map_err(Error::Http),
             Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
+            #[cfg(feature = "kafka")]
             Server::Kafka(inner) => inner.spin().await.map_err(Error::Kafka),
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
             Server::FileTree(inner) => inner.spin().await.map_err(Error::FileTree),
