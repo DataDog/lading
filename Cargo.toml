@@ -22,7 +22,7 @@ byte-unit = { version = "4.0", features = ["serde"] }
 bytecount = "0.6"
 bytes = { version = "1.3.0", default-features = false }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
-flate2 = { version = "1.0.24", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.0.25", default-features = false, features = ["rust_backend"] }
 futures = "0.3.25"
 governor = { version = "0.5", features = ["std", "jitter", "quanta"] }
 http = "0.2"
