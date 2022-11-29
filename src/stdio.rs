@@ -4,7 +4,6 @@ use serde::Deserialize;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
-    process::{ChildStderr, ChildStdout},
     task::JoinHandle,
 };
 use tracing::info;
@@ -86,13 +85,10 @@ impl Behavior {
         name: &'static str,
     ) -> Result<StdioHandle<()>, Error> {
         let mut file = match &self {
-            Behavior::Quiet => return Ok(StdioHandle { _inner: None }),
-            Behavior::TeeAndLog(path) => {
-                let file = File::create(path)
-                    .await
-                    .map_err(|e| Error::CreateLogFile(path.to_owned(), e))?;
-                file
-            }
+            Behavior::Quiet => return Ok(StdioHandle { inner: None }),
+            Behavior::TeeAndLog(path) => File::create(path)
+                .await
+                .map_err(|e| Error::CreateLogFile(path.clone(), e))?,
         };
 
         let mut stdout = BufReader::new(stream).lines();
@@ -104,26 +100,26 @@ impl Behavior {
                 // Ignore io errors: there's nothing we can do to surface them
                 // from here. Keeping this task going allows the tracing output
                 // to continue.
-                let _ = file.write_all(output.as_bytes()).await;
-                let _ = file.write_all("\n".as_bytes()).await;
+                let _res = file.write_all(output.as_bytes()).await;
+                let _res = file.write_all("\n".as_bytes()).await;
             }
-            let _ = file.flush();
+            let _res = file.flush();
         });
 
         Ok(StdioHandle {
-            _inner: Some(fwd_task),
+            inner: Some(fwd_task),
         })
     }
 }
 
 /// The stdio forwarder will run until this handle is dropped
 pub(crate) struct StdioHandle<T> {
-    _inner: Option<JoinHandle<T>>,
+    inner: Option<JoinHandle<T>>,
 }
 
 impl<T> Drop for StdioHandle<T> {
     fn drop(&mut self) {
-        if let Some(handle) = &self._inner {
+        if let Some(handle) = &self.inner {
             handle.abort();
         }
     }
