@@ -22,12 +22,9 @@ use nix::{
 };
 use serde::Deserialize;
 use tokio::{process::Command, sync::broadcast::Receiver};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
-use crate::{
-    common::{stdio, Output},
-    signals::Shutdown,
-};
+use crate::{signals::Shutdown, common::Output};
 
 #[derive(Debug)]
 /// Errors produced by [`Server`]
@@ -97,6 +94,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
+    #[instrument(skip(self, pid_snd))]
     pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<ExitStatus, Error> {
         let target_pid = pid_snd
             .recv()
@@ -112,13 +110,22 @@ impl Server {
 
         target_cmd
             .stdin(Stdio::null())
-            .stdout(stdio(&config.output.stdout))
-            .stderr(stdio(&config.output.stderr))
+            .stdout(config.output.stdout.stdio())
+            .stderr(config.output.stderr.stdio())
             .env_clear()
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
+
+        let _stdout_handle = config
+            .output
+            .stdout
+            .spin(target_child.stdout.take().unwrap(), "inspector stdout");
+        let _stderr_handle = config
+            .output
+            .stderr
+            .spin(target_child.stderr.take().unwrap(), "inspector stderr");
 
         let target_wait = target_child.wait();
         tokio::select! {

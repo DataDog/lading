@@ -29,10 +29,10 @@ use nix::{
     unistd::Pid,
 };
 use tokio::{process::Command, sync::broadcast::Sender};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, signals::Shutdown};
+use crate::signals::Shutdown;
 
 /// Errors produced by [`Server`]
 #[derive(thiserror::Error, Debug)]
@@ -55,6 +55,9 @@ pub enum Error {
     /// The target process exited unexpectedly
     #[error("target exited unexpectedly: {0:?}")]
     TargetExited(Option<ExitStatus>),
+    /// Target log error
+    #[error("Target log error: {0}")]
+    Log(#[from] crate::stdio::Error),
 }
 
 /// Configuration for PID target mode
@@ -231,6 +234,7 @@ impl Server {
 
     /// Execute a binary target. lading will attempt to gracefully terminate the
     /// process after the test has completed.
+    #[instrument(skip(config, pid_snd, shutdown))]
     async fn execute_binary(
         config: BinaryConfig,
         pid_snd: Sender<u32>,
@@ -239,8 +243,8 @@ impl Server {
         let mut target_cmd = Command::new(config.command);
         target_cmd
             .stdin(Stdio::null())
-            .stdout(stdio(&config.output.stdout))
-            .stderr(stdio(&config.output.stderr))
+            .stdout(config.output.stdout.stdio())
+            .stderr(config.output.stderr.stdio())
             .env_clear()
             .kill_on_drop(true)
             .args(config.arguments)
@@ -251,6 +255,17 @@ impl Server {
             .send(target_id)
             .expect("target server unable to transmit PID, catastrophic failure");
         drop(pid_snd);
+
+        let _stdout_handle = config
+            .output
+            .stdout
+            .spin(target_child.stdout.take().unwrap(), "target stdout")
+            .await;
+        let _stderr_handle = config
+            .output
+            .stderr
+            .spin(target_child.stderr.take().unwrap(), "target stderr")
+            .await;
 
         tokio::select! {
             res = target_child.wait() => {
