@@ -330,10 +330,12 @@ async fn inner_main(
     shutdown.wait(max_shutdown_delay).await;
 }
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() {
     tracing_subscriber::fmt::init();
 
-    info!("Starting lading run.");
+    info!(version = VERSION, "Starting lading run.");
     let (opts, config): (Opts, Config) = get_config();
     let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
