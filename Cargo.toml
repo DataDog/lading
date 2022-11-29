@@ -31,7 +31,7 @@ hyper = { version = "0.14", features = ["client"] }
 metrics = { version = "0.20", default-features = false }
 metrics-exporter-prometheus = { version = "0.11.0", default-features = false, features = ["http-listener"] }
 metrics-util = { version = "0.14" }
-nix = { version = "0.25" }
+nix = { version = "0.26" }
 once_cell = "1.16"
 opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-rust/", rev = "6078e32", features = ["traces", "metrics", "logs", "gen-tonic"] }
 prost = "0.11"
