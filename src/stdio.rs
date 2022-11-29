@@ -35,7 +35,7 @@ pub enum Behavior {
     /// Redirect stdout, stderr to /dev/null
     Quiet,
     /// Write to lading logs & a location on-disk.
-    Log(PathBuf),
+    TeeAndLog(PathBuf),
 }
 
 impl Default for Behavior {
@@ -48,7 +48,7 @@ impl fmt::Display for Behavior {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Behavior::Quiet => write!(f, "/dev/null")?,
-            Behavior::Log(ref path) => write!(f, "{}", path.display())?,
+            Behavior::TeeAndLog(ref path) => write!(f, "{}", path.display())?,
         }
         Ok(())
     }
@@ -60,7 +60,7 @@ impl str::FromStr for Behavior {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let mut path = PathBuf::new();
         path.push(input);
-        Ok(Behavior::Log(path))
+        Ok(Behavior::TeeAndLog(path))
     }
 }
 
@@ -68,7 +68,7 @@ impl Behavior {
     pub(crate) fn stdio(&self) -> Stdio {
         match self {
             Behavior::Quiet => Stdio::null(),
-            Behavior::Log(_path) => Stdio::piped(),
+            Behavior::TeeAndLog(_path) => Stdio::piped(),
         }
     }
 
@@ -87,7 +87,7 @@ impl Behavior {
     ) -> Result<StdioHandle<()>, Error> {
         let mut file = match &self {
             Behavior::Quiet => return Ok(StdioHandle { _inner: None }),
-            Behavior::Log(path) => {
+            Behavior::TeeAndLog(path) => {
                 let file = File::create(path)
                     .await
                     .map_err(|e| Error::CreateLogFile(path.to_owned(), e))?;
