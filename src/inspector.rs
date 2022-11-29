@@ -24,7 +24,7 @@ use serde::Deserialize;
 use tokio::{process::Command, sync::broadcast::Receiver};
 use tracing::{error, info, instrument};
 
-use crate::{signals::Shutdown, common::Output};
+use crate::{signals::Shutdown, stdio::Output};
 
 #[derive(Debug)]
 /// Errors produced by [`Server`]

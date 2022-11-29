@@ -31,8 +31,8 @@ use nix::{
 use tokio::{process::Command, sync::broadcast::Sender};
 use tracing::{error, info, instrument};
 
-pub use crate::common::{Behavior, Output};
 use crate::signals::Shutdown;
+pub use crate::stdio::{Behavior, Output};
 
 /// Errors produced by [`Server`]
 #[derive(thiserror::Error, Debug)]
