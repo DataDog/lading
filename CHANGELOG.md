@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2-beta1] - 2022-11-28
+### Changed
+- Target stdio is now echoed in lading logs for improved target visibility
+
 ## [0.11.1] - 2022-11-22
 ### Added
 - Releases now include x86-64 musl binaries
