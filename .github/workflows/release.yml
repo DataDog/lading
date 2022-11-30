@@ -27,7 +27,7 @@ jobs:
           # Linux Aarch64 cross build. librdkafka needs explicit cc/cxx in the
           # env.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             features: kafka
             cc: 'aarch64-linux-gnu-gcc'
             cxx: 'aarch64-linux-gnu-g++'
@@ -44,7 +44,7 @@ jobs:
 
           # Normal x86-64 Linux build
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             features: kafka
 
           # Musl x86-64 Linux build. Assume librdkafka needs cc/cxx.
