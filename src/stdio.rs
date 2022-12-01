@@ -83,9 +83,9 @@ impl Behavior {
         &self,
         stream: R,
         name: &'static str,
-    ) -> Result<StdioHandle<()>, Error> {
+    ) -> Result<Option<StdioHandle<()>>, Error> {
         let mut file = match &self {
-            Behavior::Quiet => return Ok(StdioHandle { inner: None }),
+            Behavior::Quiet => return Ok(None),
             Behavior::TeeAndLog(path) => File::create(path)
                 .await
                 .map_err(|e| Error::CreateLogFile(path.clone(), e))?,
@@ -106,9 +106,9 @@ impl Behavior {
             let _res = file.flush();
         });
 
-        Ok(StdioHandle {
+        Ok(Some(StdioHandle {
             inner: Some(fwd_task),
-        })
+        }))
     }
 }
 
@@ -121,6 +121,27 @@ impl<T> Drop for StdioHandle<T> {
     fn drop(&mut self) {
         if let Some(handle) = &self.inner {
             handle.abort();
+        }
+    }
+}
+
+/// Errors produced by [`Behavior`]
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum JoinError {
+    /// Tokio JoinError
+    #[error(transparent)]
+    JoinError(#[from] tokio::task::JoinError),
+    /// Inner handle was empty
+    #[error("No inner handle")]
+    None,
+}
+
+impl<T> StdioHandle<T> {
+    pub(crate) async fn join(mut self) -> Result<T, JoinError> {
+        if let Some(inner) = self.inner.take() {
+            inner.await.map_err(JoinError::from)
+        } else {
+            Err(JoinError::None)
         }
     }
 }

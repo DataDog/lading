@@ -256,22 +256,29 @@ impl Server {
             .expect("target server unable to transmit PID, catastrophic failure");
         drop(pid_snd);
 
-        let _stdout_handle = config
+        let stdout_handle = config
             .output
             .stdout
             .spin(target_child.stdout.take().unwrap(), "target stdout")
-            .await;
-        let _stderr_handle = config
+            .await?;
+        let stderr_handle = config
             .output
             .stderr
             .spin(target_child.stderr.take().unwrap(), "target stderr")
-            .await;
+            .await?;
 
         tokio::select! {
             res = target_child.wait() => {
                 match res {
                     Ok(res) => {
                         error!("target exited unexpectedly with code {}", res);
+                        // wait for any remaining target stdout/stderr to be processed
+                        if let Some(task) = stdout_handle {
+                            let _res = task.join().await;
+                        }
+                        if let Some(task) = stderr_handle {
+                            let _res = task.join().await;
+                        }
                         Err(Error::TargetExited(Some(res)))
                     },
                     Err(e) => {
