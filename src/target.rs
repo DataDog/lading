@@ -72,8 +72,11 @@ pub struct BinaryConfig {
     pub command: PathBuf,
     /// Arguments for the target sub-process.
     pub arguments: Vec<String>,
+    /// Inherit the environment variables from lading's environment.
+    pub inherit_environment: bool,
     /// Environment variables to set for the target sub-process. Lading's own
-    /// environment variables are not propagated to the target sub-process.
+    /// environment variables are only propagated to the target sub-process if
+    /// `inherit_environment` is set.
     pub environment_variables: HashMap<String, String>,
     /// Manages stderr, stdout of the target sub-process.
     pub output: Output,
@@ -240,8 +243,11 @@ impl Server {
         target_cmd
             .stdin(Stdio::null())
             .stdout(stdio(&config.output.stdout))
-            .stderr(stdio(&config.output.stderr))
-            .env_clear()
+            .stderr(stdio(&config.output.stderr));
+        if !config.inherit_environment {
+            target_cmd.env_clear();
+        }
+        target_cmd
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(config.environment_variables.iter());
