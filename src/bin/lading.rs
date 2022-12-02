@@ -86,6 +86,9 @@ struct Opts {
     /// the path of the target executable
     #[clap(long, group = "binary-target")]
     target_path: Option<PathBuf>,
+    /// inherit the target environment variables from lading's environment
+    #[clap(long, requires = "binary-target", action)]
+    target_inherit_environment: bool,
     /// additional environment variables to apply to the target, format
     /// KEY=VAL,KEY2=VAL
     #[clap(long, requires = "binary-target")]
@@ -142,6 +145,7 @@ fn get_config() -> (Opts, Config) {
         target::Config::Binary(target::BinaryConfig {
             command: path.clone(),
             arguments: ops.target_arguments.clone(),
+            inherit_environment: ops.target_inherit_environment,
             environment_variables: ops
                 .target_environment_variables
                 .clone()

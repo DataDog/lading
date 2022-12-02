@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Targets can inherit lading's environment variables using the
+`--target-inherit-environment` flag
+
 ### Changed
 - glibc based releases are now built on ubuntu-20.04 rather than ubuntu-latest
 
