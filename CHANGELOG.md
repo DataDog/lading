@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.11.2] - 2022-12-01
 ### Added
 - Targets can inherit lading's environment variables using the
 `--target-inherit-environment` flag
