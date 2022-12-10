@@ -264,30 +264,32 @@ impl Grpc {
     /// # Panics
     ///
     /// Function will panic if underlying byte capacity is not available.
-    pub async fn spin(mut self) -> Result<(), Error> {
-        let mut client = loop {
-            match self.connect().await {
-                Ok(c) => break c,
-                Err(e) => debug!("Failed to connect gRPC generator (will retry): {}", e),
-            }
-
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        };
-
+    pub async fn spin(self) -> Result<(), Error> {
+        let mut client: Option<_> = None;
         let mut blocks = self.block_cache.iter().cycle();
-        let rpc_path = self.rpc_path;
+        let rpc_path = self.rpc_path.clone();
+        let mut shutdown = self.shutdown.clone();
 
         loop {
             let blk = blocks.next().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                conn = self.connect(), if client.is_none() => {
+                    match conn {
+                        Ok(c) => client = Some(c),
+                        Err(e) => {
+                            debug!("Failed to connect gRPC generator (will retry): {}", e);
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+                _ = self.rate_limiter.until_n_ready(total_bytes), if client.is_some() => {
                     let block_length = blk.bytes.len();
                     let labels = self.metric_labels.clone();
                     counter!("requests_sent", 1, &labels);
                     let res = Self::req(
-                        &mut client,
+                        client.as_mut().unwrap(),
                         rpc_path.clone(),
                         Bytes::copy_from_slice(&blk.bytes),
                     )
@@ -303,10 +305,11 @@ impl Grpc {
                             let mut error_labels = labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
+                            client = None;
                         }
                     }
                 },
-                _ = self.shutdown.recv() => {
+                _ = shutdown.recv() => {
                     info!("shutdown signal received");
                     break;
                 },
