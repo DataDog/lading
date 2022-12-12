@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2022-12-12
+### Fixed
+- gRPC calls that respond with data are now handled correctly. This previously
+emitted an error and dropped the response.
+
 ## [0.11.2] - 2022-12-01
 ### Added
 - Targets can inherit lading's environment variables using the

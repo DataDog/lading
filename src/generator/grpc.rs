@@ -137,7 +137,13 @@ impl Decoder for CountingDecoder {
     type Error = Status;
 
     fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<usize>, Self::Error> {
-        Ok(Some(buf.remaining()))
+        let response_bytes = buf.remaining();
+
+        // Consume the provided response buffer. If this isn't done, tonic will
+        // throw an unexpected EOF error while processing the response.
+        buf.advance(response_bytes);
+
+        Ok(Some(response_bytes))
     }
 }
 
