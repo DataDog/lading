@@ -71,7 +71,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
           target: ${{ matrix.target }}
         if: matrix.target == 'aarch64-apple-darwin'

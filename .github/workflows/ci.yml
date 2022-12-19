@@ -24,7 +24,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -48,7 +47,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -72,7 +70,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
@@ -90,7 +87,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -115,7 +111,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
           override: true
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
