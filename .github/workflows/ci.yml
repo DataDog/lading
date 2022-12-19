@@ -28,7 +28,6 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - uses: Swatinem/rust-cache@v2
       - run: cargo check
 
   test:
@@ -46,7 +45,6 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
   fmt:
@@ -79,7 +77,6 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-features
 
   integration-test:
@@ -97,5 +94,4 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - uses: Swatinem/rust-cache@v2
       - run: cargo test -p sheepdog
