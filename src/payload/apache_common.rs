@@ -53,7 +53,7 @@ impl fmt::Display for Protocol {
             Protocol::Http21 => "HTTP/2.1",
             Protocol::Http22 => "HTTP/2.2",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -83,7 +83,7 @@ impl<'a> Arbitrary<'a> for Path {
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for comp in &self.components {
-            write!(f, "/{}", comp)?;
+            write!(f, "/{comp}")?;
         }
         Ok(())
     }
@@ -189,7 +189,7 @@ impl fmt::Display for Method {
             Method::Delete => "DELETE",
             Method::Patch => "PATCH",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -238,11 +238,11 @@ impl Serialize for ApacheCommon {
 
         let mut bytes_remaining = max_bytes;
         while let Ok(member) = unstructured.arbitrary::<Member>() {
-            let encoding = format!("{}", member);
+            let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{}", encoding)?;
+                    writeln!(writer, "{encoding}")?;
                     bytes_remaining = remainder;
                 }
                 None => break,

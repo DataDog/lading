@@ -191,12 +191,11 @@ impl DeleteMessageBatch {
         for id in self.get_entry_ids() {
             write!(
                 &mut entries,
-                "<DeleteMessageBatchResultEntry><Id>{}Id></DeleteMessageBatchResultEntry>",
-                id
+                "<DeleteMessageBatchResultEntry><Id>{id}</Id></DeleteMessageBatchResultEntry>",
             )
             .expect("This write shouldn't fail");
         }
-        format!("<DeleteMessageBatchResponse><DeleteMessageBatchResult>{}</DeleteMessageBatchResult><ResponseMetadata><RequestId>5EH8IGJZI4VZQTZ2VQ3KQN1AOMNA81OZ3AL1S4RHKII94ZD4FPG8</RequestId></ResponseMetadata></DeleteMessageBatchResponse>", entries)
+        format!("<DeleteMessageBatchResponse><DeleteMessageBatchResult>{entries}</DeleteMessageBatchResult><ResponseMetadata><RequestId>5EH8IGJZI4VZQTZ2VQ3KQN1AOMNA81OZ3AL1S4RHKII94ZD4FPG8</RequestId></ResponseMetadata></DeleteMessageBatchResponse>")
     }
 }
 
@@ -232,7 +231,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
                 .unwrap())
         }
         action => {
-            println!("Unknown action: {:?}", action);
+            println!("Unknown action: {action:?}");
             Ok(Response::builder()
                 .status(StatusCode::NOT_IMPLEMENTED)
                 .body(Body::from(vec![]))

@@ -88,8 +88,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Member {
             priority,
             syslog_version,
             timestamp,
-            hostname: HOSTNAMES[hostname_idx as usize].to_string(),
-            app_name: APP_NAMES[app_name_idx as usize].to_string(),
+            hostname: HOSTNAMES[hostname_idx].to_string(),
+            app_name: APP_NAMES[app_name_idx].to_string(),
             procid,
             msgid,
             message: serde_json::to_string(&message).unwrap(),
@@ -152,7 +152,7 @@ impl Serialize for Syslog5424 {
                 break;
             }
 
-            writeln!(writer, "{}", line)?;
+            writeln!(writer, "{line}")?;
 
             written_bytes += 1; // newline
             written_bytes += line.len();

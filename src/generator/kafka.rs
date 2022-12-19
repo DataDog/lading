@@ -295,7 +295,7 @@ fn get_rate_limiter(
             RateLimiter::direct(Quota::per_second(amount))
         }
         Throughput::MessagesPerSecond { amount } => {
-            let amount = if amount == 0 { 1 } else { amount as u32 };
+            let amount = if amount == 0 { 1 } else { amount };
             let amount = NonZeroU32::new(amount).expect("amount should not be zero");
 
             RateLimiter::direct(Quota::per_second(amount))

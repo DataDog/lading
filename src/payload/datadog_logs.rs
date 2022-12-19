@@ -200,7 +200,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Member {
             hostname,
             service,
             ddsource: source,
-            ddtags: TAG_OPTIONS[tag_idx as usize].to_string(),
+            ddtags: TAG_OPTIONS[tag_idx].to_string(),
         })
     }
 
@@ -242,7 +242,7 @@ impl Serialize for DatadogLog {
             if encoding.len() > max_bytes {
                 high /= 2;
             } else {
-                write!(writer, "{}", encoding)?;
+                write!(writer, "{encoding}")?;
                 break;
             }
         }
