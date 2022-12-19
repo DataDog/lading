@@ -151,7 +151,7 @@ impl Server {
                         // process starttime relative to power-on of the
                         // computer.
                         let process_starttime_ticks: u64 = parent_stat.starttime;
-                        let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second as f64;
+                        let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second;
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 

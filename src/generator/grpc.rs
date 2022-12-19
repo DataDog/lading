@@ -248,10 +248,7 @@ impl Grpc {
         request: Bytes,
     ) -> Result<Response<usize>, tonic::Status> {
         client.ready().await.map_err(|e| {
-            tonic::Status::new(
-                tonic::Code::Unknown,
-                format!("Service was not ready: {}", e),
-            )
+            tonic::Status::new(tonic::Code::Unknown, format!("Service was not ready: {e}"))
         })?;
         let res = client
             .unary(Request::new(request), rpc_path, NoopCodec::default())

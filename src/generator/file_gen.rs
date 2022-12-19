@@ -290,7 +290,7 @@ impl Child {
 
 #[inline]
 fn path_from_template(path_template: &str, index: u32) -> PathBuf {
-    let fidx = format!("{:04}", index);
+    let fidx = format!("{index:04}");
     let full_path = path_template.replace("%NNN%", &fidx);
     PathBuf::from(full_path)
 }

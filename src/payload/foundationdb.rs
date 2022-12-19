@@ -134,7 +134,7 @@ impl Serialize for FoundationDb {
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{}", encoding)?;
+                    writeln!(writer, "{encoding}")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
