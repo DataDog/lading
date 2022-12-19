@@ -191,7 +191,7 @@ impl DeleteMessageBatch {
         for id in self.get_entry_ids() {
             write!(
                 &mut entries,
-                "<DeleteMessageBatchResultEntry><Id>{id}Id></DeleteMessageBatchResultEntry>",
+                "<DeleteMessageBatchResultEntry><Id>{id}</Id></DeleteMessageBatchResultEntry>",
             )
             .expect("This write shouldn't fail");
         }
