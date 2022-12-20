@@ -202,7 +202,7 @@ impl Grpc {
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         gauge!(
-            "Bytes_per_second",
+            "bytes_per_second",
             f64::from(bytes_per_second.get()),
             &labels
         );
