@@ -146,8 +146,18 @@ impl FileGen {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "file_gen".to_string()),
+        ];
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        gauge!(
+            "bytes_per_second",
+            f64::from(bytes_per_second.get()),
+            &labels
+        );
+
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).unwrap();
         let maximum_prebuild_cache_size_bytes =
@@ -160,7 +170,6 @@ impl FileGen {
             &block_sizes,
         )?;
 
-        let labels = vec![];
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
         for _ in 0..config.duplicates {

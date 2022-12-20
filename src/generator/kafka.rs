@@ -13,7 +13,7 @@ use governor::{
     state::direct::{self, InsufficientCapacity},
     Quota, RateLimiter,
 };
-use metrics::{counter, increment_counter};
+use metrics::{counter, gauge, increment_counter};
 use rand::{prelude::StdRng, SeedableRng};
 use rdkafka::{
     config::FromClientConfig,
@@ -136,7 +136,10 @@ impl Kafka {
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let labels = vec![];
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "kafka".to_string()),
+        ];
 
         let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
@@ -163,6 +166,22 @@ impl Kafka {
             &block_sizes,
             &labels,
         )?;
+
+        match config.throughput {
+            Throughput::BytesPerSecond { amount } => {
+                gauge!("bytes_per_second", amount.get_bytes() as f64, &labels);
+            }
+            Throughput::Unlimited => {
+                // The rate limiter we takes a NonZeroU32. Our 'unlimited'
+                // throughput has a high-ish but decidedly not unlimited maximim
+                // throughput.
+                gauge!("bytes_per_second", f64::from(u32::MAX), &labels);
+            }
+            Throughput::MessagesPerSecond { .. } => {
+                // NOTE Messages may be of any size. We cannot guarantee a
+                // maximum bytes per second.
+            }
+        }
 
         Ok(Self {
             block_cache,
