@@ -16,7 +16,7 @@ use hyper::{
     header::CONTENT_LENGTH,
     Body, HeaderMap, Request, Uri,
 };
-use metrics::counter;
+use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -156,9 +156,19 @@ impl Http {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "http".to_string()),
+        ];
+
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        gauge!(
+            "bytes_per_second",
+            f64::from(bytes_per_second.get()),
+            &labels
+        );
+
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
-        let labels = vec![];
         match config.method {
             Method::Post {
                 variant,

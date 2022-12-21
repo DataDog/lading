@@ -11,7 +11,7 @@ use governor::{
     state::direct::{self, InsufficientCapacity},
     Quota, RateLimiter,
 };
-use metrics::counter;
+use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::net::UdpSocket;
@@ -99,9 +99,19 @@ impl Udp {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "udp".to_string()),
+        ];
+
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        gauge!(
+            "bytes_per_second",
+            f64::from(bytes_per_second.get()),
+            &labels
+        );
+
         let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
-        let labels = vec![];
         let block_chunks = chunk_bytes(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
