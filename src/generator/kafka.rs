@@ -172,7 +172,7 @@ impl Kafka {
                 gauge!("bytes_per_second", amount.get_bytes() as f64, &labels);
             }
             Throughput::Unlimited => {
-                // The rate limiter we takes a NonZeroU32. Our 'unlimited'
+                // The rate limiter we use takes a NonZeroU32. Our 'unlimited'
                 // throughput has a high-ish but decidedly not unlimited maximim
                 // throughput.
                 gauge!("bytes_per_second", f64::from(u32::MAX), &labels);
