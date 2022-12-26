@@ -20,6 +20,7 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
+pub mod process_tree;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
@@ -47,6 +48,8 @@ pub enum Error {
     UnixStream(unix_stream::Error),
     /// See [`crate::generator::unix_datagram::Error`] for details.
     UnixDatagram(unix_datagram::Error),
+    /// See [`crate::generator::process_tree_gen::Error`] for details.
+    ProcessTree(process_tree::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -71,6 +74,8 @@ pub enum Config {
     UnixStream(unix_stream::Config),
     /// See [`crate::generator::unix_datagram::Config`] for details.
     UnixDatagram(unix_datagram::Config),
+    /// See [`crate::generator::process_tree_gen::Config`] for details.
+    ProcessTree(process_tree::Config),
 }
 
 #[derive(Debug)]
@@ -97,6 +102,8 @@ pub enum Server {
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
     UnixDatagram(unix_datagram::UnixDatagram),
+    /// See [`crate::generator::process_tree_gen::FileTree`] for details.
+    ProcessTree(process_tree::ProcessTree),
 }
 
 impl Server {
@@ -129,6 +136,8 @@ impl Server {
             ),
             Config::UnixDatagram(conf) => Self::UnixDatagram(
                 unix_datagram::UnixDatagram::new(conf, shutdown).map_err(Error::UnixDatagram)?,
+            Config::ProcessTree(conf) => Self::ProcessTree(
+                process_tree::ProcessTree::new(&conf, shutdown).map_err(Error::ProcessTree)?,
             ),
         };
         Ok(srv)
@@ -162,6 +171,7 @@ impl Server {
             Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
             Server::UnixStream(inner) => inner.spin().await.map_err(Error::UnixStream),
             Server::UnixDatagram(inner) => inner.spin().await.map_err(Error::UnixDatagram),
+            Server::ProcessTree(inner) => inner.spin().await.map_err(Error::ProcessTree),
         };
 
         if let Err(e) = &res {

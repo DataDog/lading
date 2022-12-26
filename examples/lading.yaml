@@ -16,6 +16,29 @@ generator:
       root: /tmp/rusty
       open_per_second: 10
       rename_per_second: 1
+  - process_tree:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      max_depth: 3
+      max_children: 6
+      max_tree_per_second: 1
+      process_sleep_ns: 200000000
+      executables:
+        - executable: /usr/bin/ls
+          args:
+            mode: static
+            values: ["-al", "/tmp"]
+          envs:
+            mode: static
+            values: ["ENV=staging"]
+        - executable: /usr/bin/ls
+          args:
+            mode: generate
+            length: 10
+            count: 20
+          envs:
+            mode: generate
+            length: 10
+            count: 20
 
 blackhole:
   - tcp:
