@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0]
+## Changed
+- **Breaking change:** Support for Kafka generator is removed.
+
 ## [0.11.3] - 2022-12-12
 ### Fixed
 - gRPC calls that respond with data are now handled correctly. This previously
