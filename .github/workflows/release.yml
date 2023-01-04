@@ -24,19 +24,15 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux Aarch64 cross build. librdkafka needs explicit cc/cxx in the
-          # env.
+          # Linux Aarch64 cross build.
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-20.04
-            features: kafka
             cc: 'aarch64-linux-gnu-gcc'
             cxx: 'aarch64-linux-gnu-g++'
 
-          # Mac M1 cross build. Uses protobuf compiler on the host. librdkafka
-          # needs explicit cross env vars.
+          # Mac M1 cross build. Uses protobuf compiler on the host.
           - target: aarch64-apple-darwin
             os: macos-latest
-            features: kafka
             cflags: '-target arm64-apple-macos'
             cxxflags: '-target arm64-apple-macos'
             cc: 'clang'
@@ -45,20 +41,16 @@ jobs:
           # Normal x86-64 Linux build
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-20.04
-            features: kafka
 
-          # Musl x86-64 Linux build. Assume librdkafka needs cc/cxx.
+          # Musl x86-64 Linux build.
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            # the musl build does not support kafka
-            features: ''
             cc: 'musl-gcc'
             cxx: 'explicitly-unset'
 
           # Normal Intel Mac build
           - target: x86_64-apple-darwin
             os: macos-latest
-            features: kafka
 
       # Try to complete every job in the matrix, even if one fails.
       fail-fast: false
