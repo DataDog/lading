@@ -23,6 +23,7 @@ pub mod http;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
+pub mod uds;
 
 #[derive(Debug)]
 /// Errors produced by [`Server`].
@@ -41,6 +42,8 @@ pub enum Error {
     FileTree(file_tree::Error),
     /// See [`crate::generator::grpc::Error`] for details.
     Grpc(grpc::Error),
+    /// See [`crate::generator::uds::Error`] for details.
+    Uds(uds::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -61,6 +64,8 @@ pub enum Config {
     FileTree(file_tree::Config),
     /// See [`crate::generator::grpc::Config`] for details.
     Grpc(grpc::Config),
+    /// See [`crate::generator::uds::Config`] for details.
+    Uds(uds::Config),
 }
 
 #[derive(Debug)]
@@ -83,6 +88,8 @@ pub enum Server {
     FileTree(file_tree::FileTree),
     /// See [`crate::generator::grpc::Grpc`] for details.
     Grpc(grpc::Grpc),
+    /// See [`crate::generator::uds::Uds`] for details.
+    Uds(uds::Uds),
 }
 
 impl Server {
@@ -110,6 +117,7 @@ impl Server {
                 Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
             }
             Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
+            Config::Uds(conf) => Self::Uds(uds::Uds::new(conf, shutdown).map_err(Error::Uds)?),
         };
         Ok(srv)
     }
@@ -140,6 +148,7 @@ impl Server {
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
             Server::FileTree(inner) => inner.spin().await.map_err(Error::FileTree),
             Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
+            Server::Uds(inner) => inner.spin().await.map_err(Error::Uds),
         };
 
         if let Err(e) = &res {
