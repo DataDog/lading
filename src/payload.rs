@@ -118,6 +118,7 @@ pub enum Config {
     /// Generates OpenTelemetry metrics
     OpentelemetryMetrics,
     /// Generates DogStatsD
+    #[serde(rename = "dogstatsd")]
     DogStatsD,
 }
 
