@@ -131,6 +131,12 @@ where
             block_chunks,
             labels,
         ),
+        payload::Config::DogStatsD => construct_block_cache_inner(
+            &mut rng,
+            &payload::DogStatsD::default(),
+            block_chunks,
+            labels,
+        ),
         payload::Config::Fluent => {
             construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
         }

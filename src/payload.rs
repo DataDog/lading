@@ -9,6 +9,7 @@ use serde::Deserialize;
 pub(crate) use apache_common::ApacheCommon;
 pub(crate) use ascii::Ascii;
 pub(crate) use datadog_logs::DatadogLog;
+pub(crate) use dogstatsd::DogStatsD;
 pub(crate) use fluent::Fluent;
 pub(crate) use foundationdb::FoundationDb;
 pub(crate) use json::Json;
@@ -23,6 +24,7 @@ mod apache_common;
 mod ascii;
 mod common;
 mod datadog_logs;
+mod dogstatsd;
 mod fluent;
 mod foundationdb;
 mod json;
@@ -115,6 +117,9 @@ pub enum Config {
     OpentelemetryLogs,
     /// Generates OpenTelemetry metrics
     OpentelemetryMetrics,
+    /// Generates DogStatsD
+    #[serde(rename = "dogstatsd")]
+    DogStatsD,
 }
 
 #[derive(Debug)]
@@ -136,6 +141,7 @@ pub(crate) enum Payload {
     OtelTraces(OpentelemetryTraces),
     OtelLogs(OpentelemetryLogs),
     OtelMetrics(OpentelemetryMetrics),
+    DogStatsdD(DogStatsD),
 }
 
 impl Payload {}
@@ -159,6 +165,7 @@ impl Serialize for Payload {
             Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 }

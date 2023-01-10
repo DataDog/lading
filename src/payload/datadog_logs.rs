@@ -1,11 +1,11 @@
 use std::io::Write;
 
-use arbitrary::{size_hint, Unstructured};
+use arbitrary::{size_hint, Arbitrary, Unstructured};
 use rand::Rng;
 
 use crate::payload::{common::AsciiStr, Error, Serialize};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
 enum Status {
     Notice,
@@ -13,20 +13,7 @@ enum Status {
     Warning,
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Status {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 3 {
-            0 => Status::Notice,
-            1 => Status::Info,
-            2 => Status::Warning,
-            _ => unreachable!(),
-        };
-        Ok(res)
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
 enum Hostname {
     Alpha,
@@ -35,21 +22,7 @@ enum Hostname {
     Localhost,
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Hostname {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 4 {
-            0 => Hostname::Alpha,
-            1 => Hostname::Beta,
-            2 => Hostname::Gamma,
-            3 => Hostname::Localhost,
-            _ => unreachable!(),
-        };
-        Ok(res)
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
 enum Service {
     Vector,
@@ -57,20 +30,7 @@ enum Service {
     Cernan,
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Service {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 3 {
-            0 => Service::Vector,
-            1 => Service::Lading,
-            2 => Service::Cernan,
-            _ => unreachable!(),
-        };
-        Ok(res)
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
 enum Source {
     Bergman,
@@ -79,22 +39,6 @@ enum Source {
     Lynch,
     Waters,
     Tarkovsky,
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Source {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 6 {
-            0 => Source::Bergman,
-            1 => Source::Keaton,
-            2 => Source::Kurosawa,
-            3 => Source::Lynch,
-            4 => Source::Waters,
-            5 => Source::Tarkovsky,
-            _ => unreachable!(),
-        };
-        Ok(res)
-    }
 }
 
 const TAG_OPTIONS: [&str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
