@@ -167,7 +167,7 @@ impl Serialize for Payload {
 /// positive infinity.
 ///
 /// Adapted from rustc `int_roundings` implementation. Replace upon
-/// stabilization: https://github.com/rust-lang/rust/issues/88581
+/// stabilization: <https://github.com/rust-lang/rust/issues/88581>
 ///
 /// # Panics
 ///
