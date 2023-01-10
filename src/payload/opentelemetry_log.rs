@@ -97,10 +97,10 @@ impl Serialize for OpentelemetryLogs {
         rng.fill_bytes(&mut entropy);
         let mut unstructured = Unstructured::new(&entropy);
 
-        // An Export*ServiceRequest message has ~5 bytes of fixed values and
-        // includes a varint-encoded message length. Use the worst case for this
-        // length value.
-        let bytes_remaining = max_bytes.checked_sub(5 + max_bytes / 0x7F);
+        // An Export*ServiceRequest message has 5 bytes of fixed values plus
+        // a varint-encoded message length field. The worst case for the message
+        // length field is the max message size divided by 0x7F.
+        let bytes_remaining = max_bytes.checked_sub(5 + super::div_ceil(max_bytes, 0x7F));
         let mut bytes_remaining = if let Some(val) = bytes_remaining {
             val
         } else {
