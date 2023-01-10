@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 - Fix OpenTelemetry message length calculation for some messages.
 
+## [0.12.0-rc4]
+## Fixed
+- Lading's UDS will now re-attempt to connect to a UDS socket, rather than
+  erroring.
+
 ## [0.12.0-rc3]
 ## Changed
 - **Breaking change:** Added support for DogStatsD payload.
