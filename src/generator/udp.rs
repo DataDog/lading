@@ -152,13 +152,14 @@ impl Udp {
             let mut blocks = self.block_cache.iter().cycle();
             let mut connection = Option::<UdpSocket>::None;
             loop {
-                let blk = blocks.next().unwrap();
-                let total_bytes = blk.total_bytes;
-                assert!(
-                    total_bytes.get() <= 65507,
-                    "UDP packet too large (over 65507 B)"
-                );
                 if let Some(sock) = &connection {
+                    let blk = blocks.next().unwrap();
+                    let total_bytes = blk.total_bytes;
+                    assert!(
+                        total_bytes.get() <= 65507,
+                        "UDP packet too large (over 65507 B)"
+                    );
+
                     tokio::task::yield_now().await;
                     self.rate_limiter.until_n_ready(total_bytes).await.unwrap();
 
