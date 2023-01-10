@@ -1,6 +1,6 @@
-use std::{fmt, mem};
+use std::fmt;
 
-use arbitrary::{size_hint::and_all, Unstructured};
+use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
 
 use super::common;
 
@@ -79,7 +79,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ServiceCheck {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Arbitrary)]
 enum Status {
     Ok,
     Warning,
@@ -103,21 +103,5 @@ impl fmt::Display for Status {
                 write!(f, "unknown")
             }
         }
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Status {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let options = [
-            Status::Ok,
-            Status::Warning,
-            Status::Critical,
-            Status::Unknown,
-        ];
-        Ok(*u.choose(&options)?)
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (mem::size_of::<Self>(), Some(mem::size_of::<Self>()))
     }
 }

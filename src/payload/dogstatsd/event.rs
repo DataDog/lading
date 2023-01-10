@@ -1,6 +1,6 @@
-use std::{fmt, mem};
+use std::fmt;
 
-use arbitrary::{size_hint::and_all, Unstructured};
+use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
 
 use super::common;
 
@@ -112,6 +112,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Event {
     }
 }
 
+#[derive(Arbitrary)]
 enum Priority {
     Normal,
     Low,
@@ -126,22 +127,7 @@ impl fmt::Display for Priority {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Priority {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let is_normal = u.arbitrary()?;
-        if is_normal {
-            Ok(Self::Normal)
-        } else {
-            Ok(Self::Low)
-        }
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (mem::size_of::<Self>(), Some(mem::size_of::<Self>()))
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Arbitrary)]
 enum Alert {
     Error,
     Warning,
@@ -157,16 +143,5 @@ impl fmt::Display for Alert {
             Self::Info => write!(f, "info"),
             Self::Success => write!(f, "success"),
         }
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Alert {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let options = [Alert::Error, Alert::Warning, Alert::Info, Alert::Success];
-        Ok(*u.choose(&options)?)
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (mem::size_of::<Self>(), Some(mem::size_of::<Self>()))
     }
 }

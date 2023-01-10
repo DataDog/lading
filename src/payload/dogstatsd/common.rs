@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt, mem};
 
-use arbitrary::Unstructured;
+use arbitrary::{Arbitrary, Unstructured};
 
 const MAX_SMALLVEC: usize = 8;
 const MAX_TAGS: usize = 16;
@@ -34,9 +34,8 @@ impl fmt::Display for MetricTagStr {
 
 impl<'a> arbitrary::Arbitrary<'a> for MetricTagStr {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice: u8 = u.arbitrary()?;
-        let size = SIZES[(choice as usize) % SIZES.len()];
-        let mut bytes: Vec<u8> = vec![0; size];
+        let size = u.choose(&SIZES)?;
+        let mut bytes: Vec<u8> = vec![0; *size];
         u.fill_buffer(&mut bytes)?;
         bytes
             .iter_mut()
@@ -83,7 +82,7 @@ impl<'a> arbitrary::Arbitrary<'a> for NumValue {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Arbitrary)]
 pub(crate) enum ZeroToOne {
     One,
     Frac(u32),
@@ -105,32 +104,13 @@ impl fmt::Display for ZeroToOne {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for ZeroToOne {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let is_one = u.arbitrary()?;
-        let zto = if is_one {
-            Self::One
-        } else {
-            Self::Frac(u.arbitrary()?)
-        };
-        Ok(zto)
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (
-            mem::size_of::<ZeroToOne>(),
-            Some(mem::size_of::<ZeroToOne>()),
-        )
-    }
-}
-
 pub(crate) struct Tags {
     pub(crate) inner: HashMap<MetricTagStr, MetricTagStr>,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Tags {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let total: usize = u.arbitrary::<usize>()? % MAX_TAGS;
+        let total: usize = u.int_in_range(0..=MAX_TAGS)?;
         let mut inner = HashMap::with_capacity(total);
         for _ in 0..total {
             let key = u.arbitrary()?;
@@ -155,15 +135,7 @@ where
     T: arbitrary::Arbitrary<'a>,
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let total: usize = {
-            let val = u.arbitrary::<usize>()? % MAX_SMALLVEC;
-            if val == 0 {
-                1
-            } else {
-                val
-            }
-        };
-
+        let total: usize = u.int_in_range(1..=MAX_SMALLVEC)?;
         let mut inner = Vec::with_capacity(total);
         for _ in 0..total {
             inner.push(u.arbitrary()?);
