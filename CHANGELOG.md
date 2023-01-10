@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0-rc3]
+## Changed
+- **Breaking change:** Added support for DogStatsD payload.
+
 ## [0.12.0]
 ## Changed
 - **Breaking change:** Support for Kafka generator is removed.
