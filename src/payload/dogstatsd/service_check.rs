@@ -1,9 +1,6 @@
-use std::mem;
+use std::{fmt, mem};
 
-use arbitrary::{
-    size_hint::{self, and_all},
-    Unstructured,
-};
+use arbitrary::{size_hint::and_all, Unstructured};
 
 use super::common;
 
@@ -14,6 +11,41 @@ pub(crate) struct ServiceCheck {
     hostname: Option<common::MetricTagStr>,
     tags: Option<common::Tags>,
     message: Option<common::MetricTagStr>,
+}
+
+impl fmt::Display for ServiceCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
+        write!(
+            f,
+            "_sc|{name}|{status}",
+            name = self.name,
+            status = self.status
+        )?;
+        if let Some(timestamp) = self.timestamp_second {
+            write!(f, "|d:{timestamp}")?;
+        }
+        if let Some(ref hostname) = self.hostname {
+            write!(f, "|h:{hostname}")?;
+        }
+        if let Some(ref tags) = self.tags {
+            if !tags.inner.is_empty() {
+                write!(f, "|#")?;
+                let mut commas_remaining = tags.inner.len() - 1;
+                for (k, v) in &tags.inner {
+                    write!(f, "{k}:{v}")?;
+                    if commas_remaining != 0 {
+                        write!(f, ",")?;
+                        commas_remaining -= 1;
+                    }
+                }
+            }
+        }
+        if let Some(ref msg) = self.message {
+            write!(f, "|m:{msg}")?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for ServiceCheck {
@@ -55,6 +87,25 @@ enum Status {
     Unknown,
 }
 
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ok => {
+                write!(f, "ok")
+            }
+            Self::Warning => {
+                write!(f, "warning")
+            }
+            Self::Critical => {
+                write!(f, "critical")
+            }
+            Self::Unknown => {
+                write!(f, "unknown")
+            }
+        }
+    }
+}
+
 impl<'a> arbitrary::Arbitrary<'a> for Status {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let options = [
@@ -66,7 +117,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Status {
         Ok(*u.choose(&options)?)
     }
 
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
         (mem::size_of::<Self>(), Some(mem::size_of::<Self>()))
     }
 }

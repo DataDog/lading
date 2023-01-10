@@ -1,8 +1,7 @@
-use std::{io::Write, time::SystemTime};
+use std::{fmt, io::Write};
 
-use arbitrary::{size_hint, Unstructured};
+use arbitrary::{Arbitrary, Unstructured};
 use rand::Rng;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::payload::{Error, Serialize};
 
@@ -12,10 +11,21 @@ mod metric;
 mod service_check;
 
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
+#[derive(Arbitrary)]
 enum Member {
     Metric(metric::Metric),
     Event(event::Event),
-    // ServiceCheck(ServiceCheck),
+    ServiceCheck(service_check::ServiceCheck),
+}
+
+impl fmt::Display for Member {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Metric(ref m) => write!(f, "{m}"),
+            Self::Event(ref e) => write!(f, "{e}"),
+            Self::ServiceCheck(ref sc) => write!(f, "{sc}"),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -29,7 +39,23 @@ impl Serialize for DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        unimplemented!()
+        let mut entropy: Vec<u8> = vec![0; max_bytes];
+        rng.fill_bytes(&mut entropy);
+        let mut unstructured = Unstructured::new(&entropy);
+
+        let mut bytes_remaining = max_bytes;
+        while let Ok(member) = unstructured.arbitrary::<Member>() {
+            let encoding = format!("{member}");
+            let line_length = encoding.len() + 1; // add one for the newline
+            match bytes_remaining.checked_sub(line_length) {
+                Some(remainder) => {
+                    writeln!(writer, "{encoding}")?;
+                    bytes_remaining = remainder;
+                }
+                None => break,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -50,7 +76,7 @@ mod test {
             let dogstatsd = DogStatsD::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            syslog.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",

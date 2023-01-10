@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem};
+use std::{collections::HashMap, fmt, mem};
 
 use arbitrary::Unstructured;
 
@@ -23,6 +23,12 @@ impl MetricTagStr {
         // Safety: given that CHARSET is where we derive members from
         // `self.bytes` is always valid UTF-8.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
+    }
+}
+
+impl fmt::Display for MetricTagStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -51,6 +57,15 @@ pub(crate) enum NumValue {
     Int(i64),
 }
 
+impl fmt::Display for NumValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Float(val) => write!(f, "{val}"),
+            Self::Int(val) => write!(f, "{val}"),
+        }
+    }
+}
+
 impl<'a> arbitrary::Arbitrary<'a> for NumValue {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let is_float: bool = u.arbitrary()?;
@@ -74,15 +89,16 @@ pub(crate) enum ZeroToOne {
     Frac(u32),
 }
 
-impl ZeroToOne {
-    pub(crate) fn as_f64(self) -> f64 {
+impl fmt::Display for ZeroToOne {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::One => 1.0,
+            Self::One => write!(f, "1"),
             Self::Frac(inner) => {
-                if inner == 0 {
-                    0.0
+                if *inner == 0 {
+                    write!(f, "0")
                 } else {
-                    1.0 / (inner as f64)
+                    let val = 1.0 / f64::from(*inner);
+                    write!(f, "{val}")
                 }
             }
         }
@@ -109,7 +125,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ZeroToOne {
 }
 
 pub(crate) struct Tags {
-    inner: HashMap<MetricTagStr, MetricTagStr>,
+    pub(crate) inner: HashMap<MetricTagStr, MetricTagStr>,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Tags {
@@ -130,16 +146,24 @@ impl<'a> arbitrary::Arbitrary<'a> for Tags {
     }
 }
 
-pub(crate) struct SmallVec<T> {
-    inner: Vec<T>,
+pub(crate) struct NonEmptyVec<T> {
+    pub(crate) inner: Vec<T>,
 }
 
-impl<'a, T> arbitrary::Arbitrary<'a> for SmallVec<T>
+impl<'a, T> arbitrary::Arbitrary<'a> for NonEmptyVec<T>
 where
     T: arbitrary::Arbitrary<'a>,
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let total: usize = u.arbitrary::<usize>()? % MAX_SMALLVEC;
+        let total: usize = {
+            let val = u.arbitrary::<usize>()? % MAX_SMALLVEC;
+            if val == 0 {
+                1
+            } else {
+                val
+            }
+        };
+
         let mut inner = Vec::with_capacity(total);
         for _ in 0..total {
             inner.push(u.arbitrary()?);
@@ -149,6 +173,6 @@ where
 
     fn size_hint(depth: usize) -> (usize, Option<usize>) {
         let (low, upper) = T::size_hint(depth);
-        (low * MAX_SMALLVEC, upper.map(|u| u * MAX_SMALLVEC))
+        (low, upper.map(|u| u * MAX_SMALLVEC))
     }
 }
