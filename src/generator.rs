@@ -102,7 +102,7 @@ pub enum Server {
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
     UnixDatagram(unix_datagram::UnixDatagram),
-    /// See [`crate::generator::process_tree_gen::FileTree`] for details.
+    /// See [`crate::generator::process_tree_gen::ProcessTree`] for details.
     ProcessTree(process_tree::ProcessTree),
 }
 
@@ -136,6 +136,7 @@ impl Server {
             ),
             Config::UnixDatagram(conf) => Self::UnixDatagram(
                 unix_datagram::UnixDatagram::new(conf, shutdown).map_err(Error::UnixDatagram)?,
+            ),
             Config::ProcessTree(conf) => Self::ProcessTree(
                 process_tree::ProcessTree::new(&conf, shutdown).map_err(Error::ProcessTree)?,
             ),

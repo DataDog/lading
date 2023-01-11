@@ -7,16 +7,21 @@ use std::{
     str::FromStr,
 };
 
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, Parser, Subcommand};
 use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator, inspector, observer,
+    generator::{
+        self,
+        process_tree::{self},
+    },
+    inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
+use rand::{rngs::StdRng, SeedableRng};
 use tokio::{
     runtime::Builder,
     signal,
@@ -123,10 +128,33 @@ struct Opts {
     /// whether to ignore inspector configuration, if present, and not run the inspector
     #[clap(long)]
     disable_inspector: bool,
+    /// Extra sub commands
+    #[clap(subcommand)]
+    extracmds: Option<ExtraCommands>,
 }
 
-fn get_config() -> (Opts, Config) {
-    let ops: Opts = Opts::parse();
+#[derive(Subcommand, Debug)]
+#[clap(hide = true)]
+enum ExtraCommands {
+    ProcessTreeGen(ProcessTreeGen),
+}
+
+#[derive(Parser, Debug)]
+#[clap(group(
+    ArgGroup::new("config")
+        .required(true)
+        .args(&["config-path", "config-content"]),
+))]
+struct ProcessTreeGen {
+    /// path on disk to the configuration file
+    #[clap(long)]
+    config_path: Option<PathBuf>,
+    /// string repesanting the configuration
+    #[clap(long)]
+    config_content: Option<String>,
+}
+
+fn get_config(ops: &Opts) -> Config {
     debug!(
         "Attempting to open configuration file at: {}",
         ops.config_path
@@ -192,7 +220,7 @@ fn get_config() -> (Opts, Config) {
             }
         }
     }
-    (ops, config)
+    config
 }
 
 async fn inner_main(
@@ -334,11 +362,61 @@ async fn inner_main(
     shutdown.wait(max_shutdown_delay).await;
 }
 
+fn run_process_tree(opts: ProcessTreeGen) {
+    let mut contents = String::new();
+
+    if let Some(path) = opts.config_path {
+        debug!(
+            "Attempting to open configuration file at: {}",
+            path.display()
+        );
+        let mut file: std::fs::File = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", path.display()));
+
+        file.read_to_string(&mut contents).unwrap();
+    } else if let Some(str) = &opts.config_content {
+        contents = str.to_string()
+    } else {
+        unreachable!("clap ensures that exactly one target option is selected");
+    };
+
+    match process_tree::get_config(&contents) {
+        Ok(config) => {
+            info!("Generating a process tree.");
+
+            let mut rng = StdRng::from_seed(config.seed);
+            let nodes = process_tree::generate_tree(&mut rng, &config);
+
+            process_tree::spawn_tree(&nodes, config.process_sleep_ns.get());
+
+            info!("Bye. :)");
+        }
+        Err(e) => panic!("invalide configuration: {}", e),
+    }
+}
+
+fn run_extra_cmds(cmds: ExtraCommands) {
+    match cmds {
+        ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts),
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
     info!("Starting lading run.");
-    let (opts, config): (Opts, Config) = get_config();
+    let opts: Opts = Opts::parse();
+
+    // handle extra commands
+    if let Some(cmds) = opts.extracmds {
+        run_extra_cmds(cmds);
+        return;
+    }
+
+    let config = get_config(&opts);
+
     let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
