@@ -18,8 +18,8 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
 };
-use tokio::{io::Interest, net::UnixStream};
-use tracing::{debug, info};
+use tokio::{io::Interest, net::UnixStream, task::JoinError};
+use tracing::{debug, error, info, trace};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 /// Configuration of this generator.
@@ -51,6 +51,9 @@ pub enum Error {
     /// Generic IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Subtask error
+    #[error("Subtask failure: {0}")]
+    Subtask(#[from] JoinError),
 }
 
 #[derive(Debug)]
@@ -142,60 +145,74 @@ impl Uds {
 
         let send_task = tokio::spawn(async move {
             let mut blocks = self.block_cache.iter().cycle();
+            let mut unix_stream = Option::<UnixStream>::None;
+
             loop {
-                // Connect to the stream interior to the spawn allows us to
-                // re-connect within the same task, does require that we unwrap
-                // failures, catastrophically failing lading.
-                let stream = UnixStream::connect(&self.path)
-                    .await
-                    .map_err(Error::Io)
-                    .unwrap();
-                let blk = blocks.next().unwrap();
-                let total_bytes = blk.total_bytes;
+                if let Some(stream) = &unix_stream {
+                    let blk = blocks.next().unwrap();
+                    let total_bytes = blk.total_bytes;
 
-                tokio::task::yield_now().await;
-                self.rate_limiter
-                    .until_n_ready(total_bytes)
-                    .await
-                    .map_err(Error::Governor)
-                    .unwrap();
-
-                // NOTE When we write into a unix stream it may be that only
-                // some of the written bytes make it through in which case we
-                // must cycle back around and try to write the remainder of the
-                // buffer.
-                let blk_max: usize = total_bytes.get() as usize;
-                let mut blk_offset = 0;
-                while blk_offset < blk_max {
-                    let ready = stream
-                        .ready(Interest::WRITABLE)
+                    tokio::task::yield_now().await;
+                    self.rate_limiter
+                        .until_n_ready(total_bytes)
                         .await
-                        .map_err(Error::Io)
-                        .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
-                    if ready.is_writable() {
-                        // Try to write data, this may still fail with `WouldBlock`
-                        // if the readiness event is a false positive.
-                        match stream.try_write(&blk.bytes[blk_offset..]) {
-                            Ok(bytes) => {
-                                counter!("bytes_written", bytes as u64, &labels);
-                                blk_offset = bytes;
-                            }
-                            Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
-                                // If the read side has hung up we will never
-                                // know and will keep attempting to write into
-                                // the stream. This yield means we won't hog the
-                                // whole CPU.
-                                tokio::task::yield_now().await;
-                                continue;
-                            }
-                            Err(err) => {
-                                debug!("write failed: {}", err);
+                        .map_err(Error::Governor)
+                        .unwrap();
 
-                                let mut error_labels = labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", 1, &error_labels);
-                                break; // while blk_offset
+                    // NOTE When we write into a unix stream it may be that only
+                    // some of the written bytes make it through in which case we
+                    // must cycle back around and try to write the remainder of the
+                    // buffer.
+                    let blk_max: usize = total_bytes.get() as usize;
+                    let mut blk_offset = 0;
+                    while blk_offset < blk_max {
+                        let ready = stream
+                            .ready(Interest::WRITABLE)
+                            .await
+                            .map_err(Error::Io)
+                            .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
+                        if ready.is_writable() {
+                            // Try to write data, this may still fail with `WouldBlock`
+                            // if the readiness event is a false positive.
+                            match stream.try_write(&blk.bytes[blk_offset..]) {
+                                Ok(bytes) => {
+                                    counter!("bytes_written", bytes as u64, &labels);
+                                    blk_offset = bytes;
+                                }
+                                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                                    // If the read side has hung up we will never
+                                    // know and will keep attempting to write into
+                                    // the stream. This yield means we won't hog the
+                                    // whole CPU.
+                                    tokio::task::yield_now().await;
+                                    continue;
+                                }
+                                Err(err) => {
+                                    debug!("write failed: {}", err);
+
+                                    let mut error_labels = labels.clone();
+                                    error_labels.push(("error".to_string(), err.to_string()));
+                                    counter!("request_failure", 1, &error_labels);
+                                    break; // while blk_offset
+                                }
                             }
+                        }
+                    }
+                } else {
+                    // Connect to the stream interior to the spawn allows us to
+                    // re-connect within the same task, does require that we unwrap
+                    // failures, catastrophically failing lading.
+                    match UnixStream::connect(&self.path).await {
+                        Ok(sock) => {
+                            debug!("UDS socket opened for writing.");
+                            unix_stream = Some(sock);
+                        }
+                        Err(err) => {
+                            trace!("opening UDS path failed: {}", err);
+
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("connection_failure", 1, &error_labels);
                         }
                     }
                 }
