@@ -23,7 +23,8 @@ pub mod http;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
-pub mod uds;
+pub mod unix_datagram;
+pub mod unix_stream;
 
 #[derive(Debug)]
 /// Errors produced by [`Server`].
@@ -42,8 +43,10 @@ pub enum Error {
     FileTree(file_tree::Error),
     /// See [`crate::generator::grpc::Error`] for details.
     Grpc(grpc::Error),
-    /// See [`crate::generator::uds::Error`] for details.
-    Uds(uds::Error),
+    /// See [`crate::generator::unix_stream::Error`] for details.
+    UnixStream(unix_stream::Error),
+    /// See [`crate::generator::unix_datagram::Error`] for details.
+    UnixDatagram(unix_datagram::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -64,8 +67,10 @@ pub enum Config {
     FileTree(file_tree::Config),
     /// See [`crate::generator::grpc::Config`] for details.
     Grpc(grpc::Config),
-    /// See [`crate::generator::uds::Config`] for details.
-    Uds(uds::Config),
+    /// See [`crate::generator::unix_stream::Config`] for details.
+    UnixStream(unix_stream::Config),
+    /// See [`crate::generator::unix_datagram::Config`] for details.
+    UnixDatagram(unix_datagram::Config),
 }
 
 #[derive(Debug)]
@@ -88,8 +93,10 @@ pub enum Server {
     FileTree(file_tree::FileTree),
     /// See [`crate::generator::grpc::Grpc`] for details.
     Grpc(grpc::Grpc),
-    /// See [`crate::generator::uds::Uds`] for details.
-    Uds(uds::Uds),
+    /// See [`crate::generator::unix_stream::UnixStream`] for details.
+    UnixStream(unix_stream::UnixStream),
+    /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
+    UnixDatagram(unix_datagram::UnixDatagram),
 }
 
 impl Server {
@@ -117,7 +124,12 @@ impl Server {
                 Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
             }
             Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
-            Config::Uds(conf) => Self::Uds(uds::Uds::new(conf, shutdown).map_err(Error::Uds)?),
+            Config::UnixStream(conf) => Self::UnixStream(
+                unix_stream::UnixStream::new(conf, shutdown).map_err(Error::UnixStream)?,
+            ),
+            Config::UnixDatagram(conf) => Self::UnixDatagram(
+                unix_datagram::UnixDatagram::new(conf, shutdown).map_err(Error::UnixDatagram)?,
+            ),
         };
         Ok(srv)
     }
@@ -148,7 +160,8 @@ impl Server {
             Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
             Server::FileTree(inner) => inner.spin().await.map_err(Error::FileTree),
             Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
-            Server::Uds(inner) => inner.spin().await.map_err(Error::Uds),
+            Server::UnixStream(inner) => inner.spin().await.map_err(Error::UnixStream),
+            Server::UnixDatagram(inner) => inner.spin().await.map_err(Error::UnixDatagram),
         };
 
         if let Err(e) = &res {

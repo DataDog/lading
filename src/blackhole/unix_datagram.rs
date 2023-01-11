@@ -1,37 +1,38 @@
-//! The UDS speaking blackhole.
+//! The Unix Domain Socket datagram speaking blackhole.
 
 use std::{io, path::PathBuf};
 
+use futures::TryFutureExt;
 use metrics::counter;
 use serde::Deserialize;
-use tokio::net::UnixStream;
+use tokio::net;
 use tracing::info;
 
 use crate::signals::Shutdown;
 
 #[derive(Debug)]
-/// Errors produced by [`Uds`].
+/// Errors produced by [`UnixDatagram`].
 pub enum Error {
     /// Wrapper for [`std::io::Error`].
     Io(io::Error),
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
-/// Configuration for [`Uds`].
+/// Configuration for [`UnixDatagram`].
 pub struct Config {
     /// The path of the socket to read from.
     pub path: PathBuf,
 }
 
 #[derive(Debug)]
-/// The UDP blackhole.
-pub struct Uds {
+/// The UnixDatagram blackhole.
+pub struct UnixDatagram {
     path: PathBuf,
     shutdown: Shutdown,
 }
 
-impl Uds {
-    /// Create a new [`Uds`] server instance
+impl UnixDatagram {
+    /// Create a new [`UnixDatagram`] server instance
     #[must_use]
     pub fn new(config: Config, shutdown: Shutdown) -> Self {
         Self {
@@ -40,7 +41,7 @@ impl Uds {
         }
     }
 
-    /// Run [`Uds`] to completion
+    /// Run [`UnixDatagram`] to completion
     ///
     /// This function runs the UDS server forever, unless a shutdown signal is
     /// received or an unrecoverable error is encountered.
@@ -53,27 +54,18 @@ impl Uds {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let stream = UnixStream::connect(&self.path).await.map_err(Error::Io)?;
+        // Sockets cannot be rebound if they existed previously. Delete the
+        // socket, ignore any errors.
+        let _ = tokio::fs::remove_file(&self.path).map_err(Error::Io);
+        let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
 
         loop {
-            tokio::select! {
-                readable = stream.readable() => {
-                    readable.map_err(Error::Io)?;
-                    let mut buf = [0; 65536];
+            let mut buf = [0; 65536];
 
-                    match stream.try_read(&mut buf) {
-                        Ok(0) => {
-                            // Write side has hung up.
-                            return Ok(());
-                        }
-                        Ok(n) => {
-                            counter!("bytes_received", n as u64);
-                        }
-                        Err(ref err) if err.kind() == tokio::io::ErrorKind::WouldBlock => {
-                            tokio::task::yield_now().await;
-                        }
-                        Err(err) => return Err(Error::Io(err)),
-                    }
+            tokio::select! {
+                res = socket.recv(&mut buf) => {
+                    let n: usize = res.map_err(Error::Io)?;
+                    counter!("bytes_received", n as u64);
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");

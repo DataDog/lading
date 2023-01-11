@@ -14,7 +14,8 @@ pub mod splunk_hec;
 pub mod sqs;
 pub mod tcp;
 pub mod udp;
-pub mod uds;
+pub mod unix_datagram;
+pub mod unix_stream;
 
 #[derive(Debug)]
 /// Errors produced by [`Server`].
@@ -27,8 +28,10 @@ pub enum Error {
     SplunkHec(splunk_hec::Error),
     /// See [`crate::blackhole::udp::Error`] for details.
     Udp(udp::Error),
-    /// See [`crate::blackhole::uds::Error`] for details.
-    Uds(uds::Error),
+    /// See [`crate::blackhole::unix_stream::Error`] for details.
+    UnixStream(unix_stream::Error),
+    /// See [`crate::blackhole::unix_datagram::Error`] for details.
+    UnixDatagram(unix_datagram::Error),
     /// See [`crate::blackhole::sqs::Error`] for details.
     Sqs(sqs::Error),
 }
@@ -45,8 +48,10 @@ pub enum Config {
     SplunkHec(splunk_hec::Config),
     /// See [`crate::blackhole::udp::Config`] for details.
     Udp(udp::Config),
-    /// See [`crate::blackhole::uds::Config`] for details.
-    Uds(uds::Config),
+    /// See [`crate::blackhole::unix_stream::Config`] for details.
+    UnixStream(unix_stream::Config),
+    /// See [`crate::blackhole::unix_datagram::Config`] for details.
+    UnixDatagram(unix_datagram::Config),
     /// See [`crate::blackhole::sqs::Config`] for details.
     Sqs(sqs::Config),
 }
@@ -65,8 +70,10 @@ pub enum Server {
     SplunkHec(splunk_hec::SplunkHec),
     /// See [`crate::blackhole::udp::Udp`] for details.
     Udp(udp::Udp),
-    /// See [`crate::blackhole::uds::Uds`] for details.
-    Uds(uds::Uds),
+    /// See [`crate::blackhole::unix_stream::UnixStream`] for details.
+    UnixStream(unix_stream::UnixStream),
+    /// See [`crate::blackhole::unix_datagram::UnixDatagram`] for details.
+    UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::blackhole::sqs::Sqs`] for details.
     Sqs(sqs::Sqs),
 }
@@ -88,7 +95,12 @@ impl Server {
                 Self::Http(http::Http::new(&conf, shutdown).map_err(Error::Http)?)
             }
             Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown)),
-            Config::Uds(conf) => Self::Uds(uds::Uds::new(conf, shutdown)),
+            Config::UnixStream(conf) => {
+                Self::UnixStream(unix_stream::UnixStream::new(conf, shutdown))
+            }
+            Config::UnixDatagram(conf) => {
+                Self::UnixDatagram(unix_datagram::UnixDatagram::new(conf, shutdown))
+            }
             Config::Sqs(conf) => Self::Sqs(sqs::Sqs::new(&conf, shutdown)),
             Config::SplunkHec(conf) => Self::SplunkHec(splunk_hec::SplunkHec::new(&conf, shutdown)),
         };
@@ -109,7 +121,8 @@ impl Server {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
             Server::Udp(inner) => inner.run().await.map_err(Error::Udp),
-            Server::Uds(inner) => inner.run().await.map_err(Error::Uds),
+            Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
+            Server::UnixDatagram(inner) => inner.run().await.map_err(Error::UnixDatagram),
             Server::Sqs(inner) => inner.run().await.map_err(Error::Sqs),
             Server::SplunkHec(inner) => inner.run().await.map_err(Error::SplunkHec),
         }

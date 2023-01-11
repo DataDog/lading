@@ -4,10 +4,8 @@ use arbitrary::{Arbitrary, Unstructured};
 
 const MAX_SMALLVEC: usize = 8;
 const MAX_TAGS: usize = 16;
-const SIZES: [usize; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
+const SIZES: [usize; 6] = [1, 2, 4, 8, 16, 32];
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-#[allow(clippy::cast_possible_truncation)]
-const CHARSET_LEN: u8 = CHARSET.len() as u8;
 
 #[derive(Hash, PartialEq, Eq)]
 pub(crate) struct MetricTagStr {
@@ -34,12 +32,10 @@ impl fmt::Display for MetricTagStr {
 
 impl<'a> arbitrary::Arbitrary<'a> for MetricTagStr {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let size = u.choose(&SIZES)?;
-        let mut bytes: Vec<u8> = vec![0; *size];
-        u.fill_buffer(&mut bytes)?;
-        bytes
-            .iter_mut()
-            .for_each(|item| *item = CHARSET[(*item % CHARSET_LEN) as usize]);
+        let mut bytes: Vec<u8> = Vec::new();
+        for _ in 0..*u.choose(&SIZES)? {
+            bytes.push(*u.choose(&CHARSET)?);
+        }
         Ok(Self { bytes })
     }
 
