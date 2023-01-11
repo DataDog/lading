@@ -5,8 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## Fixed
-- Fix OpenTelemetry message length calculation for some messages.
+
+## [0.12.0-rc5]
+## Changed
+- Fixed: OpenTelemetry message length calculation corrected for some messages.
+- **Breaking change:** Split UDS support between explict datagram and stream modules.
+- Fixed: Corrected mistakes in the DogStatsD payload implementation.
 
 ## [0.12.0-rc4]
 ## Fixed
