@@ -25,7 +25,7 @@ pub struct Config {
 }
 
 #[derive(Debug)]
-/// The UnixDatagram blackhole.
+/// The `UnixDatagram` blackhole.
 pub struct UnixDatagram {
     path: PathBuf,
     shutdown: Shutdown,
@@ -56,7 +56,7 @@ impl UnixDatagram {
     pub async fn run(mut self) -> Result<(), Error> {
         // Sockets cannot be rebound if they existed previously. Delete the
         // socket, ignore any errors.
-        let _ = tokio::fs::remove_file(&self.path).map_err(Error::Io);
+        let _res = tokio::fs::remove_file(&self.path).map_err(Error::Io);
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
 
         loop {

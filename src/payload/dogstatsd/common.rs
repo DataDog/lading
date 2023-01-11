@@ -34,7 +34,7 @@ impl<'a> arbitrary::Arbitrary<'a> for MetricTagStr {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut bytes: Vec<u8> = Vec::new();
         for _ in 0..*u.choose(&SIZES)? {
-            bytes.push(*u.choose(&CHARSET)?);
+            bytes.push(*u.choose(CHARSET)?);
         }
         Ok(Self { bytes })
     }

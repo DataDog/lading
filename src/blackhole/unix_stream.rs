@@ -26,7 +26,7 @@ pub struct Config {
 }
 
 #[derive(Debug)]
-/// The UnixStream blackhole.
+/// The `UnixStream` blackhole.
 pub struct UnixStream {
     path: PathBuf,
     shutdown: Shutdown,
