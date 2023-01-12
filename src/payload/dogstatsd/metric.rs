@@ -42,13 +42,8 @@ impl fmt::Display for Count {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|c")?;
         if let Some(ref sample_rate) = self.sample_rate {
@@ -111,13 +106,8 @@ impl fmt::Display for Gauge {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|g")?;
         if let Some(ref tags) = self.tags {
@@ -176,13 +166,8 @@ impl fmt::Display for Timer {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|ms")?;
         if let Some(ref sample_rate) = self.sample_rate {
@@ -246,13 +231,8 @@ impl fmt::Display for Distribution {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|d")?;
         if let Some(ref sample_rate) = self.sample_rate {
@@ -315,13 +295,8 @@ impl fmt::Display for Set {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|s")?;
         if let Some(ref tags) = self.tags {
@@ -380,13 +355,8 @@ impl fmt::Display for Histogram {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        let mut colons_needed = self.value.inner.len() - 1;
         for val in &self.value.inner {
-            write!(f, "{val}")?;
-            if colons_needed != 0 {
-                write!(f, ":")?;
-                colons_needed -= 1;
-            }
+            write!(f, ":{val}")?;
         }
         write!(f, "|h")?;
         if let Some(ref sample_rate) = self.sample_rate {

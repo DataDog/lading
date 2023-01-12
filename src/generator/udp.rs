@@ -3,6 +3,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
+    time::Duration,
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -188,6 +189,8 @@ impl Udp {
                             let mut error_labels = labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("connection_failure", 1, &error_labels);
+
+                            tokio::time::sleep(Duration::from_secs(1)).await;
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-//! The Unix Domain Socket speaking generator.
+//! The Unix Domain Socket datagram speaking generator.
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
@@ -18,7 +18,7 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
 };
-use tokio::{io::Interest, net::UnixStream, task::JoinError};
+use tokio::{net, task::JoinError};
 use tracing::{debug, error, info, trace};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }
 
-/// Errors produced by [`Uds`].
+/// Errors produced by [`UnixDatagram`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Rate limiter has insuficient capacity for payload. Indicates a serious
@@ -57,10 +57,11 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-/// The UDS generator.
+/// The Unix Domain Socket datagram generator.
 ///
-/// This generator is responsible for sending data to the target via UDP
-pub struct Uds {
+/// This generator is responsible for sending data to the target via UDS
+/// datagrams.
+pub struct UnixDatagram {
     path: PathBuf,
     rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
     block_cache: Vec<Block>,
@@ -68,8 +69,8 @@ pub struct Uds {
     shutdown: Shutdown,
 }
 
-impl Uds {
-    /// Create a new [`Uds`] instance
+impl UnixDatagram {
+    /// Create a new [`UnixDatagram`] instance
     ///
     /// # Errors
     ///
@@ -130,98 +131,76 @@ impl Uds {
         })
     }
 
-    /// Run [`Uds`] to completion or until a shutdown signal is received.
+    /// Run [`UnixDatagram`] to completion or until a shutdown signal is received.
     ///
     /// # Errors
     ///
-    /// Function will return an error when the UDP socket cannot be written to.
+    /// Function will return an error when the UDS socket cannot be written to.
     ///
     /// # Panics
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        debug!("UDP generator running");
+        debug!("UnixDatagram generator running");
         let labels = self.metric_labels;
 
-        let send_task = tokio::spawn(async move {
-            let mut blocks = self.block_cache.iter().cycle();
-            let mut unix_stream = Option::<UnixStream>::None;
+        let socket = net::UnixDatagram::unbound().map_err(Error::Io)?;
+        loop {
+            match socket.connect(&self.path).map_err(Error::Io) {
+                Ok(()) => {
+                    info!("Connected socket to {path}", path = &self.path.display(),);
+                    break;
+                }
+                Err(err) => {
+                    trace!(
+                        "Unable to connect to socket {path}: {err}",
+                        path = &self.path.display()
+                    );
 
-            loop {
-                if let Some(stream) = &unix_stream {
-                    let blk = blocks.next().unwrap();
-                    let total_bytes = blk.total_bytes;
+                    let mut error_labels = labels.clone();
+                    error_labels.push(("error".to_string(), err.to_string()));
+                    counter!("connection_failure", 1, &error_labels);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
 
-                    tokio::task::yield_now().await;
-                    self.rate_limiter
-                        .until_n_ready(total_bytes)
-                        .await
-                        .map_err(Error::Governor)
-                        .unwrap();
+        let mut blocks = self.block_cache.iter().cycle();
 
-                    // NOTE When we write into a unix stream it may be that only
+        loop {
+            let blk = blocks.next().unwrap();
+            let total_bytes = blk.total_bytes;
+
+            tokio::select! {
+                _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                    // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {
-                        let ready = stream
-                            .ready(Interest::WRITABLE)
-                            .await
-                            .map_err(Error::Io)
-                            .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
-                        if ready.is_writable() {
-                            // Try to write data, this may still fail with `WouldBlock`
-                            // if the readiness event is a false positive.
-                            match stream.try_write(&blk.bytes[blk_offset..]) {
-                                Ok(bytes) => {
-                                    counter!("bytes_written", bytes as u64, &labels);
-                                    blk_offset = bytes;
-                                }
-                                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
-                                    // If the read side has hung up we will never
-                                    // know and will keep attempting to write into
-                                    // the stream. This yield means we won't hog the
-                                    // whole CPU.
-                                    tokio::task::yield_now().await;
-                                    continue;
-                                }
-                                Err(err) => {
-                                    debug!("write failed: {}", err);
+                        match socket.send(&blk.bytes[blk_offset..]).await {
+                            Ok(bytes) => {
+                                counter!("bytes_written", bytes as u64, &labels);
+                                blk_offset = bytes;
+                            }
+                            Err(err) => {
+                                debug!("write failed: {}", err);
 
-                                    let mut error_labels = labels.clone();
-                                    error_labels.push(("error".to_string(), err.to_string()));
-                                    counter!("request_failure", 1, &error_labels);
-                                    break; // while blk_offset
-                                }
+                                let mut error_labels = labels.clone();
+                                error_labels.push(("error".to_string(), err.to_string()));
+                                counter!("request_failure", 1, &error_labels);
+                                break; // while blk_offset
                             }
                         }
                     }
-                } else {
-                    // Connect to the stream interior to the spawn allows us to
-                    // re-connect within the same task, does require that we unwrap
-                    // failures, catastrophically failing lading.
-                    match UnixStream::connect(&self.path).await {
-                        Ok(sock) => {
-                            debug!("UDS socket opened for writing.");
-                            unix_stream = Some(sock);
-                        }
-                        Err(err) => {
-                            trace!("opening UDS path failed: {}", err);
-
-                            let mut error_labels = labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("connection_failure", 1, &error_labels);
-                        }
-                    }
                 }
+                _ = self.shutdown.recv() => {
+                    info!("shutdown signal received");
+                    return Ok(());
+                },
             }
-        });
-
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        send_task.abort();
-        Ok(())
+        }
     }
 }

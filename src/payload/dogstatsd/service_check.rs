@@ -91,16 +91,16 @@ impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ok => {
-                write!(f, "ok")
+                write!(f, "0")
             }
             Self::Warning => {
-                write!(f, "warning")
+                write!(f, "1")
             }
             Self::Critical => {
-                write!(f, "critical")
+                write!(f, "2")
             }
             Self::Unknown => {
-                write!(f, "unknown")
+                write!(f, "3")
             }
         }
     }

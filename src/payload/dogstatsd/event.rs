@@ -23,7 +23,7 @@ impl fmt::Display for Event {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(
             f,
-            "_e{title_utf8_length},{text_utf8_length}:{title}|{text}",
+            "_e{{{title_utf8_length},{text_utf8_length}}}:{title}|{text}",
             title_utf8_length = self.title_utf8_length,
             text_utf8_length = self.text_utf8_length,
             title = self.title,
