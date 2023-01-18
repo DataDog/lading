@@ -12,6 +12,7 @@ allow = [
   "Zlib",
   "Unicode-DFS-2016",
 ]
+unused-allowed-license = "allow"
 
 copyleft = "deny"
 default = "deny"
