@@ -16,6 +16,9 @@ allow = [
 copyleft = "deny"
 default = "deny"
 
+[sources]
+allow-git = ["https://github.com/open-telemetry/opentelemetry-rust/"]
+
 [advisories]
 vulnerability = "deny"
 unmaintained = "deny"
