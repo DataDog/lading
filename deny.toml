@@ -12,9 +12,14 @@ allow = [
   "Zlib",
   "Unicode-DFS-2016",
 ]
+unused-allowed-license = "allow"
 
 copyleft = "deny"
 default = "deny"
+
+[sources]
+allow-git = ["https://github.com/open-telemetry/opentelemetry-rust/"]
+unknown-git = "deny"
 
 [advisories]
 vulnerability = "deny"
@@ -22,8 +27,6 @@ unmaintained = "deny"
 notice = "deny"
 unsound = "deny"
 ignore = [
-  # ansi_term is unmaintained
-  "RUSTSEC-2021-0139",
   # atty is unsound for some custom allocators on Windows and is unmaintained
   "RUSTSEC-2021-0145",
 ]
