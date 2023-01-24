@@ -28,7 +28,7 @@ use std::{
     time::Duration,
 };
 use tokio::process::Command;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug)]
 /// Not executable
@@ -45,6 +45,20 @@ impl fmt::Display for NotExecutable {
 }
 
 #[derive(Debug)]
+/// Execution error
+pub struct ExecutionError {
+    stderr: String,
+}
+
+impl error::Error for ExecutionError {}
+
+impl fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "execution failed: {}", self.stderr)
+    }
+}
+
+#[derive(Debug)]
 /// Errors produced by [`ProcessTree`].
 pub enum Error {
     /// Rate limiter has insuficient capacity for payload. Indicates a serious bug.
@@ -55,6 +69,8 @@ pub enum Error {
     Serialization(serde_yaml::Error),
     /// Wrapper around [`std::io::Error`].
     Io(::std::io::Error),
+    /// Process tree command execution error
+    ExecutionError(ExecutionError),
 }
 
 impl fmt::Display for Error {
@@ -64,6 +80,7 @@ impl fmt::Display for Error {
             Error::NotExecutable(e) => write!(f, "executable error : {e}"),
             Error::Serialization(e) => write!(f, "serialization error : {e}"),
             Error::Io(e) => write!(f, "io error : {e}"),
+            Error::ExecutionError(e) => write!(f, "execution error : {e}"),
         }
     }
 }
@@ -89,6 +106,12 @@ impl From<serde_yaml::Error> for Error {
 impl From<::std::io::Error> for Error {
     fn from(error: ::std::io::Error) -> Self {
         Error::Io(error)
+    }
+}
+
+impl From<ExecutionError> for Error {
+    fn from(error: ExecutionError) -> Self {
+        Error::ExecutionError(error)
     }
 }
 
@@ -291,6 +314,8 @@ impl ProcessTree {
     ///
     /// # Errors
     ///
+    /// Return an error if the process tree generator command fails.
+    ///
     /// # Panics
     ///
     /// Panic if the lading path can't determine.
@@ -303,13 +328,20 @@ impl ProcessTree {
             tokio::select! {
                 _ = process_rate_limiter.until_ready() => {
                     // using pid as target pid just to pass laging clap constraints
-                    let _res = Command::new(lading_path)
+                    let output = Command::new(lading_path)
                         .args(["--target-pid", "1"])
                         .arg("process-tree-gen")
                         .arg("--config-content")
                         .arg(&self.config_content)
                         .stdin(Stdio::null())
-                        .spawn();
+                        .output().await.unwrap();
+
+                    if !output.status.success() {
+                        error!("process tree generator execution error");
+                        return Err(Error::from(ExecutionError {
+                            stderr: str::from_utf8(&output.stderr).unwrap().to_string()
+                        }));
+                    }
                 },
 
                 _ = self.shutdown.recv() => {

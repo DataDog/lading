@@ -399,6 +399,7 @@ fn run_process_tree(opts: ProcessTreeGen) {
 
 fn run_extra_cmds(cmds: ExtraCommands) {
     match cmds {
+        // This command will call fork and the process must be kept fork-safe up to this point.
         ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts),
     }
 }
