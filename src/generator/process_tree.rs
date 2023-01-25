@@ -1,0 +1,556 @@
+//! The process tree generator.
+//!
+//! Unlike the other generators the process tree generator does not "connect" however
+//! losely to the target but instead, without coordination, merely generates
+//! a process tree.
+
+use crate::signals::Shutdown;
+use governor::{state::InsufficientCapacity, Quota, RateLimiter};
+use is_executable::IsExecutable;
+use nix::{
+    sys::wait::{waitpid, WaitPidFlag, WaitStatus},
+    unistd::{fork, ForkResult, Pid},
+};
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    rngs::StdRng,
+    seq::SliceRandom,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{vec_deque, HashMap, HashSet, VecDeque},
+    env, error, fmt,
+    iter::Peekable,
+    num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
+    process::{exit, Stdio},
+    str, thread,
+    time::Duration,
+};
+use tokio::process::Command;
+use tracing::{error, info};
+
+#[derive(Debug)]
+/// Not executable
+pub struct NotExecutable {
+    executable: PathBuf,
+}
+
+impl error::Error for NotExecutable {}
+
+impl fmt::Display for NotExecutable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} not executable", self.executable.display())
+    }
+}
+
+#[derive(Debug)]
+/// Execution error
+pub struct ExecutionError {
+    stderr: String,
+}
+
+impl error::Error for ExecutionError {}
+
+impl fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "execution failed: {}", self.stderr)
+    }
+}
+
+#[derive(Debug)]
+/// Errors produced by [`ProcessTree`].
+pub enum Error {
+    /// Rate limiter has insuficient capacity for payload. Indicates a serious bug.
+    Governor(InsufficientCapacity),
+    /// The file is not executable
+    NotExecutable(NotExecutable),
+    /// Wrapper around [`serde_yaml::Error`].
+    Serialization(serde_yaml::Error),
+    /// Wrapper around [`std::io::Error`].
+    Io(::std::io::Error),
+    /// Process tree command execution error
+    ExecutionError(ExecutionError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Governor(e) => write!(f, "governor error : {e}"),
+            Error::NotExecutable(e) => write!(f, "executable error : {e}"),
+            Error::Serialization(e) => write!(f, "serialization error : {e}"),
+            Error::Io(e) => write!(f, "io error : {e}"),
+            Error::ExecutionError(e) => write!(f, "execution error : {e}"),
+        }
+    }
+}
+
+impl From<InsufficientCapacity> for Error {
+    fn from(error: InsufficientCapacity) -> Self {
+        Error::Governor(error)
+    }
+}
+
+impl From<NotExecutable> for Error {
+    fn from(error: NotExecutable) -> Self {
+        Error::NotExecutable(error)
+    }
+}
+
+impl From<serde_yaml::Error> for Error {
+    fn from(error: serde_yaml::Error) -> Self {
+        Error::Serialization(error)
+    }
+}
+
+impl From<::std::io::Error> for Error {
+    fn from(error: ::std::io::Error) -> Self {
+        Error::Io(error)
+    }
+}
+
+impl From<ExecutionError> for Error {
+    fn from(error: ExecutionError) -> Self {
+        Error::ExecutionError(error)
+    }
+}
+
+fn default_max_depth() -> NonZeroU32 {
+    NonZeroU32::new(10).unwrap()
+}
+
+fn default_max_tree_per_second() -> NonZeroU32 {
+    NonZeroU32::new(5).unwrap()
+}
+
+// default to 100ms
+fn default_process_sleep_ns() -> NonZeroU32 {
+    NonZeroU32::new(100_000_000).unwrap()
+}
+
+fn default_max_children() -> NonZeroU32 {
+    NonZeroU32::new(10).unwrap()
+}
+
+fn default_args_len() -> NonZeroUsize {
+    NonZeroUsize::new(10).unwrap()
+}
+
+fn default_args_count() -> NonZeroU32 {
+    NonZeroU32::new(16).unwrap()
+}
+
+fn default_envs_len() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+
+fn default_envs_count() -> NonZeroU32 {
+    NonZeroU32::new(10).unwrap()
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum Args {
+    /// Statically defined arguments
+    Static(StaticArgs),
+    /// Generated arguments
+    Generate(GenerateArgs),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+pub struct StaticArgs {
+    /// Argumments used with the `static` mode
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+/// Configuration of [`ProcessTree`]
+pub struct GenerateArgs {
+    /// The maximum number argument per Process. Used by the `generate` mode
+    #[serde(default = "default_args_len")]
+    pub length: NonZeroUsize,
+    /// The maximum number of arguments. Used by the `generate` mode
+    #[serde(default = "default_args_count")]
+    pub count: NonZeroU32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum Envs {
+    /// Statically defined environment variables
+    Static(StaticEnvs),
+    /// Generated environment variables
+    Generate(GenerateEnvs),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+pub struct StaticEnvs {
+    /// Environment variables used with the `static` mode
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+/// Configuration of [`ProcessTree`]
+pub struct GenerateEnvs {
+    /// The maximum number environment variable per Process. Used by the `generate` mode
+    #[serde(default = "default_envs_len")]
+    pub length: NonZeroUsize,
+    /// The maximum number of environment variable.  Used by the `generate` mode
+    #[serde(default = "default_envs_count")]
+    pub count: NonZeroU32,
+}
+
+impl StaticEnvs {
+    #[must_use]
+    /// return environment variables as a hashmap
+    pub fn to_hash(&self) -> HashMap<String, String> {
+        let mut envs: HashMap<String, String> = HashMap::new();
+        for env in &self.values {
+            if let Some(kv) = env.split_once('=') {
+                envs.insert(kv.0.to_string(), kv.1.to_string());
+            } else {
+                envs.insert(env.clone(), String::new());
+            }
+        }
+        envs
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+pub struct Executable {
+    /// Path of the executable
+    pub executable: PathBuf,
+    /// Command line arguments
+    pub args: Args,
+    /// Environment variables
+    pub envs: Envs,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// Configuration of [`ProcessTree`]
+pub struct Config {
+    /// The seed for random operations against this target
+    pub seed: [u8; 32],
+    /// The number of process created per second
+    #[serde(default = "default_max_tree_per_second")]
+    pub max_tree_per_second: NonZeroU32,
+    /// The maximum depth of the process tree
+    #[serde(default = "default_max_depth")]
+    pub max_depth: NonZeroU32,
+    /// The maximum children per level
+    #[serde(default = "default_max_children")]
+    pub max_children: NonZeroU32,
+    /// Sleep applied at process start
+    #[serde(default = "default_process_sleep_ns")]
+    pub process_sleep_ns: NonZeroU32,
+    /// List of executables
+    pub executables: Vec<Executable>,
+}
+
+impl Config {
+    /// Validate the configuration
+    ///
+    /// # Errors
+    ///
+    /// Validation will fail if one executable path is not executable.
+    pub fn validate(&self) -> Result<(), Error> {
+        let iter = self.executables.iter();
+        for exec in iter {
+            if !exec.executable.is_executable() {
+                return Err(Error::from(NotExecutable {
+                    executable: exec.executable.clone(),
+                }));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+/// The `ProcessTree` generator.
+///
+/// This generator generates a random `ProcessTree`,
+/// this without coordination to the target.
+pub struct ProcessTree {
+    lading_path: PathBuf,
+    config_content: String,
+    max_tree_per_second: NonZeroU32,
+    shutdown: Shutdown,
+}
+
+impl ProcessTree {
+    /// Create a new [`ProcessTree`]
+    ///
+    /// # Errors
+    ///
+    /// Return an error if the config can be serialized.
+    ///
+    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+        let lading_path = match env::current_exe() {
+            Ok(path) => path,
+            Err(e) => return Err(Error::from(e)),
+        };
+
+        match serde_yaml::to_string(config) {
+            Ok(serialized) => Ok(Self {
+                lading_path,
+                config_content: serialized,
+                max_tree_per_second: config.max_tree_per_second,
+                shutdown,
+            }),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    /// Run [`ProcessTree`] to completion or until a shutdown signal is received.
+    ///
+    /// In this loop the process tree will be generated.
+    ///
+    /// # Errors
+    ///
+    /// Return an error if the process tree generator command fails.
+    ///
+    /// # Panics
+    ///
+    /// Panic if the lading path can't determine.
+    ///
+    pub async fn spin(mut self) -> Result<(), Error> {
+        let process_rate_limiter = RateLimiter::direct(Quota::per_second(self.max_tree_per_second));
+        let lading_path = self.lading_path.to_str().unwrap();
+
+        loop {
+            tokio::select! {
+                _ = process_rate_limiter.until_ready() => {
+                    // using pid as target pid just to pass laging clap constraints
+                    let output = Command::new(lading_path)
+                        .args(["--target-pid", "1"])
+                        .arg("process-tree-gen")
+                        .arg("--config-content")
+                        .arg(&self.config_content)
+                        .stdin(Stdio::null())
+                        .output().await.unwrap();
+
+                    if !output.status.success() {
+                        error!("process tree generator execution error");
+                        return Err(Error::from(ExecutionError {
+                            stderr: str::from_utf8(&output.stderr).unwrap().to_string()
+                        }));
+                    }
+                },
+
+                _ = self.shutdown.recv() => {
+                    info!("shutdown signal received");
+                    break;
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
+#[inline]
+fn rnd_str(rng: &mut StdRng, len: usize) -> String {
+    Alphanumeric.sample_string(rng, len)
+}
+
+#[inline]
+fn gen_rnd_args(rng: &mut StdRng, len: usize, max: u32) -> Vec<String> {
+    let mut args = Vec::new();
+    for _ in 0..max {
+        args.push(rnd_str(rng, len));
+    }
+    args
+}
+
+#[inline]
+fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> HashMap<String, String> {
+    let key_size = len / 2;
+    let value_size = len - key_size;
+
+    let mut envs = HashMap::new();
+    for _ in 0..max {
+        let key = rnd_str(rng, key_size);
+        let value = rnd_str(rng, value_size);
+        envs.insert(key, value);
+    }
+    envs
+}
+
+/// Defines a execution of an executable with args and envs
+#[derive(Debug)]
+pub struct Exec {
+    executable: String,
+    args: Vec<String>,
+    envs: HashMap<String, String>,
+}
+
+impl Exec {
+    fn new(rng: &mut StdRng, config: &Config) -> Self {
+        let exec = config.executables.choose(rng).unwrap();
+
+        let args = match &exec.args {
+            Args::Static(params) => params.values.clone(),
+            Args::Generate(params) => gen_rnd_args(rng, params.length.get(), params.count.get()),
+        };
+
+        let envs = match &exec.envs {
+            Envs::Static(params) => params.to_hash(),
+            Envs::Generate(params) => gen_rnd_envs(rng, params.length.get(), params.count.get()),
+        };
+
+        Self {
+            executable: exec.executable.to_str().unwrap().to_string(),
+            args,
+            envs,
+        }
+    }
+}
+
+/// Defines a process node
+#[derive(Debug)]
+pub struct Process {
+    depth: u32,
+    exec: Option<Exec>,
+}
+
+impl Process {
+    fn new(depth: u32, exec: Option<Exec>) -> Self {
+        Self { depth, exec }
+    }
+}
+
+/// Spawn the process tree
+///
+/// # Panics
+///
+/// Function will panic if the nodes list in incorrectly proccessed.
+///
+pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
+    let mut iter = nodes.iter().peekable();
+    let mut pids_to_wait: HashSet<Pid> = HashSet::new();
+    let mut depth = 0;
+
+    loop {
+        try_wait_pid(&mut pids_to_wait);
+
+        if iter.len() == 0 {
+            if !pids_to_wait.is_empty() {
+                continue;
+            }
+
+            // do not exit from the root node
+            if depth > 0 {
+                exit(0)
+            }
+
+            return;
+        }
+
+        let duration = Duration::from_nanos(sleep_ns.into());
+        thread::sleep(duration);
+
+        let process = iter.next().unwrap();
+
+        if let Some(exec) = &process.exec {
+            let status = std::process::Command::new(&exec.executable)
+                .args(&exec.args)
+                .envs(&exec.envs)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .ok()
+                .unwrap();
+            exit(status.code().unwrap())
+        }
+
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { child, .. }) => {
+                pids_to_wait.insert(child);
+                goto_next_sibling(process.depth, &mut iter);
+            }
+            Ok(ForkResult::Child) => {
+                depth = process.depth;
+                pids_to_wait.clear();
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+#[inline]
+fn try_wait_pid(pids: &mut HashSet<Pid>) {
+    let mut exited: Option<Pid> = None;
+
+    for pid in pids.iter() {
+        match waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => {}
+            Ok(_) | Err(_) => {
+                exited = Some(*pid);
+                break;
+            }
+        }
+    }
+    if let Some(pid) = exited {
+        pids.remove(&pid);
+    }
+}
+
+#[inline]
+fn goto_next_sibling(depth: u32, iter: &mut Peekable<vec_deque::Iter<'_, Process>>) {
+    while let Some(child) = iter.peek() {
+        if child.depth == depth {
+            break;
+        }
+        iter.next();
+    }
+}
+
+/// Generate a process tree
+pub fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<Process> {
+    let mut nodes = VecDeque::new();
+    let mut stack = Vec::new();
+
+    stack.push(Process::new(1, None));
+
+    while let Some(process) = stack.pop() {
+        let curr_depth = process.depth;
+
+        nodes.push_back(process);
+
+        if curr_depth + 1 > config.max_depth.get() {
+            let exec = Exec::new(rng, config);
+
+            let process = Process::new(curr_depth + 1, Some(exec));
+            nodes.push_back(process);
+        } else {
+            for _ in 0..config.max_children.get() {
+                let process = Process::new(curr_depth + 1, None);
+                stack.push(process);
+            }
+        }
+    }
+
+    nodes
+}
+
+/// Parse the configuration of the process tree
+///
+/// # Errors
+///
+/// Return an error if the content is incorrect
+///
+pub fn get_config(content: &str) -> Result<Config, Error> {
+    match serde_yaml::from_str::<Config>(content) {
+        Ok(config) => {
+            config.validate()?;
+            Ok(config)
+        }
+        Err(e) => Err(Error::from(e)),
+    }
+}
