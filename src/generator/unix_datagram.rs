@@ -4,6 +4,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 use byte_unit::{Byte, ByteUnit};
 use governor::{
@@ -172,7 +173,7 @@ impl UnixDatagram {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                _ = self.rate_limiter.until_n_ready(total_bytes), if !target::Meta::rss_bytes_limit_exceeded() => {
                     // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the

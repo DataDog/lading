@@ -21,6 +21,7 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     process::{ExitStatus, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use nix::{
@@ -32,7 +33,44 @@ use tokio::{process::Command, sync::broadcast::Sender};
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, signals::Shutdown};
+use crate::{common::stdio, observer::RSS_BYTES, signals::Shutdown};
+
+/// Expose the process' current RSS consumption, allowing abstractions to be
+/// built on top in the Target implementation.
+pub(crate) static RSS_BYTES_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// Errors produced by [`Meta`]
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum MetaError {
+    /// Unable to support byte limits greater than u64::MAX
+    #[error("unable to support bytes greater than u64::MAX")]
+    ByteLimitTooLarge,
+}
+
+/// Source for live metadata about the running target.
+#[derive(Debug, Clone, Copy)]
+pub struct Meta {}
+
+impl Meta {
+    /// Set the maximum RSS bytes limit
+    #[inline]
+    pub fn set_rss_bytes_limit(limit: byte_unit::Byte) -> Result<(), MetaError> {
+        let raw_limit: u128 = limit.get_bytes();
+        if raw_limit > (u64::MAX as u128) {
+            return Err(MetaError::ByteLimitTooLarge);
+        }
+        RSS_BYTES_LIMIT.store(raw_limit as u64, Ordering::Relaxed);
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn rss_bytes_limit_exceeded() -> bool {
+        let limit: u64 = RSS_BYTES_LIMIT.load(Ordering::Relaxed);
+        let current: u64 = RSS_BYTES.load(Ordering::Relaxed);
+
+        current > limit
+    }
+}
 
 /// Errors produced by [`Server`]
 #[derive(thiserror::Error, Debug)]

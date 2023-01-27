@@ -21,6 +21,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -176,7 +177,9 @@ impl Tcp {
                         }
                     }
                 }
-                _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
+                _ = self.rate_limiter.until_n_ready(total_bytes), if
+                    connection.is_some() && !target::Meta::rss_bytes_limit_exceeded()
+                => {
                     let mut client = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {

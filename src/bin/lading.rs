@@ -107,6 +107,9 @@ struct Opts {
     /// the path to write target's stderr
     #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stderr_path: Behavior,
+    /// the maximum amount of RSS bytes the target may consume before lading backs off load
+    #[clap(long)]
+    target_rss_bytes_limit: Option<byte_unit::Byte>,
     /// path on disk to write captures, will override prometheus-addr if both
     /// are set
     #[clap(long)]
@@ -167,6 +170,9 @@ fn get_config(ops: &Opts) -> Config {
     file.read_to_string(&mut contents).unwrap();
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
 
+    if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
+        target::Meta::set_rss_bytes_limit(rss_bytes_limit).unwrap();
+    }
     let target = if let Some(pid) = ops.target_pid {
         target::Config::Pid(target::PidConfig { pid })
     } else if let Some(path) = &ops.target_path {

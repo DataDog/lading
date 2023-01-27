@@ -27,6 +27,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -228,7 +229,7 @@ impl Http {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = rate_limiter.until_n_ready(total_bytes) => {
+                _ = rate_limiter.until_n_ready(total_bytes), if !target::Meta::rss_bytes_limit_exceeded() => {
                     let client = client.clone();
                     let labels = labels.clone();
                     let method = method.clone();

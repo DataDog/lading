@@ -4,6 +4,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 use byte_unit::{Byte, ByteUnit};
 use governor::{
@@ -167,7 +168,7 @@ impl UnixStream {
                         }
                     }
                 }
-                _ = self.rate_limiter.until_n_ready(total_bytes), if unix_stream.is_some() => {
+                _ = self.rate_limiter.until_n_ready(total_bytes), if unix_stream.is_some() && !target::Meta::rss_bytes_limit_exceeded() => {
                     tokio::task::yield_now().await;
 
                     // NOTE When we write into a unix stream it may be that only
