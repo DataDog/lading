@@ -26,7 +26,7 @@ use serde::Deserialize;
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
-    task::JoinHandle,
+    task::{JoinError, JoinHandle},
 };
 use tracing::info;
 
@@ -46,11 +46,19 @@ pub enum Error {
     Io(::std::io::Error),
     /// Creation of payload blocks failed.
     Block(block::Error),
+    /// Could not join on child task results.
+    Child(JoinError),
 }
 
 impl From<block::Error> for Error {
     fn from(error: block::Error) -> Self {
         Error::Block(error)
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(error: JoinError) -> Self {
+        Error::Child(error)
     }
 }
 
@@ -190,6 +198,7 @@ impl FileGen {
                 block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
+                shutdown: shutdown.clone(),
             };
 
             handles.push(tokio::spawn(child.spin()));
@@ -214,7 +223,7 @@ impl FileGen {
         self.shutdown.recv().await;
         info!("shutdown signal received");
         for handle in self.handles.drain(..) {
-            handle.abort();
+            handle.await??;
         }
         Ok(())
     }
@@ -228,10 +237,11 @@ struct Child {
     block_cache: Vec<Block>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
+    shutdown: Shutdown,
 }
 
 impl Child {
-    pub(crate) async fn spin(self) -> Result<(), Error> {
+    pub(crate) async fn spin(mut self) -> Result<(), Error> {
         let bytes_per_second = self.bytes_per_second.get() as usize;
         let mut bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
@@ -249,51 +259,57 @@ impl Child {
                 .await?,
         );
 
-        for blk in self.block_cache.iter().cycle() {
-            let total_bytes = blk.total_bytes;
-            let total_newlines = blk.lines;
-            let block = &blk.bytes;
+        let mut blocks = self.block_cache.iter().cycle();
 
-            self.rate_limiter.until_n_ready(total_bytes).await?;
+        loop {
+            let block = blocks.next().unwrap();
+            let total_bytes = block.total_bytes;
+            let total_newlines = block.lines;
 
-            {
-                fp.write_all(block).await?;
-                fp.flush().await?;
-                // block.len() and total_bytes are the same numeric value but we
-                // avoid needing to get a plain value from a non-zero by calling
-                // len here.
-                counter!("bytes_written", block.len() as u64);
-                counter!("lines_written", total_newlines);
+            tokio::select! {
+                _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                    {
+                        fp.write_all(&block.bytes).await?;
+                        fp.flush().await?;
 
-                bytes_written += block.len() as u64;
-                gauge!("current_target_size_bytes", bytes_written as f64);
-            }
+                        counter!("bytes_written", u64::from(total_bytes.get()));
+                        counter!("lines_written", total_newlines);
 
-            if bytes_written > maximum_bytes_per_file {
-                if self.rotate {
-                    // Delete file, leaving any open file handlers intact. This
-                    // includes our own `fp` for the time being.
-                    fs::remove_file(&path).await?;
+                        bytes_written += u64::from(total_bytes.get());
+                        gauge!("current_target_size_bytes", bytes_written as f64);
+                    }
+
+                    if bytes_written > maximum_bytes_per_file {
+                        if self.rotate {
+                            // Delete file, leaving any open file handlers intact. This
+                            // includes our own `fp` for the time being.
+                            fs::remove_file(&path).await?;
+                        }
+                        // Update `path` to point to the next indexed file.
+                        file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
+                        path = path_from_template(&self.path_template, file_index);
+                        // Open a new fp to `path`, replacing `fp`. Any holders of the
+                        // file pointer still have it but the file no longer has a name.
+                        fp = BufWriter::with_capacity(
+                            bytes_per_second,
+                            fs::OpenOptions::new()
+                                .create(true)
+                                .truncate(false)
+                                .write(true)
+                                .open(&path)
+                                .await?,
+                        );
+                        bytes_written = 0;
+                        counter!("file_rotated", 1);
+                    }
                 }
-                // Update `path` to point to the next indexed file.
-                file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
-                path = path_from_template(&self.path_template, file_index);
-                // Open a new fp to `path`, replacing `fp`. Any holders of the
-                // file pointer still have it but the file no longer has a name.
-                fp = BufWriter::with_capacity(
-                    bytes_per_second,
-                    fs::OpenOptions::new()
-                        .create(true)
-                        .truncate(false)
-                        .write(true)
-                        .open(&path)
-                        .await?,
-                );
-                bytes_written = 0;
-                counter!("file_rotated", 1);
+                _ = self.shutdown.recv() => {
+                    fp.flush().await?;
+                    info!("shutdown signal received");
+                    return Ok(());
+                },
             }
         }
-        unreachable!()
     }
 }
 
