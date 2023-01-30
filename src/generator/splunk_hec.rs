@@ -234,12 +234,12 @@ impl SplunkHec {
             f64::from(self.parallel_connections),
             &labels
         );
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut blocks = self.block_cache.iter().cycle().peekable();
         let mut channels = self.channels.iter().cycle();
 
         loop {
             let channel: Channel = channels.next().unwrap().clone();
-            let blk = blocks.next().unwrap();
+            let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -248,6 +248,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
+                    let blk = blocks.next().unwrap(); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 

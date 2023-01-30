@@ -144,11 +144,11 @@ impl UnixStream {
         debug!("UnixStream generator running");
         let labels = self.metric_labels;
 
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut blocks = self.block_cache.iter().cycle().peekable();
         let mut unix_stream = Option::<net::UnixStream>::None;
 
         loop {
-            let blk = blocks.next().unwrap();
+            let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -186,6 +186,7 @@ impl UnixStream {
                             .map_err(Error::Io)
                             .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
+                            let blk = blocks.next().unwrap(); // actually advance through the blocks
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
                             match stream.try_write(&blk.bytes[blk_offset..]) {

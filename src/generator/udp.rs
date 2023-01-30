@@ -150,10 +150,10 @@ impl Udp {
         let labels = self.metric_labels;
 
         let mut connection = Option::<UdpSocket>::None;
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut blocks = self.block_cache.iter().cycle().peekable();
 
         loop {
-            let blk = blocks.next().unwrap();
+            let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,
@@ -180,6 +180,7 @@ impl Udp {
                 }
                 _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
                     let sock = connection.unwrap();
+                    let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             counter!("bytes_written", bytes as u64, &labels);
