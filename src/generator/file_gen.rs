@@ -15,6 +15,7 @@ use std::{
 };
 
 use byte_unit::{Byte, ByteUnit};
+use futures::future::join_all;
 use governor::{
     clock, state,
     state::direct::{self, InsufficientCapacity},
@@ -46,7 +47,7 @@ pub enum Error {
     Io(::std::io::Error),
     /// Creation of payload blocks failed.
     Block(block::Error),
-    /// Could not join on child task results.
+    /// Child sub-task error.
     Child(JoinError),
 }
 
@@ -222,8 +223,12 @@ impl FileGen {
     pub async fn spin(mut self) -> Result<(), Error> {
         self.shutdown.recv().await;
         info!("shutdown signal received");
-        for handle in self.handles.drain(..) {
-            handle.await??;
+        for res in join_all(self.handles.drain(..)).await {
+            match res {
+                Ok(Ok(())) => continue,
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
         }
         Ok(())
     }
