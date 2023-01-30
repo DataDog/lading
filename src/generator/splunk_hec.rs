@@ -266,7 +266,7 @@ impl SplunkHec {
                     // the AckID, meaning we could just keep the channel logic
                     // in this main loop here and avoid the AckService entirely.
                     let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
-                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request));
+                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.clone()));
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
@@ -290,39 +290,45 @@ async fn send_hec_request(
     channel: Channel,
     client: Client<HttpConnector>,
     request: Request<Body>,
+    mut shutdown: Shutdown,
 ) {
     counter!("requests_sent", 1, &labels);
     let work = client.request(request);
 
-    match timeout(Duration::from_secs(1), work).await {
-        Ok(tm) => match tm {
-            Ok(response) => {
-                counter!("bytes_written", block_length as u64, &labels);
-                let (parts, body) = response.into_parts();
-                let status = parts.status;
-                let mut status_labels = labels.clone();
-                status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
-                counter!("request_ok", 1, &status_labels);
-                channel
-                    .send(async {
-                        let body_bytes = hyper::body::to_bytes(body).await.unwrap();
-                        let hec_ack_response =
-                            serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
-                        hec_ack_response.ack_id
-                    })
-                    .await;
+    tokio::select! {
+        tm = timeout(Duration::from_secs(1), work) => {
+            match tm {
+                Ok(tm) => match tm {
+                    Ok(response) => {
+                        counter!("bytes_written", block_length as u64, &labels);
+                        let (parts, body) = response.into_parts();
+                        let status = parts.status;
+                        let mut status_labels = labels.clone();
+                        status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
+                        counter!("request_ok", 1, &status_labels);
+                        channel
+                            .send(async {
+                                let body_bytes = hyper::body::to_bytes(body).await.unwrap();
+                                let hec_ack_response =
+                                    serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
+                                hec_ack_response.ack_id
+                            })
+                            .await;
+                    }
+                    Err(err) => {
+                        let mut error_labels = labels.clone();
+                        error_labels.push(("error".to_string(), err.to_string()));
+                        counter!("request_failure", 1, &error_labels);
+                    }
+                }
+                Err(err) => {
+                    let mut error_labels = labels.clone();
+                    error_labels.push(("error".to_string(), err.to_string()));
+                    counter!("request_timeout", 1, &error_labels);
+                }
             }
-            Err(err) => {
-                let mut error_labels = labels.clone();
-                error_labels.push(("error".to_string(), err.to_string()));
-                counter!("request_failure", 1, &error_labels);
-            }
-        },
-        Err(err) => {
-            let mut error_labels = labels.clone();
-            error_labels.push(("error".to_string(), err.to_string()));
-            counter!("request_timeout", 1, &error_labels);
         }
+        _ = shutdown.recv() => {},
     }
     drop(permit);
 }
