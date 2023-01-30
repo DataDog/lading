@@ -149,36 +149,20 @@ impl Udp {
         debug!("UDP generator running");
         let labels = self.metric_labels;
 
-        let send_task = tokio::spawn(async move {
-            let mut blocks = self.block_cache.iter().cycle();
-            let mut connection = Option::<UdpSocket>::None;
-            loop {
-                if let Some(sock) = &connection {
-                    let blk = blocks.next().unwrap();
-                    let total_bytes = blk.total_bytes;
-                    assert!(
-                        total_bytes.get() <= 65507,
-                        "UDP packet too large (over 65507 B)"
-                    );
+        let mut connection = Option::<UdpSocket>::None;
+        let mut blocks = self.block_cache.iter().cycle();
 
-                    tokio::task::yield_now().await;
-                    self.rate_limiter.until_n_ready(total_bytes).await.unwrap();
+        loop {
+            let blk = blocks.next().unwrap();
+            let total_bytes = blk.total_bytes;
+            assert!(
+                total_bytes.get() <= 65507,
+                "UDP packet too large (over 65507 B)"
+            );
 
-                    match sock.send_to(&blk.bytes, self.addr).await {
-                        Ok(bytes) => {
-                            counter!("bytes_written", bytes as u64, &labels);
-                        }
-                        Err(err) => {
-                            debug!("write failed: {}", err);
-
-                            let mut error_labels = labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("request_failure", 1, &error_labels);
-                            connection = None;
-                        }
-                    }
-                } else {
-                    match UdpSocket::bind("127.0.0.1:0").await {
+            tokio::select! {
+                conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
+                    match conn {
                         Ok(sock) => {
                             debug!("UDP port bound");
                             connection = Some(sock);
@@ -194,12 +178,28 @@ impl Udp {
                         }
                     }
                 }
-            }
-        });
+                _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
+                    let sock = connection.unwrap();
+                    match sock.send_to(&blk.bytes, self.addr).await {
+                        Ok(bytes) => {
+                            counter!("bytes_written", bytes as u64, &labels);
+                            connection = Some(sock);
+                        }
+                        Err(err) => {
+                            debug!("write failed: {}", err);
 
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        send_task.abort();
-        Ok(())
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("request_failure", 1, &error_labels);
+                            connection = None;
+                        }
+                    }
+                }
+                _ = self.shutdown.recv() => {
+                    info!("shutdown signal received");
+                    return Ok(());
+                },
+            }
+        }
     }
 }
