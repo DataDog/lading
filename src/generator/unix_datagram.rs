@@ -165,10 +165,10 @@ impl UnixDatagram {
             }
         }
 
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut blocks = self.block_cache.iter().cycle().peekable();
 
         loop {
-            let blk = blocks.next().unwrap();
+            let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -177,6 +177,7 @@ impl UnixDatagram {
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
+                    let blk = blocks.next().unwrap(); // actually advance through the blocks
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {

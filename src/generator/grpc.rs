@@ -287,11 +287,11 @@ impl Grpc {
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
 
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut blocks = self.block_cache.iter().cycle().peekable();
         let rpc_path = self.rpc_path;
 
         loop {
-            let blk = blocks.next().unwrap();
+            let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -299,6 +299,7 @@ impl Grpc {
                     let block_length = blk.bytes.len();
                     let labels = self.metric_labels.clone();
                     counter!("requests_sent", 1, &labels);
+                    let blk = blocks.next().unwrap(); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),
