@@ -5,10 +5,10 @@ use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
 use super::common;
 
 pub(crate) struct ServiceCheck {
-    name: common::MetricTagStr,
+    name: common::MetricTagKey,
     status: Status,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagStr>,
+    hostname: Option<common::MetricTagKey>,
     tags: Option<common::Tags>,
     message: Option<common::MetricTagStr>,
 }

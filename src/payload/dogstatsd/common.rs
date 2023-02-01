@@ -4,46 +4,68 @@ use arbitrary::{Arbitrary, Unstructured};
 
 const MAX_SMALLVEC: usize = 8;
 const MAX_TAGS: usize = 16;
-const SIZES: [usize; 6] = [1, 2, 4, 8, 16, 32];
-const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-#[derive(Hash, PartialEq, Eq)]
+const STRS: [&str; 64] = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "10", "11",
+    "12", "13", "14", "15", "16", "17", "18", "19", "1A", "1B", "1C", "1D", "1E", "1F", "20", "21",
+    "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B", "2C", "2D", "2E", "2F", "30", "31",
+    "32", "33", "34", "35", "36", "37", "38", "39", "3A", "3B", "3C", "3D", "3E", "3F",
+];
+// NOTE if you adjust the size of KEYS or VALUES please choose a length that
+// divides equally into the bit size of `idx`, else we'll preference some keys
+// and values over others. Not also that the binomial coefficient here is 12,870
+// so please do take some measure to constrain cardinality further if you
+// increase the space here.
+const KEYS: [&str; 16] = [
+    "000", "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012",
+    "013", "014", "015",
+];
+const VALUES: [&str; 8] = ["000", "001", "002", "003", "004", "005", "006", "007"];
+
+#[derive(Hash, PartialEq, Eq, Arbitrary)]
+pub(crate) struct MetricTagKey {
+    idx: u8,
+}
+
+impl fmt::Display for MetricTagKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let idx = (self.idx as usize) % KEYS.len();
+        write!(f, "{}", KEYS[idx])
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Arbitrary)]
+pub(crate) struct MetricTagValue {
+    idx: u8,
+}
+
+impl fmt::Display for MetricTagValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let idx = (self.idx as usize) % VALUES.len();
+        write!(f, "{}", VALUES[idx])
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Arbitrary)]
 pub(crate) struct MetricTagStr {
-    bytes: Vec<u8>,
+    idx: u8,
 }
 
 impl MetricTagStr {
     pub(crate) fn len(&self) -> usize {
-        self.bytes.len()
+        self.as_str().len()
     }
 
+    #[inline]
     pub(crate) fn as_str(&self) -> &str {
-        // Safety: given that CHARSET is where we derive members from
-        // `self.bytes` is always valid UTF-8.
-        unsafe { std::str::from_utf8_unchecked(&self.bytes) }
+        let idx = (self.idx as usize) % STRS.len();
+        STRS[idx]
     }
 }
 
 impl fmt::Display for MetricTagStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for MetricTagStr {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut bytes: Vec<u8> = Vec::new();
-        for _ in 0..*u.choose(&SIZES)? {
-            bytes.push(*u.choose(CHARSET)?);
-        }
-        Ok(Self { bytes })
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        let empty_sz = mem::size_of::<Self>();
-        let full_bytes_sz = mem::size_of::<u8>() * 128; // max in SIZES
-
-        (empty_sz, Some(empty_sz + full_bytes_sz))
     }
 }
 
@@ -101,7 +123,7 @@ impl fmt::Display for ZeroToOne {
 }
 
 pub(crate) struct Tags {
-    pub(crate) inner: HashMap<MetricTagStr, MetricTagStr>,
+    pub(crate) inner: HashMap<MetricTagKey, MetricTagValue>,
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Tags {
@@ -117,8 +139,10 @@ impl<'a> arbitrary::Arbitrary<'a> for Tags {
     }
 
     fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let (low, upper) = MetricTagStr::size_hint(depth);
-        (low * MAX_TAGS, upper.map(|u| u * MAX_TAGS))
+        arbitrary::size_hint::and(
+            MetricTagKey::size_hint(depth),
+            MetricTagValue::size_hint(depth),
+        )
     }
 }
 
