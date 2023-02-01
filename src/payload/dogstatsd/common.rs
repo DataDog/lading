@@ -5,7 +5,7 @@ use arbitrary::{Arbitrary, Unstructured};
 const MAX_SMALLVEC: usize = 8;
 const MAX_TAGS: usize = 16;
 
-const STRS: [&'static str; 64] = [
+const STRS: [&str; 64] = [
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "10", "11",
     "12", "13", "14", "15", "16", "17", "18", "19", "1A", "1B", "1C", "1D", "1E", "1F", "20", "21",
     "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B", "2C", "2D", "2E", "2F", "30", "31",
@@ -16,11 +16,11 @@ const STRS: [&'static str; 64] = [
 // and values over others. Not also that the binomial coefficient here is 12,870
 // so please do take some measure to constrain cardinality further if you
 // increase the space here.
-const KEYS: [&'static str; 16] = [
+const KEYS: [&str; 16] = [
     "000", "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012",
     "013", "014", "015",
 ];
-const VALUES: [&'static str; 8] = ["000", "001", "002", "003", "004", "005", "006", "007"];
+const VALUES: [&str; 8] = ["000", "001", "002", "003", "004", "005", "006", "007"];
 
 #[derive(Hash, PartialEq, Eq, Arbitrary)]
 pub(crate) struct MetricTagKey {
