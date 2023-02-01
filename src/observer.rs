@@ -8,7 +8,7 @@
 //! writes out key details about memory and CPU consumption into the capture
 //! data. On non-Linux systems the observer, if enabled, will emit a warning.
 
-use std::io;
+use std::{io, sync::atomic::AtomicU64};
 
 use nix::errno::Errno;
 use serde::Deserialize;
@@ -19,6 +19,10 @@ use crate::signals::Shutdown;
 
 #[cfg(target_os = "linux")]
 use procfs::process::Process;
+
+/// Expose the process' current RSS consumption, allowing abstractions to be
+/// built on top in the Target implementation.
+pub(crate) static RSS_BYTES: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 /// Errors produced by [`Server`]
@@ -120,7 +124,7 @@ impl Server {
     #[allow(clippy::similar_names)]
     #[cfg(target_os = "linux")]
     pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
-        use std::time::Duration;
+        use std::{sync::atomic::Ordering, time::Duration};
 
         use metrics::gauge;
         use procfs::Uptime;
@@ -175,8 +179,11 @@ impl Server {
                         let vsize: u64 = all_stats.iter().map(|stat| stat.vsize).sum();
                         let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.num_threads).unwrap()).sum();
 
+                        let rss_bytes: u64 = rss*page_size;
+                        RSS_BYTES.store(rss_bytes, Ordering::Relaxed);
+
                         // Number of pages that the process has in real memory.
-                        gauge!("rss_bytes", (rss * page_size) as f64);
+                        gauge!("rss_bytes", rss_bytes as f64);
                         // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
                         gauge!("rsslim_bytes", rsslim as f64);
                         // The size in bytes of the process in virtual memory.

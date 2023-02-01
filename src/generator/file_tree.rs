@@ -23,7 +23,7 @@ use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::{signals::Shutdown, target};
 
 static FILE_EXTENSION: &str = "txt";
 
@@ -157,7 +157,9 @@ impl FileTree {
 
         loop {
             tokio::select! {
-                _ = open_rate_limiter.until_ready() => {
+                _ = open_rate_limiter.until_ready(), if
+                    !target::Meta::rss_bytes_limit_exceeded()
+                => {
                     let node = iter.next().unwrap();
                     if node.exists() {
                         File::open(node.as_path()).await?;
@@ -170,7 +172,12 @@ impl FileTree {
                     }
                 },
                 _ = rename_rate_limiter.until_ready() => {
-                     if let Some(folder) = folders.choose_mut(&mut self.rng) {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    if let Some(folder) = folders.choose_mut(&mut self.rng) {
                         rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }
                 }

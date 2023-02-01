@@ -35,6 +35,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 
 #[derive(Debug)]
@@ -273,6 +274,12 @@ impl Child {
 
             tokio::select! {
                 _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+
                     {
                         fp.write_all(&block.bytes).await?;
                         fp.flush().await?;

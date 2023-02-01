@@ -4,6 +4,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 use byte_unit::{Byte, ByteUnit};
 use governor::{
@@ -173,6 +174,11 @@ impl UnixDatagram {
 
             tokio::select! {
                 _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
