@@ -54,10 +54,16 @@ pub struct Meta {}
 
 impl Meta {
     /// Set the maximum RSS bytes limit
+    ///
+    /// # Errors
+    ///
+    /// Will fail if the `byte_unit::Byte` value given is larger than `u64::MAX`
+    /// bytes.
     #[inline]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn set_rss_bytes_limit(limit: byte_unit::Byte) -> Result<(), MetaError> {
         let raw_limit: u128 = limit.get_bytes();
-        if raw_limit > (u64::MAX as u128) {
+        if raw_limit > u128::from(u64::MAX) {
             return Err(MetaError::ByteLimitTooLarge);
         }
 
