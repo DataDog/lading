@@ -36,6 +36,7 @@ use crate::{
     payload,
     payload::SplunkHecEncoding,
     signals::Shutdown,
+    target,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -244,6 +245,11 @@ impl SplunkHec {
 
             tokio::select! {
                 _ = rate_limiter.until_n_ready(total_bytes) => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     let client = client.clone();
                     let labels = labels.clone();
                     let uri = uri.clone();

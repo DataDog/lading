@@ -177,9 +177,12 @@ impl Tcp {
                         }
                     }
                 }
-                _ = self.rate_limiter.until_n_ready(total_bytes), if
-                    connection.is_some() && !target::Meta::rss_bytes_limit_exceeded()
-                => {
+                _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     let mut client = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {

@@ -4,7 +4,7 @@
 //! losely to the target but instead, without coordination, merely generates
 //! a process tree.
 
-use crate::signals::Shutdown;
+use crate::{signals::Shutdown, target};
 use governor::{state::InsufficientCapacity, Quota, RateLimiter};
 use is_executable::IsExecutable;
 use nix::{
@@ -327,6 +327,11 @@ impl ProcessTree {
         loop {
             tokio::select! {
                 _ = process_rate_limiter.until_ready() => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     // using pid as target pid just to pass laging clap constraints
                     let output = Command::new(lading_path)
                         .args(["--target-pid", "1"])

@@ -22,6 +22,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -179,6 +180,11 @@ impl Udp {
                     }
                 }
                 _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     let sock = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {

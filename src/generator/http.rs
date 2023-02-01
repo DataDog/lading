@@ -229,7 +229,12 @@ impl Http {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = rate_limiter.until_n_ready(total_bytes), if !target::Meta::rss_bytes_limit_exceeded() => {
+                _ = rate_limiter.until_n_ready(total_bytes) => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     let client = client.clone();
                     let labels = labels.clone();
                     let method = method.clone();

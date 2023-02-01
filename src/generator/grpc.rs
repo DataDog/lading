@@ -27,6 +27,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
+    target,
 };
 
 /// Errors produced by [`Grpc`]
@@ -296,6 +297,11 @@ impl Grpc {
 
             tokio::select! {
                 _ = self.rate_limiter.until_n_ready(total_bytes) => {
+                    if target::Meta::rss_bytes_limit_exceeded() {
+                        info!("RSS byte limit exceeded, backing off...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     let block_length = blk.bytes.len();
                     let labels = self.metric_labels.clone();
                     counter!("requests_sent", 1, &labels);

@@ -24,6 +24,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use metrics::gauge;
 use nix::{
     errno::Errno,
     sys::signal::{kill, SIGTERM},
@@ -59,6 +60,9 @@ impl Meta {
         if raw_limit > (u64::MAX as u128) {
             return Err(MetaError::ByteLimitTooLarge);
         }
+
+        gauge!("rss_bytes_limit", raw_limit as f64);
+
         RSS_BYTES_LIMIT.store(raw_limit as u64, Ordering::Relaxed);
         Ok(())
     }
@@ -67,6 +71,11 @@ impl Meta {
     pub(crate) fn rss_bytes_limit_exceeded() -> bool {
         let limit: u64 = RSS_BYTES_LIMIT.load(Ordering::Relaxed);
         let current: u64 = RSS_BYTES.load(Ordering::Relaxed);
+
+        gauge!(
+            "rss_bytes_limit_overage",
+            current.saturating_sub(limit) as f64
+        );
 
         current > limit
     }
