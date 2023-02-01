@@ -10,10 +10,10 @@ pub(crate) struct Event {
     title_utf8_length: usize,
     text_utf8_length: usize,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagStr>,
-    aggregation_key: Option<common::MetricTagStr>,
+    hostname: Option<common::MetricTagKey>,
+    aggregation_key: Option<common::MetricTagKey>,
     priority: Option<Priority>,
-    source_type_name: Option<common::MetricTagStr>,
+    source_type_name: Option<common::MetricTagKey>,
     alert_type: Option<Alert>,
     tags: Option<common::Tags>,
 }
