@@ -6,31 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0-rc6]
+## [0.12.0]
 ## Added
 - Added the ability for lading to back-off load generation based on RSS limits.
 - Process tree generator contributed by @safchain
-## Changed
-- Adjusted the cardinality of DogStatsD keys, values and names downward.
-
-## [0.12.0-rc5]
-## Changed
 - Fixed: OpenTelemetry message length calculation corrected for some messages.
 - **Breaking change:** Split UDS support between explict datagram and stream modules.
 - Fixed: Corrected mistakes in the DogStatsD payload implementation.
-
-## [0.12.0-rc4]
+## Changed
+- Adjusted the cardinality of DogStatsD keys, values and names downward.
+- **Breaking change:** Added support for DogStatsD payload.
+- **Breaking change:** Support for Kafka generator is removed.
 ## Fixed
 - Lading's UDS will now re-attempt to connect to a UDS socket, rather than
   erroring.
-
-## [0.12.0-rc3]
-## Changed
-- **Breaking change:** Added support for DogStatsD payload.
-
-## [0.12.0]
-## Changed
-- **Breaking change:** Support for Kafka generator is removed.
 
 ## [0.11.3] - 2022-12-12
 ### Fixed
