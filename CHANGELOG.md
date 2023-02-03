@@ -5,8 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.12.0-rc6]
 ## Added
+- Added the ability for lading to back-off load generation based on RSS limits.
 - Process tree generator contributed by @safchain
+## Changed
+- Adjusted the cardinality of DogStatsD keys, values and names downward.
 
 ## [0.12.0-rc5]
 ## Changed
