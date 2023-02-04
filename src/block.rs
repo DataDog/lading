@@ -8,8 +8,9 @@ use rand::{prelude::SliceRandom, Rng};
 
 use crate::payload::{self, Serialize};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, thiserror::Error)]
 pub enum Error {
+    #[error("Chunk error: {0}")]
     Chunk(ChunkError),
 }
 
@@ -18,15 +19,6 @@ impl From<ChunkError> for Error {
         Error::Chunk(error)
     }
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            Error::Chunk(e) => std::fmt::Display::fmt(e, f),
-        }
-    }
-}
-impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub(crate) struct Block {

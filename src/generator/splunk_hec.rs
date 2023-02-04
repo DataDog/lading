@@ -4,17 +4,11 @@ mod acknowledgements;
 
 use std::{
     num::{NonZeroU32, NonZeroUsize},
-    sync::Arc,
     time::Duration,
 };
 
 use acknowledgements::Channels;
 use byte_unit::{Byte, ByteUnit};
-use governor::{
-    clock,
-    state::{self, direct},
-    Quota, RateLimiter,
-};
 use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
@@ -36,7 +30,7 @@ use crate::{
     payload,
     payload::SplunkHecEncoding,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -79,14 +73,17 @@ pub struct Config {
     pub parallel_connections: u16,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(thiserror::Error, Debug, Clone, Copy)]
 /// Errors produced by [`SplunkHec`].
 pub enum Error {
     /// User supplied HEC path is invalid.
+    #[error("User supplied HEC path is not valid")]
     InvalidHECPath,
     /// Interior acknowledgement error.
+    #[error("Interior error: {0}")]
     Acknowledgements(acknowledgements::Error),
     /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
     Block(block::Error),
 }
 
@@ -103,7 +100,7 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
@@ -167,7 +164,6 @@ impl SplunkHec {
             &labels
         );
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let uri = get_uri_by_format(&config.target_uri, config.format);
 
         let block_chunks = chunk_bytes(
@@ -202,7 +198,7 @@ impl SplunkHec {
             uri,
             token: config.token,
             block_cache,
-            rate_limiter,
+            throttle: Throttle::new(bytes_per_second),
             metric_labels: labels,
             shutdown,
         })
@@ -226,7 +222,6 @@ impl SplunkHec {
             .set_host(false)
             .build_http();
 
-        let rate_limiter = Arc::new(self.rate_limiter);
         let uri = self.uri;
         let labels = self.metric_labels;
 
@@ -244,12 +239,7 @@ impl SplunkHec {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = rate_limiter.until_n_ready(total_bytes) => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = self.throttle.wait_for(total_bytes) => {
                     let client = client.clone();
                     let labels = labels.clone();
                     let uri = uri.clone();

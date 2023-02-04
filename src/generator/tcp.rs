@@ -6,11 +6,6 @@ use std::{
 };
 
 use byte_unit::{Byte, ByteUnit};
-use governor::{
-    clock, state,
-    state::direct::{self, InsufficientCapacity},
-    Quota, RateLimiter,
-};
 use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -21,7 +16,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -41,13 +36,11 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug, Copy, Clone)]
 /// Errors produced by [`Tcp`].
 pub enum Error {
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious
-    /// bug.
-    Governor(InsufficientCapacity),
     /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
     Block(block::Error),
 }
 
@@ -57,19 +50,13 @@ impl From<block::Error> for Error {
     }
 }
 
-impl From<InsufficientCapacity> for Error {
-    fn from(error: InsufficientCapacity) -> Self {
-        Error::Governor(error)
-    }
-}
-
 #[derive(Debug)]
 /// The TCP generator.
 ///
 /// This generator is responsible for connecting to the target via TCP
 pub struct Tcp {
     addr: SocketAddr,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
@@ -119,7 +106,6 @@ impl Tcp {
             &labels
         );
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let block_chunks = chunk_bytes(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
@@ -137,7 +123,7 @@ impl Tcp {
         Ok(Self {
             addr,
             block_cache,
-            rate_limiter,
+            throttle: Throttle::new(bytes_per_second),
             metric_labels: labels,
             shutdown,
         })
@@ -177,12 +163,7 @@ impl Tcp {
                         }
                     }
                 }
-                _ = self.rate_limiter.until_n_ready(total_bytes), if connection.is_some() => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let mut client = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {

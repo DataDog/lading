@@ -4,14 +4,9 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 use byte_unit::{Byte, ByteUnit};
-use governor::{
-    clock,
-    state::{self, direct, InsufficientCapacity},
-    Quota, RateLimiter,
-};
 use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -42,10 +37,6 @@ pub struct Config {
 /// Errors produced by [`UnixStream`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious
-    /// bug.
-    #[error("Rate limiter has insufficient capacity for payload: {0}")]
-    Governor(#[from] InsufficientCapacity),
     /// Creation of payload blocks failed.
     #[error("Creation of payload blocks failed: {0}")]
     Block(#[from] block::Error),
@@ -64,7 +55,7 @@ pub enum Error {
 /// streams.
 pub struct UnixStream {
     path: PathBuf,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
@@ -114,7 +105,6 @@ impl UnixStream {
             &labels
         );
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let block_chunks = chunk_bytes(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
@@ -126,7 +116,7 @@ impl UnixStream {
         Ok(Self {
             path: config.path,
             block_cache,
-            rate_limiter,
+            throttle: Throttle::new(bytes_per_second),
             metric_labels: labels,
             shutdown,
         })
@@ -168,13 +158,7 @@ impl UnixStream {
                         }
                     }
                 }
-                _ = self.rate_limiter.until_n_ready(total_bytes), if unix_stream.is_some() => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-
+                _ = self.throttle.wait_for(total_bytes), if unix_stream.is_some() => {
                     // NOTE When we write into a unix stream it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
