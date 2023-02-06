@@ -4,8 +4,7 @@
 //! losely to the target but instead, without coordination, merely generates
 //! a process tree.
 
-use crate::{signals::Shutdown, target};
-use governor::{state::InsufficientCapacity, Quota, RateLimiter};
+use crate::{signals::Shutdown, throttle::Throttle};
 use is_executable::IsExecutable;
 use nix::{
     sys::wait::{waitpid, WaitPidFlag, WaitStatus},
@@ -61,8 +60,6 @@ impl fmt::Display for ExecutionError {
 #[derive(Debug)]
 /// Errors produced by [`ProcessTree`].
 pub enum Error {
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious bug.
-    Governor(InsufficientCapacity),
     /// The file is not executable
     NotExecutable(NotExecutable),
     /// Wrapper around [`serde_yaml::Error`].
@@ -76,18 +73,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Governor(e) => write!(f, "governor error : {e}"),
             Error::NotExecutable(e) => write!(f, "executable error : {e}"),
             Error::Serialization(e) => write!(f, "serialization error : {e}"),
             Error::Io(e) => write!(f, "io error : {e}"),
             Error::ExecutionError(e) => write!(f, "execution error : {e}"),
         }
-    }
-}
-
-impl From<InsufficientCapacity> for Error {
-    fn from(error: InsufficientCapacity) -> Self {
-        Error::Governor(error)
     }
 }
 
@@ -321,17 +311,12 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let process_rate_limiter = RateLimiter::direct(Quota::per_second(self.max_tree_per_second));
+        let process_throttle = Throttle::new(self.max_tree_per_second);
         let lading_path = self.lading_path.to_str().unwrap();
 
         loop {
             tokio::select! {
-                _ = process_rate_limiter.until_ready() => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = process_throttle.wait() => {
                     // using pid as target pid just to pass laging clap constraints
                     let output = Command::new(lading_path)
                         .args(["--target-pid", "1"])

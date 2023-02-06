@@ -16,11 +16,6 @@ use std::{
 
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
-use governor::{
-    clock, state,
-    state::direct::{self, InsufficientCapacity},
-    Quota, RateLimiter,
-};
 use metrics::{counter, gauge};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -35,20 +30,20 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileGen`].
 pub enum Error {
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious
-    /// bug.
-    Governor(InsufficientCapacity),
     /// Wrapper around [`std::io::Error`].
+    #[error("Io error: {0}")]
     Io(::std::io::Error),
     /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
     Block(block::Error),
     /// Child sub-task error.
+    #[error("Child join error: {0}")]
     Child(JoinError),
 }
 
@@ -61,12 +56,6 @@ impl From<block::Error> for Error {
 impl From<JoinError> for Error {
     fn from(error: JoinError) -> Self {
         Error::Child(error)
-    }
-}
-
-impl From<InsufficientCapacity> for Error {
-    fn from(error: InsufficientCapacity) -> Self {
-        Error::Governor(error)
     }
 }
 
@@ -183,11 +172,7 @@ impl FileGen {
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
         for _ in 0..config.duplicates {
-            let rate_limiter: RateLimiter<
-                direct::NotKeyed,
-                state::InMemoryState,
-                clock::QuantaClock,
-            > = RateLimiter::direct(Quota::per_second(bytes_per_second));
+            let throttle = Throttle::new(bytes_per_second);
 
             let block_cache =
                 construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
@@ -196,7 +181,7 @@ impl FileGen {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 bytes_per_second,
-                rate_limiter,
+                throttle,
                 block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
@@ -239,7 +224,7 @@ struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
@@ -273,13 +258,7 @@ impl Child {
             let total_newlines = block.lines;
 
             tokio::select! {
-                _ = self.rate_limiter.until_n_ready(total_bytes) => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-
+                _ = self.throttle.wait_for(total_bytes) => {
                     {
                         fp.write_all(&block.bytes).await?;
                         fp.flush().await?;

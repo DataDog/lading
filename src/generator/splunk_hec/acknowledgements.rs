@@ -16,7 +16,7 @@ use super::{AckSettings, SPLUNK_HEC_CHANNEL_HEADER};
 
 type AckId = u64;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(thiserror::Error, Debug, Clone, Copy)]
 pub enum Error {}
 
 #[derive(Debug, Clone)]

@@ -1,16 +1,8 @@
 //! The HTTP protocol speaking generator.
 
-use std::{
-    num::{NonZeroU32, NonZeroUsize},
-    sync::Arc,
-};
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use byte_unit::{Byte, ByteUnit};
-use governor::{
-    clock, state,
-    state::direct::{self, InsufficientCapacity},
-    Quota, RateLimiter,
-};
 use hyper::{
     client::{Client, HttpConnector},
     header::CONTENT_LENGTH,
@@ -27,7 +19,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -66,19 +58,20 @@ pub struct Config {
     pub parallel_connections: u16,
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Http`].
 pub enum Error {
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious
-    /// bug.
-    Governor(InsufficientCapacity),
     /// Wrapper around [`std::io::Error`].
+    #[error("Io error: {0}")]
     Io(::std::io::Error),
     /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
     Block(block::Error),
     /// Wrapper around [`hyper::Error`].
+    #[error("Hyper error: {0}")]
     Hyper(hyper::Error),
     /// Wrapper around [`hyper::http::Error`].
+    #[error("HTTP error: {0}")]
     Http(hyper::http::Error),
 }
 
@@ -100,12 +93,6 @@ impl From<hyper::http::Error> for Error {
     }
 }
 
-impl From<InsufficientCapacity> for Error {
-    fn from(error: InsufficientCapacity) -> Self {
-        Error::Governor(error)
-    }
-}
-
 impl From<::std::io::Error> for Error {
     fn from(error: ::std::io::Error) -> Self {
         Error::Io(error)
@@ -122,7 +109,7 @@ pub struct Http {
     method: hyper::Method,
     headers: hyper::HeaderMap,
     parallel_connections: u16,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
@@ -169,7 +156,6 @@ impl Http {
             &labels
         );
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         match config.method {
             Method::Post {
                 variant,
@@ -193,7 +179,7 @@ impl Http {
                     method: hyper::Method::POST,
                     headers: config.headers,
                     block_cache,
-                    rate_limiter,
+                    throttle: Throttle::new(bytes_per_second),
                     metric_labels: labels,
                     shutdown,
                 })
@@ -217,7 +203,6 @@ impl Http {
             .retry_canceled_requests(false)
             .set_host(false)
             .build_http();
-        let rate_limiter = Arc::new(self.rate_limiter);
         let method = self.method;
         let uri = self.uri;
 
@@ -229,12 +214,7 @@ impl Http {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = rate_limiter.until_n_ready(total_bytes) => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = self.throttle.wait_for(total_bytes) => {
                     let client = client.clone();
                     let labels = labels.clone();
                     let method = method.clone();

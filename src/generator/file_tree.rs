@@ -17,20 +17,20 @@ use std::{
     str,
 };
 
-use governor::{Quota, RateLimiter};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::{signals::Shutdown, target};
+use crate::{signals::Shutdown, throttle::Throttle};
 
 static FILE_EXTENSION: &str = "txt";
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileTree`].
 pub enum Error {
     /// Wrapper around [`std::io::Error`].
+    #[error("Io error: {0}")]
     Io(::std::io::Error),
 }
 
@@ -149,17 +149,15 @@ impl FileTree {
     ///
     /// Function will panic if one node is not path is not populated properly
     pub async fn spin(mut self) -> Result<(), Error> {
-        let open_rate_limiter = RateLimiter::direct(Quota::per_second(self.open_per_second));
-        let rename_rate_limiter = RateLimiter::direct(Quota::per_second(self.rename_per_second));
+        let open_throttle = Throttle::new(self.open_per_second);
+        let rename_throttle = Throttle::new(self.rename_per_second);
 
         let mut iter = self.nodes.iter().cycle();
         let mut folders = Vec::with_capacity(self.total_folder);
 
         loop {
             tokio::select! {
-                _ = open_rate_limiter.until_ready(), if
-                    !target::Meta::rss_bytes_limit_exceeded()
-                => {
+                _ = open_throttle.wait() => {
                     let node = iter.next().unwrap();
                     if node.exists() {
                         File::open(node.as_path()).await?;
@@ -171,12 +169,7 @@ impl FileTree {
                         }
                     }
                 },
-                _ = rename_rate_limiter.until_ready() => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = rename_throttle.wait() => {
                     if let Some(folder) = folders.choose_mut(&mut self.rng) {
                         rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }

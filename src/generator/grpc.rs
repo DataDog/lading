@@ -7,11 +7,6 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, Bytes};
-use governor::{
-    clock, state,
-    state::direct::{self, InsufficientCapacity},
-    Quota, RateLimiter,
-};
 use http::{uri::PathAndQuery, Uri};
 use metrics::{counter, gauge};
 use rand::rngs::StdRng;
@@ -27,21 +22,21 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    target,
+    throttle::Throttle,
 };
 
 /// Errors produced by [`Grpc`]
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// The remote RPC endpoint returned an error.
+    #[error("RPC endpoint error: {0}")]
     Rpc(tonic::Status),
     /// gRPC transport error
+    #[error("gRPC transport error: {0}")]
     Transport(tonic::transport::Error),
     /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
     Block(block::Error),
-    /// Rate limiter has insuficient capacity for payload. Indicates a serious
-    /// bug.
-    Governor(InsufficientCapacity),
 }
 
 impl From<tonic::Status> for Error {
@@ -61,24 +56,6 @@ impl From<block::Error> for Error {
         Error::Block(error)
     }
 }
-
-impl From<InsufficientCapacity> for Error {
-    fn from(error: InsufficientCapacity) -> Self {
-        Error::Governor(error)
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            Error::Transport(e) => std::fmt::Display::fmt(e, f),
-            Error::Rpc(e) => std::fmt::Display::fmt(e, f),
-            Error::Block(e) => std::fmt::Display::fmt(e, f),
-            Error::Governor(e) => std::fmt::Display::fmt(e, f),
-        }
-    }
-}
-impl std::error::Error for Error {}
 
 /// Config for [`Grpc`]
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -157,7 +134,7 @@ pub struct Grpc {
     target_uri: Uri,
     rpc_path: PathAndQuery,
     shutdown: Shutdown,
-    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    throttle: Throttle,
     block_cache: Vec<Block>,
     metric_labels: Vec<(String, String)>,
 }
@@ -208,7 +185,6 @@ impl Grpc {
             &labels
         );
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(bytes_per_second));
         let block_chunks = chunk_bytes(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
@@ -230,7 +206,7 @@ impl Grpc {
             config,
             shutdown,
             block_cache,
-            rate_limiter,
+            throttle: Throttle::new(bytes_per_second),
             metric_labels: labels,
         })
     }
@@ -296,12 +272,7 @@ impl Grpc {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.rate_limiter.until_n_ready(total_bytes) => {
-                    if target::Meta::rss_bytes_limit_exceeded() {
-                        info!("RSS byte limit exceeded, backing off...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
+                _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     let labels = self.metric_labels.clone();
                     counter!("requests_sent", 1, &labels);
