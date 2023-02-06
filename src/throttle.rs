@@ -50,6 +50,7 @@ impl Throttle {
             if target::Meta::rss_bytes_limit_exceeded() {
                 info!("RSS byte limit exceeded, backing off...");
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            } else {
                 break;
             }
         }
