@@ -174,9 +174,9 @@ impl Server {
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
 
-                        let rss: u64 = all_stats.iter().map(|stat| stat.rss).sum();
-                        let rsslim: u64 = all_stats.iter().map(|stat| stat.rsslim).sum();
-                        let vsize: u64 = all_stats.iter().map(|stat| stat.vsize).sum();
+                        let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.rss));
+                        let rsslim: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.rsslim));
+                        let vsize: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.vsize));
                         let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.num_threads).unwrap()).sum();
 
                         let rss_bytes: u64 = rss*page_size;
