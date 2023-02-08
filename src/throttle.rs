@@ -1,14 +1,13 @@
 //! A throttle for input into the target program.
 
-// There are three signals that are obeyed in this Throttle,
-
+use metrics::gauge;
 use std::{cmp, num::NonZeroU32};
 use tokio::time::{self, Duration, Instant};
 use tracing::info;
 
 use crate::target;
 
-const INTERVAL_TICKS: u128 = 1_000_000;
+const INTERVAL_TICKS: u64 = 1_000_000;
 
 /// Errors produced by [`Throttle`].
 #[derive(thiserror::Error, Debug)]
@@ -18,55 +17,38 @@ pub(crate) enum Error {
     Capacity,
 }
 
-// // Knuth TAOCP vol 2, 3rd edition, page 232, discussed
-// // https://www.johndcook.com/blog/standard_deviation/ and
-// // https://math.stackexchange.com/a/116344.
-// #[derive(Default, Debug)]
-// struct Welford {
-//     m_n: u64,
-//     m_oldM: f64,
-//     m_newM: f64,
-//     m_oldS: f64,
-//     m_newS: f64,
-// }
+#[derive(Debug)]
+struct Clock {
+    start: Instant,
+}
 
-// impl Welford {
-//     fn push(&mut self, value: f64) {
-//         self.m_n += 1;
-//         if self.m_n == 1 {
-//             self.m_newM = value;
-//             self.m_oldM = value;
-//             self.m_oldS = 0.0;
-//         } else {
-//             self.m_newM = self.m_oldM + (value - self.m_oldM) / (self.m_n as f64);
-//             self.m_newS = self.m_oldS + (value - self.m_oldM) * (value - self.m_newM);
+impl Default for Clock {
+    fn default() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+}
 
-//             self.m_oldM = self.m_newM;
-//             self.m_oldS = self.m_newS;
-//         }
-//     }
+impl Clock {
+    /// Return the number of ticks since `Clock` was created.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if the number of ticks elapsed is greater than u64::MAX.
+    fn ticks_elapsed(&self) -> u64 {
+        let now = Instant::now();
+        let ticks_since: u128 = now.duration_since(self.start).as_micros();
+        if ticks_since > (u64::MAX as u128) {
+            panic!("584,554 years elapsed since last call!");
+        }
+        ticks_since as u64
+    }
 
-//     fn mean(&self) -> f64 {
-//         if self.m_n == 0 {
-//             0.0
-//         } else {
-//             self.m_newM
-//         }
-//     }
-
-//     fn variance(&self) -> f64 {
-//         if self.m_n > 1 {
-//             let shifted_m_n = self.m_n - 1;
-//             self.m_newS / (shifted_m_n as f64)
-//         } else {
-//             0.0
-//         }
-//     }
-
-//     fn stdev(&self) -> f64 {
-//         self.variance().sqrt()
-//     }
-// }
+    async fn wait(&self, ticks: u64) {
+        time::sleep(Duration::from_micros(ticks)).await
+    }
+}
 
 #[derive(Debug)]
 /// A throttle type.
@@ -92,18 +74,22 @@ pub(crate) enum Error {
 /// have been were every request satisfied and, once a second, sets the new
 /// budget as the midway point between the previous budget and actual
 pub(crate) struct Throttle {
-    spare_capacity: u128,
-
-    maximum_capacity: u128,
+    spare_capacity: u64,
+    /// The maximum capacity of `Throttle` past which no more capacity will be
+    /// added.
+    maximum_capacity: u64,
     /// The budget that was requested in the interval, whether it was satisfied
     /// or not.
-    requested_budget: u128,
-    projected_budget: u128,
-    /// The instance the current interval began.
-    interval_start: Instant,
+    requested_budget: u64,
+    /// The budget that was projected for the interval, a 'soft' limit. Will
+    /// never be greater than `maximum_capacity`.
+    projected_budget: u64,
     /// The interval number, primarily useful for testing and debugging.
-    interval: u128,
-    //    rate_limiter: RateLimiter<direct::NotKeyed, state::InMemoryState, clock::QuantaClock>,
+    interval: u64,
+    /// Per tick, how much capacity is added to the throttle.
+    refill_per_tick: u64,
+    /// The clock that this `Throttle` will use.
+    clock: Clock,
 }
 
 impl Throttle {
@@ -112,22 +98,20 @@ impl Throttle {
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
 
-        // let refill_per_tick = (maximum_capacity.get() as f64) / 1_000_000.0;
+        let refill_per_tick = (maximum_capacity.get() as u64) / INTERVAL_TICKS;
 
         // let rate_limiter = RateLimiter::direct(Quota::per_second(maximum_capacity));
         // let maximum_capacity = maximum_capacity.get();
         // let interval_actual_budget = maximum_capacity / 10;
 
         Self {
-            maximum_capacity: maximum_capacity.get() as u128,
-
-            //            rate_limiter,
-            // interval_actual_budget,
+            maximum_capacity: maximum_capacity.get() as u64,
+            refill_per_tick,
             requested_budget: 0,
-            projected_budget: maximum_capacity.get() as u128 / 2,
-            interval_start: Instant::now(),
+            projected_budget: maximum_capacity.get() as u64 / 2,
             interval: 0,
             spare_capacity: 0,
+            clock: Clock::default(),
         }
     }
 
@@ -139,10 +123,33 @@ impl Throttle {
     }
 
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
+        // Okay, here's the idea. At the base of `Throttle` is a cell rate
+        // algorithm. We have bucket that gradually fills up and when it's full
+        // it doesn't fill up anymore. Callers draw down on this capacity and if
+        // they draw down more than is available in the bucket they're made to
+        // wait.
+        //
+        // We augment this in two ways. The first is a binary on/off with regard
+        // to target RSS limit: if the target is above the limit we hang the
+        // caller for one second, else we don't. The second is a trick we play
+        // with capacity. The bucket is of a certain, fixed size but we draw a
+        // 'projected budget' somewhere below that capacity and hold the client
+        // to that. If they don't meet the projected budget in an 'interval' --
+        // one second -- their next projected budget is lower. If they go above
+        // that projected budget their next interval has more. The goal is to
+        // narrow in on a 'true' rate for the caller.
+
+        gauge!("throttle_spare_capacity", self.spare_capacity as f64);
+        gauge!("throttle_refills_per_tick", self.refill_per_tick as f64);
+        gauge!("throttle_requested_budget", self.requested_budget as f64);
+        gauge!("throttle_projected_budget", self.projected_budget as f64);
+
+        // RSS limit signal. Thankfully very simple: a loop that polls
+        // `rss_bytes_limit_exceeded` once a second.
         loop {
             if target::Meta::rss_bytes_limit_exceeded() {
                 info!("RSS byte limit exceeded, backing off...");
-                time::sleep(Duration::from_secs(1)).await;
+                self.clock.wait(INTERVAL_TICKS).await;
             } else {
                 break;
             }
@@ -150,29 +157,34 @@ impl Throttle {
 
         // Fast bail-out. There's no way for this to ever be satisfied and is a
         // bug on the part of the caller, arguably.
-        if request.get() as u128 > self.maximum_capacity {
+        if request.get() as u64 > self.maximum_capacity {
             return Err(Error::Capacity);
         }
 
-        // Determine if its time for the budget to be recalculated. If we have
-        // passed the second boundary since the budget anchor was set we look to see if the previous budget was used. If not, we reset to the actual used budget, if yes we
-
-        // Wake up and compute how much the throttle capacity is refilled since
-        // we were last called.
-        let now = Instant::now();
-        let ticks_since = now.duration_since(self.interval_start).as_micros();
-        let refilled_capacity: u128 = cmp::max(
-            ticks_since.wrapping_mul(f64::MAX as u128) + self.spare_capacity,
+        // Now that the preliminaries are out of the way, wake up and compute
+        // how much the throttle capacity is refilled since we were last
+        // called. Depending on how long ago this was we may have completely
+        // filled up throttle capacity. Note we fill to the _projected_ budget
+        // and not the maximum capacity.
+        let ticks_since = self.clock.ticks_elapsed();
+        let refilled_capacity: u64 = cmp::min(
+            ticks_since
+                .wrapping_mul(f64::MAX as u64)
+                .wrapping_mul(self.refill_per_tick)
+                .wrapping_add(self.spare_capacity),
             self.projected_budget,
         );
 
-        // Figure out if we're in the same interval or not. If we are, increase
-        // interval_requested_budget. If we are not see if the client ended the
-        // interval with budget remaining, adjust refill rate downward, else
-        // upward.
+        // Now that capacity is refreshed it's time to adjust the projected
+        // budget. This we do by determining if we've moved into a new interval
+        // and, if we have, raising that budget. Note that if we skip multiple
+        // intervals between calls we do not currently reduce the projected
+        // budget for those 'missing' intervals, although that would be
+        // interesting to do maybe.
+
         let current_interval = ticks_since % INTERVAL_TICKS;
         if current_interval != self.interval {
-            // interval elapsed
+            // We are not in the same interval.
             self.interval = current_interval;
             // If the client requested budget is lower than the projected budget
             // we set the next interval's projected budget to the requested
@@ -180,64 +192,33 @@ impl Throttle {
             if self.requested_budget <= self.projected_budget {
                 self.projected_budget = self.requested_budget;
             } else {
-                self.projected_budget = cmp::max(
+                self.projected_budget = cmp::min(
                     self.projected_budget + (self.projected_budget / 4),
                     self.maximum_capacity,
                 );
             }
             self.requested_budget = 0;
+        } else {
+            // Intentionally blank. There is nothing to do in the event we are
+            // in the same interval, with regard to budgets.
         }
 
-        self.requested_budget = self.requested_budget.wrapping_add(request.get() as u128);
+        self.requested_budget = self.requested_budget.wrapping_add(request.get() as u64);
 
-        let capacity_request = request.get() as u128;
+        let capacity_request = request.get() as u64;
         if refilled_capacity > capacity_request {
+            // If the refilled capacity is greater than the request we respond
+            // to the caller immediately and store the spare capacity for next
+            // call.
             self.spare_capacity = refilled_capacity - capacity_request;
         } else {
+            // If the refill is not sufficient we calculate how many ticks will
+            // need to pass before capacity is sufficient, force the client to
+            // wait that amount of time.
+            self.spare_capacity = 0;
             let slop = capacity_request - refilled_capacity;
-            time::sleep(Duration::from_micros(slop as u64)).await;
+            self.clock.wait(slop).await;
         }
         Ok(())
-
-        // satisfy
-        // the request or wait enough ticks to do so. Either way we increase the requested If we are not,
-
-        // let seconds_elapsed = self.interval_start.elapsed().as_secs();
-        // if seconds_elapsed > 0 {
-        //     self.interval += seconds_elapsed;
-        // }
-
-        // Are we in the same interval or not?
-
-        // When the refilled_capacity is greater than the user requested capacity we settle the request, adjusting capacity and budget
-        // if refilled_capacity >
-
-        // // We check whether we're within the current interval or have moved
-        // // beyond it. If we are within the current interval we bump the
-        // // requested_budget and then wait for the inner rate limiter,
-        // // returning. This will potentially push us into the next interval but
-        // // avoids the situation where we accumulate in the interior rate limiter
-        // // overmuch and then burst at the start of each interval.
-        // //
-        // // If we are beyond `interval` then we bump the interval, recording its
-        // // new instant, and fiddle with the budget based on previous requests.
-        // if self.interval_start.elapsed() <= self.interval_width {
-        //     self.interval += 1;
-        //     self.interval_requested_budget =
-        //         self.interval_actual_budget.wrapping_add(capacity.get());
-
-        //     // Wait for the rate limiter, then check that the budget requested
-        //     // has not exceeded the budget for the interval.
-        //     self.rate_limiter.until_n_ready(capacity).await.unwrap();
-        //     if self.interval_requested_budget > self.interval_actual_budget {
-        //         return Ok(None);
-        //     }
-        //     unimplemented!()
-        // } else {
-        //     unimplemented!()
-        // }
-
-        // self.rate_limiter.until_n_ready(capacity).await.unwrap();
-        // Ok(())
     }
 }
