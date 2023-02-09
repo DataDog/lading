@@ -17,6 +17,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
+async-trait = { version = "0.1", default-features = false, features = [] }
 arbitrary = { version = "1", default-features = false, features = ["derive"] }
 byte-unit = { version = "4.0", features = ["serde"] }
 bytecount = "0.6"

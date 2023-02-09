@@ -1,5 +1,6 @@
 //! A throttle for input into the target program.
 
+use async_trait::async_trait;
 use metrics::gauge;
 use std::{cmp, num::NonZeroU32};
 use tokio::time::{self, Duration, Instant};
@@ -17,12 +18,18 @@ pub(crate) enum Error {
     Capacity,
 }
 
+#[async_trait]
+pub(crate) trait Clock {
+    fn ticks_elapsed(&self) -> u64;
+    async fn wait(&self, ticks: u64);
+}
+
 #[derive(Debug)]
-struct Clock {
+pub(crate) struct RealClock {
     start: Instant,
 }
 
-impl Default for Clock {
+impl Default for RealClock {
     fn default() -> Self {
         Self {
             start: Instant::now(),
@@ -30,7 +37,8 @@ impl Default for Clock {
     }
 }
 
-impl Clock {
+#[async_trait]
+impl Clock for RealClock {
     /// Return the number of ticks since `Clock` was created.
     ///
     /// # Panics
@@ -49,6 +57,8 @@ impl Clock {
         time::sleep(Duration::from_micros(ticks)).await
     }
 }
+
+pub(crate) type Throttle = GenericThrottle<RealClock>;
 
 #[derive(Debug)]
 /// A throttle type.
@@ -73,7 +83,10 @@ impl Clock {
 /// `Throttle` keeps track keep track of the actual budget consumption would
 /// have been were every request satisfied and, once a second, sets the new
 /// budget as the midway point between the previous budget and actual
-pub(crate) struct Throttle {
+pub(crate) struct GenericThrottle<C>
+where
+    C: Clock,
+{
     spare_capacity: u64,
     /// The maximum capacity of `Throttle` past which no more capacity will be
     /// added.
@@ -89,11 +102,20 @@ pub(crate) struct Throttle {
     /// Per tick, how much capacity is added to the throttle.
     refill_per_tick: u64,
     /// The clock that this `Throttle` will use.
-    clock: Clock,
+    clock: C,
 }
 
-impl Throttle {
+impl GenericThrottle<RealClock> {
     pub(crate) fn new(maximum_capacity: NonZeroU32) -> Self {
+        GenericThrottle::with_clock(maximum_capacity, RealClock::default())
+    }
+}
+
+impl<C> GenericThrottle<C>
+where
+    C: Clock,
+{
+    fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
         // We set the maximum capacity of the bucket, X. We say that an
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
@@ -111,8 +133,23 @@ impl Throttle {
             projected_budget: maximum_capacity.get() as u64 / 2,
             interval: 0,
             spare_capacity: 0,
-            clock: Clock::default(),
+            clock,
         }
+    }
+
+    #[cfg(test)]
+    fn maximum_capacity(&self) -> u64 {
+        self.maximum_capacity
+    }
+
+    #[cfg(test)]
+    fn requested_budget(&self) -> u64 {
+        self.requested_budget
+    }
+
+    #[cfg(test)]
+    fn projected_budget(&self) -> u64 {
+        self.projected_budget
     }
 
     #[inline]
@@ -203,7 +240,10 @@ impl Throttle {
             // in the same interval, with regard to budgets.
         }
 
-        self.requested_budget = self.requested_budget.wrapping_add(request.get() as u64);
+        self.requested_budget = cmp::min(
+            self.requested_budget.wrapping_add(request.get() as u64),
+            self.maximum_capacity,
+        );
 
         let capacity_request = request.get() as u64;
         if refilled_capacity > capacity_request {
@@ -221,4 +261,155 @@ impl Throttle {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        num::NonZeroU32,
+        sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+        task::{Context, Poll},
+    };
+
+    use async_trait::async_trait;
+    use futures::{task::noop_waker, Future, FutureExt};
+    use proptest::prelude::*;
+
+    use super::{Clock, GenericThrottle};
+
+    // A test clock for Throttle
+    //
+    // The idea here is `wait` does nothing. Time skips forward by looping
+    // through `tick_progressions`, simulating a setup with no real-time
+    // deadlines. We store -- in a relaxed fashion -- the previous tick wait,
+    // which we add to any progression of time. If we didn't do that waits would
+    // be totally untethered from tick progress, which is not quite right.
+    #[derive(Debug)]
+    struct TestClock {
+        idx: AtomicUsize,
+        previous_wait: AtomicU64,
+        tick_progressions: Vec<u32>, // time can move backward but stdlib returns 0 if that happens
+    }
+
+    impl TestClock {
+        fn new(tick_progressions: Vec<u32>) -> Self {
+            Self {
+                idx: AtomicUsize::new(0),
+                previous_wait: AtomicU64::new(0),
+                tick_progressions,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Clock for TestClock {
+        fn ticks_elapsed(&self) -> u64 {
+            let previous_wait = self.previous_wait.load(Ordering::Relaxed);
+            let mut idx = self.idx.load(Ordering::Acquire);
+            let res: u64 = self.tick_progressions[idx].into();
+            loop {
+                let new_idx = (idx + 1) % self.tick_progressions.len();
+                match self.idx.compare_exchange_weak(
+                    idx,
+                    new_idx,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(x) => idx = x,
+                }
+            }
+            res + previous_wait
+        }
+
+        async fn wait(&self, ticks: u64) {
+            // Do nothing, except store the amount of ticks waited. Losing some
+            // of these or getting them out of order is fine, hence the relaxed.
+            self.previous_wait.store(ticks, Ordering::Relaxed)
+        }
+    }
+
+    fn drive<T>(future: impl Future<Output = T>) -> T {
+        let waker = noop_waker();
+        let mut ctx = Context::from_waker(&waker);
+
+        let mut future = Box::pin(future);
+        loop {
+            match future.poll_unpin(&mut ctx) {
+                Poll::Pending => continue,
+                Poll::Ready(res) => return res,
+            }
+        }
+    }
+
+    fn ticks() -> impl Strategy<Value = Vec<u32>> {
+        prop::collection::vec(any::<u32>(), 1..500)
+    }
+
+    fn nonempty_requests() -> impl Strategy<Value = Vec<u32>> {
+        let vals = any::<u32>().prop_filter("non-zero", |x| *x != 0_u32);
+        prop::collection::vec(vals, 1..10_000)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: u32::MAX,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn projected_budget_always_le_max(
+            tick_progressions in ticks(),
+            maximum_capacity in 1_u32..u32::MAX,
+            requests in nonempty_requests(),
+        ) {
+            let maximum_capacity = NonZeroU32::new(maximum_capacity).unwrap();
+            let requests: Vec<NonZeroU32> = requests
+                .into_iter()
+                .filter(|x| *x > 0)
+                .map(|x| NonZeroU32::new(x).unwrap())
+                .collect();
+
+            let clock = TestClock::new(tick_progressions);
+            let mut throttle = GenericThrottle::with_clock(maximum_capacity, clock);
+
+            for request in requests {
+                assert!(throttle.maximum_capacity() >= throttle.projected_budget());
+                let _: Result<(), _> = drive(throttle.wait_for(request));
+                assert!(throttle.maximum_capacity() >= throttle.projected_budget());
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: u32::MAX,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn requested_budget_always_le_max(
+            tick_progressions in ticks(),
+            maximum_capacity in 1_u32..u32::MAX,
+            requests in nonempty_requests(),
+        ) {
+            let maximum_capacity = NonZeroU32::new(maximum_capacity).unwrap();
+            let requests: Vec<NonZeroU32> = requests
+                .into_iter()
+                .filter(|x| *x > 0)
+                .map(|x| NonZeroU32::new(x).unwrap())
+                .collect();
+
+            let clock = TestClock::new(tick_progressions);
+            let mut throttle = GenericThrottle::with_clock(maximum_capacity, clock);
+
+            for request in requests {
+                assert!(throttle.maximum_capacity() >= throttle.requested_budget());
+                let _: Result<(), _> = drive(throttle.wait_for(request));
+                assert!(throttle.maximum_capacity() >= throttle.requested_budget());
+            }
+        }
+    }
+
+    //    }
 }
