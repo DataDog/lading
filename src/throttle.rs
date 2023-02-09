@@ -152,6 +152,11 @@ where
         self.projected_budget
     }
 
+    #[cfg(test)]
+    fn interval(&self) -> u64 {
+        self.interval
+    }
+
     #[inline]
     pub(crate) async fn wait(&mut self) -> Result<(), Error> {
         // SAFETY: 1_u32 is a non-zero u32.
@@ -206,9 +211,8 @@ where
         let ticks_since = self.clock.ticks_elapsed();
         let refilled_capacity: u64 = cmp::min(
             ticks_since
-                .wrapping_mul(f64::MAX as u64)
-                .wrapping_mul(self.refill_per_tick)
-                .wrapping_add(self.spare_capacity),
+                .saturating_mul(self.refill_per_tick)
+                .saturating_add(self.spare_capacity),
             self.projected_budget,
         );
 
@@ -220,6 +224,7 @@ where
         // interesting to do maybe.
 
         let current_interval = ticks_since % INTERVAL_TICKS;
+        println!("TICKS_SINCE: {ticks_since}");
         if current_interval != self.interval {
             // We are not in the same interval.
             self.interval = current_interval;
@@ -267,13 +272,15 @@ where
 mod test {
     use std::{
         num::NonZeroU32,
-        sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+        sync::Mutex,
         task::{Context, Poll},
     };
 
     use async_trait::async_trait;
     use futures::{task::noop_waker, Future, FutureExt};
     use proptest::prelude::*;
+
+    use crate::throttle::INTERVAL_TICKS;
 
     use super::{Clock, GenericThrottle};
 
@@ -285,17 +292,24 @@ mod test {
     // which we add to any progression of time. If we didn't do that waits would
     // be totally untethered from tick progress, which is not quite right.
     #[derive(Debug)]
+    struct TestClockMeta {
+        idx: usize,
+        ticks_elapsed: u64,
+    }
+
+    #[derive(Debug)]
     struct TestClock {
-        idx: AtomicUsize,
-        previous_wait: AtomicU64,
-        tick_progressions: Vec<u32>, // time can move backward but stdlib returns 0 if that happens
+        meta: Mutex<TestClockMeta>,
+        tick_progressions: Vec<u8>, // time can move backward but stdlib returns 0 if that happens
     }
 
     impl TestClock {
-        fn new(tick_progressions: Vec<u32>) -> Self {
+        fn new(tick_progressions: Vec<u8>) -> Self {
             Self {
-                idx: AtomicUsize::new(0),
-                previous_wait: AtomicU64::new(0),
+                meta: Mutex::new(TestClockMeta {
+                    idx: 0,
+                    ticks_elapsed: 0,
+                }),
                 tick_progressions,
             }
         }
@@ -304,28 +318,15 @@ mod test {
     #[async_trait]
     impl Clock for TestClock {
         fn ticks_elapsed(&self) -> u64 {
-            let previous_wait = self.previous_wait.load(Ordering::Relaxed);
-            let mut idx = self.idx.load(Ordering::Acquire);
-            let res: u64 = self.tick_progressions[idx].into();
-            loop {
-                let new_idx = (idx + 1) % self.tick_progressions.len();
-                match self.idx.compare_exchange_weak(
-                    idx,
-                    new_idx,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(x) => idx = x,
-                }
-            }
-            res + previous_wait
+            self.meta.lock().unwrap().ticks_elapsed
         }
 
         async fn wait(&self, ticks: u64) {
-            // Do nothing, except store the amount of ticks waited. Losing some
-            // of these or getting them out of order is fine, hence the relaxed.
-            self.previous_wait.store(ticks, Ordering::Relaxed)
+            let mut meta = self.meta.lock().unwrap();
+
+            let current_tick = self.tick_progressions[meta.idx];
+            meta.ticks_elapsed += current_tick as u64 + ticks;
+            meta.idx = (meta.idx + 1) % self.tick_progressions.len();
         }
     }
 
@@ -342,8 +343,8 @@ mod test {
         }
     }
 
-    fn ticks() -> impl Strategy<Value = Vec<u32>> {
-        prop::collection::vec(any::<u32>(), 1..500)
+    fn ticks() -> impl Strategy<Value = Vec<u8>> {
+        prop::collection::vec(any::<u8>(), 1..5000)
     }
 
     fn nonempty_requests() -> impl Strategy<Value = Vec<u32>> {
@@ -354,7 +355,7 @@ mod test {
     proptest! {
         #![proptest_config(ProptestConfig {
             cases: 1_000,
-            max_shrink_iters: u32::MAX,
+            max_shrink_iters: 100_000,
             .. ProptestConfig::default()
         })]
         #[test]
@@ -384,7 +385,7 @@ mod test {
     proptest! {
         #![proptest_config(ProptestConfig {
             cases: 1_000,
-            max_shrink_iters: u32::MAX,
+            max_shrink_iters: 100_000,
             .. ProptestConfig::default()
         })]
         #[test]
@@ -411,5 +412,42 @@ mod test {
         }
     }
 
-    //    }
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: 100_000,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn time_advances_properly(
+            tick_progressions in ticks(),
+            maximum_capacity in 1_u32..u32::MAX,
+            requests in nonempty_requests(),
+        ) {
+            // Make a clone of the ticks that will drive our clock, keep track
+            // of how many ticks have passed in the test.
+            let test_ticks = tick_progressions.clone();
+            let mut total_ticks = 0;
+            let mut ticks_idx = 0;
+
+            let maximum_capacity = NonZeroU32::new(maximum_capacity).unwrap();
+            let requests: Vec<NonZeroU32> = requests
+                .into_iter()
+                .filter(|x| *x > 0)
+                .map(|x| NonZeroU32::new(x).unwrap())
+                .collect();
+
+            let clock = TestClock::new(tick_progressions);
+            let mut throttle = GenericThrottle::with_clock(maximum_capacity, clock);
+
+            for request in requests {
+                debug_assert_eq!(throttle.interval(), total_ticks % INTERVAL_TICKS, "BEFORE");
+                if let Ok(()) = drive(throttle.wait_for(request)) {
+                    ticks_idx = (ticks_idx + 1) % test_ticks.len();
+                    total_ticks += test_ticks[ticks_idx] as u64 + request.get() as u64;
+                    debug_assert_eq!(throttle.interval(), total_ticks % INTERVAL_TICKS, "AFTER");
+                }
+            }
+        }
+    }
 }
