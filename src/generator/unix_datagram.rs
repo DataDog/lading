@@ -95,7 +95,7 @@ impl UnixDatagram {
             .collect();
         let labels = vec![
             ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "uds".to_string()),
+            ("component_name".to_string(), "unix_datagram".to_string()),
         ];
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
@@ -175,6 +175,7 @@ impl UnixDatagram {
                         match socket.send(&blk.bytes[blk_offset..]).await {
                             Ok(bytes) => {
                                 counter!("bytes_written", bytes as u64, &labels);
+                                counter!("packets_sent", 1, &labels);
                                 blk_offset = bytes;
                             }
                             Err(err) => {
