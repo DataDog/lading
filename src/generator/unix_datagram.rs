@@ -95,7 +95,7 @@ impl UnixDatagram {
             .collect();
         let labels = vec![
             ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "uds".to_string()),
+            ("component_name".to_string(), "unix_datagram".to_string()),
         ];
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
