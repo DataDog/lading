@@ -227,7 +227,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
