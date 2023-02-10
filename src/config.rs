@@ -66,6 +66,8 @@ impl Default for Telemetry {
 mod tests {
     use std::str::FromStr;
 
+    use http::HeaderMap;
+
     use super::*;
 
     #[test]
@@ -88,7 +90,7 @@ blackhole:
   - tcp:
       binding_addr: "127.0.0.1:1001"
 "#;
-        let config: Config = serde_yaml::from_str(&contents).unwrap();
+        let config: Config = serde_yaml::from_str(contents).unwrap();
         assert_eq!(
             config,
             Config {
@@ -103,10 +105,10 @@ blackhole:
                         )
                         .unwrap()
                     },
-                    headers: Default::default(),
+                    headers: HeaderMap::default(),
                     bytes_per_second: byte_unit::Byte::from_unit(100_f64, byte_unit::ByteUnit::MB)
                         .unwrap(),
-                    block_sizes: Default::default(),
+                    block_sizes: Option::default(),
                     parallel_connections: 5,
                 })],
                 blackhole: Some(vec![
@@ -117,11 +119,11 @@ blackhole:
                         binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
                     })
                 ]),
-                target: Default::default(),
-                telemetry: Default::default(),
-                observer: Default::default(),
-                inspector: Default::default(),
+                target: Option::default(),
+                telemetry: crate::config::Telemetry::default(),
+                observer: observer::Config::default(),
+                inspector: Option::default(),
             },
-        )
+        );
     }
 }

@@ -144,7 +144,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            assert!(bytes.len() <= max_bytes, "max len: {}, actual: {}", max_bytes, bytes.len());
+            assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
 
@@ -159,7 +159,7 @@ mod test {
             let mut bytes = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
 
-            assert!(bytes.len() > 0);
+            assert!(!bytes.is_empty());
         }
     }
 
