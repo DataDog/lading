@@ -71,20 +71,16 @@ pub(crate) type Throttle = GenericThrottle<RealClock>;
 /// * binary back-off based on RSS consumption of the target and
 /// * a 'bean counter' approach to searching for target throughput setpoint.
 ///
-/// The last is based on a budget allocation heuristic in large political organizations:
+/// The last is based on a budget allocation heuristic in large political
+/// organizations:
 ///
 /// * Given parties Consumer, Provider and Budget which Provider dictates the
-///   maximum of, doles out to Consumer. Allow the initial state of Budget to be
-///   X.
-/// * At each negotiation interval Consumer advertises to Provider that its
-///   actual consumption of budget was Y, its new desired budget is Z.
-///   - If Y < X then new budget is Y, discarding Z.
-///   - If Y >= X then new budget is Z * 125%.
-///
-/// In `Throttle` consumer does not advertise its desired budget. Instead
-/// `Throttle` keeps track keep track of the actual budget consumption would
-/// have been were every request satisfied and, once a second, sets the new
-/// budget as the midway point between the previous budget and actual
+///   maximum of, doles out to Consumer. The initial budget is the maximum.
+/// * Allow the projected budget for an interval to be X and the actual
+///   requested budget for that interval to be Y.
+/// * At each negotiation interval the Provider calculates a new projected budget:
+///   - If Y < X then new budget is X - (X-Y)/8,
+///   - If Y >= X then new budget is X + (Y-X)/4.
 pub(crate) struct GenericThrottle<C>
 where
     C: Clock,
@@ -230,12 +226,13 @@ where
             // Intentionally blank. There is nothing to do in the event we are
             // in the same interval, with regard to budgets.
         } else {
-            // We are not in the same interval.
-            self.interval = current_interval;
+            // The new interval is begun, calculate new budgets.
+            //
             // If the client requested budget is lower than the projected budget
-            // we set the next interval's projected budget to the midway point
-            // between requested one. and the projected one. If it's higher, we
-            // creep up from the projected budget.
+            // we set the next interval's projected budget 1/8 down the
+            // difference from the current projected budget. If it's higher we
+            // creep up 1/4 up the difference. This allows us to steadily change
+            // toward the setpoint without fluctuating wildly.
             if self.requested_budget <= self.projected_budget {
                 let diff = self.projected_budget - self.requested_budget;
                 self.projected_budget -= diff / 8;
@@ -244,6 +241,10 @@ where
                 self.projected_budget =
                     cmp::min(self.projected_budget + (diff / 4), self.maximum_capacity);
             }
+            // Adjust the interval upward, set the requested budget to zero in
+            // this brave new interval.
+            assert!(current_interval > self.interval);
+            self.interval = current_interval;
             self.requested_budget = 0;
         }
 
