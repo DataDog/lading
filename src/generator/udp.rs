@@ -175,6 +175,7 @@ impl Udp {
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             counter!("bytes_written", bytes as u64, &labels);
+                            counter!("packets_sent", 1, &labels);
                             connection = Some(sock);
                         }
                         Err(err) => {

@@ -181,6 +181,7 @@ impl UnixStream {
                             match stream.try_write(&blk.bytes[blk_offset..]) {
                                 Ok(bytes) => {
                                     counter!("bytes_written", bytes as u64, &labels);
+                                    counter!("packets_sent", 1, &labels);
                                     blk_offset = bytes;
                                 }
                                 Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {

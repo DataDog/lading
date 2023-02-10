@@ -173,6 +173,7 @@ impl Tcp {
                                 u64::from(blk.total_bytes.get()),
                                 &labels
                             );
+                            counter!("packets_sent", 1, &labels);
                             connection = Some(client);
                         }
                         Err(err) => {
