@@ -44,15 +44,19 @@ impl Clock for RealClock {
     /// # Panics
     ///
     /// Function will panic if the number of ticks elapsed is greater than u64::MAX.
+    #[allow(clippy::cast_possible_truncation)]
     fn ticks_elapsed(&self) -> u64 {
         let now = Instant::now();
         let ticks_since: u128 = now.duration_since(self.start).as_micros();
-        assert!(ticks_since <= u128::from(u64::MAX), "584,554 years elapsed since last call!");
+        assert!(
+            ticks_since <= u128::from(u64::MAX),
+            "584,554 years elapsed since last call!"
+        );
         ticks_since as u64
     }
 
     async fn wait(&self, ticks: u64) {
-        time::sleep(Duration::from_micros(ticks)).await
+        time::sleep(Duration::from_micros(ticks)).await;
     }
 }
 
@@ -222,7 +226,10 @@ where
         // interesting to do maybe.
 
         let current_interval = ticks_since / INTERVAL_TICKS;
-        if current_interval != self.interval {
+        if current_interval == self.interval {
+            // Intentionally blank. There is nothing to do in the event we are
+            // in the same interval, with regard to budgets.
+        } else {
             // We are not in the same interval.
             self.interval = current_interval;
             // If the client requested budget is lower than the projected budget
@@ -238,9 +245,6 @@ where
                     cmp::min(self.projected_budget + (diff / 4), self.maximum_capacity);
             }
             self.requested_budget = 0;
-        } else {
-            // Intentionally blank. There is nothing to do in the event we are
-            // in the same interval, with regard to budgets.
         }
 
         self.requested_budget = cmp::min(
