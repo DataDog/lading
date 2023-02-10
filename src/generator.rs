@@ -135,7 +135,7 @@ impl Server {
                 unix_stream::UnixStream::new(conf, shutdown).map_err(Error::UnixStream)?,
             ),
             Config::UnixDatagram(conf) => Self::UnixDatagram(
-                unix_datagram::UnixDatagram::new(conf, shutdown).map_err(Error::UnixDatagram)?,
+                unix_datagram::UnixDatagram::new(&conf, shutdown).map_err(Error::UnixDatagram)?,
             ),
             Config::ProcessTree(conf) => Self::ProcessTree(
                 process_tree::ProcessTree::new(&conf, shutdown).map_err(Error::ProcessTree)?,
