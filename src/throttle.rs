@@ -47,9 +47,7 @@ impl Clock for RealClock {
     fn ticks_elapsed(&self) -> u64 {
         let now = Instant::now();
         let ticks_since: u128 = now.duration_since(self.start).as_micros();
-        if ticks_since > (u64::MAX as u128) {
-            panic!("584,554 years elapsed since last call!");
-        }
+        assert!(ticks_since <= u128::from(u64::MAX), "584,554 years elapsed since last call!");
         ticks_since as u64
     }
 
@@ -120,17 +118,17 @@ where
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
 
-        let refill_per_tick = (maximum_capacity.get() as u64) / INTERVAL_TICKS;
+        let refill_per_tick = u64::from(maximum_capacity.get()) / INTERVAL_TICKS;
 
         // let rate_limiter = RateLimiter::direct(Quota::per_second(maximum_capacity));
         // let maximum_capacity = maximum_capacity.get();
         // let interval_actual_budget = maximum_capacity / 10;
 
         Self {
-            maximum_capacity: maximum_capacity.get() as u64,
+            maximum_capacity: u64::from(maximum_capacity.get()),
             refill_per_tick,
             requested_budget: 0,
-            projected_budget: maximum_capacity.get() as u64,
+            projected_budget: u64::from(maximum_capacity.get()),
             interval: 0,
             spare_capacity: 0,
             clock,
@@ -199,7 +197,7 @@ where
 
         // Fast bail-out. There's no way for this to ever be satisfied and is a
         // bug on the part of the caller, arguably.
-        if request.get() as u64 > self.maximum_capacity {
+        if u64::from(request.get()) > self.maximum_capacity {
             return Err(Error::Capacity);
         }
 
@@ -233,7 +231,7 @@ where
             // creep up from the projected budget.
             if self.requested_budget <= self.projected_budget {
                 let diff = self.projected_budget - self.requested_budget;
-                self.projected_budget = self.projected_budget - (diff / 8);
+                self.projected_budget -= diff / 8;
             } else {
                 let diff = self.requested_budget - self.projected_budget;
                 self.projected_budget =
@@ -246,11 +244,11 @@ where
         }
 
         self.requested_budget = cmp::min(
-            self.requested_budget.wrapping_add(request.get() as u64),
+            self.requested_budget.wrapping_add(u64::from(request.get())),
             self.maximum_capacity,
         );
 
-        let capacity_request = request.get() as u64;
+        let capacity_request = u64::from(request.get());
         if refilled_capacity > capacity_request {
             // If the refilled capacity is greater than the request we respond
             // to the caller immediately and store the spare capacity for next
@@ -323,7 +321,7 @@ mod test {
             let mut meta = self.meta.lock().unwrap();
 
             let current_tick = self.tick_progressions[meta.idx];
-            meta.ticks_elapsed += current_tick as u64 + request;
+            meta.ticks_elapsed += u64::from(current_tick) + request;
             meta.idx = (meta.idx + 1) % self.tick_progressions.len();
         }
     }
