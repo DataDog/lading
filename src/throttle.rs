@@ -130,7 +130,7 @@ where
             maximum_capacity: maximum_capacity.get() as u64,
             refill_per_tick,
             requested_budget: 0,
-            projected_budget: maximum_capacity.get() as u64 / 2,
+            projected_budget: maximum_capacity.get() as u64,
             interval: 0,
             spare_capacity: 0,
             clock,
@@ -228,10 +228,11 @@ where
             // We are not in the same interval.
             self.interval = current_interval;
             // If the client requested budget is lower than the projected budget
-            // we set the next interval's projected budget to the requested
-            // one. If it's higher, we creep up from the projected budget.
+            // we set the next interval's projected budget to the midway point
+            // between requested one. and the projected one. If it's higher, we
+            // creep up from the projected budget.
             if self.requested_budget <= self.projected_budget {
-                self.projected_budget = self.requested_budget;
+                self.projected_budget = (self.projected_budget - self.requested_budget) / 2;
             } else {
                 self.projected_budget = cmp::min(
                     self.projected_budget + (self.projected_budget / 4),
@@ -440,7 +441,4 @@ mod test {
             }
         }
     }
-
-    // TODO is time advancing correctly? As we make requests is the interval
-    // being updated properly.
 }
