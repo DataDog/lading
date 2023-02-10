@@ -7,6 +7,7 @@ use crate::{
     throttle::Throttle,
 };
 use byte_unit::{Byte, ByteUnit};
+use futures::future::join_all;
 use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -14,8 +15,15 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
 };
-use tokio::{net, task::JoinError};
+use tokio::{
+    net,
+    task::{JoinError, JoinHandle},
+};
 use tracing::{debug, error, info, trace};
+
+fn default_parallel_connections() -> u16 {
+    1
+}
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 /// Configuration of this generator.
@@ -32,6 +40,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The total number of parallel connections to maintain
+    #[serde(default = "default_parallel_connections")]
+    pub parallel_connections: u16,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -46,6 +57,9 @@ pub enum Error {
     /// Subtask error
     #[error("Subtask failure: {0}")]
     Subtask(#[from] JoinError),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
 }
 
 #[derive(Debug)]
@@ -54,10 +68,7 @@ pub enum Error {
 /// This generator is responsible for sending data to the target via UDS
 /// datagrams.
 pub struct UnixDatagram {
-    path: PathBuf,
-    throttle: Throttle,
-    block_cache: Vec<Block>,
-    metric_labels: Vec<(String, String)>,
+    handles: Vec<JoinHandle<Result<(), Error>>>,
     shutdown: Shutdown,
 }
 
@@ -111,15 +122,24 @@ impl UnixDatagram {
                 .expect("bytes must be non-zero"),
             &block_sizes,
         )?;
-        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
-        Ok(Self {
-            path: config.path,
-            block_cache,
-            throttle: Throttle::new(bytes_per_second),
-            metric_labels: labels,
-            shutdown,
-        })
+        let mut handles = Vec::new();
+        for _ in 0..config.parallel_connections {
+            let block_cache =
+                construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
+
+            let child = Child {
+                path: config.path.clone(),
+                block_cache,
+                throttle: Throttle::new(bytes_per_second),
+                metric_labels: labels.clone(),
+                shutdown: shutdown.clone(),
+            };
+
+            handles.push(tokio::spawn(child.spin()));
+        }
+
+        Ok(Self { handles, shutdown })
     }
 
     /// Run [`UnixDatagram`] to completion or until a shutdown signal is received.
@@ -132,6 +152,30 @@ impl UnixDatagram {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
+        for res in join_all(self.handles.drain(..)).await {
+            match res {
+                Ok(Ok(())) => continue,
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Child {
+    path: PathBuf,
+    throttle: Throttle,
+    block_cache: Vec<Block>,
+    metric_labels: Vec<(String, String)>,
+    shutdown: Shutdown,
+}
+
+impl Child {
+    async fn spin(mut self) -> Result<(), Error> {
         debug!("UnixDatagram generator running");
         let labels = self.metric_labels;
 
