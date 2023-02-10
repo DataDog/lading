@@ -232,12 +232,12 @@ where
             // between requested one. and the projected one. If it's higher, we
             // creep up from the projected budget.
             if self.requested_budget <= self.projected_budget {
-                self.projected_budget = (self.projected_budget - self.requested_budget) / 2;
+                let diff = self.projected_budget - self.requested_budget;
+                self.projected_budget = self.projected_budget - (diff / 8);
             } else {
-                self.projected_budget = cmp::min(
-                    self.projected_budget + (self.projected_budget / 4),
-                    self.maximum_capacity,
-                );
+                let diff = self.requested_budget - self.projected_budget;
+                self.projected_budget =
+                    cmp::min(self.projected_budget + (diff / 4), self.maximum_capacity);
             }
             self.requested_budget = 0;
         } else {
