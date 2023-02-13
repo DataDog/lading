@@ -21,7 +21,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
         if: matrix.os == 'ubuntu-latest'
@@ -38,7 +38,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
         if: matrix.os == 'ubuntu-latest'
@@ -55,7 +55,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
         with:
           components: rustfmt
       - run: rustup component add rustfmt
@@ -68,7 +68,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
         with:
           components: clippy
       - name: Install protobuf (Apt)
@@ -87,7 +87,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
         if: matrix.os == 'ubuntu-latest'
