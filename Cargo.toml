@@ -17,6 +17,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
+async-trait = { version = "0.1", default-features = false, features = [] }
 arbitrary = { version = "1", default-features = false, features = ["derive"] }
 byte-unit = { version = "4.0", features = ["serde"] }
 bytecount = "0.6"
@@ -24,7 +25,6 @@ bytes = { version = "1.4.0", default-features = false }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
 flate2 = { version = "1.0.25", default-features = false, features = ["rust_backend"] }
 futures = "0.3.26"
-governor = { version = "0.5", features = ["std", "jitter", "quanta"] }
 http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }

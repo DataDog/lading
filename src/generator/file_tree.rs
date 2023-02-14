@@ -149,8 +149,8 @@ impl FileTree {
     ///
     /// Function will panic if one node is not path is not populated properly
     pub async fn spin(mut self) -> Result<(), Error> {
-        let open_throttle = Throttle::new(self.open_per_second);
-        let rename_throttle = Throttle::new(self.rename_per_second);
+        let mut open_throttle = Throttle::new(self.open_per_second);
+        let mut rename_throttle = Throttle::new(self.rename_per_second);
 
         let mut iter = self.nodes.iter().cycle();
         let mut folders = Vec::with_capacity(self.total_folder);

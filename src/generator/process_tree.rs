@@ -311,7 +311,7 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let process_throttle = Throttle::new(self.max_tree_per_second);
+        let mut process_throttle = Throttle::new(self.max_tree_per_second);
         let lading_path = self.lading_path.to_str().unwrap();
 
         loop {

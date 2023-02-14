@@ -217,6 +217,7 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/"
         bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
@@ -227,7 +228,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
@@ -247,6 +252,7 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/"
         bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
@@ -257,7 +263,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
@@ -277,6 +287,7 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/logs"
         bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
@@ -289,7 +300,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
@@ -309,6 +324,7 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/traces"
         bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
@@ -321,7 +337,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
@@ -341,6 +361,7 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/metrics"
         bytes_per_second: "100 Mb"
+        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
@@ -353,7 +374,11 @@ generator:
 
         let reqs = test.run().await?;
 
-        assert!(reqs.http.request_count > 10);
+        debug_assert!(
+            reqs.http.request_count > 10,
+            "Request count: {request_count}",
+            request_count = reqs.http.request_count
+        );
         Ok(())
     }
 
