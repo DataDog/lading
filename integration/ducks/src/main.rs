@@ -311,7 +311,7 @@ impl DucksTarget {
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
-                m.entropy.add(entropy::metric_entropy(&buf) as f64);
+                m.entropy.add(entropy::metric_entropy(buf) as f64);
             }
         }
     }
