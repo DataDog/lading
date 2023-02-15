@@ -138,9 +138,8 @@ impl Server {
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
 
-        let ticks_per_second: f64 =
-            procfs::ticks_per_second().expect("cannot determine ticks per second") as f64;
-        let page_size = procfs::page_size().expect("cannot determinte page size");
+        let ticks_per_second: f64 = procfs::ticks_per_second() as f64;
+        let page_size = procfs::page_size();
 
         gauge!("ticks_per_second", ticks_per_second);
 
