@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.13.0-rc1]
+## [0.13.0]
 ## Added
 - Introduced automatic throttling into generators to search for stable target load.
 ## Fixed
