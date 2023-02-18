@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "arbitrary",
  "async-pidfd",
