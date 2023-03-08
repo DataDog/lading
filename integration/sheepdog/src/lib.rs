@@ -16,11 +16,11 @@
 use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::Context;
-use assert_fs::TempDir;
 use shared::{
     integration_api::{self, integration_target_client::IntegrationTargetClient},
     DucksConfig,
 };
+use tempfile::TempDir;
 use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
 use tracing::debug;
@@ -106,7 +106,7 @@ impl IntegrationTest {
         let lading_binary = build_lading()?;
 
         // Every ducks-sheepdog pair is connected by a unique socket file
-        let ducks_comm_file = self.tempdir.join("ducks_socket");
+        let ducks_comm_file = self.tempdir.path().join("ducks_socket");
 
         let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
@@ -133,7 +133,7 @@ impl IntegrationTest {
         let port = test.port as u16;
 
         // template & write lading config
-        let lading_config_file = self.tempdir.join("lading.yaml");
+        let lading_config_file = self.tempdir.path().join("lading.yaml");
         let mut file =
             std::fs::File::create(&lading_config_file).context("create lading config file")?;
         let lading_config = self
@@ -143,7 +143,7 @@ impl IntegrationTest {
             .context("write lading config")?;
 
         // run lading against the ducks process that was started above
-        let captures_file = self.tempdir.join("captures");
+        let captures_file = self.tempdir.path().join("captures");
         let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "lading=debug,info")
