@@ -255,7 +255,7 @@ mod tests {
 
         test_proc.kill().unwrap();
 
-        let mut bins = stats.iter().map(|s| s.comm.clone()).collect::<Vec<_>>();
+        let mut bins = stats.iter().map(|s| s.0.comm.clone()).collect::<Vec<_>>();
         bins.sort();
 
         assert_eq!(&bins, &[String::from("sh"), String::from("sleep")]);
