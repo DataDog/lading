@@ -20,7 +20,6 @@ use lading::{
     signals::Shutdown,
     target::{self, Behavior, Output},
 };
-use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{rngs::StdRng, SeedableRng};
 use tokio::{
     runtime::Builder,
@@ -114,10 +113,6 @@ struct Opts {
     /// are set
     #[clap(long)]
     capture_path: Option<String>,
-    /// address to bind prometheus exporter to, will be overridden by
-    /// capture-path if both are set
-    #[clap(long)]
-    prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
     #[clap(long, default_value_t = 30)]
     max_shutdown_delay: u16,
@@ -196,26 +191,13 @@ fn get_config(ops: &Opts) -> Config {
     config.target = Some(target);
 
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
-    if let Some(ref prom_addr) = ops.prometheus_addr {
-        config.telemetry = Telemetry::Prometheus {
-            prometheus_addr: prom_addr.parse().unwrap(),
-            global_labels: options_global_labels.inner,
-        };
-    } else if let Some(ref capture_path) = ops.capture_path {
+    if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().unwrap(),
             global_labels: options_global_labels.inner,
         };
     } else {
         match config.telemetry {
-            Telemetry::Prometheus {
-                ref mut global_labels,
-                ..
-            } => {
-                for (k, v) in options_global_labels.inner {
-                    global_labels.insert(k, v);
-                }
-            }
             Telemetry::Log {
                 ref mut global_labels,
                 ..
@@ -244,16 +226,6 @@ async fn inner_main(
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
     match config.telemetry {
-        Telemetry::Prometheus {
-            prometheus_addr,
-            global_labels,
-        } => {
-            let mut builder = PrometheusBuilder::new().with_http_listener(prometheus_addr);
-            for (k, v) in global_labels {
-                builder = builder.add_global_label(k, v);
-            }
-            builder.install().unwrap();
-        }
         Telemetry::Log {
             path,
             global_labels,

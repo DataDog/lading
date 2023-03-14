@@ -1,7 +1,7 @@
 //! This module controls configuration parsing from the end user, providing a
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -35,14 +35,6 @@ pub struct Config {
 #[serde(untagged)]
 /// Defines the manner of lading's telemetry.
 pub enum Telemetry {
-    /// In prometheus mode lading will emit its internal telemetry for scraping
-    /// at a prometheus poll endpoint.
-    Prometheus {
-        /// Address and port for prometheus exporter
-        prometheus_addr: SocketAddr,
-        /// Additional labels to include in every metric
-        global_labels: HashMap<String, String>,
-    },
     /// In log mode lading will emit its internal telemetry to a structured log
     /// file, the "capture" file.
     Log {
@@ -55,8 +47,8 @@ pub enum Telemetry {
 
 impl Default for Telemetry {
     fn default() -> Self {
-        Self::Prometheus {
-            prometheus_addr: "0.0.0.0:9000".parse().unwrap(),
+        Self::Log {
+            path: PathBuf::from("/tmp/lading.capture"),
             global_labels: HashMap::default(),
         }
     }

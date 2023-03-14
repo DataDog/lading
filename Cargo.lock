@@ -761,12 +761,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipnet"
-version = "2.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30e22bd8629359895450b59ea7a776c850561b96a3b1d31321c1949d9e6c9146"
-
-[[package]]
 name = "is_executable"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -801,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "arbitrary",
  "async-pidfd",
@@ -817,7 +811,6 @@ dependencies = [
  "hyper",
  "is_executable",
  "metrics",
- "metrics-exporter-prometheus",
  "metrics-util",
  "nix",
  "once_cell",
@@ -935,24 +928,6 @@ dependencies = [
  "ahash",
  "metrics-macros",
  "portable-atomic",
-]
-
-[[package]]
-name = "metrics-exporter-prometheus"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8603921e1f54ef386189335f288441af761e0fc61bcb552168d9cedfe63ebc70"
-dependencies = [
- "hyper",
- "indexmap",
- "ipnet",
- "metrics",
- "metrics-util",
- "parking_lot",
- "portable-atomic",
- "quanta",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
