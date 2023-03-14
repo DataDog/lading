@@ -29,6 +29,8 @@ unsound = "deny"
 ignore = [
   # atty is unsound for some custom allocators on Windows and is unmaintained
   "RUSTSEC-2021-0145",
+  # mach is unmaintained
+  "RUSTSEC-2020-0168",
 ]
 
 [bans]
