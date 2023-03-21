@@ -93,12 +93,14 @@ impl Server {
 
     /// Get process stats for the given process and all of its children.
     #[cfg(target_os = "linux")]
-    fn get_proc_stats(process: &Process) -> Result<Vec<procfs::process::Stat>, Error> {
+    fn get_proc_stats(
+        process: &Process,
+    ) -> Result<Vec<(procfs::process::Stat, procfs::process::MemoryMaps)>, Error> {
         let target_process = Process::new(process.pid()).map_err(Error::ProcError)?;
         let target_and_children = Self::get_all_children(target_process)?;
         let stats = target_and_children
             .into_iter()
-            .map(|p| p.stat())
+            .map(|p| Ok((p.stat()?, p.smaps()?)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::ProcError)?;
         Ok(stats)
@@ -158,10 +160,10 @@ impl Server {
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 
-                        let cutime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cutime).unwrap()).sum();
-                        let cstime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.cstime).unwrap()).sum();
-                        let utime: u64 = all_stats.iter().map(|stat| stat.utime).sum();
-                        let stime: u64 = all_stats.iter().map(|stat| stat.stime).sum();
+                        let cutime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.cutime).unwrap()).sum();
+                        let cstime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.cstime).unwrap()).sum();
+                        let utime: u64 = all_stats.iter().map(|stat| stat.0.utime).sum();
+                        let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
                         let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
                         let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
@@ -173,16 +175,25 @@ impl Server {
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
 
-                        let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.rss));
-                        let rsslim: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.rsslim));
-                        let vsize: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.vsize));
-                        let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.num_threads).unwrap()).sum();
+                        let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rss));
+                        let pss: u64 = all_stats.iter().fold(0, |val, stat| {
+                            let one_proc = stat.1.iter().fold(0u64, |one_map, stat| {
+                                one_map.saturating_add(stat.extension.map.get("Pss").copied().unwrap_or_default())
+                            });
+                            val.saturating_add(one_proc)
+                        });
+
+                        let rsslim: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rsslim));
+                        let vsize: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.vsize));
+                        let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.num_threads).unwrap()).sum();
 
                         let rss_bytes: u64 = rss*page_size;
                         RSS_BYTES.store(rss_bytes, Ordering::Relaxed);
 
                         // Number of pages that the process has in real memory.
                         gauge!("rss_bytes", rss_bytes as f64);
+                        // Proportional share of bytes owned by this process and its children.
+                        gauge!("pss_bytes", pss as f64);
                         // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
                         gauge!("rsslim_bytes", rsslim as f64);
                         // The size in bytes of the process in virtual memory.
@@ -244,7 +255,7 @@ mod tests {
 
         test_proc.kill().unwrap();
 
-        let mut bins = stats.iter().map(|s| s.comm.clone()).collect::<Vec<_>>();
+        let mut bins = stats.iter().map(|s| s.0.comm.clone()).collect::<Vec<_>>();
         bins.sort();
 
         assert_eq!(&bins, &[String::from("sh"), String::from("sleep")]);
