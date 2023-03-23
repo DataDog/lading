@@ -140,9 +140,10 @@ impl crate::payload::Serialize for TraceAgent {
                     buf
                 }
             };
-            // NOTE because the type of Vec<Vec<Span>> this algorithm isn't
-            // right. We want to shrink the tree present here. This algorithm
-            // _does_ work if the tree is a straight pipe.
+            // NOTE because the type of Vec<Vec<Span>> this shrink isn't as
+            // efficient as it could be. We want to shrink the tree present
+            // here. This algorithm _does_ work perfectly if the tree is a
+            // straight pipe.
             if encoding.len() > max_bytes {
                 high /= 2;
             } else {

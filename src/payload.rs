@@ -94,6 +94,7 @@ pub enum Encoding {
     /// Use JSON format
     Json,
     /// Use MsgPack binary format
+    #[serde(alias = "msgpack")]
     MsgPack,
 }
 
