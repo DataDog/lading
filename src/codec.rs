@@ -53,8 +53,7 @@ pub(crate) fn decode(
                     return Err(hyper::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .body(hyper::Body::from(format!(
-                            "Unsupported encoding type: {}",
-                            encoding
+                            "Unsupported encoding type: {encoding}"
                         )))
                         .expect("failed to build response"))
                 }
@@ -72,8 +71,7 @@ fn encoding_error_to_response(
     hyper::Response::builder()
         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         .body(hyper::Body::from(format!(
-            "failed to decode input as {}: {}",
-            encoding, error
+            "failed to decode input as {encoding}: {error}"
         )))
         .expect("failed to build response")
 }

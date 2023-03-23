@@ -55,7 +55,7 @@ use serde::Serialize;
 // I understand correctly the `moretags` also implies that the field names are
 // camel_case in msgpack.
 
-/// TraceAgent span
+/// `TraceAgent` span
 #[derive(Arbitrary, serde::Serialize)]
 struct Span {
     /// service is the name of the service with which this span is associated.
