@@ -213,28 +213,26 @@ impl Http {
             let blk = blocks.next().unwrap();
             let total_bytes = blk.total_bytes;
 
+            let body = Body::from(blk.bytes.clone());
+            let block_length = blk.bytes.len();
+
+            let mut request: Request<Body> = Request::builder()
+                .method(method.clone())
+                .uri(&uri)
+                .header(CONTENT_LENGTH, block_length)
+                .body(body)
+                .unwrap();
+            let headers = request.headers_mut();
+            for (k, v) in self.headers.clone().drain() {
+                if let Some(k) = k {
+                    headers.insert(k, v);
+                }
+            }
+
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let client = client.clone();
                     let labels = labels.clone();
-                    let method = method.clone();
-                    let uri = uri.clone();
-
-                    let body = Body::from(blk.bytes.clone());
-                    let block_length = blk.bytes.len();
-
-                    let mut request: Request<Body> = Request::builder()
-                        .method(method)
-                        .uri(uri)
-                        .header(CONTENT_LENGTH, block_length)
-                        .body(body)
-                        .unwrap();
-                    let headers = request.headers_mut();
-                    for (k,v) in self.headers.clone().drain() {
-                        if let Some(k) = k {
-                            headers.insert(k,v);
-                        }
-                    }
 
                     let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
                     tokio::spawn(async move {

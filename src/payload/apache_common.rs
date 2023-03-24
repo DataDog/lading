@@ -142,8 +142,7 @@ impl fmt::Display for Timestamp {
 
         write!(
             f,
-            "{:02}/{}/{}:{:02}:{:02}:{:02} {:04}",
-            day, month, year, hour, minute, second, timezone
+            "{day:02}/{month}/{year}:{hour:02}:{minute:02}:{second:02} {timezone:04}"
         )
     }
 }

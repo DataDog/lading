@@ -6,7 +6,7 @@ use std::{
 use metrics::gauge;
 use rand::{prelude::SliceRandom, Rng};
 
-use crate::payload::{self, Serialize};
+use crate::payload::{self, Serialize, TraceAgent};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, thiserror::Error)]
 pub enum Error {
@@ -117,6 +117,14 @@ where
     R: Rng,
 {
     match payload {
+        payload::Config::TraceAgent(enc) => {
+            let ta = match enc {
+                payload::Encoding::Json => TraceAgent::json(),
+                payload::Encoding::MsgPack => TraceAgent::msg_pack(),
+            };
+
+            construct_block_cache_inner(&mut rng, &ta, block_chunks, labels)
+        }
         payload::Config::Syslog5424 => construct_block_cache_inner(
             &mut rng,
             &payload::Syslog5424::default(),

@@ -19,6 +19,7 @@ pub(crate) use opentelemetry_trace::OpentelemetryTraces;
 pub(crate) use splunk_hec::{Encoding as SplunkHecEncoding, SplunkHec};
 pub(crate) use statik::Static;
 pub(crate) use syslog::Syslog5424;
+pub(crate) use trace_agent::TraceAgent;
 
 mod apache_common;
 mod ascii;
@@ -34,6 +35,7 @@ mod opentelemetry_trace;
 mod splunk_hec;
 mod statik;
 mod syslog;
+mod trace_agent;
 
 /// Errors related to serialization
 #[derive(Debug)]
@@ -85,6 +87,17 @@ pub(crate) trait Serialize {
         W: Write;
 }
 
+/// Sub-configuration for `TraceAgent` format
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Encoding {
+    /// Use JSON format
+    Json,
+    /// Use MsgPack binary format
+    #[serde(alias = "msgpack")]
+    MsgPack,
+}
+
 /// Configuration for `Payload`
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -120,6 +133,8 @@ pub enum Config {
     /// Generates DogStatsD
     #[serde(rename = "dogstatsd")]
     DogStatsD,
+    /// Generates TraceAgent payloads in JSON format
+    TraceAgent(Encoding),
 }
 
 #[derive(Debug)]
@@ -142,6 +157,7 @@ pub(crate) enum Payload {
     OtelLogs(OpentelemetryLogs),
     OtelMetrics(OpentelemetryMetrics),
     DogStatsdD(DogStatsD),
+    TraceAgent(TraceAgent),
 }
 
 impl Payload {}
@@ -166,6 +182,7 @@ impl Serialize for Payload {
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 }

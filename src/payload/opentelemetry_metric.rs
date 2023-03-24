@@ -190,9 +190,7 @@ impl Serialize for OpentelemetryMetrics {
         // a varint-encoded message length field. The worst case for the message
         // length field is the max message size divided by 0x7F.
         let bytes_remaining = max_bytes.checked_sub(5 + super::div_ceil(max_bytes, 0x7F));
-        let mut bytes_remaining = if let Some(val) = bytes_remaining {
-            val
-        } else {
+        let Some(mut bytes_remaining) = bytes_remaining else {
             return Ok(());
         };
 
