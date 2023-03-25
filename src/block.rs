@@ -3,6 +3,7 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
 };
 
+use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use metrics::gauge;
 use rand::{prelude::SliceRandom, Rng};
 
@@ -24,7 +25,7 @@ impl From<ChunkError> for Error {
 pub(crate) struct Block {
     pub(crate) total_bytes: NonZeroU32,
     pub(crate) lines: u64,
-    pub(crate) bytes: Vec<u8>,
+    pub(crate) bytes: Bytes,
 }
 
 #[inline]
@@ -224,12 +225,12 @@ where
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
-        let mut block: Vec<u8> = Vec::with_capacity(*block_size);
+        let mut block: Writer<BytesMut> = BytesMut::with_capacity(*block_size).writer();
         serializer
             .to_bytes(&mut rng, *block_size, &mut block)
             .unwrap();
-        block.shrink_to_fit();
-        if block.is_empty() {
+        let bytes: Bytes = block.into_inner().freeze();
+        if bytes.is_empty() {
             // Blocks may be empty, especially when the amount of bytes
             // requested for the block are relatively low. This is a quirk of
             // our use of Arbitrary. We do not have the ability to tell that
@@ -239,12 +240,12 @@ where
             // serialized into.
             continue;
         }
-        let total_bytes = NonZeroU32::new(block.len().try_into().unwrap()).unwrap();
-        let newlines = total_newlines(&block);
+        let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap()).unwrap();
+        let newlines = total_newlines(&bytes);
         block_cache.push(Block {
             total_bytes,
             lines: newlines,
-            bytes: block,
+            bytes,
         });
     }
     assert!(!block_cache.is_empty());
