@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Introduced Proportional Set Size (PSS) memory measurement under the
   `pss_bytes` metric.
+-  Convert `Block` to use `Bytes` type instead of `Vec<u8>`.
 
 ## [0.13.1-rc1]
 ##
