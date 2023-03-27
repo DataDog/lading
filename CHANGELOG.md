@@ -5,13 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+
+## [0.13.1]
 ## Added
 - Introduced Proportional Set Size (PSS) memory measurement under the
   `pss_bytes` metric.
--  Convert `Block` to use `Bytes` type instead of `Vec<u8>`.
-
-## [0.13.1-rc1]
-##
+- Convert `Block` to use `Bytes` type instead of `Vec<u8>`.
 - Introduce Datadog trace-agent payload support in JSON and MsgPack serialization.
 
 ## [0.13.0]
