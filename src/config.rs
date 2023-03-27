@@ -26,8 +26,12 @@ pub struct Config {
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub blackhole: Option<Vec<blackhole::Config>>,
-    /// The target inspector sub-program
+    /// A target inspector sub-program configured in YAML.
     pub inspector: Option<inspector::Config>,
+    /// A target inspector sub-program configured with CLI flags. This is run in
+    /// addition to the inspector configured in YAML if both are present.
+    #[serde(skip_deserializing)]
+    pub cli_inspector: Option<inspector::Config>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]

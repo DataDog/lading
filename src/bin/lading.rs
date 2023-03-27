@@ -131,6 +131,14 @@ struct Opts {
     /// whether to ignore inspector configuration, if present, and not run the inspector
     #[clap(long)]
     disable_inspector: bool,
+    /// Shell snippet to run alongside the target. This command will be run in a
+    /// Bash shell with the target PID available in the `TARGET_PID` environment
+    /// variable. Environment variables set for lading are not propagated.
+    ///
+    /// This inspector is run in addition to the inspector that may be defined
+    /// in the config file.
+    #[clap(long)]
+    inspector: Option<String>,
     /// Extra sub commands
     #[clap(subcommand)]
     extracmds: Option<ExtraCommands>,
@@ -226,6 +234,20 @@ fn get_config(ops: &Opts) -> Config {
             }
         }
     }
+
+    if let Some(inspector) = &ops.inspector {
+        let inspector = inspector::Config {
+            command: PathBuf::from("/usr/bin/env"),
+            arguments: vec![String::from("bash"), String::from("-c"), inspector.clone()],
+            environment_variables: Default::default(),
+            output: Output {
+                stderr: Behavior::Inherit,
+                stdout: Behavior::Inherit,
+            },
+        };
+        config.cli_inspector = Some(inspector);
+    }
+
     config
 }
 
@@ -296,13 +318,25 @@ async fn inner_main(
     }
 
     //
-    // INSPECTOR
+    // INSPECTOR FROM CONFIG
     //
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
             let inspector_server =
                 inspector::Server::new(inspector_conf, shutdown.clone()).unwrap();
+            let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
+        }
+    }
+
+    //
+    // INSPECTOR FROM CLI
+    //
+    if let Some(cli_inspector_conf) = config.cli_inspector {
+        if !disable_inspector {
+            let tgt_rcv = tgt_snd.subscribe();
+            let inspector_server =
+                inspector::Server::new(cli_inspector_conf, shutdown.clone()).unwrap();
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
