@@ -177,11 +177,11 @@ fn get_config(ops: &Opts) -> Config {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit).unwrap();
     }
     let target = if ops.no_target {
-        target::Config::None
+        None
     } else if let Some(pid) = ops.target_pid {
-        target::Config::Pid(target::PidConfig { pid })
+        Some(target::Config::Pid(target::PidConfig { pid }))
     } else if let Some(path) = &ops.target_path {
-        target::Config::Binary(target::BinaryConfig {
+        Some(target::Config::Binary(target::BinaryConfig {
             command: path.clone(),
             arguments: ops.target_arguments.clone(),
             inherit_environment: ops.target_inherit_environment,
@@ -194,11 +194,11 @@ fn get_config(ops: &Opts) -> Config {
                 stderr: ops.target_stderr_path.clone(),
                 stdout: ops.target_stdout_path.clone(),
             },
-        })
+        }))
     } else {
         unreachable!("clap ensures that exactly one target option is selected");
     };
-    config.target = Some(target);
+    config.target = target;
 
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
@@ -330,12 +330,21 @@ async fn inner_main(
     //
     // OBSERVER
     //
-    let obs_rcv = tgt_snd.subscribe();
-    let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
-    let _osrv = tokio::spawn(observer_server.run(obs_rcv));
+    // Observer is not used when there is no target.
+    let tsrv = if let Some(target) = config.target {
+        let obs_rcv = tgt_snd.subscribe();
+        let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
+        let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
-    let target_server = target::Server::new(config.target.unwrap(), shutdown.clone());
-    let tsrv = tokio::spawn(target_server.run(tgt_snd));
+        //
+        // TARGET
+        //
+        let target_server = target::Server::new(target, shutdown.clone());
+        let tsrv = tokio::spawn(target_server.run(tgt_snd));
+        futures::future::Either::Left(tsrv)
+    } else {
+        futures::future::Either::Right(futures::future::pending())
+    };
 
     let experiment_sleep = async move {
         info!("target is running, now sleeping for warmup");
