@@ -94,4 +94,5 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-      - run: cargo test -p sheepdog
+      - run: cargo test -p
+        timeout-minutes: 30
