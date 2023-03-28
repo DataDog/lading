@@ -95,3 +95,4 @@ jobs:
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
       - run: cargo test -p sheepdog
+        timeout-minutes: 30
