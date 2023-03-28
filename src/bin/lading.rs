@@ -76,7 +76,7 @@ impl FromStr for CliKeyValues {
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
-        .args(&["target-path", "target-pid"]),
+        .args(&["target-path", "target-pid", "no-target"]),
 ))]
 struct Opts {
     /// path on disk to the configuration file
@@ -88,6 +88,9 @@ struct Opts {
     /// measure an externally-launched process by PID
     #[clap(long)]
     target_pid: Option<NonZeroU32>,
+    /// disable target measurement
+    #[clap(long)]
+    no_target: bool,
     /// the path of the target executable
     #[clap(long, group = "binary-target")]
     target_path: Option<PathBuf>,
@@ -173,7 +176,9 @@ fn get_config(ops: &Opts) -> Config {
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit).unwrap();
     }
-    let target = if let Some(pid) = ops.target_pid {
+    let target = if ops.no_target {
+        target::Config::None
+    } else if let Some(pid) = ops.target_pid {
         target::Config::Pid(target::PidConfig { pid })
     } else if let Some(path) = &ops.target_path {
         target::Config::Binary(target::BinaryConfig {

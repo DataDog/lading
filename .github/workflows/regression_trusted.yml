@@ -312,7 +312,7 @@ jobs:
             --comparison-sha ${{ needs.compute-metadata.outputs.comparison-sha }} \
             --target-config-dir ${{ github.workspace }}/regression/ \
             --target-name lading-target \
-            --target-command /usr/local/bin/lading \
+            --target-command /usr/local/bin/lading --no-target --config-path /etc/lading-target/lading.yml \
             --submission-metadata ${{ runner.temp }}/submission-metadata
 
       - uses: actions/upload-artifact@v3

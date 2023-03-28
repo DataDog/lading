@@ -138,6 +138,8 @@ pub struct BinaryConfig {
 /// Configuration for [`Server`]
 #[derive(Debug, PartialEq, Eq)]
 pub enum Config {
+    /// Disable target measurement
+    None,
     /// An existing process that is managed externally
     Pid(PidConfig),
     /// A binary that will be launched and managed directly
@@ -203,6 +205,7 @@ impl Server {
         // a critical error. Binary mode expects the target to run until
         // signalled to exit.
         match config {
+            Config::None => {}
             Config::Pid(config) => {
                 Self::watch(config, pid_snd, self.shutdown).await?;
             }
