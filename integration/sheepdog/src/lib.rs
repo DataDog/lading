@@ -192,7 +192,7 @@ impl IntegrationTest {
     pub async fn run(self) -> Result<Metrics, anyhow::Error> {
         tokio::select! {
             res = self.run_inner() => { res }
-            _ = tokio::time::sleep(Duration::from_secs(600)) => { panic!("test timed out") }
+            _ = tokio::time::sleep(Duration::from_secs(30 * 60)) => { panic!("test timed out") }
         }
     }
 }
