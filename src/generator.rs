@@ -156,6 +156,7 @@ impl Server {
     /// Function will return an error if the underlying sub-server signals
     /// error.
     pub async fn run(self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
+        // Pause until the target process is running.
         let _ = pid_snd.recv().await;
         drop(pid_snd);
 
