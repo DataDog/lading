@@ -290,10 +290,6 @@ async fn inner_main(
     //
     // GENERATOR
     //
-    assert!(
-        !config.generator.is_empty(),
-        "lading requires at least one generator in order to run"
-    );
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
         let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
