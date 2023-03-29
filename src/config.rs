@@ -14,6 +14,7 @@ pub struct Config {
     #[serde(default)]
     pub telemetry: Telemetry,
     /// The generator to apply to the target in-rig
+    #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
     /// The observer that watches the target

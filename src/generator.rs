@@ -156,10 +156,8 @@ impl Server {
     /// Function will return an error if the underlying sub-server signals
     /// error.
     pub async fn run(self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
-        let _ = pid_snd
-            .recv()
-            .await
-            .expect("target failed to transmit PID, catastrophic failure");
+        // Pause until the target process is running.
+        let _ = pid_snd.recv().await;
         drop(pid_snd);
 
         let res = match self {
