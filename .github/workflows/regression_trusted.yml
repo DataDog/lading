@@ -43,7 +43,7 @@ jobs:
           export P_VALUE="0.1"
           export SMP_CRATE_VERSION="0.7.2"
           export SMP_WAIT_TIMEOUT="55"
-          export LADING_VERSION="0.13.2-rc1"
+          export LADING_VERSION="0.13.2"
 
 
           echo "warmup seconds: ${WARMUP_SECONDS}"

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
-## [0.13.2-rc1]
+## [0.13.2]
 ## Added
 - Added a CLI flag to disable the target module
 - Allow lading to run without any generators active
