@@ -11,7 +11,6 @@ pub(crate) use ascii::Ascii;
 pub(crate) use datadog_logs::DatadogLog;
 pub(crate) use dogstatsd::DogStatsD;
 pub(crate) use fluent::Fluent;
-pub(crate) use foundationdb::FoundationDb;
 pub(crate) use json::Json;
 pub(crate) use opentelemetry_log::OpentelemetryLogs;
 pub(crate) use opentelemetry_metric::OpentelemetryMetrics;
@@ -27,7 +26,6 @@ mod common;
 mod datadog_logs;
 mod dogstatsd;
 mod fluent;
-mod foundationdb;
 mod json;
 mod opentelemetry_log;
 mod opentelemetry_metric;
@@ -110,8 +108,6 @@ pub enum Config {
     SplunkHec { encoding: SplunkHecEncoding },
     /// Generates Datadog Logs JSON messages
     DatadogLog,
-    /// Generates a limited subset of FoundationDB logs
-    FoundationDb,
     /// Generates a static, user supplied data
     Static {
         /// Defines the file path to read static variant data from. Content is
@@ -145,7 +141,6 @@ pub(crate) enum Payload {
     Ascii(Ascii),
     DatadogLog(DatadogLog),
     Fluent(Fluent),
-    FoundationDb(FoundationDb),
     Json(Json),
     SplunkHec(SplunkHec),
     #[cfg_attr(test, proptest(skip))]
@@ -173,7 +168,6 @@ impl Serialize for Payload {
             Payload::Ascii(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DatadogLog(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Fluent(ser) => ser.to_bytes(rng, max_bytes, writer),
-            Payload::FoundationDb(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Json(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::SplunkHec(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Static(ser) => ser.to_bytes(rng, max_bytes, writer),
