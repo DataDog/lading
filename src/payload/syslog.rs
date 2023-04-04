@@ -1,7 +1,6 @@
 use std::{io::Write, time::SystemTime};
 
-use arbitrary::{size_hint, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::payload::{Error, Serialize};
@@ -29,29 +28,19 @@ struct Message {
     true_anomaly: u8,
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Message {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Message {
-            eccentricity: u.arbitrary::<u32>()?,
-            semimajor_axis: u.arbitrary::<u32>()?,
-            inclination: u.arbitrary::<f32>()?,
-            longitude_of_ascending_node: u.arbitrary::<u32>()?,
-            periapsis: u.arbitrary::<u64>()?,
-            true_anomaly: u.arbitrary::<u8>()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-                <f32 as arbitrary::Arbitrary>::size_hint(depth),
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-                <u64 as arbitrary::Arbitrary>::size_hint(depth),
-                <u8 as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
+impl Distribution<Message> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Message
+    where
+        R: Rng + ?Sized,
+    {
+        Message {
+            eccentricity: rng.gen(),
+            semimajor_axis: rng.gen(),
+            inclination: rng.gen(),
+            longitude_of_ascending_node: rng.gen(),
+            periapsis: rng.gen(),
+            true_anomaly: rng.gen(),
+        }
     }
 }
 
@@ -66,50 +55,29 @@ struct Member {
     message: String,    // shortish structured string
 }
 
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        Member {
+            priority: rng.gen_range(0..=191),
+            syslog_version: rng.gen_range(1..=3),
+            timestamp: to_rfc3339(SystemTime::now()),
+            hostname: HOSTNAMES.choose(rng).unwrap().to_string(),
+            app_name: APP_NAMES.choose(rng).unwrap().to_string(),
+            procid: rng.gen_range(100..=9999),
+            msgid: rng.gen_range(1..=999),
+            message: serde_json::to_string(&rng.gen::<Message>()).unwrap(),
+        }
+    }
+}
+
 fn to_rfc3339<T>(dt: T) -> String
 where
     T: Into<OffsetDateTime>,
 {
     dt.into().format(&Rfc3339).unwrap()
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Member {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let priority = u.arbitrary::<u8>()? % 191;
-        let syslog_version = (u.arbitrary::<u8>()? % 3) + 1;
-        let timestamp = to_rfc3339(SystemTime::now());
-        let hostname_idx = u.arbitrary::<usize>()? % HOSTNAMES.len();
-        let app_name_idx = u.arbitrary::<usize>()? % APP_NAMES.len();
-        let procid = (u.arbitrary::<u16>()? % 9899) + 101;
-        let msgid = (u.arbitrary::<u16>()? % 999) + 1;
-        let message = u.arbitrary::<Message>()?;
-
-        Ok(Member {
-            priority,
-            syslog_version,
-            timestamp,
-            hostname: HOSTNAMES[hostname_idx].to_string(),
-            app_name: APP_NAMES[app_name_idx].to_string(),
-            procid,
-            msgid,
-            message: serde_json::to_string(&message).unwrap(),
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <u8 as arbitrary::Arbitrary>::size_hint(depth),
-                <u8 as arbitrary::Arbitrary>::size_hint(depth),
-                (16, Some(64)), // timestamp
-                (8, Some(16)),  // hostnames
-                (4, Some(20)),  // app names
-                <u16 as arbitrary::Arbitrary>::size_hint(depth),
-                <u16 as arbitrary::Arbitrary>::size_hint(depth),
-                (128, Some(512)), // message
-            ])
-        })
-    }
 }
 
 impl Member {
@@ -129,7 +97,7 @@ impl Member {
 }
 
 impl Serialize for Syslog5424 {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -139,24 +107,20 @@ impl Serialize for Syslog5424 {
             return Ok(());
         }
 
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let unstructured = Unstructured::new(&entropy);
-
-        let members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let encoded = members.into_iter().map(Member::into_string);
-
         let mut written_bytes = 0;
-        for line in encoded {
-            if line.len() + 1 + written_bytes > max_bytes {
+        for member in rng.sample_iter::<Member, Standard>(Standard) {
+            let encoded = member.into_string();
+
+            if encoded.len() + 1 + written_bytes > max_bytes {
                 break;
             }
 
-            writeln!(writer, "{line}")?;
+            writeln!(writer, "{encoded}")?;
 
             written_bytes += 1; // newline
-            written_bytes += line.len();
+            written_bytes += encoded.len();
         }
+
         Ok(())
     }
 }

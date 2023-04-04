@@ -2,14 +2,10 @@
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
 use std::{collections::HashMap, io::Write};
 
-use arbitrary::{size_hint, Unstructured};
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 use serde_tuple::Serialize_tuple;
 
-use super::{
-    common::{AsciiStr, AsciiString},
-    Generator,
-};
+use super::{common::AsciiString, Generator};
 use crate::payload::{Error, Serialize};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -47,54 +43,6 @@ impl Distribution<RecordValue> for Standard {
     }
 }
 
-fn object(u: &mut Unstructured<'_>) -> arbitrary::Result<RecordValue> {
-    let mut obj = HashMap::new();
-    for _ in 0..u.arbitrary_len::<(AsciiStr, u8)>()? {
-        let key = u.arbitrary::<AsciiStr>()?;
-        let msg = u.arbitrary::<u8>()?;
-        obj.insert(key.as_str().to_string(), msg);
-    }
-    Ok(RecordValue::Object(obj))
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for RecordValue {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let v = if u.arbitrary::<bool>()? {
-            RecordValue::String(AsciiStr::arbitrary(u)?.as_str().to_string())
-        } else {
-            object(u)?
-        };
-        Ok(v)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <HashMap<String, u8> as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
-    }
-}
-
-fn record(u: &mut Unstructured<'_>) -> arbitrary::Result<HashMap<String, RecordValue>> {
-    let mut record = HashMap::new();
-
-    let msg = u.arbitrary::<AsciiStr>()?;
-    record.insert(
-        "message".to_string(),
-        RecordValue::String(msg.as_str().to_string()),
-    );
-    record.insert("event".to_string(), object(u)?);
-
-    for _ in 0..u.arbitrary_len::<(AsciiStr, AsciiStr)>()? {
-        let key = u.arbitrary::<AsciiStr>()?;
-        let msg = RecordValue::String(u.arbitrary::<AsciiStr>()?.as_str().to_string());
-        record.insert(key.as_str().to_string(), msg);
-    }
-    Ok(record)
-}
-
 #[derive(Serialize_tuple)]
 struct Entry {
     time: u32,
@@ -122,24 +70,6 @@ impl Distribution<Entry> for Standard {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Entry {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Entry {
-            time: u.arbitrary::<u32>()?,
-            record: record(u)?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <HashMap<String, String> as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
-    }
-}
-
 #[derive(Serialize_tuple)]
 struct FluentForward {
     tag: String,
@@ -156,24 +86,6 @@ impl Distribution<FluentForward> for Standard {
             tag: AsciiString::default().generate(rng).unwrap(),
             entries: rng.sample_iter(Standard).take(total_entries).collect(),
         }
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for FluentForward {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(FluentForward {
-            tag: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
-            entries: u.arbitrary::<Vec<Entry>>()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <Vec<Entry> as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
     }
 }
 
@@ -205,26 +117,6 @@ impl Distribution<FluentMessage> for Standard {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(FluentMessage {
-            tag: u.arbitrary::<AsciiStr>()?.as_str().to_string(),
-            time: u.arbitrary::<u32>()?,
-            record: record(u)?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-                <HashMap<String, String> as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
-    }
-}
-
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 enum Member {
@@ -242,27 +134,6 @@ impl Distribution<Member> for Standard {
             1 => Member::Forward(rng.gen()),
             _ => unimplemented!(),
         }
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Member {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice = u.arbitrary::<u8>()?;
-        let res = match choice % 2 {
-            0 => Member::Message(u.arbitrary::<FluentMessage>()?),
-            1 => Member::Forward(u.arbitrary::<FluentForward>()?),
-            _ => unreachable!(),
-        };
-        Ok(res)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <FluentMessage as arbitrary::Arbitrary>::size_hint(depth),
-                <FluentForward as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
     }
 }
 
