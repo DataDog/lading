@@ -23,7 +23,6 @@ byte-unit = { version = "4.0", features = ["serde"] }
 bytecount = "0.6"
 bytes = { version = "1.4.0", default-features = false, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
-derive_builder = "0.12"
 flate2 = { version = "1.0.25", default-features = false, features = ["rust_backend"] }
 futures = "0.3.28"
 http = "0.2"

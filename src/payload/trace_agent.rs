@@ -145,7 +145,7 @@ impl crate::payload::Serialize for TraceAgent {
             // here. This algorithm _does_ work perfectly if the tree is a
             // straight pipe.
             if encoding.len() > max_bytes {
-                high /= 2;
+                high /= 16;
             } else {
                 writer.write_all(&encoding)?;
                 break;

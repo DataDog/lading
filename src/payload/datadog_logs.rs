@@ -1,13 +1,10 @@
 use std::io::Write;
 
-use arbitrary::{size_hint, Arbitrary, Unstructured};
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::payload::{common::AsciiStr, Error, Serialize};
+use crate::payload::{common::AsciiString, Error, Generator, Serialize};
 
-use super::{common::AsciiString, Generator};
-
-#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Status {
     Notice,
@@ -29,7 +26,7 @@ impl Distribution<Status> for Standard {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Hostname {
     Alpha,
@@ -53,7 +50,7 @@ impl Distribution<Hostname> for Standard {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Service {
     Vector,
@@ -75,7 +72,7 @@ impl Distribution<Service> for Standard {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Source {
     Bergman,
@@ -131,32 +128,6 @@ impl Distribution<Structured> for Standard {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Structured {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let ascii_str = u.arbitrary::<AsciiStr>()?;
-
-        Ok(Structured {
-            mineral: ascii_str.as_str().to_string(),
-            proportional: u.arbitrary::<u32>()?,
-            integral: u.arbitrary::<u64>()?,
-            derivative: u.arbitrary::<f64>()?,
-            vegetable: u.arbitrary::<i16>()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-                <u64 as arbitrary::Arbitrary>::size_hint(depth),
-                <f64 as arbitrary::Arbitrary>::size_hint(depth),
-                <i16 as arbitrary::Arbitrary>::size_hint(depth),
-            ])
-        })
-    }
-}
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 enum Message {
@@ -164,26 +135,18 @@ enum Message {
     Structured(String),
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Message {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let inner = if u.arbitrary::<bool>()? {
-            let ascii_str = u.arbitrary::<AsciiStr>()?;
-            Message::Unstructured(ascii_str.as_str().to_string())
-        } else {
-            let structured = u.arbitrary::<Structured>()?;
-            Message::Structured(serde_json::to_string(&structured).unwrap())
-        };
-
-        Ok(inner)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and(
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <Structured as arbitrary::Arbitrary>::size_hint(depth),
-            )
-        })
+impl Distribution<Message> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Message
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..2) {
+            0 => {
+                Message::Unstructured(AsciiString::default().generate(rng).expect("must not fail"))
+            }
+            1 => Message::Structured(serde_json::to_string(&rng.gen::<Structured>()).unwrap()),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -206,34 +169,20 @@ struct Member {
     pub(crate) ddtags: String,
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Member {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let message = u.arbitrary::<Message>()?;
-        let status = u.arbitrary::<Status>()?;
-        let timestamp = u.arbitrary::<u32>()?;
-        let hostname = u.arbitrary::<Hostname>()?;
-        let service = u.arbitrary::<Service>()?;
-        let source = u.arbitrary::<Source>()?;
-        let tag_idx = u.arbitrary::<usize>()? % TAG_OPTIONS.len();
-
-        Ok(Member {
-            message,
-            status,
-            timestamp,
-            hostname,
-            service,
-            ddsource: source,
-            ddtags: TAG_OPTIONS[tag_idx].to_string(),
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and(
-                <AsciiStr as arbitrary::Arbitrary>::size_hint(depth),
-                <u32 as arbitrary::Arbitrary>::size_hint(depth),
-            )
-        })
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        Member {
+            message: rng.gen(),
+            status: rng.gen(),
+            timestamp: rng.gen(),
+            hostname: rng.gen(),
+            service: rng.gen(),
+            ddsource: rng.gen(),
+            ddtags: TAG_OPTIONS.choose(rng).unwrap().to_string(),
+        }
     }
 }
 
@@ -252,18 +201,28 @@ impl Serialize for DatadogLog {
             return Ok(());
         }
 
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let unstructured = Unstructured::new(&entropy);
+        // We will arbitrarily generate 1_000 Member instances and then
+        // serialize. If this is below `max_bytes` we'll add more until we're
+        // over. Once we are we'll start removing instances until we're back
+        // below the limit.
 
-        let members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let low = 0;
-        let mut high = members.len();
+        let mut members: Vec<Member> = Standard.sample_iter(&mut rng).take(1_000).collect();
 
+        // Search for too many Member instances.
         loop {
-            let encoding = serde_json::to_string(&members[low..high])?;
+            let encoding = serde_json::to_string(&members)?;
             if encoding.len() > max_bytes {
-                high /= 2;
+                break;
+            }
+            members.extend(Standard.sample_iter(&mut rng).take(100));
+        }
+
+        // Search for an encoding that's just right.
+        let mut high = members.len();
+        loop {
+            let encoding = serde_json::to_string(&members[0..high])?;
+            if encoding.len() > max_bytes {
+                high /= 16;
             } else {
                 write!(writer, "{encoding}")?;
                 break;

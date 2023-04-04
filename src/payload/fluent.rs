@@ -3,21 +3,48 @@
 use std::{collections::HashMap, io::Write};
 
 use arbitrary::{size_hint, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 use serde_tuple::Serialize_tuple;
 
-use super::common::AsciiStr;
+use super::{
+    common::{AsciiStr, AsciiString},
+    Generator,
+};
 use crate::payload::{Error, Serialize};
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Fluent {}
 
+pub(crate) type Object = HashMap<String, u8>;
+
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 enum RecordValue {
     String(String),
-    Object(HashMap<String, u8>),
+    Object(Object),
+}
+
+impl Distribution<RecordValue> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> RecordValue
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..2) {
+            0 => RecordValue::String(AsciiString::default().generate(rng).unwrap()),
+            1 => {
+                let mut obj = HashMap::new();
+                for _ in 0..rng.gen_range(0..128) {
+                    let key = AsciiString::default().generate(rng).unwrap();
+                    let val = rng.gen();
+
+                    obj.insert(key, val);
+                }
+                RecordValue::Object(obj)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn object(u: &mut Unstructured<'_>) -> arbitrary::Result<RecordValue> {
@@ -74,6 +101,27 @@ struct Entry {
     record: HashMap<String, RecordValue>, // always contains 'message' and 'event' -> object key
 }
 
+impl Distribution<Entry> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Entry
+    where
+        R: Rng + ?Sized,
+    {
+        let mut rec = HashMap::new();
+        rec.insert(String::from("message"), rng.gen());
+        rec.insert(String::from("event"), rng.gen());
+        for _ in 0..rng.gen_range(0..128) {
+            let key = AsciiString::default().generate(rng).unwrap();
+            let val = rng.gen();
+
+            rec.insert(key, val);
+        }
+        Entry {
+            time: rng.gen(),
+            record: rec,
+        }
+    }
+}
+
 impl<'a> arbitrary::Arbitrary<'a> for Entry {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Entry {
@@ -96,6 +144,19 @@ impl<'a> arbitrary::Arbitrary<'a> for Entry {
 struct FluentForward {
     tag: String,
     entries: Vec<Entry>,
+}
+
+impl Distribution<FluentForward> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> FluentForward
+    where
+        R: Rng + ?Sized,
+    {
+        let total_entries = rng.gen_range(0..32);
+        FluentForward {
+            tag: AsciiString::default().generate(rng).unwrap(),
+            entries: rng.sample_iter(Standard).take(total_entries).collect(),
+        }
+    }
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for FluentForward {
@@ -123,6 +184,27 @@ struct FluentMessage {
     record: HashMap<String, RecordValue>, // always contains 'message' key
 }
 
+impl Distribution<FluentMessage> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> FluentMessage
+    where
+        R: Rng + ?Sized,
+    {
+        let mut rec = HashMap::new();
+        rec.insert(String::from("message"), rng.gen());
+        for _ in 0..rng.gen_range(0..128) {
+            let key = AsciiString::default().generate(rng).unwrap();
+            let val = rng.gen();
+
+            rec.insert(key, val);
+        }
+        FluentMessage {
+            tag: AsciiString::default().generate(rng).unwrap(),
+            time: rng.gen(),
+            record: rec,
+        }
+    }
+}
+
 impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(FluentMessage {
@@ -148,6 +230,19 @@ impl<'a> arbitrary::Arbitrary<'a> for FluentMessage {
 enum Member {
     Message(FluentMessage),
     Forward(FluentForward),
+}
+
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..2) {
+            0 => Member::Message(rng.gen()),
+            1 => Member::Forward(rng.gen()),
+            _ => unimplemented!(),
+        }
+    }
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Member {
@@ -182,25 +277,41 @@ impl Serialize for Fluent {
             return Ok(());
         }
 
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let unstructured = Unstructured::new(&entropy);
+        // We will arbitrarily generate 1_000 Member instances and then
+        // serialize. If this is below `max_bytes` we'll add more until we're
+        // over. Once we are we'll start removing instances until we're back
+        // below the limit.
 
-        let members = <Vec<Member> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let members: Vec<Vec<u8>> = members
-            .into_iter()
-            .map(|m| rmp_serde::to_vec(&m).unwrap())
+        let mut members: Vec<Vec<u8>> = Standard
+            .sample_iter(&mut rng)
+            .take(1_000)
+            .map(|m: Member| rmp_serde::to_vec(&m).unwrap())
             .collect();
-        let low = 0;
-        let mut high = members.len();
 
+        // Search for too many Member instances.
         loop {
-            let encoding_len = members[low..high].iter().fold(0, |acc, m| acc + m.len());
+            let encoding_len = members[0..].iter().fold(0, |acc, m| acc + m.len());
+            if encoding_len > max_bytes {
+                break;
+            }
+
+            members.extend(
+                Standard
+                    .sample_iter(&mut rng)
+                    .take(100)
+                    .map(|m: Member| rmp_serde::to_vec(&m).unwrap()),
+            );
+        }
+
+        // Search for an encoding that's just right.
+        let mut high = members.len();
+        loop {
+            let encoding_len = members[0..high].iter().fold(0, |acc, m| acc + m.len());
 
             if encoding_len > max_bytes {
-                high /= 2;
+                high /= 16;
             } else {
-                for m in &members[low..high] {
+                for m in &members[0..high] {
                     writer.write_all(m)?;
                 }
                 break;

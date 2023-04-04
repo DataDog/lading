@@ -1,5 +1,4 @@
 use arbitrary::Unstructured;
-use derive_builder::Builder;
 use rand::{distributions::DistString, seq::SliceRandom, Rng};
 
 use super::Generator;
@@ -26,10 +25,8 @@ pub(crate) struct AsciiStr {
     bytes: Vec<u8>,
 }
 
-#[derive(Debug, PartialEq, Builder, Default)]
-#[builder(pattern = "owned")]
+#[derive(Debug, PartialEq, Default)]
 pub(crate) struct AsciiString {
-    #[builder(default = "64")]
     max_length: u16,
 }
 
