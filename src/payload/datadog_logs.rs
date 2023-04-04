@@ -181,7 +181,7 @@ impl Distribution<Member> for Standard {
             hostname: rng.gen(),
             service: rng.gen(),
             ddsource: rng.gen(),
-            ddtags: TAG_OPTIONS.choose(rng).unwrap().to_string(),
+            ddtags: (*TAG_OPTIONS.choose(rng).unwrap()).to_string(),
         }
     }
 }

@@ -14,7 +14,7 @@ impl DistString for AsciiStr {
         s.extend(
             CHARSET
                 .choose_multiple(rng, len)
-                .map(|c| unsafe { char::from_u32_unchecked(*c as u32) }),
+                .map(|c| unsafe { char::from_u32_unchecked(u32::from(*c)) }),
         );
     }
 }
@@ -45,7 +45,7 @@ impl Generator<String, Error> for AsciiString {
         s.extend(
             CHARSET
                 .choose_multiple(rng, len)
-                .map(|c| unsafe { char::from_u32_unchecked(*c as u32) }),
+                .map(|c| unsafe { char::from_u32_unchecked(u32::from(*c)) }),
         );
         Ok(s)
     }
