@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use derive_builder::Builder;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
 use crate::payload::{Error, Serialize};
@@ -38,29 +37,18 @@ impl Distribution<Member> for Standard {
     }
 }
 
-#[derive(Debug, Clone, Builder)]
+#[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-#[builder(pattern = "owned")]
-pub(crate) struct Json {
-    padding_bytes: Vec<usize>,
-}
-
-impl Default for Json {
-    fn default() -> Self {
-        Json {
-            padding_bytes: Vec::from(SIZES),
-        }
-    }
-}
+pub(crate) struct Json;
 
 #[derive(thiserror::Error, Debug)]
 enum GeneratorError {}
 
-impl<R> Generator<Member, R, GeneratorError> for Json
-where
-    R: rand::Rng,
-{
-    fn generate(&self, rng: &mut R) -> Result<Member, GeneratorError> {
+impl Generator<Member, GeneratorError> for Json {
+    fn generate<R>(&self, rng: &mut R) -> Result<Member, GeneratorError>
+    where
+        R: rand::Rng + ?Sized,
+    {
         Ok(rng.gen())
     }
 }

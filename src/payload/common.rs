@@ -26,7 +26,7 @@ pub(crate) struct AsciiStr {
     bytes: Vec<u8>,
 }
 
-#[derive(Debug, PartialEq, Builder)]
+#[derive(Debug, PartialEq, Builder, Default)]
 #[builder(pattern = "owned")]
 pub(crate) struct AsciiString {
     #[builder(default = "64")]
@@ -34,13 +34,13 @@ pub(crate) struct AsciiString {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum Error {}
+pub(crate) enum Error {}
 
-impl<R> Generator<String, R, Error> for AsciiString
-where
-    R: rand::Rng,
-{
-    fn generate(&self, rng: &mut R) -> Result<String, Error> {
+impl Generator<String, Error> for AsciiString {
+    fn generate<R>(&self, rng: &mut R) -> Result<String, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
         let len: usize = rng.gen_range(1..self.max_length) as usize; // todo
         let total_bytes = 4 * len; // max size of an `char` times length
         let mut s = String::with_capacity(total_bytes);

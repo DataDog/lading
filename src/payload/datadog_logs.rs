@@ -1,9 +1,11 @@
 use std::io::Write;
 
 use arbitrary::{size_hint, Arbitrary, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use crate::payload::{common::AsciiStr, Error, Serialize};
+
+use super::{common::AsciiString, Generator};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
@@ -11,6 +13,20 @@ enum Status {
     Notice,
     Info,
     Warning,
+}
+
+impl Distribution<Status> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Status
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..3) {
+            0 => Status::Notice,
+            1 => Status::Info,
+            2 => Status::Warning,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
@@ -22,12 +38,41 @@ enum Hostname {
     Localhost,
 }
 
+impl Distribution<Hostname> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Hostname
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..4) {
+            0 => Hostname::Alpha,
+            1 => Hostname::Beta,
+            2 => Hostname::Gamma,
+            3 => Hostname::Localhost,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
 #[serde(rename_all = "lowercase")]
 enum Service {
     Vector,
     Lading,
     Cernan,
+}
+
+impl Distribution<Service> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Service
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..3) {
+            0 => Service::Vector,
+            1 => Service::Lading,
+            2 => Service::Cernan,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Arbitrary)]
@@ -41,6 +86,23 @@ enum Source {
     Tarkovsky,
 }
 
+impl Distribution<Source> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Source
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..6) {
+            0 => Source::Bergman,
+            1 => Source::Keaton,
+            2 => Source::Kurosawa,
+            3 => Source::Lynch,
+            4 => Source::Waters,
+            5 => Source::Tarkovsky,
+            _ => unreachable!(),
+        }
+    }
+}
+
 const TAG_OPTIONS: [&str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -50,6 +112,23 @@ struct Structured {
     derivative: f64,
     vegetable: i16,
     mineral: String,
+}
+
+impl Distribution<Structured> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Structured
+    where
+        R: Rng + ?Sized,
+    {
+        let mineral: String = AsciiString::default().generate(rng).expect("must not fail");
+
+        Structured {
+            proportional: rng.gen(),
+            integral: rng.gen(),
+            derivative: rng.gen(),
+            vegetable: rng.gen(),
+            mineral,
+        }
+    }
 }
 
 impl<'a> arbitrary::Arbitrary<'a> for Structured {
