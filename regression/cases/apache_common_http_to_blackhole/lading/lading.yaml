@@ -1,6 +1,0 @@
-# This is not the lading under test! This is the stable, released version of
-# lading that is used to run the test.
-
-blackhole:
-  - tcp:
-      binding_addr: "0.0.0.0:8080"
