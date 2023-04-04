@@ -1,9 +1,11 @@
 use std::io::Write;
 
-use arbitrary::{size_hint, Arbitrary, Unstructured};
-use rand::Rng;
+use derive_builder::Builder;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
 use crate::payload::{Error, Serialize};
+
+use super::Generator;
 
 const SIZES: [usize; 13] = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 
@@ -20,39 +22,48 @@ struct Member {
     pub(crate) byte_parade: Vec<u8>,
 }
 
-impl<'a> Arbitrary<'a> for Member {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice: u8 = u.arbitrary()?;
-        let size = SIZES[(choice as usize) % SIZES.len()];
-        let mut byte_parade: Vec<u8> = vec![0; size];
-        u.fill_buffer(&mut byte_parade)?;
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        let max = SIZES.choose(rng).unwrap();
 
-        let member = Member {
-            id: u.arbitrary()?,
-            name: u.arbitrary()?,
-            seed: u.arbitrary()?,
-            byte_parade,
-        };
-        Ok(member)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let byte_parade_hint = (SIZES[0], Some(SIZES[SIZES.len() - 1]));
-
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <u64 as Arbitrary>::size_hint(depth),
-                <u64 as Arbitrary>::size_hint(depth),
-                <u16 as Arbitrary>::size_hint(depth),
-                byte_parade_hint,
-            ])
-        })
+        Member {
+            id: rng.gen(),
+            name: rng.gen(),
+            seed: rng.gen(),
+            byte_parade: rng.sample_iter(Standard).take(*max).collect(),
+        }
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Builder)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct Json {}
+#[builder(pattern = "owned")]
+pub(crate) struct Json {
+    padding_bytes: Vec<usize>,
+}
+
+impl Default for Json {
+    fn default() -> Self {
+        Json {
+            padding_bytes: Vec::from(SIZES),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+enum GeneratorError {}
+
+impl<R> Generator<Member, R, GeneratorError> for Json
+where
+    R: rand::Rng,
+{
+    fn generate(&self, rng: &mut R) -> Result<Member, GeneratorError> {
+        Ok(rng.gen())
+    }
+}
 
 impl Serialize for Json {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -60,12 +71,9 @@ impl Serialize for Json {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Member>() {
+
+        while let Ok(member) = self.generate(&mut rng) {
             let encoding = serde_json::to_string(&member)?;
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

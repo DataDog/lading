@@ -200,6 +200,14 @@ const fn div_ceil(lhs: usize, rhs: usize) -> usize {
     }
 }
 
+/// Generate instance of `I` from source of randomness `S`.
+pub(crate) trait Generator<I, S, E>
+where
+    E: std::error::Error,
+{
+    fn generate(&self, state: &mut S) -> Result<I, E>;
+}
+
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
