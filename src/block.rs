@@ -165,12 +165,6 @@ where
         payload::Config::Json => {
             construct_block_cache_inner(&mut rng, &payload::Json::default(), block_chunks, labels)
         }
-        payload::Config::FoundationDb => construct_block_cache_inner(
-            &mut rng,
-            &payload::FoundationDb::default(),
-            block_chunks,
-            labels,
-        ),
         payload::Config::Static { ref static_path } => construct_block_cache_inner(
             &mut rng,
             &payload::Static::new(static_path),
