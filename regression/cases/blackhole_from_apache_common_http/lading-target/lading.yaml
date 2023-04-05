@@ -1,5 +1,7 @@
 # Configure the lading under test
 
 blackhole:
-  - tcp:
-      binding_addr: "0.0.0.0:8282"
+  - http:
+      concurrent_requests_max: 1000
+      binding_addr: "127.0.0.1:8282"
+      body_variant: nothing
