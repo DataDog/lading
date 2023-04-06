@@ -10,10 +10,11 @@
 use std::io::Write;
 
 use crate::payload::{Error, Serialize};
-use arbitrary::{size_hint, Arbitrary, Unstructured};
 use opentelemetry_proto::tonic::metrics::v1::{self};
 use prost::Message;
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+
+use super::{common::AsciiString, Generator};
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportMetricsServiceRequests`](opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest)
 struct ExportMetricsServiceRequest(Vec<Metric>);
@@ -41,133 +42,86 @@ struct NumberDataPoint(v1::NumberDataPoint);
 struct Gauge(v1::Gauge);
 struct Sum(v1::Sum);
 
-impl<'a> Arbitrary<'a> for ExportMetricsServiceRequest {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let metrics: Vec<Metric> = u.arbitrary()?;
-        Ok(Self(metrics))
-    }
-}
-
-impl<'a> Arbitrary<'a> for NumberDataPoint {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let time_unix_nano = u.arbitrary()?;
-        let start_time_unix_nano = u.arbitrary()?;
-
-        let value = match u.int_in_range(0u8..=1)? {
-            0 => v1::number_data_point::Value::AsDouble(u.arbitrary()?),
-            1 => v1::number_data_point::Value::AsInt(u.arbitrary()?),
+impl Distribution<NumberDataPoint> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> NumberDataPoint
+    where
+        R: Rng + ?Sized,
+    {
+        let value = match rng.gen_range(0..=1) {
+            0 => v1::number_data_point::Value::AsDouble(rng.gen()),
+            1 => v1::number_data_point::Value::AsInt(rng.gen()),
             _ => unreachable!(),
         };
 
-        Ok(Self(v1::NumberDataPoint {
+        NumberDataPoint(v1::NumberDataPoint {
             attributes: Vec::new(),
-            start_time_unix_nano,
-            time_unix_nano,
+            start_time_unix_nano: rng.gen(),
+            time_unix_nano: rng.gen(),
             exemplars: Vec::new(),
             flags: 0,
             value: Some(value),
-        }))
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <u64 as Arbitrary>::size_hint(depth),
-                <u64 as Arbitrary>::size_hint(depth),
-                <u8 as Arbitrary>::size_hint(depth),
-                size_hint::or(
-                    <f64 as Arbitrary>::size_hint(depth),
-                    <i64 as Arbitrary>::size_hint(depth),
-                ),
-            ])
         })
     }
 }
 
-impl<'a> Arbitrary<'a> for Gauge {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let len = u.arbitrary_len::<NumberDataPoint>()?;
-        let mut data_points = Vec::new();
-        for _ in 0..len {
-            data_points.push(u.arbitrary::<NumberDataPoint>()?.0);
-        }
-        Ok(Self(v1::Gauge { data_points }))
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        (<NumberDataPoint as Arbitrary>::size_hint(depth).0, None)
+impl Distribution<Gauge> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Gauge
+    where
+        R: Rng + ?Sized,
+    {
+        let total = rng.gen_range(0..64);
+        let data_points = Standard
+            .sample_iter(rng)
+            .map(|ndp: NumberDataPoint| ndp.0)
+            .take(total)
+            .collect();
+        Gauge(v1::Gauge { data_points })
     }
 }
 
-impl<'a> Arbitrary<'a> for Sum {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let len = u.arbitrary_len::<NumberDataPoint>()?;
-        let mut data_points = Vec::new();
-        for _ in 0..len {
-            data_points.push(u.arbitrary::<NumberDataPoint>()?.0);
-        }
-        Ok(Self(v1::Sum {
+impl Distribution<Sum> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Sum
+    where
+        R: Rng + ?Sized,
+    {
+        // 0: Unspecified AggregationTemporality, MUST not be used
+        // 1: Delta
+        // 2: Cumulative
+        let aggregation_temporality = *[1, 2].choose(rng).unwrap();
+        let is_monotonic = rng.gen();
+        let total = rng.gen_range(0..64);
+        let data_points = Standard
+            .sample_iter(rng)
+            .map(|ndp: NumberDataPoint| ndp.0)
+            .take(total)
+            .collect();
+
+        Sum(v1::Sum {
             data_points,
-            // 0: Unspecified AggregationTemporality, MUST not be used
-            // 1: Delta
-            // 2: Cumulative
-            aggregation_temporality: *u.choose(&[1, 2])?,
-            is_monotonic: *u.choose(&[true, false])?,
-        }))
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        (
-            size_hint::and_all(&[
-                <NumberDataPoint as Arbitrary>::size_hint(depth),
-                <usize as Arbitrary>::size_hint(depth),
-                <usize as Arbitrary>::size_hint(depth),
-            ])
-            .0,
-            None,
-        )
+            aggregation_temporality,
+            is_monotonic,
+        })
     }
 }
 
-impl<'a> Arbitrary<'a> for Metric {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let name = u.arbitrary()?;
-        let description = u.arbitrary()?;
-        let unit = u.arbitrary()?;
-
-        let data = match u.int_in_range(0u8..=1)? {
-            0 => v1::metric::Data::Gauge(u.arbitrary::<Gauge>()?.0),
-            1 => v1::metric::Data::Sum(u.arbitrary::<Sum>()?.0),
+impl Distribution<Metric> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Metric
+    where
+        R: Rng + ?Sized,
+    {
+        let data = match rng.gen_range(0..=1) {
+            0 => v1::metric::Data::Gauge(rng.gen::<Gauge>().0),
+            1 => v1::metric::Data::Sum(rng.gen::<Sum>().0),
             // Currently unsupported: Histogram, ExponentialHistogram, Summary
             _ => unreachable!(),
         };
-
         let data = Some(data);
 
-        Ok(Metric(v1::Metric {
-            name,
-            description,
-            unit,
+        Metric(v1::Metric {
+            name: AsciiString::default().generate(rng).unwrap(),
+            description: AsciiString::default().generate(rng).unwrap(),
+            unit: AsciiString::default().generate(rng).unwrap(),
             data,
-        }))
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            (
-                size_hint::and_all(&[
-                    <String as Arbitrary>::size_hint(depth),
-                    <String as Arbitrary>::size_hint(depth),
-                    <String as Arbitrary>::size_hint(depth),
-                    <u8 as Arbitrary>::size_hint(depth),
-                    size_hint::or_all(&[
-                        <Gauge as Arbitrary>::size_hint(depth),
-                        <Sum as Arbitrary>::size_hint(depth),
-                    ]),
-                ])
-                .0,
-                None,
-            )
         })
     }
 }
@@ -182,10 +136,6 @@ impl Serialize for OpentelemetryMetrics {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         // An Export*ServiceRequest message has 5 bytes of fixed values plus
         // a varint-encoded message length field. The worst case for the message
         // length field is the max message size divided by 0x7F.
@@ -195,8 +145,8 @@ impl Serialize for OpentelemetryMetrics {
         };
 
         let mut acc = ExportMetricsServiceRequest(Vec::new());
-        while let Ok(member) = unstructured.arbitrary::<Metric>() {
-            // Note: this 2 is a guessed value for an unknown size factor.
+        loop {
+            let member: Metric = rng.gen();
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
                 Some(remainder) => {

@@ -8,14 +8,15 @@
 //! currently implemented.
 
 use crate::payload::{Error, Serialize};
-use arbitrary::{Arbitrary, Unstructured};
 use opentelemetry_proto::tonic::{
     common::v1::{any_value, AnyValue},
     logs::v1,
 };
 use prost::Message;
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 use std::io::Write;
+
+use super::{common::AsciiString, Generator};
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportLogsServiceRequests`](opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest)
 struct ExportLogsServiceRequest(Vec<LogRecord>);
@@ -40,46 +41,31 @@ impl ExportLogsServiceRequest {
 
 struct LogRecord(v1::LogRecord);
 
-impl<'a> Arbitrary<'a> for ExportLogsServiceRequest {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let logs: Vec<LogRecord> = u.arbitrary()?;
-        Ok(Self(logs))
-    }
-}
-
-impl<'a> Arbitrary<'a> for LogRecord {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let time_unix_nano = u.arbitrary()?;
-        let observed_time_unix_nano = u.arbitrary()?;
-
-        let severity_number = u.int_in_range(1..=24)?;
-        let severity_text = String::new();
-
+impl Distribution<LogRecord> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> LogRecord
+    where
+        R: Rng + ?Sized,
+    {
         let body = Some(AnyValue {
-            value: Some(any_value::Value::StringValue(u.arbitrary()?)),
+            value: Some(any_value::Value::StringValue(
+                AsciiString::default().generate(rng).unwrap(),
+            )),
         });
 
-        let attributes = Vec::new();
-
-        let dropped_attributes_count = 0;
-        let flags = 0;
-        let trace_id = Vec::new();
-        let span_id = Vec::new();
-
         #[allow(deprecated)]
-        Ok(LogRecord(v1::LogRecord {
-            time_unix_nano,
-            observed_time_unix_nano,
-            severity_number,
-            severity_text,
+        LogRecord(v1::LogRecord {
+            time_unix_nano: rng.gen(),
+            observed_time_unix_nano: rng.gen(),
+            severity_number: rng.gen_range(1..=24),
+            severity_text: String::new(),
             name: String::new(),
             body,
-            attributes,
-            dropped_attributes_count,
-            flags,
-            trace_id,
-            span_id,
-        }))
+            attributes: Vec::new(),
+            dropped_attributes_count: 0,
+            flags: 0,
+            trace_id: Vec::new(),
+            span_id: Vec::new(),
+        })
     }
 }
 
@@ -93,10 +79,6 @@ impl Serialize for OpentelemetryLogs {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         // An Export*ServiceRequest message has 5 bytes of fixed values plus
         // a varint-encoded message length field. The worst case for the message
         // length field is the max message size divided by 0x7F.
@@ -106,7 +88,8 @@ impl Serialize for OpentelemetryLogs {
         };
 
         let mut acc = ExportLogsServiceRequest(Vec::new());
-        while let Ok(member) = unstructured.arbitrary::<LogRecord>() {
+        loop {
+            let member: LogRecord = rng.gen();
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
@@ -117,6 +100,7 @@ impl Serialize for OpentelemetryLogs {
                 None => break,
             }
         }
+
         let buf = acc.into_prost_type().encode_to_vec();
         writer.write_all(&buf)?;
         Ok(())
