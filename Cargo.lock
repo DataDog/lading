@@ -383,7 +383,7 @@ dependencies = [
  "sketches-ddsketch",
  "tokio",
  "tokio-stream",
- "tonic 0.9.0",
+ "tonic 0.9.1",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -847,7 +847,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
- "tonic 0.9.0",
+ "tonic 0.9.1",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -1750,7 +1750,7 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
- "tonic 0.9.0",
+ "tonic 0.9.1",
  "tonic-build",
 ]
 
@@ -1764,7 +1764,7 @@ dependencies = [
  "shared",
  "tempfile",
  "tokio",
- "tonic 0.9.0",
+ "tonic 0.9.1",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -2043,9 +2043,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1395a90742867024769551f906de147d352fb7cbdb4fd1cdbffe17734cfb124c"
+checksum = "38bd8e87955eb13c1986671838177d6792cdc52af9bffced0d2c8a9a7f741ab3"
 dependencies = [
  "async-trait",
  "axum",
