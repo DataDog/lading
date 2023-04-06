@@ -20,7 +20,6 @@ impl DistString for AsciiStr {
 }
 
 #[derive(Debug, PartialEq)]
-
 pub(crate) struct AsciiStr {
     bytes: Vec<u8>,
 }
