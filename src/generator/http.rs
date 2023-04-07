@@ -63,40 +63,16 @@ pub struct Config {
 pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
-    Io(::std::io::Error),
+    Io(#[from] ::std::io::Error),
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
-    Block(block::Error),
+    Block(#[from] block::Error),
     /// Wrapper around [`hyper::Error`].
     #[error("Hyper error: {0}")]
-    Hyper(hyper::Error),
+    Hyper(#[from] hyper::Error),
     /// Wrapper around [`hyper::http::Error`].
     #[error("HTTP error: {0}")]
-    Http(hyper::http::Error),
-}
-
-impl From<block::Error> for Error {
-    fn from(error: block::Error) -> Self {
-        Error::Block(error)
-    }
-}
-
-impl From<hyper::Error> for Error {
-    fn from(error: hyper::Error) -> Self {
-        Error::Hyper(error)
-    }
-}
-
-impl From<hyper::http::Error> for Error {
-    fn from(error: hyper::http::Error) -> Self {
-        Error::Http(error)
-    }
-}
-
-impl From<::std::io::Error> for Error {
-    fn from(error: ::std::io::Error) -> Self {
-        Error::Io(error)
-    }
+    Http(#[from] hyper::http::Error),
 }
 
 /// The HTTP generator.

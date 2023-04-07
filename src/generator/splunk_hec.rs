@@ -84,13 +84,7 @@ pub enum Error {
     Acknowledgements(acknowledgements::Error),
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
-    Block(block::Error),
-}
-
-impl From<block::Error> for Error {
-    fn from(error: block::Error) -> Self {
-        Error::Block(error)
-    }
+    Block(#[from] block::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
