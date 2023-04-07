@@ -16,7 +16,7 @@ mod event;
 mod metric;
 mod service_check;
 
-fn choose_or_not<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<T>
+fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
 where
     T: Clone,
     R: rand::Rng + ?Sized,
@@ -80,19 +80,19 @@ impl Distribution<MemberGenerator> for Standard {
         let service_check_generator = ServiceCheckGenerator {
             names: titles.clone(),
             small_strings: small_strings.clone(),
-            texts_or_messages: texts_or_messages.clone(),
+            texts_or_messages,
             tags: tags.clone(),
         };
         let metric_generator = MetricGenerator {
-            names: titles.clone(),
-            container_ids: small_strings.clone(),
+            names: titles,
+            container_ids: small_strings,
             tags,
         };
 
         MemberGenerator {
-            metric_generator,
-            service_check_generator,
             event_generator,
+            service_check_generator,
+            metric_generator,
         }
     }
 }
