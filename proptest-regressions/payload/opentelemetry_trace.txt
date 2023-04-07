@@ -1,0 +1,9 @@
+cc 325199fdea8be0042be060879afba97ca248ff0ea9d4c20a085646cd8e10b038 # shrinks to seed = 0, max_bytes = 16
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 90bc9aeffc8a7285d32751ac48b53b5612d27b72782d112eaad9f0a877eec0e4 # shrinks to seed = 0, max_bytes = 6
+cc f6ebb8c90afa752f08626702a51a65f419a2e7d8a2e865c1fe189f41ab552acc # shrinks to seed = 0, max_bytes = 6
