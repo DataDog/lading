@@ -114,7 +114,7 @@ impl Distribution<Span> for Standard {
 
         Span {
             service: String::from(*SERVICES.choose(rng).unwrap()),
-            name: AsciiString::default().generate(rng).unwrap(),
+            name: AsciiString::default().generate(rng),
             resource: String::new(),
             trace_id: rng.gen(),
             span_id: rng.gen(),

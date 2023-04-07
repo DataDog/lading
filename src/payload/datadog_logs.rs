@@ -116,7 +116,7 @@ impl Distribution<Structured> for Standard {
     where
         R: Rng + ?Sized,
     {
-        let mineral: String = AsciiString::default().generate(rng).expect("must not fail");
+        let mineral: String = AsciiString::default().generate(rng);
 
         Structured {
             proportional: rng.gen(),
@@ -141,9 +141,7 @@ impl Distribution<Message> for Standard {
         R: Rng + ?Sized,
     {
         match rng.gen_range(0..2) {
-            0 => {
-                Message::Unstructured(AsciiString::default().generate(rng).expect("must not fail"))
-            }
+            0 => Message::Unstructured(AsciiString::default().generate(rng)),
             1 => Message::Structured(serde_json::to_string(&rng.gen::<Structured>()).unwrap()),
             _ => unreachable!(),
         }

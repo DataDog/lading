@@ -59,7 +59,7 @@ impl Distribution<Span> for Standard {
             trace_state: String::new(),
             // zeros: root span
             parent_span_id: vec![0; 8],
-            name: AsciiString::default().generate(rng).unwrap(),
+            name: AsciiString::default().generate(rng),
             kind: rng.gen_range(0..=5),
             start_time_unix_nano,
             end_time_unix_nano,

@@ -207,7 +207,7 @@ impl Distribution<User> for Standard {
     where
         R: Rng + ?Sized,
     {
-        User(AsciiString::default().generate(rng).unwrap())
+        User(AsciiString::default().generate(rng))
     }
 }
 

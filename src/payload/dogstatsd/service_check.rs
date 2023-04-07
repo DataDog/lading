@@ -27,7 +27,7 @@ impl Distribution<ServiceCheck> for Standard {
             None
         };
         let message = if rng.gen() {
-            Some(AsciiString::default().generate(rng).unwrap())
+            Some(AsciiString::default().generate(rng))
         } else {
             None
         };

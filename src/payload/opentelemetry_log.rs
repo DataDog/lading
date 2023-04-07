@@ -48,7 +48,7 @@ impl Distribution<LogRecord> for Standard {
     {
         let body = Some(AnyValue {
             value: Some(any_value::Value::StringValue(
-                AsciiString::default().generate(rng).unwrap(),
+                AsciiString::default().generate(rng),
             )),
         });
 

@@ -178,11 +178,8 @@ const fn div_ceil(lhs: usize, rhs: usize) -> usize {
 }
 
 /// Generate instance of `I` from source of randomness `S`.
-pub(crate) trait Generator<I, E>
-where
-    E: std::error::Error,
-{
-    fn generate<R>(&self, rng: &mut R) -> Result<I, E>
+pub(crate) trait Generator<I> {
+    fn generate<'a, R>(&'a self, rng: &mut R) -> I
     where
         R: rand::Rng + ?Sized;
 }

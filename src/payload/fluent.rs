@@ -27,11 +27,11 @@ impl Distribution<RecordValue> for Standard {
         R: Rng + ?Sized,
     {
         match rng.gen_range(0..2) {
-            0 => RecordValue::String(AsciiString::default().generate(rng).unwrap()),
+            0 => RecordValue::String(AsciiString::default().generate(rng)),
             1 => {
                 let mut obj = HashMap::new();
                 for _ in 0..rng.gen_range(0..128) {
-                    let key = AsciiString::default().generate(rng).unwrap();
+                    let key = AsciiString::default().generate(rng);
                     let val = rng.gen();
 
                     obj.insert(key, val);
@@ -58,7 +58,7 @@ impl Distribution<Entry> for Standard {
         rec.insert(String::from("message"), rng.gen());
         rec.insert(String::from("event"), rng.gen());
         for _ in 0..rng.gen_range(0..128) {
-            let key = AsciiString::default().generate(rng).unwrap();
+            let key = AsciiString::default().generate(rng);
             let val = rng.gen();
 
             rec.insert(key, val);
@@ -83,7 +83,7 @@ impl Distribution<FluentForward> for Standard {
     {
         let total_entries = rng.gen_range(0..32);
         FluentForward {
-            tag: AsciiString::default().generate(rng).unwrap(),
+            tag: AsciiString::default().generate(rng),
             entries: rng.sample_iter(Standard).take(total_entries).collect(),
         }
     }
@@ -104,13 +104,13 @@ impl Distribution<FluentMessage> for Standard {
         let mut rec = HashMap::new();
         rec.insert(String::from("message"), rng.gen());
         for _ in 0..rng.gen_range(0..128) {
-            let key = AsciiString::default().generate(rng).unwrap();
+            let key = AsciiString::default().generate(rng);
             let val = rng.gen();
 
             rec.insert(key, val);
         }
         FluentMessage {
-            tag: AsciiString::default().generate(rng).unwrap(),
+            tag: AsciiString::default().generate(rng),
             time: rng.gen(),
             record: rec,
         }

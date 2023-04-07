@@ -18,7 +18,7 @@ impl Serialize for Ascii {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let encoding: String = AsciiString::default().generate(&mut rng).unwrap();
+            let encoding: String = AsciiString::default().generate(&mut rng);
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {

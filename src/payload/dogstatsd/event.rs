@@ -1,24 +1,67 @@
 use std::fmt;
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+
+use crate::payload::Generator;
 
 use super::common;
 
-pub(crate) struct Event {
-    title: String,
-    text: String,
+pub(crate) struct EventGenerator<'a> {
+    pub(crate) titles: &'a [String],
+    pub(crate) texts_or_messages: &'a [String],
+    pub(crate) small_strings: &'a [String],
+}
+
+fn choose_or_not<'a, R>(mut rng: &mut R, pool: &'a [String]) -> Option<&'a str>
+where
+    R: rand::Rng + ?Sized,
+{
+    if rng.gen() {
+        Some(pool.choose(&mut rng).unwrap())
+    } else {
+        None
+    }
+}
+
+impl<'a> Generator<Event<'a>> for EventGenerator<'a> {
+    fn generate<R>(&self, mut rng: &mut R) -> Event<'a>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let title = self.titles.choose(&mut rng).unwrap();
+        let text = self.texts_or_messages.choose(&mut rng).unwrap();
+
+        Event {
+            title_utf8_length: title.len(),
+            text_utf8_length: text.len(),
+            title,
+            text,
+            timestamp_second: rng.gen(),
+            hostname: choose_or_not(&mut rng, self.small_strings),
+            aggregation_key: choose_or_not(&mut rng, self.small_strings),
+            priority: rng.gen(),
+            source_type_name: choose_or_not(&mut rng, self.small_strings),
+            alert_type: rng.gen(),
+            tags: rng.gen(),
+        }
+    }
+}
+
+pub(crate) struct Event<'a> {
+    title: &'a str,
+    text: &'a str,
     title_utf8_length: usize,
     text_utf8_length: usize,
     timestamp_second: Option<u32>,
-    hostname: Option<String>,
-    aggregation_key: Option<String>,
+    hostname: Option<&'a str>,
+    aggregation_key: Option<&'a str>,
     priority: Option<Priority>,
-    source_type_name: Option<String>,
+    source_type_name: Option<&'a str>,
     alert_type: Option<Alert>,
     tags: Option<common::Tags>,
 }
 
-impl fmt::Display for Event {
+impl<'a> fmt::Display for Event<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(
@@ -61,46 +104,6 @@ impl fmt::Display for Event {
             }
         }
         Ok(())
-    }
-}
-
-impl Distribution<Event> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Event
-    where
-        R: Rng + ?Sized,
-    {
-        let title = format!("{}", rng.gen::<u64>());
-        let text = format!("{}", rng.gen::<u64>());
-
-        let source_type_name = if rng.gen() {
-            Some(format!("{}", rng.gen_range(0..32)))
-        } else {
-            None
-        };
-        let aggregation_key = if rng.gen() {
-            Some(format!("{}", rng.gen_range(0..32)))
-        } else {
-            None
-        };
-        let hostname = if rng.gen() {
-            Some(format!("{}", rng.gen_range(0..32)))
-        } else {
-            None
-        };
-
-        Event {
-            title_utf8_length: title.len(),
-            text_utf8_length: text.len(),
-            title,
-            text,
-            timestamp_second: rng.gen(),
-            hostname,
-            aggregation_key,
-            priority: rng.gen(),
-            source_type_name,
-            alert_type: rng.gen(),
-            tags: rng.gen(),
-        }
     }
 }
 

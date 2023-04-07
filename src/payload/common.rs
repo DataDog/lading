@@ -9,11 +9,14 @@ pub(crate) struct AsciiString {
     max_length: u16,
 }
 
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum Error {}
+impl AsciiString {
+    pub(crate) fn with_maximum_length(cap: u16) -> Self {
+        Self { max_length: cap }
+    }
+}
 
-impl Generator<String, Error> for AsciiString {
-    fn generate<R>(&self, rng: &mut R) -> Result<String, Error>
+impl Generator<String> for AsciiString {
+    fn generate<R>(&self, rng: &mut R) -> String
     where
         R: rand::Rng + ?Sized,
     {
@@ -26,6 +29,6 @@ impl Generator<String, Error> for AsciiString {
                 .choose_multiple(rng, len)
                 .map(|c| unsafe { char::from_u32_unchecked(u32::from(*c)) }),
         );
-        Ok(s)
+        s
     }
 }

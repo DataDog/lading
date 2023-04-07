@@ -118,9 +118,9 @@ impl Distribution<Metric> for Standard {
         let data = Some(data);
 
         Metric(v1::Metric {
-            name: AsciiString::default().generate(rng).unwrap(),
-            description: AsciiString::default().generate(rng).unwrap(),
-            unit: AsciiString::default().generate(rng).unwrap(),
+            name: AsciiString::default().generate(rng),
+            description: AsciiString::default().generate(rng),
+            unit: AsciiString::default().generate(rng),
             data,
         })
     }

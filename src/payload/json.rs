@@ -41,15 +41,12 @@ impl Distribution<Member> for Standard {
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Json;
 
-#[derive(thiserror::Error, Debug)]
-enum GeneratorError {}
-
-impl Generator<Member, GeneratorError> for Json {
-    fn generate<R>(&self, rng: &mut R) -> Result<Member, GeneratorError>
+impl Generator<Member> for Json {
+    fn generate<R>(&self, rng: &mut R) -> Member
     where
         R: rand::Rng + ?Sized,
     {
-        Ok(rng.gen())
+        rng.gen()
     }
 }
 
@@ -61,7 +58,8 @@ impl Serialize for Json {
     {
         let mut bytes_remaining = max_bytes;
 
-        while let Ok(member) = self.generate(&mut rng) {
+        loop {
+            let member = self.generate(&mut rng);
             let encoding = serde_json::to_string(&member)?;
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
