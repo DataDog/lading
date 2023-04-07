@@ -1,11 +1,25 @@
 use std::{collections::HashMap, io::Write};
 
-use arbitrary::{Arbitrary, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
 
 use crate::payload::Error;
 use serde::Serialize;
+
+use super::{common::AsciiString, Generator};
+const SERVICES: [&str; 7] = [
+    "tablet",
+    "phone",
+    "phone2",
+    "laptop",
+    "desktop",
+    "monitor",
+    "bigger-monitor",
+];
+const TAG_NAMES: [&str; 8] = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight",
+];
+const SERVICE_KIND: [&str; 4] = ["web", "db", "lambda", "cicd"];
 
 // Manual implementation of [this protobuf](https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/pb/span.proto).
 //
@@ -56,7 +70,7 @@ use serde::Serialize;
 // camel_case in msgpack.
 
 /// `TraceAgent` span
-#[derive(Arbitrary, serde::Serialize)]
+#[derive(serde::Serialize)]
 struct Span {
     /// service is the name of the service with which this span is associated.
     service: String,
@@ -85,6 +99,35 @@ struct Span {
     kind: String,
     /// meta_struct is a registry of structured "other" data used by, e.g., AppSec.
     meta_struct: HashMap<String, Vec<u8>>,
+}
+
+impl Distribution<Span> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Span
+    where
+        R: Rng + ?Sized,
+    {
+        let total_metrics = rng.gen_range(0..6);
+        let mut metrics: HashMap<String, f64> = HashMap::new();
+        for k in TAG_NAMES.choose_multiple(rng, total_metrics) {
+            metrics.insert(String::from(*k), rng.gen());
+        }
+
+        Span {
+            service: String::from(*SERVICES.choose(rng).unwrap()),
+            name: AsciiString::default().generate(rng).unwrap(),
+            resource: String::new(),
+            trace_id: rng.gen(),
+            span_id: rng.gen(),
+            parent_id: rng.gen(),
+            start: rng.gen(),
+            duration: rng.gen(),
+            error: rng.gen_range(0..=1),
+            meta: HashMap::new(),
+            metrics,
+            kind: String::from(*SERVICE_KIND.choose(rng).unwrap()),
+            meta_struct: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -123,20 +166,49 @@ impl crate::payload::Serialize for TraceAgent {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let unstructured = Unstructured::new(&entropy);
+        // We will arbitrarily generate 1_000 Member instances and then
+        // serialize. If this is below `max_bytes` we'll add more until we're
+        // over. Once we are we'll start removing instances until we're back
+        // below the limit.
+        //
+        // NOTE we might consider a method that allows us to construct a tree of
+        // Spans as an improvement in the future, one in which parent_ids are
+        // obeyed, as an example.
+        let mut members: Vec<Vec<Span>> = vec![];
+        let mut remaining = 1_000;
+        while remaining > 0 {
+            let total = rng.gen_range(0..=remaining);
+            let spans: Vec<Span> = Standard.sample_iter(&mut rng).take(total).collect();
+            members.push(spans);
+            remaining = remaining.saturating_sub(total);
+        }
 
-        let members = <Vec<Vec<Span>> as arbitrary::Arbitrary>::arbitrary_take_rest(unstructured)?;
-        let low = 0;
-        let mut high = members.len();
-
+        // Search for too many Member instances.
         loop {
             let encoding = match self.encoding {
-                Encoding::Json => serde_json::to_vec(&members[low..high])?,
+                Encoding::Json => serde_json::to_vec(&members[0..])?,
                 Encoding::MsgPack => {
                     let mut buf = Vec::with_capacity(max_bytes);
-                    members[low..high].serialize(&mut Serializer::new(&mut buf))?;
+                    members[0..].serialize(&mut Serializer::new(&mut buf))?;
+                    buf
+                }
+            };
+            if encoding.len() > max_bytes {
+                break;
+            }
+
+            let total = rng.gen_range(0..=100);
+            members.push(Standard.sample_iter(&mut rng).take(total).collect());
+        }
+
+        // Search for an encoding that's just right.
+        let mut high = members.len();
+        loop {
+            let encoding = match self.encoding {
+                Encoding::Json => serde_json::to_vec(&members[0..high])?,
+                Encoding::MsgPack => {
+                    let mut buf = Vec::with_capacity(max_bytes);
+                    members[0..high].serialize(&mut Serializer::new(&mut buf))?;
                     buf
                 }
             };
