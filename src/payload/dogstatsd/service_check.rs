@@ -1,10 +1,17 @@
 use std::fmt;
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::payload::{common::AsciiString, Generator};
+use crate::payload::Generator;
 
-use super::common;
+use super::{choose_or_not, common};
+
+pub(crate) struct ServiceCheckGenerator {
+    pub(crate) names: Vec<String>,
+    pub(crate) small_strings: Vec<String>,
+    pub(crate) texts_or_messages: Vec<String>,
+    pub(crate) tags: Vec<common::Tags>,
+}
 
 pub(crate) struct ServiceCheck {
     name: String,
@@ -15,29 +22,22 @@ pub(crate) struct ServiceCheck {
     message: Option<String>,
 }
 
-impl Distribution<ServiceCheck> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> ServiceCheck
+impl Generator<ServiceCheck> for ServiceCheckGenerator {
+    fn generate<R>(&self, mut rng: &mut R) -> ServiceCheck
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
     {
-        let name = format!("{}", rng.gen::<u64>());
-        let hostname = if rng.gen() {
-            Some(format!("{}", rng.gen_range(0..32)))
-        } else {
-            None
-        };
-        let message = if rng.gen() {
-            Some(AsciiString::default().generate(rng))
-        } else {
-            None
-        };
+        let name = self.names.choose(&mut rng).unwrap().clone();
+        let hostname = choose_or_not(&mut rng, &self.small_strings);
+        let message = choose_or_not(&mut rng, &self.texts_or_messages);
+        let tags = choose_or_not(&mut rng, &self.tags);
 
         ServiceCheck {
             name,
             status: rng.gen(),
             timestamp_second: rng.gen(),
             hostname,
-            tags: rng.gen(),
+            tags,
             message,
         }
     }
@@ -59,10 +59,10 @@ impl fmt::Display for ServiceCheck {
             write!(f, "|h:{hostname}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;

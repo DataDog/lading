@@ -1,27 +1,37 @@
 use std::{fmt, io::Write};
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
 use crate::payload::{Error, Serialize};
 
-use self::event::EventGenerator;
+use self::{
+    common::TagsGenerator, event::EventGenerator, metric::MetricGenerator,
+    service_check::ServiceCheckGenerator,
+};
 
 use super::{common::AsciiString, Generator};
 
 mod common;
 mod event;
-//mod metric;
-// mod service_check;
+mod metric;
+mod service_check;
+
+fn choose_or_not<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<T>
+where
+    T: Clone,
+    R: rand::Rng + ?Sized,
+{
+    if rng.gen() {
+        Some((*pool.choose(&mut rng).unwrap()).clone())
+    } else {
+        None
+    }
+}
 
 struct MemberGenerator {
-    metric_names: Vec<String>,
-    container_ids: Vec<String>,
-    tag_keys: Vec<String>,
-    tag_values: Vec<String>,
-    hostnames: Vec<String>,
-    titles: Vec<String>,
-    texts_or_messages: Vec<String>,
-    small_strings: Vec<String>,
+    event_generator: EventGenerator,
+    service_check_generator: ServiceCheckGenerator,
+    metric_generator: MetricGenerator,
 }
 
 #[inline]
@@ -49,52 +59,72 @@ impl Distribution<MemberGenerator> for Standard {
     where
         R: Rng + ?Sized,
     {
+        let titles = random_strings(128, &mut rng);
+        let texts_or_messages = random_strings_with_length(128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(1024, 8, &mut rng);
+
+        let total_tags = rng.gen_range(0..512);
+        let mut tags = Vec::with_capacity(total_tags);
+        let tags_generator = TagsGenerator::new(rng.gen_range(1..32), rng.gen_range(1..64));
+        for _ in 0..total_tags {
+            tags.push(tags_generator.generate(&mut rng));
+        }
+
+        let event_generator = EventGenerator {
+            titles: titles.clone(),
+            texts_or_messages: texts_or_messages.clone(),
+            small_strings: small_strings.clone(),
+            tags: tags.clone(),
+        };
+
+        let service_check_generator = ServiceCheckGenerator {
+            names: titles.clone(),
+            small_strings: small_strings.clone(),
+            texts_or_messages: texts_or_messages.clone(),
+            tags: tags.clone(),
+        };
+        let metric_generator = MetricGenerator {
+            names: titles.clone(),
+            container_ids: small_strings.clone(),
+            tags,
+        };
+
         MemberGenerator {
-            metric_names: random_strings(64, &mut rng),
-            container_ids: random_strings(128, &mut rng),
-            tag_keys: random_strings(16, &mut rng),
-            tag_values: random_strings(16, &mut rng),
-            hostnames: random_strings(16, &mut rng),
-            titles: random_strings(128, &mut rng),
-            texts_or_messages: random_strings_with_length(128, 1024, &mut rng),
-            small_strings: random_strings_with_length(1024, 8, &mut rng),
+            metric_generator,
+            service_check_generator,
+            event_generator,
         }
     }
 }
 
-impl<'a> Generator<Member<'a>> for MemberGenerator {
-    fn generate<R>(&'a self, rng: &mut R) -> Member<'a>
+impl Generator<Member> for MemberGenerator {
+    fn generate<R>(&self, rng: &mut R) -> Member
     where
         R: rand::Rng + ?Sized,
     {
         let idx = rng.gen_range(0..3);
         match idx {
-            0 => {
-                let gen = EventGenerator {
-                    titles: &self.titles,
-                    texts_or_messages: &self.texts_or_messages,
-                    small_strings: &self.small_strings,
-                };
-                Member::Event(gen.generate(rng))
-            }
+            0 => Member::Event(self.event_generator.generate(rng)),
+            1 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
+            3 => Member::Metric(self.metric_generator.generate(rng)),
             _ => unreachable!(),
         }
     }
 }
 
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
-enum Member<'a> {
-    //    Metric(metric::Metric),
-    Event(event::Event<'a>),
-    //    ServiceCheck(service_check::ServiceCheck),
+enum Member {
+    Metric(metric::Metric),
+    Event(event::Event),
+    ServiceCheck(service_check::ServiceCheck),
 }
 
-impl<'a> fmt::Display for Member<'a> {
+impl fmt::Display for Member {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            //            Self::Metric(ref m) => write!(f, "{m}"),
+            Self::Metric(ref m) => write!(f, "{m}"),
             Self::Event(ref e) => write!(f, "{e}"),
-            //            Self::ServiceCheck(ref sc) => write!(f, "{sc}"),
+            Self::ServiceCheck(ref sc) => write!(f, "{sc}"),
         }
     }
 }
