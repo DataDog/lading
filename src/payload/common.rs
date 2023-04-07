@@ -4,9 +4,15 @@ use super::Generator;
 
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,";
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct AsciiString {
     max_length: u16,
+}
+
+impl Default for AsciiString {
+    fn default() -> Self {
+        Self { max_length: 16 }
+    }
 }
 
 impl AsciiString {

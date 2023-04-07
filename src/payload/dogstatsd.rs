@@ -39,16 +39,21 @@ fn random_strings<R>(cap: usize, rng: &mut R) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
-    random_strings_with_length(cap, 64, rng)
+    random_strings_with_length(0, cap, 64, rng)
 }
 
 #[inline]
-fn random_strings_with_length<R>(cap: usize, max_length: u16, rng: &mut R) -> Vec<String>
+fn random_strings_with_length<R>(
+    min: usize,
+    cap: usize,
+    max_length: u16,
+    rng: &mut R,
+) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
     let mut buf = Vec::with_capacity(cap);
-    for _ in 0..rng.gen_range(0..cap) {
+    for _ in 0..rng.gen_range(min..cap) {
         buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
     }
     buf
@@ -59,9 +64,9 @@ impl Distribution<MemberGenerator> for Standard {
     where
         R: Rng + ?Sized,
     {
-        let titles = random_strings(128, &mut rng);
-        let texts_or_messages = random_strings_with_length(128, 1024, &mut rng);
-        let small_strings = random_strings_with_length(1024, 8, &mut rng);
+        let titles = random_strings_with_length(4, 128, 64, &mut rng);
+        let texts_or_messages = random_strings_with_length(4, 128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(16, 1024, 8, &mut rng);
 
         let total_tags = rng.gen_range(0..512);
         let mut tags = Vec::with_capacity(total_tags);
@@ -106,7 +111,7 @@ impl Generator<Member> for MemberGenerator {
         match idx {
             0 => Member::Event(self.event_generator.generate(rng)),
             1 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
-            3 => Member::Metric(self.metric_generator.generate(rng)),
+            2 => Member::Metric(self.metric_generator.generate(rng)),
             _ => unreachable!(),
         }
     }

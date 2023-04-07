@@ -96,9 +96,10 @@ impl Generator<Tags> for TagsGenerator {
         let mut tags = HashMap::new();
         for k in tag_keys.choose_multiple(&mut rng, total_keys) {
             let key = k.clone();
-            let val = tag_values.choose(&mut rng).unwrap().clone();
-
-            tags.insert(key, val);
+            if let Some(val) = tag_values.choose(&mut rng) {
+                let val = val.clone();
+                tags.insert(key, val);
+            }
         }
         tags
     }
