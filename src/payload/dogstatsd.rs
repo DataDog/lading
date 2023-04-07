@@ -1,7 +1,6 @@
 use std::{fmt, io::Write};
 
-use arbitrary::{Arbitrary, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use crate::payload::{Error, Serialize};
 
@@ -11,11 +10,24 @@ mod metric;
 mod service_check;
 
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
-#[derive(Arbitrary)]
 enum Member {
     Metric(metric::Metric),
     Event(event::Event),
     ServiceCheck(service_check::ServiceCheck),
+}
+
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..3) {
+            0 => Member::Metric(rng.gen()),
+            1 => Member::Event(rng.gen()),
+            2 => Member::ServiceCheck(rng.gen()),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Member {
@@ -39,12 +51,9 @@ impl Serialize for DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Member>() {
+        loop {
+            let member: Member = rng.gen();
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

@@ -1,19 +1,19 @@
 use std::fmt;
 
-use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use super::common;
 
 pub(crate) struct Event {
-    title: common::MetricTagStr,
-    text: common::MetricTagStr,
+    title: String,
+    text: String,
     title_utf8_length: usize,
     text_utf8_length: usize,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagKey>,
-    aggregation_key: Option<common::MetricTagKey>,
+    hostname: Option<String>,
+    aggregation_key: Option<String>,
     priority: Option<Priority>,
-    source_type_name: Option<common::MetricTagKey>,
+    source_type_name: Option<String>,
     alert_type: Option<Alert>,
     tags: Option<common::Tags>,
 }
@@ -64,58 +64,62 @@ impl fmt::Display for Event {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Event {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let title: common::MetricTagStr = u.arbitrary()?;
-        let text: common::MetricTagStr = u.arbitrary()?;
-        Ok(Self {
+impl Distribution<Event> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Event
+    where
+        R: Rng + ?Sized,
+    {
+        let title = format!("{}", rng.gen::<u64>());
+        let text = format!("{}", rng.gen::<u64>());
+
+        let source_type_name = if rng.gen() {
+            Some(format!("{}", rng.gen_range(0..32)))
+        } else {
+            None
+        };
+        let aggregation_key = if rng.gen() {
+            Some(format!("{}", rng.gen_range(0..32)))
+        } else {
+            None
+        };
+        let hostname = if rng.gen() {
+            Some(format!("{}", rng.gen_range(0..32)))
+        } else {
+            None
+        };
+
+        Event {
             title_utf8_length: title.len(),
             text_utf8_length: text.len(),
             title,
             text,
-            timestamp_second: u.arbitrary()?,
-            hostname: u.arbitrary()?,
-            aggregation_key: u.arbitrary()?,
-            priority: u.arbitrary()?,
-            source_type_name: u.arbitrary()?,
-            alert_type: u.arbitrary()?,
-            tags: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let title_sz = common::MetricTagStr::size_hint(depth);
-        let text_sz = common::MetricTagStr::size_hint(depth);
-        let title_len_sz = usize::size_hint(depth);
-        let text_len_sz = usize::size_hint(depth);
-        let timestamp_sz = u32::size_hint(depth);
-        let hostname_sz = common::MetricTagStr::size_hint(depth);
-        let aggregation_sz = common::MetricTagStr::size_hint(depth);
-        let priority_sz = Priority::size_hint(depth);
-        let source_type_sz = common::MetricTagStr::size_hint(depth);
-        let alert_sz = Alert::size_hint(depth);
-        let tags = common::Tags::size_hint(depth);
-
-        and_all(&[
-            title_sz,
-            text_sz,
-            title_len_sz,
-            text_len_sz,
-            timestamp_sz,
-            hostname_sz,
-            aggregation_sz,
-            priority_sz,
-            source_type_sz,
-            alert_sz,
-            tags,
-        ])
+            timestamp_second: rng.gen(),
+            hostname,
+            aggregation_key,
+            priority: rng.gen(),
+            source_type_name,
+            alert_type: rng.gen(),
+            tags: rng.gen(),
+        }
     }
 }
 
-#[derive(Arbitrary)]
 enum Priority {
     Normal,
     Low,
+}
+
+impl Distribution<Priority> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Priority
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..2) {
+            0 => Priority::Low,
+            1 => Priority::Normal,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Priority {
@@ -127,12 +131,27 @@ impl fmt::Display for Priority {
     }
 }
 
-#[derive(Clone, Copy, Arbitrary)]
+#[derive(Clone, Copy)]
 enum Alert {
     Error,
     Warning,
     Info,
     Success,
+}
+
+impl Distribution<Alert> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Alert
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..4) {
+            0 => Alert::Error,
+            1 => Alert::Warning,
+            2 => Alert::Info,
+            3 => Alert::Success,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Alert {

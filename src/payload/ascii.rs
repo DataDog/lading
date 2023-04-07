@@ -1,9 +1,10 @@
 use std::io::Write;
 
-use arbitrary::{self, Unstructured};
 use rand::Rng;
 
-use crate::payload::{common::AsciiStr, Error, Serialize};
+use crate::payload::{Error, Serialize};
+
+use super::{common::AsciiString, Generator};
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -15,13 +16,9 @@ impl Serialize for Ascii {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<AsciiStr>() {
-            let encoding = member.as_str();
+        loop {
+            let encoding: String = AsciiString::default().generate(&mut rng).unwrap();
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {

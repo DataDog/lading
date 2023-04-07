@@ -1,16 +1,46 @@
 use std::fmt;
 
-use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
+use rand::{distributions::Standard, prelude::Distribution, Rng};
+
+use crate::payload::{common::AsciiString, Generator};
 
 use super::common;
 
 pub(crate) struct ServiceCheck {
-    name: common::MetricTagKey,
+    name: String,
     status: Status,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagKey>,
+    hostname: Option<String>,
     tags: Option<common::Tags>,
-    message: Option<common::MetricTagStr>,
+    message: Option<String>,
+}
+
+impl Distribution<ServiceCheck> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> ServiceCheck
+    where
+        R: Rng + ?Sized,
+    {
+        let name = format!("{}", rng.gen::<u64>());
+        let hostname = if rng.gen() {
+            Some(format!("{}", rng.gen_range(0..32)))
+        } else {
+            None
+        };
+        let message = if rng.gen() {
+            Some(AsciiString::default().generate(rng).unwrap())
+        } else {
+            None
+        };
+
+        ServiceCheck {
+            name,
+            status: rng.gen(),
+            timestamp_second: rng.gen(),
+            hostname,
+            tags: rng.gen(),
+            message,
+        }
+    }
 }
 
 impl fmt::Display for ServiceCheck {
@@ -48,43 +78,27 @@ impl fmt::Display for ServiceCheck {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for ServiceCheck {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            status: u.arbitrary()?,
-            timestamp_second: u.arbitrary()?,
-            hostname: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            message: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let status_sz = Status::size_hint(depth);
-        let timestamp_sz = u32::size_hint(depth);
-        let hostname_sz = common::MetricTagStr::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let message_sz = common::MetricTagStr::size_hint(depth);
-
-        and_all(&[
-            name_sz,
-            status_sz,
-            timestamp_sz,
-            hostname_sz,
-            tags_sz,
-            message_sz,
-        ])
-    }
-}
-
-#[derive(Clone, Copy, Arbitrary)]
+#[derive(Clone, Copy)]
 enum Status {
     Ok,
     Warning,
     Critical,
     Unknown,
+}
+
+impl Distribution<Status> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Status
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..4) {
+            0 => Status::Ok,
+            1 => Status::Warning,
+            2 => Status::Critical,
+            3 => Status::Unknown,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Status {

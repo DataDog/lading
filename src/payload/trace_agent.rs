@@ -173,7 +173,8 @@ impl crate::payload::Serialize for TraceAgent {
         //
         // NOTE we might consider a method that allows us to construct a tree of
         // Spans as an improvement in the future, one in which parent_ids are
-        // obeyed, as an example.
+        // obeyed, as an example. We could then have a 'shrink' or 'expand'
+        // method on that tree to avoid this loop.
         let mut members: Vec<Vec<Span>> = vec![];
         let mut remaining = 1_000;
         while remaining > 0 {
