@@ -4,5 +4,5 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc a58f2cd0ace3517aad8878967f0f9eb4709c9df758d2e669753de1cb83c52975
-cc 4f02fd6df4c1fc13104afac9dc248871a2bab63febf2938c6f9cadc051467bcf # shrinks to seed = 53466259000180281, max_bytes = 128
+cc f53443df99cdd05984359aabbe67d19f5ae91490302add7c38368f5f12f74aba # shrinks to seed = 8662357858841375442, max_bytes = 0
+cc 551c4421c84a666f1da44f00beeee7a6c23b5b351625600dfe8469eaf1b563d3 # shrinks to seed = 12381002064624564645, max_bytes = 2048

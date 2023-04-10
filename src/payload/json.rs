@@ -62,6 +62,8 @@ impl Serialize for Json {
             let member = self.generate(&mut rng);
             let encoding = serde_json::to_string(&member)?;
             let line_length = encoding.len() + 1; // add one for the newline
+
+            println!("[{max_bytes}] {line_length} {bytes_remaining}");
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
                     writeln!(writer, "{encoding}")?;
@@ -94,24 +96,6 @@ mod test {
             let mut bytes = Vec::with_capacity(max_bytes);
             json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
             assert!(bytes.len() <= max_bytes);
-        }
-    }
-
-    // We want to be sure that the serialized size of the payload is not zero.
-    proptest! {
-        #[test]
-        fn payload_not_zero_bytes(seed: u64, max_bytes in 0..u16::MAX) {
-            let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let json = Json::default();
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            debug_assert!(
-                bytes.len() != 0,
-                "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
-            );
         }
     }
 

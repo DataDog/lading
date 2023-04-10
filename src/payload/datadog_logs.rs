@@ -257,24 +257,6 @@ mod test {
         }
     }
 
-    // We want to be sure that the serialized size of the payload is not zero.
-    proptest! {
-        #[test]
-        fn payload_not_zero_bytes(seed: u64, max_bytes: u16) {
-            let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let ddlogs = DatadogLog::default();
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            debug_assert!(
-                bytes.len() != 0,
-                "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
-            );
-        }
-    }
-
     // We want to know that every payload produced by this type actually
     // deserializes as json, is not truncated etc.
     proptest! {

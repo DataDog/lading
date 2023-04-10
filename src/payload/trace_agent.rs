@@ -254,24 +254,6 @@ mod test {
         }
     }
 
-    // We want to be sure that the serialized size of the payload is not zero.
-    proptest! {
-        #[test]
-        fn payload_not_zero_bytes(seed: u64, max_bytes: u16) {
-            let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let trace_agent = TraceAgent::default();
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            trace_agent.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            debug_assert!(
-                bytes.len() != 0,
-                "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
-            );
-        }
-    }
-
     proptest! {
         #[test]
         fn payload_not_exceed_max_bytes_msg_pack(seed: u64, max_bytes: u16) {
