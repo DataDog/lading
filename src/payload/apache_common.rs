@@ -356,3 +356,48 @@ impl Serialize for ApacheCommon {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+    use rand::{rngs::SmallRng, SeedableRng};
+
+    use crate::payload::{ApacheCommon, Serialize};
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let apache = ApacheCommon::default();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            apache.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            debug_assert!(
+                bytes.len() <= max_bytes,
+                "{:?}",
+                std::str::from_utf8(&bytes).unwrap()
+            );
+        }
+    }
+
+    // We want to be sure that the serialized size of the payload is not zero.
+    proptest! {
+        #[test]
+        fn payload_not_zero_bytes(seed: u64, max_bytes: u16) {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let apache = ApacheCommon::default();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            apache.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            debug_assert!(
+                bytes.len() != 0,
+                "{:?}",
+                std::str::from_utf8(&bytes).unwrap()
+            );
+        }
+    }
+}
