@@ -220,7 +220,7 @@ impl Serialize for DatadogLog {
         loop {
             let encoding = serde_json::to_string(&members[0..high])?;
             if encoding.len() > max_bytes {
-                high /= 16;
+                high /= 2;
             } else {
                 write!(writer, "{encoding}")?;
                 break;
