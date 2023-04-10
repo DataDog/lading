@@ -162,7 +162,6 @@ impl Serialize for Fluent {
         // Search for too many Member instances.
         loop {
             let encoding_len = members[0..].iter().fold(0, |acc, m| acc + m.len());
-            println!("{encoding_len} > {max_bytes}");
             if encoding_len > max_bytes {
                 break;
             }
@@ -179,7 +178,6 @@ impl Serialize for Fluent {
         let mut high = members.len();
         loop {
             let encoding_len = members[0..high].iter().fold(0, |acc, m| acc + m.len());
-            println!("[0..{high}] {encoding_len} > {max_bytes}");
 
             if encoding_len > max_bytes {
                 high /= 2;
