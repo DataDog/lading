@@ -212,7 +212,7 @@ mod test {
     // deserializes as splunk's hec, is not truncated etc.
     proptest! {
         #[test]
-        fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
+        fn every_payload_deserializes(seed: u64, max_bytes in 0..u16::MAX)  {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let hec = SplunkHec::default();

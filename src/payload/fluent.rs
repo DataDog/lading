@@ -203,7 +203,7 @@ mod test {
     // exceed `max_bytes`.
     proptest! {
         #[test]
-        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes in 0..u16::MAX) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let fluent = Fluent::default();

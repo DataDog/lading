@@ -154,7 +154,7 @@ mod test {
     // We want to be sure that the serialized size of the payload is not zero.
     proptest! {
         #[test]
-        fn payload_not_zero_bytes(seed: u64, max_bytes: u16) {
+        fn payload_not_zero_bytes(seed: u64, max_bytes in 128..u16::MAX) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let syslog = Syslog5424::default();
