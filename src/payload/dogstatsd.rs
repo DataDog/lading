@@ -22,7 +22,7 @@ where
     R: rand::Rng + ?Sized,
 {
     if rng.gen() {
-        pool.choose(&mut rng).map(|t| t.clone())
+        pool.choose(&mut rng).cloned()
     } else {
         None
     }
