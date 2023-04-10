@@ -1,11 +1,10 @@
 use crate::payload::{Error, Serialize};
 
-use arbitrary::{self, Arbitrary, Unstructured};
 use core::fmt;
-use rand::Rng;
-use std::{io::Write, mem};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use std::io::Write;
 
-use super::common::AsciiStr;
+use super::{common::AsciiString, Generator};
 
 const PATH_NAMES: [&str; 25] = [
     "alfa", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliett",
@@ -23,17 +22,16 @@ const STATUS_CODES: [u16; 64] = [
 #[derive(Debug)]
 struct StatusCode(u16);
 
-impl<'a> Arbitrary<'a> for StatusCode {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(StatusCode(*u.choose(&STATUS_CODES)?))
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        (mem::size_of::<u16>(), Some(mem::size_of::<u16>()))
+impl Distribution<StatusCode> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> StatusCode
+    where
+        R: Rng + ?Sized,
+    {
+        StatusCode(*STATUS_CODES.choose(rng).unwrap())
     }
 }
 
-#[derive(Arbitrary, Debug)]
+#[derive(Debug)]
 enum Protocol {
     Http10,
     Http11,
@@ -41,6 +39,23 @@ enum Protocol {
     Http20,
     Http21,
     Http22,
+}
+
+impl Distribution<Protocol> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Protocol
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..6) {
+            0 => Protocol::Http10,
+            1 => Protocol::Http11,
+            2 => Protocol::Http12,
+            3 => Protocol::Http20,
+            4 => Protocol::Http21,
+            5 => Protocol::Http22,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Protocol {
@@ -62,21 +77,19 @@ struct Path {
     components: Vec<&'static str>,
 }
 
-impl<'a> Arbitrary<'a> for Path {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let total_components: usize = (u.arbitrary::<usize>()? % 16) + 1;
+impl Distribution<Path> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Path
+    where
+        R: Rng + ?Sized,
+    {
+        let total_components: usize = rng.gen_range(1..=16);
         let mut components = Vec::with_capacity(total_components);
 
         for _ in 0..total_components {
-            components.push(*u.choose(&PATH_NAMES)?);
+            components.push(*PATH_NAMES.choose(rng).unwrap());
         }
 
-        Ok(Path { components })
-    }
-
-    fn size_hint(_depth: usize) -> (usize, Option<usize>) {
-        let max_component_bytes = 10;
-        (max_component_bytes, Some(max_component_bytes * 16))
+        Path { components }
     }
 }
 
@@ -89,7 +102,7 @@ impl fmt::Display for Path {
     }
 }
 
-#[derive(Arbitrary, Debug)]
+#[derive(Debug)]
 enum Month {
     January,
     February,
@@ -105,7 +118,30 @@ enum Month {
     December,
 }
 
-#[derive(Arbitrary, Debug)]
+impl Distribution<Month> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Month
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..12) {
+            0 => Month::January,
+            1 => Month::February,
+            2 => Month::March,
+            3 => Month::April,
+            4 => Month::May,
+            5 => Month::June,
+            6 => Month::July,
+            7 => Month::August,
+            8 => Month::September,
+            9 => Month::October,
+            10 => Month::November,
+            11 => Month::December,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct Timestamp {
     day: u8,
     month: Month,
@@ -116,6 +152,22 @@ struct Timestamp {
     timezone: u8,
 }
 
+impl Distribution<Timestamp> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Timestamp
+    where
+        R: Rng + ?Sized,
+    {
+        Timestamp {
+            day: rng.gen(),
+            month: rng.gen(),
+            year: rng.gen(),
+            hour: rng.gen(),
+            minute: rng.gen(),
+            second: rng.gen(),
+            timezone: rng.gen(),
+        }
+    }
+}
 impl fmt::Display for Timestamp {
     // [day/month/year:hour:minute:second zone]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -147,8 +199,17 @@ impl fmt::Display for Timestamp {
     }
 }
 
-#[derive(Arbitrary, Debug)]
-struct User(AsciiStr);
+#[derive(Debug)]
+struct User(String);
+
+impl Distribution<User> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> User
+    where
+        R: Rng + ?Sized,
+    {
+        User(AsciiString::default().generate(rng))
+    }
+}
 
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -156,12 +217,26 @@ impl fmt::Display for User {
     }
 }
 
-#[derive(Arbitrary, Debug)]
+#[derive(Debug)]
 struct IpV4 {
     zero: u8,
     one: u8,
     two: u8,
     three: u8,
+}
+
+impl Distribution<IpV4> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> IpV4
+    where
+        R: Rng + ?Sized,
+    {
+        IpV4 {
+            zero: rng.gen(),
+            one: rng.gen(),
+            two: rng.gen(),
+            three: rng.gen(),
+        }
+    }
 }
 
 impl fmt::Display for IpV4 {
@@ -170,13 +245,29 @@ impl fmt::Display for IpV4 {
     }
 }
 
-#[derive(Arbitrary, Debug)]
+#[derive(Debug)]
 enum Method {
     Get,
     Put,
     Post,
     Delete,
     Patch,
+}
+
+impl Distribution<Method> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Method
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..5) {
+            0 => Method::Get,
+            1 => Method::Put,
+            2 => Method::Post,
+            3 => Method::Delete,
+            4 => Method::Patch,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Method {
@@ -192,7 +283,7 @@ impl fmt::Display for Method {
     }
 }
 
-#[derive(Arbitrary, Debug)]
+#[derive(Debug)]
 struct Member {
     host: IpV4,
     user: User,
@@ -202,6 +293,24 @@ struct Member {
     protocol: Protocol,
     status_code: StatusCode,
     bytes_out: u16,
+}
+
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        Member {
+            host: rng.gen(),
+            user: rng.gen(),
+            timestamp: rng.gen(),
+            method: rng.gen(),
+            path: rng.gen(),
+            protocol: rng.gen(),
+            status_code: rng.gen(),
+            bytes_out: rng.gen(),
+        }
+    }
 }
 
 impl fmt::Display for Member {
@@ -231,12 +340,9 @@ impl Serialize for ApacheCommon {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Member>() {
+        loop {
+            let member: Member = rng.gen();
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
@@ -248,5 +354,32 @@ impl Serialize for ApacheCommon {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+    use rand::{rngs::SmallRng, SeedableRng};
+
+    use crate::payload::{ApacheCommon, Serialize};
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
+            let max_bytes = max_bytes as usize;
+            let rng = SmallRng::seed_from_u64(seed);
+            let apache = ApacheCommon::default();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            apache.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            debug_assert!(
+                bytes.len() <= max_bytes,
+                "{:?}",
+                std::str::from_utf8(&bytes).unwrap()
+            );
+        }
     }
 }

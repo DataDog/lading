@@ -1,17 +1,123 @@
 use std::{fmt, io::Write};
 
-use arbitrary::{Arbitrary, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
 use crate::payload::{Error, Serialize};
+
+use self::{
+    common::TagsGenerator, event::EventGenerator, metric::MetricGenerator,
+    service_check::ServiceCheckGenerator,
+};
+
+use super::{common::AsciiString, Generator};
 
 mod common;
 mod event;
 mod metric;
 mod service_check;
 
+fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
+where
+    T: Clone,
+    R: rand::Rng + ?Sized,
+{
+    if rng.gen() {
+        pool.choose(&mut rng).cloned()
+    } else {
+        None
+    }
+}
+
+struct MemberGenerator {
+    event_generator: EventGenerator,
+    service_check_generator: ServiceCheckGenerator,
+    metric_generator: MetricGenerator,
+}
+
+#[inline]
+fn random_strings<R>(cap: usize, rng: &mut R) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    random_strings_with_length(0, cap, 64, rng)
+}
+
+#[inline]
+fn random_strings_with_length<R>(
+    min: usize,
+    cap: usize,
+    max_length: u16,
+    rng: &mut R,
+) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    let mut buf = Vec::with_capacity(cap);
+    for _ in 0..rng.gen_range(min..cap) {
+        buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
+    }
+    buf
+}
+
+impl Distribution<MemberGenerator> for Standard {
+    fn sample<R>(&self, mut rng: &mut R) -> MemberGenerator
+    where
+        R: Rng + ?Sized,
+    {
+        let titles = random_strings_with_length(4, 128, 64, &mut rng);
+        let texts_or_messages = random_strings_with_length(4, 128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(16, 1024, 8, &mut rng);
+
+        let total_tags = rng.gen_range(0..512);
+        let mut tags = Vec::with_capacity(total_tags);
+        let tags_generator = TagsGenerator::new(rng.gen_range(1..32), rng.gen_range(1..64));
+        for _ in 0..total_tags {
+            tags.push(tags_generator.generate(&mut rng));
+        }
+
+        let event_generator = EventGenerator {
+            titles: titles.clone(),
+            texts_or_messages: texts_or_messages.clone(),
+            small_strings: small_strings.clone(),
+            tags: tags.clone(),
+        };
+
+        let service_check_generator = ServiceCheckGenerator {
+            names: titles.clone(),
+            small_strings: small_strings.clone(),
+            texts_or_messages,
+            tags: tags.clone(),
+        };
+        let metric_generator = MetricGenerator {
+            names: titles,
+            container_ids: small_strings,
+            tags,
+        };
+
+        MemberGenerator {
+            event_generator,
+            service_check_generator,
+            metric_generator,
+        }
+    }
+}
+
+impl Generator<Member> for MemberGenerator {
+    fn generate<R>(&self, rng: &mut R) -> Member
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let idx = rng.gen_range(0..3);
+        match idx {
+            0 => Member::Event(self.event_generator.generate(rng)),
+            1 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
+            2 => Member::Metric(self.metric_generator.generate(rng)),
+            _ => unreachable!(),
+        }
+    }
+}
+
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
-#[derive(Arbitrary)]
 enum Member {
     Metric(metric::Metric),
     Event(event::Event),
@@ -39,12 +145,11 @@ impl Serialize for DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
+        let member_generator: MemberGenerator = rng.gen();
 
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Member>() {
+        loop {
+            let member: Member = member_generator.generate(&mut rng);
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

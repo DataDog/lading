@@ -1,19 +1,83 @@
 use std::fmt;
 
-use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom};
 
-use super::common::{self, NonEmptyVec};
+use crate::payload::Generator;
 
-const MAX_VALUES: usize = 8;
+use super::{choose_or_not, common};
 
-#[derive(Arbitrary)]
+pub(crate) struct MetricGenerator {
+    pub(crate) names: Vec<String>,
+    pub(crate) container_ids: Vec<String>,
+    pub(crate) tags: Vec<common::Tags>,
+}
+
+impl Generator<Metric> for MetricGenerator {
+    fn generate<R>(&self, mut rng: &mut R) -> Metric
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let container_id = choose_or_not(&mut rng, &self.container_ids);
+        let name = self.names.choose(&mut rng).unwrap().clone();
+        let tags = choose_or_not(&mut rng, &self.tags);
+        let sample_rate = rng.gen();
+        let total_values = rng.gen_range(0..32);
+        let value: Vec<common::NumValue> =
+            Standard.sample_iter(&mut rng).take(total_values).collect();
+
+        match rng.gen_range(0..6) {
+            0 => Metric::Count(Count {
+                name,
+                value,
+                sample_rate,
+                tags,
+                container_id,
+            }),
+            1 => Metric::Gauge(Gauge {
+                name,
+                value,
+                tags,
+                container_id,
+            }),
+            2 => Metric::Timer(Timer {
+                name,
+                value,
+                sample_rate,
+                tags,
+                container_id,
+            }),
+            3 => Metric::Distribution(Dist {
+                name,
+                value,
+                sample_rate,
+                tags,
+                container_id,
+            }),
+            4 => Metric::Set(Set {
+                name,
+                value,
+                tags,
+                container_id,
+            }),
+            5 => Metric::Histogram(Histogram {
+                name,
+                value,
+                sample_rate,
+                tags,
+                container_id,
+            }),
+            _ => unreachable!(),
+        }
+    }
+}
+
 pub(crate) enum Metric {
     Count(Count),
     Gauge(Gauge),
     Timer(Timer),
     Histogram(Histogram),
     Set(Set),
-    Distribution(Distribution),
+    Distribution(Dist),
 }
 
 impl fmt::Display for Metric {
@@ -30,11 +94,11 @@ impl fmt::Display for Metric {
 }
 
 pub(crate) struct Count {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+    name: String,
+    value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
 impl fmt::Display for Count {
@@ -42,7 +106,7 @@ impl fmt::Display for Count {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|c")?;
@@ -50,10 +114,10 @@ impl fmt::Display for Count {
             write!(f, "|@{sample_rate}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -70,35 +134,11 @@ impl fmt::Display for Count {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Count {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            sample_rate: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let sample_sz = common::ZeroToOne::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, sample_sz, tags_sz, container_id_sz])
-    }
-}
-
 pub(crate) struct Gauge {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+    name: String,
+    value: Vec<common::NumValue>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
 impl fmt::Display for Gauge {
@@ -106,15 +146,15 @@ impl fmt::Display for Gauge {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|g")?;
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -131,34 +171,12 @@ impl fmt::Display for Gauge {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Gauge {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, tags_sz, container_id_sz])
-    }
-}
-
 pub(crate) struct Timer {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+    name: String,
+    value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
 impl fmt::Display for Timer {
@@ -166,7 +184,7 @@ impl fmt::Display for Timer {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|ms")?;
@@ -174,10 +192,10 @@ impl fmt::Display for Timer {
             write!(f, "|@{sample_rate}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -194,44 +212,20 @@ impl fmt::Display for Timer {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Timer {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            sample_rate: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let sample_sz = common::ZeroToOne::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, sample_sz, tags_sz, container_id_sz])
-    }
-}
-
-pub(crate) struct Distribution {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+pub(crate) struct Dist {
+    name: String,
+    value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
-impl fmt::Display for Distribution {
+impl fmt::Display for Dist {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|d")?;
@@ -239,10 +233,10 @@ impl fmt::Display for Distribution {
             write!(f, "|@{sample_rate}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -259,35 +253,11 @@ impl fmt::Display for Distribution {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Distribution {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            sample_rate: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let sample_sz = common::ZeroToOne::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, sample_sz, tags_sz, container_id_sz])
-    }
-}
-
 pub(crate) struct Set {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+    name: String,
+    value: Vec<common::NumValue>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
 impl fmt::Display for Set {
@@ -295,15 +265,15 @@ impl fmt::Display for Set {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|s")?;
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -320,34 +290,12 @@ impl fmt::Display for Set {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Set {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, tags_sz, container_id_sz])
-    }
-}
-
 pub(crate) struct Histogram {
-    name: common::MetricTagStr,
-    value: NonEmptyVec<common::NumValue>,
+    name: String,
+    value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::Tags>,
-    container_id: Option<common::MetricTagStr>,
+    container_id: Option<String>,
 }
 
 impl fmt::Display for Histogram {
@@ -355,7 +303,7 @@ impl fmt::Display for Histogram {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value.inner {
+        for val in &self.value {
             write!(f, ":{val}")?;
         }
         write!(f, "|h")?;
@@ -363,10 +311,10 @@ impl fmt::Display for Histogram {
             write!(f, "|@{sample_rate}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -380,29 +328,5 @@ impl fmt::Display for Histogram {
         }
 
         Ok(())
-    }
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for Histogram {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            value: u.arbitrary()?,
-            sample_rate: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            container_id: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let value_sz = {
-            let (low, upper) = common::NumValue::size_hint(depth);
-            (low * MAX_VALUES, upper.map(|u| u * MAX_VALUES))
-        };
-        let sample_sz = common::ZeroToOne::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let container_id_sz = common::MetricTagStr::size_hint(depth);
-        and_all(&[name_sz, value_sz, sample_sz, tags_sz, container_id_sz])
     }
 }

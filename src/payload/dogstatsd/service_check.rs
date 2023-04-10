@@ -1,16 +1,46 @@
 use std::fmt;
 
-use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use super::common;
+use crate::payload::Generator;
+
+use super::{choose_or_not, common};
+
+pub(crate) struct ServiceCheckGenerator {
+    pub(crate) names: Vec<String>,
+    pub(crate) small_strings: Vec<String>,
+    pub(crate) texts_or_messages: Vec<String>,
+    pub(crate) tags: Vec<common::Tags>,
+}
 
 pub(crate) struct ServiceCheck {
-    name: common::MetricTagKey,
+    name: String,
     status: Status,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagKey>,
+    hostname: Option<String>,
     tags: Option<common::Tags>,
-    message: Option<common::MetricTagStr>,
+    message: Option<String>,
+}
+
+impl Generator<ServiceCheck> for ServiceCheckGenerator {
+    fn generate<R>(&self, mut rng: &mut R) -> ServiceCheck
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let name = self.names.choose(&mut rng).unwrap().clone();
+        let hostname = choose_or_not(&mut rng, &self.small_strings);
+        let message = choose_or_not(&mut rng, &self.texts_or_messages);
+        let tags = choose_or_not(&mut rng, &self.tags);
+
+        ServiceCheck {
+            name,
+            status: rng.gen(),
+            timestamp_second: rng.gen(),
+            hostname,
+            tags,
+            message,
+        }
+    }
 }
 
 impl fmt::Display for ServiceCheck {
@@ -29,10 +59,10 @@ impl fmt::Display for ServiceCheck {
             write!(f, "|h:{hostname}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -48,43 +78,27 @@ impl fmt::Display for ServiceCheck {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for ServiceCheck {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Self {
-            name: u.arbitrary()?,
-            status: u.arbitrary()?,
-            timestamp_second: u.arbitrary()?,
-            hostname: u.arbitrary()?,
-            tags: u.arbitrary()?,
-            message: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let name_sz = common::MetricTagStr::size_hint(depth);
-        let status_sz = Status::size_hint(depth);
-        let timestamp_sz = u32::size_hint(depth);
-        let hostname_sz = common::MetricTagStr::size_hint(depth);
-        let tags_sz = common::Tags::size_hint(depth);
-        let message_sz = common::MetricTagStr::size_hint(depth);
-
-        and_all(&[
-            name_sz,
-            status_sz,
-            timestamp_sz,
-            hostname_sz,
-            tags_sz,
-            message_sz,
-        ])
-    }
-}
-
-#[derive(Clone, Copy, Arbitrary)]
+#[derive(Clone, Copy)]
 enum Status {
     Ok,
     Warning,
     Critical,
     Unknown,
+}
+
+impl Distribution<Status> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Status
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..4) {
+            0 => Status::Ok,
+            1 => Status::Warning,
+            2 => Status::Critical,
+            3 => Status::Unknown,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Status {

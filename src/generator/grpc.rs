@@ -30,31 +30,13 @@ use crate::{
 pub enum Error {
     /// The remote RPC endpoint returned an error.
     #[error("RPC endpoint error: {0}")]
-    Rpc(tonic::Status),
+    Rpc(#[from] tonic::Status),
     /// gRPC transport error
     #[error("gRPC transport error: {0}")]
-    Transport(tonic::transport::Error),
+    Transport(#[from] tonic::transport::Error),
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
-    Block(block::Error),
-}
-
-impl From<tonic::Status> for Error {
-    fn from(e: tonic::Status) -> Self {
-        Error::Rpc(e)
-    }
-}
-
-impl From<tonic::transport::Error> for Error {
-    fn from(e: tonic::transport::Error) -> Self {
-        Error::Transport(e)
-    }
-}
-
-impl From<block::Error> for Error {
-    fn from(error: block::Error) -> Self {
-        Error::Block(error)
-    }
+    Block(#[from] block::Error),
 }
 
 /// Config for [`Grpc`]

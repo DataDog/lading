@@ -7,11 +7,12 @@
 //! currently implemented.
 
 use crate::payload::{Error, Serialize};
-use arbitrary::{Arbitrary, Unstructured};
 use opentelemetry_proto::tonic::trace::v1;
 use prost::Message;
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 use std::io::Write;
+
+use super::{common::AsciiString, Generator};
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportTraceServiceRequest`](opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest)
 struct ExportTraceServiceRequest(Vec<Span>);
@@ -35,63 +36,41 @@ impl ExportTraceServiceRequest {
         }
     }
 }
-
-impl<'a> Arbitrary<'a> for ExportTraceServiceRequest {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let spans: Vec<Span> = u.arbitrary()?;
-        Ok(Self(spans))
-    }
-}
-
 struct Span(v1::Span);
 
-impl<'a> Arbitrary<'a> for Span {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let trace_id: [u8; 16] = u.arbitrary()?;
-        let trace_id = trace_id.to_vec();
-
-        // span_id must be nonzero
-        let span_id: [u8; 8] = u.arbitrary()?;
-        let span_id = span_id.to_vec();
-
-        // https://www.w3.org/TR/trace-context/#tracestate-header
-        let trace_state = String::new();
-
-        // zeros: root span
-        let parent_span_id: [u8; 8] = [0; 8];
-        let parent_span_id = parent_span_id.to_vec();
-
-        let name: String = u.arbitrary()?;
-
-        let kind: i32 = u.int_in_range(0..=5)?;
+impl Distribution<Span> for Standard {
+    fn sample<R>(&self, mut rng: &mut R) -> Span
+    where
+        R: Rng + ?Sized,
+    {
+        let trace_id = Standard.sample_iter(&mut rng).take(16).collect();
+        let span_id = Standard.sample_iter(&mut rng).take(8).collect();
 
         // Some collectors may immediately drop old/future spans. Consider
         // constraining these to recent timestamps.
-        let start_time_unix_nano: u64 = u.arbitrary()?;
+        let start_time_unix_nano: u64 = rng.gen();
         // end time is expected to be greater than or equal to start time
-        let end_time_unix_nano: u64 = u.int_in_range(start_time_unix_nano..=u64::MAX)?;
+        let end_time_unix_nano: u64 = rng.gen_range(start_time_unix_nano..=u64::MAX);
 
-        let attributes = Vec::new();
-        let events = Vec::new();
-        let links = Vec::new();
-
-        Ok(Span(v1::Span {
+        Span(v1::Span {
             trace_id,
             span_id,
-            trace_state,
-            parent_span_id,
-            name,
-            kind,
+            // https://www.w3.org/TR/trace-context/#tracestate-header
+            trace_state: String::new(),
+            // zeros: root span
+            parent_span_id: vec![0; 8],
+            name: AsciiString::default().generate(rng),
+            kind: rng.gen_range(0..=5),
             start_time_unix_nano,
             end_time_unix_nano,
-            attributes,
+            attributes: Vec::new(),
             dropped_attributes_count: 0,
-            events,
+            events: Vec::new(),
             dropped_events_count: 0,
-            links,
+            links: Vec::new(),
             dropped_links_count: 0,
             status: None,
-        }))
+        })
     }
 }
 
@@ -105,10 +84,6 @@ impl Serialize for OpentelemetryTraces {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         // An Export*ServiceRequest message has 5 bytes of fixed values plus
         // a varint-encoded message length field. The worst case for the message
         // length field is the max message size divided by 0x7F.
@@ -118,7 +93,8 @@ impl Serialize for OpentelemetryTraces {
         };
 
         let mut acc = ExportTraceServiceRequest(Vec::new());
-        while let Ok(member) = unstructured.arbitrary::<Span>() {
+        loop {
+            let member: Span = rng.gen();
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {

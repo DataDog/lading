@@ -1,19 +1,53 @@
 use std::fmt;
 
-use arbitrary::{size_hint::and_all, Arbitrary, Unstructured};
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use super::common;
+use crate::payload::Generator;
+
+use super::{choose_or_not, common};
+
+pub(crate) struct EventGenerator {
+    pub(crate) titles: Vec<String>,
+    pub(crate) texts_or_messages: Vec<String>,
+    pub(crate) small_strings: Vec<String>,
+    pub(crate) tags: Vec<common::Tags>,
+}
+
+impl Generator<Event> for EventGenerator {
+    fn generate<R>(&self, mut rng: &mut R) -> Event
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let title = self.titles.choose(&mut rng).unwrap().clone();
+        let text = self.texts_or_messages.choose(&mut rng).unwrap().clone();
+        let tags = choose_or_not(&mut rng, &self.tags);
+
+        Event {
+            title_utf8_length: title.len(),
+            text_utf8_length: text.len(),
+            title,
+            text,
+            timestamp_second: rng.gen(),
+            hostname: choose_or_not(&mut rng, &self.small_strings),
+            aggregation_key: choose_or_not(&mut rng, &self.small_strings),
+            priority: rng.gen(),
+            source_type_name: choose_or_not(&mut rng, &self.small_strings),
+            alert_type: rng.gen(),
+            tags,
+        }
+    }
+}
 
 pub(crate) struct Event {
-    title: common::MetricTagStr,
-    text: common::MetricTagStr,
+    title: String,
+    text: String,
     title_utf8_length: usize,
     text_utf8_length: usize,
     timestamp_second: Option<u32>,
-    hostname: Option<common::MetricTagKey>,
-    aggregation_key: Option<common::MetricTagKey>,
+    hostname: Option<String>,
+    aggregation_key: Option<String>,
     priority: Option<Priority>,
-    source_type_name: Option<common::MetricTagKey>,
+    source_type_name: Option<String>,
     alert_type: Option<Alert>,
     tags: Option<common::Tags>,
 }
@@ -48,10 +82,10 @@ impl fmt::Display for Event {
             write!(f, "|s:{source_type_name}")?;
         }
         if let Some(ref tags) = self.tags {
-            if !tags.inner.is_empty() {
+            if !tags.is_empty() {
                 write!(f, "|#")?;
-                let mut commas_remaining = tags.inner.len() - 1;
-                for (k, v) in &tags.inner {
+                let mut commas_remaining = tags.len() - 1;
+                for (k, v) in tags.iter() {
                     write!(f, "{k}:{v}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
@@ -64,58 +98,22 @@ impl fmt::Display for Event {
     }
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for Event {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let title: common::MetricTagStr = u.arbitrary()?;
-        let text: common::MetricTagStr = u.arbitrary()?;
-        Ok(Self {
-            title_utf8_length: title.len(),
-            text_utf8_length: text.len(),
-            title,
-            text,
-            timestamp_second: u.arbitrary()?,
-            hostname: u.arbitrary()?,
-            aggregation_key: u.arbitrary()?,
-            priority: u.arbitrary()?,
-            source_type_name: u.arbitrary()?,
-            alert_type: u.arbitrary()?,
-            tags: u.arbitrary()?,
-        })
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let title_sz = common::MetricTagStr::size_hint(depth);
-        let text_sz = common::MetricTagStr::size_hint(depth);
-        let title_len_sz = usize::size_hint(depth);
-        let text_len_sz = usize::size_hint(depth);
-        let timestamp_sz = u32::size_hint(depth);
-        let hostname_sz = common::MetricTagStr::size_hint(depth);
-        let aggregation_sz = common::MetricTagStr::size_hint(depth);
-        let priority_sz = Priority::size_hint(depth);
-        let source_type_sz = common::MetricTagStr::size_hint(depth);
-        let alert_sz = Alert::size_hint(depth);
-        let tags = common::Tags::size_hint(depth);
-
-        and_all(&[
-            title_sz,
-            text_sz,
-            title_len_sz,
-            text_len_sz,
-            timestamp_sz,
-            hostname_sz,
-            aggregation_sz,
-            priority_sz,
-            source_type_sz,
-            alert_sz,
-            tags,
-        ])
-    }
-}
-
-#[derive(Arbitrary)]
 enum Priority {
     Normal,
     Low,
+}
+
+impl Distribution<Priority> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Priority
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..2) {
+            0 => Priority::Low,
+            1 => Priority::Normal,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Priority {
@@ -127,12 +125,27 @@ impl fmt::Display for Priority {
     }
 }
 
-#[derive(Clone, Copy, Arbitrary)]
+#[derive(Clone, Copy)]
 enum Alert {
     Error,
     Warning,
     Info,
     Success,
+}
+
+impl Distribution<Alert> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Alert
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..4) {
+            0 => Alert::Error,
+            1 => Alert::Warning,
+            2 => Alert::Info,
+            3 => Alert::Success,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl fmt::Display for Alert {

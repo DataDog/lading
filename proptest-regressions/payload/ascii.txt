@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc b0a5e4db7ec2c4733f43f726a8960b63cd99d8d80e62aa5632b059f7a72106ce # shrinks to seed = 15194034853109340835, max_bytes = 0
 cc e2bc9dd7b2802fb4395c3e3efa1158afc6a1a58b769a0a484d71b8d3e2d25c9b # shrinks to seed = 15044724196553407659, max_bytes = 1
+cc b60d67e07247984212a3c9eefbee0eb97c7cb7560b4609870c7f943c62e6482a # shrinks to seed = 9286616756472296351, max_bytes = 0

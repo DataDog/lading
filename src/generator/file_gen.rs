@@ -38,31 +38,13 @@ use crate::{
 pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
-    Io(::std::io::Error),
+    Io(#[from] ::std::io::Error),
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
-    Block(block::Error),
+    Block(#[from] block::Error),
     /// Child sub-task error.
     #[error("Child join error: {0}")]
-    Child(JoinError),
-}
-
-impl From<block::Error> for Error {
-    fn from(error: block::Error) -> Self {
-        Error::Block(error)
-    }
-}
-
-impl From<JoinError> for Error {
-    fn from(error: JoinError) -> Self {
-        Error::Child(error)
-    }
-}
-
-impl From<::std::io::Error> for Error {
-    fn from(error: ::std::io::Error) -> Self {
-        Error::Io(error)
-    }
+    Child(#[from] JoinError),
 }
 
 fn default_rotation() -> bool {

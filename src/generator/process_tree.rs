@@ -57,52 +57,21 @@ impl fmt::Display for ExecutionError {
     }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`ProcessTree`].
 pub enum Error {
     /// The file is not executable
-    NotExecutable(NotExecutable),
+    #[error("Not Executable!")]
+    NotExecutable(#[from] NotExecutable),
     /// Wrapper around [`serde_yaml::Error`].
-    Serialization(serde_yaml::Error),
+    #[error("Serialization failed with error: {0}")]
+    Serialization(#[from] serde_yaml::Error),
     /// Wrapper around [`std::io::Error`].
-    Io(::std::io::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] ::std::io::Error),
     /// Process tree command execution error
-    ExecutionError(ExecutionError),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::NotExecutable(e) => write!(f, "executable error : {e}"),
-            Error::Serialization(e) => write!(f, "serialization error : {e}"),
-            Error::Io(e) => write!(f, "io error : {e}"),
-            Error::ExecutionError(e) => write!(f, "execution error : {e}"),
-        }
-    }
-}
-
-impl From<NotExecutable> for Error {
-    fn from(error: NotExecutable) -> Self {
-        Error::NotExecutable(error)
-    }
-}
-
-impl From<serde_yaml::Error> for Error {
-    fn from(error: serde_yaml::Error) -> Self {
-        Error::Serialization(error)
-    }
-}
-
-impl From<::std::io::Error> for Error {
-    fn from(error: ::std::io::Error) -> Self {
-        Error::Io(error)
-    }
-}
-
-impl From<ExecutionError> for Error {
-    fn from(error: ExecutionError) -> Self {
-        Error::ExecutionError(error)
-    }
+    #[error("Execution error: {0}")]
+    ExecutionError(#[from] ExecutionError),
 }
 
 fn default_max_depth() -> NonZeroU32 {

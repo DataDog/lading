@@ -1,10 +1,9 @@
 use std::io::Write;
 
-use arbitrary::{size_hint, Arbitrary, Unstructured};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::Deserialize;
 
-use crate::payload::{common::AsciiStr, Error, Serialize};
+use crate::payload::{Error, Serialize};
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
 const STAGES: [&str; 4] = ["production", "performance", "noprod", "staging"];
@@ -46,34 +45,21 @@ struct Attrs {
     pub(crate) aws_account: String,
 }
 
-impl<'a> Arbitrary<'a> for Attrs {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice: u8 = u.arbitrary()?;
-        let system_id = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
-        let partition = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
-        let event_type = EVENT_TYPES[(choice as usize) % EVENT_TYPES.len()].to_string();
-        let stage = STAGES[(choice as usize) % STAGES.len()].to_string();
-        let service = SERVICES[(choice as usize) % SERVICES.len()].to_string();
-        let container = CONTAINER_TYPES[(choice as usize) % CONTAINER_TYPES.len()].to_string();
-        let aws_account = "verymodelofthemodernmajor".to_string();
-
-        let attrs = Attrs {
-            system_id,
-            stage: stage.clone(),
-            event_type,
-            c2c_service: service,
-            c2c_partition: partition,
-            c2c_stage: stage,
-            c2c_container_type: container,
-            aws_account,
-        };
-        Ok(attrs)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[<AsciiStr as Arbitrary>::size_hint(depth)])
-        })
+impl Distribution<Attrs> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Attrs
+    where
+        R: Rng + ?Sized,
+    {
+        Attrs {
+            system_id: String::from(*SYSTEM_IDS.choose(rng).unwrap()),
+            stage: String::from(*STAGES.choose(rng).unwrap()),
+            event_type: String::from(*EVENT_TYPES.choose(rng).unwrap()),
+            c2c_service: String::from(*SERVICES.choose(rng).unwrap()),
+            c2c_partition: String::from(*PARTITIONS.choose(rng).unwrap()),
+            c2c_stage: String::from(*STAGES.choose(rng).unwrap()),
+            c2c_container_type: String::from(*CONTAINER_TYPES.choose(rng).unwrap()),
+            aws_account: String::from("verymodelofthemodernmajor"),
+        }
     }
 }
 
@@ -84,26 +70,16 @@ struct Event {
     attrs: Attrs,
 }
 
-impl<'a> Arbitrary<'a> for Event {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice: u8 = u.arbitrary()?;
-        let message = MESSAGES[(choice as usize) % MESSAGES.len()].to_string();
-        let event = Event {
+impl Distribution<Event> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Event
+    where
+        R: Rng + ?Sized,
+    {
+        Event {
             timestamp: 1_606_215_269.333_915,
-            message,
-            attrs: u.arbitrary()?,
-        };
-        Ok(event)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <f64 as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <Attrs as Arbitrary>::size_hint(depth),
-            ])
-        })
+            message: String::from(*MESSAGES.choose(rng).unwrap()),
+            attrs: rng.gen(),
+        }
     }
 }
 
@@ -115,29 +91,17 @@ struct Member {
     pub(crate) index: String,
 }
 
-impl<'a> Arbitrary<'a> for Member {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let choice: u8 = u.arbitrary()?;
-        let host = SYSTEM_IDS[(choice as usize) % SYSTEM_IDS.len()].to_string();
-        let index = PARTITIONS[(choice as usize) % PARTITIONS.len()].to_string();
-        let member = Member {
-            event: u.arbitrary()?,
-            time: 1_606_215_269.333_915,
-            host,
-            index,
-        };
-        Ok(member)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        size_hint::recursion_guard(depth, |depth| {
-            size_hint::and_all(&[
-                <Attrs as Arbitrary>::size_hint(depth),
-                <f64 as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-                <AsciiStr as Arbitrary>::size_hint(depth),
-            ])
-        })
+impl Distribution<Member> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Member
+    where
+        R: Rng + ?Sized,
+    {
+        Member {
+            event: rng.gen(),
+            time: rng.gen(),
+            host: String::from(*SYSTEM_IDS.choose(rng).unwrap()),
+            index: String::from(*PARTITIONS.choose(rng).unwrap()),
+        }
     }
 }
 
@@ -175,12 +139,9 @@ impl Serialize for SplunkHec {
         R: Rng + Sized,
         W: Write,
     {
-        let mut entropy: Vec<u8> = vec![0; max_bytes];
-        rng.fill_bytes(&mut entropy);
-        let mut unstructured = Unstructured::new(&entropy);
-
         let mut bytes_remaining = max_bytes;
-        while let Ok(member) = unstructured.arbitrary::<Member>() {
+        loop {
+            let member: Member = rng.gen();
             let encoding = match self.encoding {
                 Encoding::Text => {
                     let event = member.event;
@@ -233,7 +194,7 @@ mod test {
     // deserializes as splunk's hec, is not truncated etc.
     proptest! {
         #[test]
-        fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
+        fn every_payload_deserializes(seed: u64, max_bytes in 0..u16::MAX)  {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
             let hec = SplunkHec::default();
