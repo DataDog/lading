@@ -155,13 +155,14 @@ impl Serialize for Fluent {
 
         let mut members: Vec<Vec<u8>> = Standard
             .sample_iter(&mut rng)
-            .take(1_000)
+            .take(10)
             .map(|m: Member| rmp_serde::to_vec(&m).unwrap())
             .collect();
 
         // Search for too many Member instances.
         loop {
             let encoding_len = members[0..].iter().fold(0, |acc, m| acc + m.len());
+            println!("{encoding_len} > {max_bytes}");
             if encoding_len > max_bytes {
                 break;
             }
@@ -169,7 +170,7 @@ impl Serialize for Fluent {
             members.extend(
                 Standard
                     .sample_iter(&mut rng)
-                    .take(100)
+                    .take(10)
                     .map(|m: Member| rmp_serde::to_vec(&m).unwrap()),
             );
         }

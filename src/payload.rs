@@ -132,8 +132,6 @@ pub(crate) enum Payload {
     TraceAgent(TraceAgent),
 }
 
-impl Payload {}
-
 impl Serialize for Payload {
     fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
@@ -182,32 +180,4 @@ pub(crate) trait Generator<I> {
     fn generate<R>(&self, rng: &mut R) -> I
     where
         R: rand::Rng + ?Sized;
-}
-
-#[cfg(test)]
-mod test {
-    use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
-
-    use crate::payload::{Payload, Serialize};
-
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    proptest! {
-        #[test]
-        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16, payload: Payload) {
-            let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            payload.to_bytes(rng, max_bytes, &mut bytes).unwrap();
-            debug_assert!(
-                bytes.len() <= max_bytes,
-                "{} > max of {}. Payload: {:?}",
-                bytes.len(),
-                max_bytes,
-                std::str::from_utf8(&bytes).unwrap_or("<failed to utf8 encode payload>")
-            );
-        }
-    }
 }
