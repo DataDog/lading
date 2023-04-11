@@ -5,8 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.14.0-rc8]
+## Changed
+- Remove biased select! to avoid failing to shutdown.
+
+## [0.14.0-rc7]
+## Changed
+- Datadog logs generation now much faster, relying on an experimentally
+  determined 'encoded size' rather than searching at runtime for the same.
+
+## [0.14.0-rc6]
+## Changed
+- Adjusted file_gen generator to consume less CPU by registering necessary
+  metrics.
+
+## [0.14.0-rc5]
+## Changed
+- Adjusted trace-agent msgpack payload generation to be much faster at the cost
+  of some memory during the generation process.
+
+## [0.14.0-rc4]
+## Changed
+- Adjusted internal TCP generator metrics to be registered where possible.
+- Biased internal TCP generator toward transmission case.
+
+## [0.14.0-rc3]
 ## Added
-- Added a CLI flag to disable the target module
+- Added the ability to configure details about DogStatsD payload
 
 ## [0.13.1]
 ## Added
