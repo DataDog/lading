@@ -28,6 +28,7 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 struct MemberGenerator {
     event_generator: EventGenerator,
     service_check_generator: ServiceCheckGenerator,
@@ -129,28 +130,30 @@ impl fmt::Display for Member {
 #[allow(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct DogStatsD {
-    metric_names_range: Range<NonZeroUsize>,
-    tag_keys_range: Range<usize>,
+    member_generator: MemberGenerator,
 }
 
-impl Default for DogStatsD {
-    fn default() -> Self {
-        Self {
-            metric_names_range: NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap(),
-            tag_keys_range: 0..32,
-        }
-    }
-}
+// impl Default for DogStatsD {
+//     fn default() -> Self {
+//         Self {
+//             metric_names_range: NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap(),
+//             tag_keys_range: 0..32,
+//         }
+//     }
+// }
 
 impl DogStatsD {
-    pub(crate) fn new(
+    pub(crate) fn new<R>(
         metric_names_range: Range<NonZeroUsize>,
         tag_keys_range: Range<usize>,
-    ) -> Self {
-        Self {
-            metric_names_range,
-            tag_keys_range,
-        }
+        rng: &mut R,
+    ) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let member_generator = MemberGenerator::new(metric_names_range, tag_keys_range, rng);
+
+        Self { member_generator }
     }
 }
 
@@ -160,15 +163,9 @@ impl Serialize for DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let member_generator: MemberGenerator = MemberGenerator::new(
-            self.metric_names_range.clone(),
-            self.tag_keys_range.clone(),
-            &mut rng,
-        );
-
         let mut bytes_remaining = max_bytes;
         loop {
-            let member: Member = member_generator.generate(&mut rng);
+            let member: Member = self.member_generator.generate(&mut rng);
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

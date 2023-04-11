@@ -6,6 +6,7 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
     pub(crate) titles: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,

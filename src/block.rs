@@ -147,12 +147,9 @@ where
             let tg_max = tag_keys_maximum.unwrap_or(cmp::max(tg_min, 64));
             let tg_range = tg_min..tg_max;
 
-            construct_block_cache_inner(
-                &mut rng,
-                &payload::DogStatsD::new(mn_range, tg_range),
-                block_chunks,
-                labels,
-            )
+            let serializer = payload::DogStatsD::new(mn_range, tg_range, &mut rng);
+
+            construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
         payload::Config::Fluent => {
             construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)

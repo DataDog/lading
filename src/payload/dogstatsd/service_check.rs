@@ -6,6 +6,7 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,

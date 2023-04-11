@@ -6,6 +6,7 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
