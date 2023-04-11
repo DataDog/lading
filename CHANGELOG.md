@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0-rc2]
+## [0.14.0-rc3]
 ## Added
 - Added a CLI flag to disable the target module
 - Added the ability to configure details about DogStatsD payload
