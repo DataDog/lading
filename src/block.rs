@@ -138,8 +138,9 @@ where
             tag_keys_minimum,
             tag_keys_maximum,
         } => {
-            let mn_min = metric_names_minimum.unwrap_or(0);
-            let mn_max = metric_names_maximum.unwrap_or(cmp::max(mn_min, 64));
+            let mn_min = metric_names_minimum.unwrap_or(NonZeroUsize::new(1).unwrap());
+            let mn_max =
+                metric_names_maximum.unwrap_or(cmp::max(mn_min, NonZeroUsize::new(64).unwrap()));
             let mn_range = mn_min..mn_max;
 
             let tg_min = tag_keys_minimum.unwrap_or(0);

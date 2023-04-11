@@ -1,4 +1,4 @@
-use std::{fmt, io::Write, ops::Range};
+use std::{fmt, io::Write, num::NonZeroUsize, ops::Range};
 
 use rand::{seq::SliceRandom, Rng};
 
@@ -47,10 +47,12 @@ where
 }
 
 impl MemberGenerator {
-    fn new<R>(metric_range: Range<usize>, key_range: Range<usize>, mut rng: &mut R) -> Self
+    fn new<R>(metric_range: Range<NonZeroUsize>, key_range: Range<usize>, mut rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
+        let metric_range = metric_range.start.get()..metric_range.end.get();
+
         let titles = random_strings_with_length(metric_range, 64, &mut rng);
         let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
@@ -127,21 +129,24 @@ impl fmt::Display for Member {
 #[allow(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct DogStatsD {
-    metric_names_range: Range<usize>,
+    metric_names_range: Range<NonZeroUsize>,
     tag_keys_range: Range<usize>,
 }
 
 impl Default for DogStatsD {
     fn default() -> Self {
         Self {
-            metric_names_range: 0..64,
+            metric_names_range: NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap(),
             tag_keys_range: 0..32,
         }
     }
 }
 
 impl DogStatsD {
-    pub(crate) fn new(metric_names_range: Range<usize>, tag_keys_range: Range<usize>) -> Self {
+    pub(crate) fn new(
+        metric_names_range: Range<NonZeroUsize>,
+        tag_keys_range: Range<usize>,
+    ) -> Self {
         Self {
             metric_names_range,
             tag_keys_range,
