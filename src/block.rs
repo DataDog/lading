@@ -1,5 +1,5 @@
 use std::{
-    convert::TryInto,
+    cmp,
     num::{NonZeroU32, NonZeroUsize},
 };
 
@@ -132,12 +132,27 @@ where
             block_chunks,
             labels,
         ),
-        payload::Config::DogStatsD => construct_block_cache_inner(
-            &mut rng,
-            &payload::DogStatsD::default(),
-            block_chunks,
-            labels,
-        ),
+        payload::Config::DogStatsD {
+            metric_names_minimum,
+            metric_names_maximum,
+            tag_keys_minimum,
+            tag_keys_maximum,
+        } => {
+            let mn_min = metric_names_minimum.unwrap_or(0);
+            let mn_max = metric_names_maximum.unwrap_or(cmp::max(mn_min, 64));
+            let mn_range = mn_min..mn_max;
+
+            let tg_min = tag_keys_minimum.unwrap_or(0);
+            let tg_max = tag_keys_maximum.unwrap_or(cmp::max(tg_min, 64));
+            let tg_range = tg_min..tg_max;
+
+            construct_block_cache_inner(
+                &mut rng,
+                &payload::DogStatsD::new(mn_range, tg_range),
+                block_chunks,
+                labels,
+            )
+        }
         payload::Config::Fluent => {
             construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
         }

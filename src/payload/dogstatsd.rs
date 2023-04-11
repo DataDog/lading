@@ -1,11 +1,11 @@
-use std::{fmt, io::Write};
+use std::{fmt, io::Write, ops::Range};
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{seq::SliceRandom, Rng};
 
 use crate::payload::{Error, Serialize};
 
 use self::{
-    common::TagsGenerator, event::EventGenerator, metric::MetricGenerator,
+    common::tags, event::EventGenerator, metric::MetricGenerator,
     service_check::ServiceCheckGenerator,
 };
 
@@ -35,43 +35,40 @@ struct MemberGenerator {
 }
 
 #[inline]
-fn random_strings<R>(cap: usize, rng: &mut R) -> Vec<String>
+fn random_strings<R>(total: usize, rng: &mut R) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
-    random_strings_with_length(0, cap, 64, rng)
+    random_strings_with_length(total..total, 64, rng)
 }
 
 #[inline]
-fn random_strings_with_length<R>(
-    min: usize,
-    cap: usize,
-    max_length: u16,
-    rng: &mut R,
-) -> Vec<String>
+fn random_strings_with_length<R>(min_max: Range<usize>, max_length: u16, rng: &mut R) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
-    let mut buf = Vec::with_capacity(cap);
-    for _ in 0..rng.gen_range(min..cap) {
+    let mut buf = Vec::with_capacity(min_max.end);
+    for _ in 0..rng.gen_range(min_max) {
         buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
     }
     buf
 }
 
-impl Distribution<MemberGenerator> for Standard {
-    fn sample<R>(&self, mut rng: &mut R) -> MemberGenerator
+impl MemberGenerator {
+    fn new<R>(metric_range: Range<usize>, key_range: Range<usize>, mut rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
-        let titles = random_strings_with_length(4, 128, 64, &mut rng);
-        let texts_or_messages = random_strings_with_length(4, 128, 1024, &mut rng);
-        let small_strings = random_strings_with_length(16, 1024, 8, &mut rng);
+        let titles = random_strings_with_length(metric_range, 64, &mut rng);
+        let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
 
-        let total_tags = rng.gen_range(0..512);
-        let mut tags = Vec::with_capacity(total_tags);
-        let tags_generator = TagsGenerator::new(rng.gen_range(1..32), rng.gen_range(1..64));
-        for _ in 0..total_tags {
+        let total_tag_sets = 512;
+        let max_values_per_tag_set = 512;
+
+        let mut tags = Vec::with_capacity(total_tag_sets);
+        let tags_generator = tags::Generator::new(key_range, max_values_per_tag_set);
+        for _ in 0..total_tag_sets {
             tags.push(tags_generator.generate(&mut rng));
         }
 
@@ -134,10 +131,22 @@ impl fmt::Display for Member {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct DogStatsD {}
+pub(crate) struct DogStatsD {
+    metric_names_range: Range<usize>,
+    tag_keys_range: Range<usize>,
+}
+
+impl DogStatsD {
+    pub(crate) fn new(metric_names_range: Range<usize>, tag_keys_range: Range<usize>) -> Self {
+        Self {
+            metric_names_range,
+            tag_keys_range,
+        }
+    }
+}
 
 impl Serialize for DogStatsD {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -145,7 +154,11 @@ impl Serialize for DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let member_generator: MemberGenerator = rng.gen();
+        let member_generator: MemberGenerator = MemberGenerator::new(
+            self.metric_names_range.clone(),
+            self.tag_keys_range.clone(),
+            &mut rng,
+        );
 
         let mut bytes_remaining = max_bytes;
         loop {

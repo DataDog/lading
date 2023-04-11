@@ -105,7 +105,18 @@ pub enum Config {
     OpentelemetryMetrics,
     /// Generates DogStatsD
     #[serde(rename = "dogstatsd")]
-    DogStatsD,
+    DogStatsD {
+        /// Defines the minimum number of metric names allowed in a payload.
+        metric_names_minimum: Option<usize>,
+        /// Defines the maximum number of metric names allowed in a
+        /// payload. Must be greater or equal to minimum.
+        metric_names_maximum: Option<usize>,
+        /// Defines the minimum number of metric names allowed in a payload.
+        tag_keys_minimum: Option<usize>,
+        /// Defines the maximum number of metric names allowed in a
+        /// payload. Must be greater or equal to minimum.
+        tag_keys_maximum: Option<usize>,
+    },
     /// Generates TraceAgent payloads in JSON format
     TraceAgent(Encoding),
 }
