@@ -123,7 +123,6 @@ pub enum Config {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[allow(dead_code)]
 pub(crate) enum Payload {
     ApacheCommon(ApacheCommon),
@@ -132,9 +131,6 @@ pub(crate) enum Payload {
     Fluent(Fluent),
     Json(Json),
     SplunkHec(SplunkHec),
-    #[cfg_attr(test, proptest(skip))]
-    // No way to generate the files necessary to back Static, so avoid
-    // generating this variant entirely.
     Static(Static),
     Syslog(Syslog5424),
     OtelTraces(OpentelemetryTraces),

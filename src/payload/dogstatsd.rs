@@ -128,19 +128,9 @@ impl fmt::Display for Member {
 
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct DogStatsD {
     member_generator: MemberGenerator,
 }
-
-// impl Default for DogStatsD {
-//     fn default() -> Self {
-//         Self {
-//             metric_names_range: NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap(),
-//             tag_keys_range: 0..32,
-//         }
-//     }
-// }
 
 impl DogStatsD {
     pub(crate) fn new<R>(
@@ -182,6 +172,8 @@ impl Serialize for DogStatsD {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
+
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
@@ -193,8 +185,10 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let dogstatsd = DogStatsD::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let metric_names_range =  NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap();
+            let tag_keys_range =  0..32;
+            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
