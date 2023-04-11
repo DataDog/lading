@@ -35,14 +35,6 @@ struct MemberGenerator {
 }
 
 #[inline]
-fn random_strings<R>(total: usize, rng: &mut R) -> Vec<String>
-where
-    R: Rng + ?Sized,
-{
-    random_strings_with_length(total..total, 64, rng)
-}
-
-#[inline]
 fn random_strings_with_length<R>(min_max: Range<usize>, max_length: u16, rng: &mut R) -> Vec<String>
 where
     R: Rng + ?Sized,
@@ -137,6 +129,15 @@ impl fmt::Display for Member {
 pub(crate) struct DogStatsD {
     metric_names_range: Range<usize>,
     tag_keys_range: Range<usize>,
+}
+
+impl Default for DogStatsD {
+    fn default() -> Self {
+        Self {
+            metric_names_range: 0..64,
+            tag_keys_range: 0..32,
+        }
+    }
 }
 
 impl DogStatsD {

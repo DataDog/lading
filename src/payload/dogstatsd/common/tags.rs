@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Range};
 
 use rand::seq::SliceRandom;
 
-use crate::payload::{self, dogstatsd::random_strings};
+use crate::payload::{self, dogstatsd::random_strings_with_length};
 
 pub(crate) type Tags = HashMap<String, String>;
 
@@ -25,10 +25,8 @@ impl payload::Generator<Tags> for Generator {
     where
         R: rand::Rng + ?Sized,
     {
-        let max_keys = self.key_range.end;
-
-        let tag_keys = random_strings(max_keys, &mut rng);
-        let tag_values = random_strings(self.max_values, &mut rng);
+        let tag_keys = random_strings_with_length(self.key_range.clone(), 64, &mut rng);
+        let tag_values = random_strings_with_length(0..self.max_values, 32, &mut rng);
 
         let total_keys = rng.gen_range(self.key_range.clone());
         let mut tags = HashMap::new();
