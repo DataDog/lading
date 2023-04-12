@@ -6,7 +6,7 @@ use std::{
 };
 
 use byte_unit::{Byte, ByteUnit};
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
@@ -144,6 +144,8 @@ impl Tcp {
         let mut connection = None;
         let mut blocks = self.block_cache.iter().cycle().peekable();
 
+        let bytes_written = register_counter!("bytes_written", &labels);
+
         loop {
             let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
@@ -168,12 +170,7 @@ impl Tcp {
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {
                         Ok(()) => {
-                            counter!(
-                                "bytes_written",
-                                u64::from(blk.total_bytes.get()),
-                                &labels
-                            );
-                            counter!("packets_sent", 1, &labels);
+                            bytes_written.increment(u64::from(blk.total_bytes.get()));
                             connection = Some(client);
                         }
                         Err(err) => {
