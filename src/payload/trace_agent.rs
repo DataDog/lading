@@ -176,7 +176,7 @@ impl crate::payload::Serialize for TraceAgent {
         // obeyed, as an example. We could then have a 'shrink' or 'expand'
         // method on that tree to avoid this loop.
         let mut members: Vec<Vec<Span>> = vec![];
-        let mut remaining = 1_000;
+        let mut remaining = 10_000;
         while remaining > 0 {
             let total = rng.gen_range(0..=remaining);
             let spans: Vec<Span> = Standard.sample_iter(&mut rng).take(total).collect();
@@ -198,8 +198,7 @@ impl crate::payload::Serialize for TraceAgent {
                 break;
             }
 
-            let total = rng.gen_range(0..=100);
-            members.push(Standard.sample_iter(&mut rng).take(total).collect());
+            members.push(Standard.sample_iter(&mut rng).take(5_000).collect());
         }
 
         // Search for an encoding that's just right.
