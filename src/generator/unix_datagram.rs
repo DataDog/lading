@@ -8,7 +8,7 @@ use crate::{
 };
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use std::{
@@ -177,7 +177,9 @@ struct Child {
 impl Child {
     async fn spin(mut self) -> Result<(), Error> {
         debug!("UnixDatagram generator running");
-        let labels = self.metric_labels;
+
+        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
+        let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         let socket = net::UnixDatagram::unbound().map_err(Error::Io)?;
         loop {
@@ -192,7 +194,7 @@ impl Child {
                         path = &self.path.display()
                     );
 
-                    let mut error_labels = labels.clone();
+                    let mut error_labels = self.metric_labels.clone();
                     error_labels.push(("error".to_string(), err.to_string()));
                     counter!("connection_failure", 1, &error_labels);
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -207,6 +209,8 @@ impl Child {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
+                biased;
+
                 _ = self.throttle.wait_for(total_bytes) => {
                     // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case we
@@ -218,14 +222,14 @@ impl Child {
                     while blk_offset < blk_max {
                         match socket.send(&blk.bytes[blk_offset..]).await {
                             Ok(bytes) => {
-                                counter!("bytes_written", bytes as u64, &labels);
-                                counter!("packets_sent", 1, &labels);
+                                bytes_written.increment(bytes as u64);
+                                packets_sent.increment(1);
                                 blk_offset = bytes;
                             }
                             Err(err) => {
                                 debug!("write failed: {}", err);
 
-                                let mut error_labels = labels.clone();
+                                let mut error_labels = self.metric_labels.clone();
                                 error_labels.push(("error".to_string(), err.to_string()));
                                 counter!("request_failure", 1, &error_labels);
                                 break; // while blk_offset

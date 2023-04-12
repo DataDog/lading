@@ -139,12 +139,10 @@ impl Tcp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let labels = self.metric_labels;
-
         let mut connection = None;
         let mut blocks = self.block_cache.iter().cycle().peekable();
 
-        let bytes_written = register_counter!("bytes_written", &labels);
+        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
 
         loop {
             let blk = blocks.peek().unwrap();
@@ -164,7 +162,7 @@ impl Tcp {
                         Err(err) => {
                             trace!("write failed: {}", err);
 
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
                             connection = None;
@@ -182,7 +180,7 @@ impl Tcp {
                             // run alone
                             trace!("connection to {} failed: {}", self.addr, err);
 
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("connection_failure", 1, &error_labels);
                         }
