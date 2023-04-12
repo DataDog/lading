@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0-rc6]
+## Changed
+- Adjusted file_gen generator to consume less CPU by registering necessary
+  metrics.
+
 ## [0.14.0-rc5]
 ## Changed
 - Adjusted trace-agent msgpack payload generation to be much faster at the cost
