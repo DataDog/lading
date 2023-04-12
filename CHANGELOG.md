@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0-rc4]
+## Changed
+- Adjusted internal TCP generator metrics to be registered where possible.
+- Biased internal TCP generator toward transmission case.
+## Removed
+- Removed `packets_sent` from the TCP generator, cutting CPU time.
+
 ## [0.14.0-rc3]
 ## Added
 - Added a CLI flag to disable the target module
