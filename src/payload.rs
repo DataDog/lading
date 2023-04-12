@@ -123,7 +123,7 @@ pub enum Config {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code, clippy::large_enum_variant)]
 pub(crate) enum Payload {
     ApacheCommon(ApacheCommon),
     Ascii(Ascii),
