@@ -151,22 +151,10 @@ impl Tcp {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                conn = TcpStream::connect(self.addr), if connection.is_none() => {
-                    match conn {
-                        Ok(client) => {
-                            connection = Some(client);
-                        }
-                        Err(err) => {
-                            trace!("connection to {} failed: {}", self.addr, err);
+                biased;
 
-                            let mut error_labels = labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("connection_failure", 1, &error_labels);
-                        }
-                    }
-                }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
-                    let mut client = connection.unwrap();
+                    let mut client: TcpStream = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {
                         Ok(()) => {
@@ -180,6 +168,23 @@ impl Tcp {
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
                             connection = None;
+                        }
+                    }
+                }
+                conn = TcpStream::connect(self.addr), if connection.is_none() => {
+                    match conn {
+                        Ok(client) => {
+                            connection = Some(client);
+                        }
+                        Err(err) => {
+                            // TODO should sleep on connection failure since we
+                            // generate 77k attempts in capture output in one
+                            // run alone
+                            trace!("connection to {} failed: {}", self.addr, err);
+
+                            let mut error_labels = labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("connection_failure", 1, &error_labels);
                         }
                     }
                 }
