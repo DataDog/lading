@@ -166,10 +166,9 @@ impl crate::payload::Serialize for TraceAgent {
         R: Rng + Sized,
         W: Write,
     {
-        // We will arbitrarily generate 1_000 Member instances and then
-        // serialize. If this is below `max_bytes` we'll add more until we're
-        // over. Once we are we'll start removing instances until we're back
-        // below the limit.
+        // We will arbitrarily generate Member instances and then serialize. If
+        // this is below `max_bytes` we'll add more until we're over. Once we
+        // are we'll start removing instances until we're back below the limit.
         //
         // NOTE we might consider a method that allows us to construct a tree of
         // Spans as an improvement in the future, one in which parent_ids are
