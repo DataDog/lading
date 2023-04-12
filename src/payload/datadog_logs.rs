@@ -199,12 +199,12 @@ impl Serialize for DatadogLog {
             return Ok(());
         }
 
-        // We will arbitrarily generate 1_000 Member instances and then
+        // We will arbitrarily generate Member instances and then
         // serialize. If this is below `max_bytes` we'll add more until we're
         // over. Once we are we'll start removing instances until we're back
         // below the limit.
 
-        let mut members: Vec<Member> = Standard.sample_iter(&mut rng).take(100).collect();
+        let mut members: Vec<Member> = Standard.sample_iter(&mut rng).take(1000).collect();
 
         // Search for too many Member instances.
         loop {
@@ -212,7 +212,7 @@ impl Serialize for DatadogLog {
             if encoding.len() > max_bytes {
                 break;
             }
-            members.extend(Standard.sample_iter(&mut rng).take(10));
+            members.extend(Standard.sample_iter(&mut rng).take(100));
         }
 
         // Search for an encoding that's just right.

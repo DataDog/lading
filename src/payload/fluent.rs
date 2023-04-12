@@ -155,7 +155,7 @@ impl Serialize for Fluent {
 
         let mut members: Vec<Vec<u8>> = Standard
             .sample_iter(&mut rng)
-            .take(10)
+            .take(1000)
             .map(|m: Member| rmp_serde::to_vec(&m).unwrap())
             .collect();
 
@@ -169,7 +169,7 @@ impl Serialize for Fluent {
             members.extend(
                 Standard
                     .sample_iter(&mut rng)
-                    .take(10)
+                    .take(100)
                     .map(|m: Member| rmp_serde::to_vec(&m).unwrap()),
             );
         }
