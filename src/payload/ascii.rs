@@ -6,6 +6,8 @@ use crate::payload::{Error, Serialize};
 
 use super::{common::AsciiString, Generator};
 
+const MAX_LENGTH: u16 = 6_144; // 6 KiB
+
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub(crate) struct Ascii {}
@@ -18,7 +20,7 @@ impl Serialize for Ascii {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let encoding: String = AsciiString::default().generate(&mut rng);
+            let encoding: String = AsciiString::with_maximum_length(MAX_LENGTH).generate(&mut rng);
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
