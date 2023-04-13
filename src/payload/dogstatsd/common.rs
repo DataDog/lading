@@ -1,10 +1,8 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::payload::Generator;
-
-use super::random_strings;
+pub(crate) mod tags;
 
 pub(crate) enum NumValue {
     Float(f64),
@@ -65,42 +63,5 @@ impl fmt::Display for ZeroToOne {
                 }
             }
         }
-    }
-}
-
-pub(crate) type Tags = HashMap<String, String>;
-
-pub(crate) struct TagsGenerator {
-    pub(crate) max_keys: usize,
-    pub(crate) max_values: usize,
-}
-
-impl TagsGenerator {
-    pub(crate) fn new(max_keys: usize, max_values: usize) -> Self {
-        Self {
-            max_keys,
-            max_values,
-        }
-    }
-}
-
-impl Generator<Tags> for TagsGenerator {
-    fn generate<R>(&self, mut rng: &mut R) -> Tags
-    where
-        R: rand::Rng + ?Sized,
-    {
-        let tag_keys = random_strings(self.max_keys, &mut rng);
-        let tag_values = random_strings(self.max_values, &mut rng);
-
-        let total_keys = rng.gen_range(0..self.max_keys);
-        let mut tags = HashMap::new();
-        for k in tag_keys.choose_multiple(&mut rng, total_keys) {
-            let key = k.clone();
-            if let Some(val) = tag_values.choose(&mut rng) {
-                let val = val.clone();
-                tags.insert(key, val);
-            }
-        }
-        tags
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     io::{self, Write},
+    num::NonZeroUsize,
     path::PathBuf,
 };
 
@@ -105,13 +106,24 @@ pub enum Config {
     OpentelemetryMetrics,
     /// Generates DogStatsD
     #[serde(rename = "dogstatsd")]
-    DogStatsD,
+    DogStatsD {
+        /// Defines the minimum number of metric names allowed in a payload.
+        metric_names_minimum: Option<NonZeroUsize>,
+        /// Defines the maximum number of metric names allowed in a
+        /// payload. Must be greater or equal to minimum.
+        metric_names_maximum: Option<NonZeroUsize>,
+        /// Defines the minimum number of metric names allowed in a payload.
+        tag_keys_minimum: Option<usize>,
+        /// Defines the maximum number of metric names allowed in a
+        /// payload. Must be greater or equal to minimum.
+        tag_keys_maximum: Option<usize>,
+    },
     /// Generates TraceAgent payloads in JSON format
     TraceAgent(Encoding),
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code, clippy::large_enum_variant)]
 pub(crate) enum Payload {
     ApacheCommon(ApacheCommon),
     Ascii(Ascii),

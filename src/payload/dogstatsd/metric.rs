@@ -6,10 +6,11 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
-    pub(crate) tags: Vec<common::Tags>,
+    pub(crate) tags: Vec<common::tags::Tags>,
 }
 
 impl Generator<Metric> for MetricGenerator {
@@ -97,7 +98,7 @@ pub(crate) struct Count {
     name: String,
     value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 
@@ -137,7 +138,7 @@ impl fmt::Display for Count {
 pub(crate) struct Gauge {
     name: String,
     value: Vec<common::NumValue>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 
@@ -175,7 +176,7 @@ pub(crate) struct Timer {
     name: String,
     value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 
@@ -216,7 +217,7 @@ pub(crate) struct Dist {
     name: String,
     value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 
@@ -256,7 +257,7 @@ impl fmt::Display for Dist {
 pub(crate) struct Set {
     name: String,
     value: Vec<common::NumValue>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 
@@ -294,7 +295,7 @@ pub(crate) struct Histogram {
     name: String,
     value: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
 

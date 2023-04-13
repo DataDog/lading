@@ -6,11 +6,12 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
     pub(crate) titles: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
     pub(crate) small_strings: Vec<String>,
-    pub(crate) tags: Vec<common::Tags>,
+    pub(crate) tags: Vec<common::tags::Tags>,
 }
 
 impl Generator<Event> for EventGenerator {
@@ -49,7 +50,7 @@ pub(crate) struct Event {
     priority: Option<Priority>,
     source_type_name: Option<String>,
     alert_type: Option<Alert>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
 }
 
 impl fmt::Display for Event {

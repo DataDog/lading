@@ -6,11 +6,12 @@ use crate::payload::Generator;
 
 use super::{choose_or_not, common};
 
+#[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) tags: Vec<common::Tags>,
+    pub(crate) tags: Vec<common::tags::Tags>,
 }
 
 pub(crate) struct ServiceCheck {
@@ -18,7 +19,7 @@ pub(crate) struct ServiceCheck {
     status: Status,
     timestamp_second: Option<u32>,
     hostname: Option<String>,
-    tags: Option<common::Tags>,
+    tags: Option<common::tags::Tags>,
     message: Option<String>,
 }
 
