@@ -156,12 +156,10 @@ where
         payload::Config::Ascii => {
             construct_block_cache_inner(&mut rng, &payload::Ascii::default(), block_chunks, labels)
         }
-        payload::Config::DatadogLog => construct_block_cache_inner(
-            &mut rng,
-            &payload::DatadogLog::default(),
-            block_chunks,
-            labels,
-        ),
+        payload::Config::DatadogLog => {
+            let serializer = payload::DatadogLog::new(&mut rng);
+            construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
+        }
         payload::Config::Json => {
             construct_block_cache_inner(&mut rng, &payload::Json::default(), block_chunks, labels)
         }
