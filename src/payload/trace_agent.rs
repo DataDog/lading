@@ -166,17 +166,16 @@ impl crate::payload::Serialize for TraceAgent {
         R: Rng + Sized,
         W: Write,
     {
-        // We will arbitrarily generate 1_000 Member instances and then
-        // serialize. If this is below `max_bytes` we'll add more until we're
-        // over. Once we are we'll start removing instances until we're back
-        // below the limit.
+        // We will arbitrarily generate Member instances and then serialize. If
+        // this is below `max_bytes` we'll add more until we're over. Once we
+        // are we'll start removing instances until we're back below the limit.
         //
         // NOTE we might consider a method that allows us to construct a tree of
         // Spans as an improvement in the future, one in which parent_ids are
         // obeyed, as an example. We could then have a 'shrink' or 'expand'
         // method on that tree to avoid this loop.
         let mut members: Vec<Vec<Span>> = vec![];
-        let mut remaining = 1_000;
+        let mut remaining = 10_000;
         while remaining > 0 {
             let total = rng.gen_range(0..=remaining);
             let spans: Vec<Span> = Standard.sample_iter(&mut rng).take(total).collect();
@@ -198,8 +197,7 @@ impl crate::payload::Serialize for TraceAgent {
                 break;
             }
 
-            let total = rng.gen_range(0..=100);
-            members.push(Standard.sample_iter(&mut rng).take(total).collect());
+            members.push(Standard.sample_iter(&mut rng).take(5_000).collect());
         }
 
         // Search for an encoding that's just right.
