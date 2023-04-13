@@ -8,7 +8,7 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes};
 use http::{uri::PathAndQuery, Uri};
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, register_counter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::Deserialize;
@@ -249,6 +249,11 @@ impl Grpc {
         let mut blocks = self.block_cache.iter().cycle().peekable();
         let rpc_path = self.rpc_path;
 
+        let requests_sent = register_counter!("requests_sent", &self.metric_labels);
+        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
+        let request_ok = register_counter!("request_ok", &self.metric_labels);
+        let response_bytes = register_counter!("response_bytes", &self.metric_labels);
+
         loop {
             let blk = blocks.peek().unwrap();
             let total_bytes = blk.total_bytes;
@@ -256,8 +261,7 @@ impl Grpc {
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
-                    let labels = self.metric_labels.clone();
-                    counter!("requests_sent", 1, &labels);
+                    requests_sent.increment(1);
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
@@ -268,12 +272,12 @@ impl Grpc {
 
                     match res {
                         Ok(res) => {
-                            counter!("bytes_written", block_length as u64, &labels);
-                            counter!("request_ok", 1, &labels);
-                            counter!("response_bytes", res.into_inner() as u64, &labels);
+                            bytes_written.increment(block_length as u64);
+                            request_ok.increment(1);
+                            response_bytes.increment(res.into_inner() as u64);
                         }
                         Err(err) => {
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
                         }

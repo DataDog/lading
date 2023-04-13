@@ -6,7 +6,7 @@ use std::{
 };
 
 use byte_unit::{Byte, ByteUnit};
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
@@ -139,10 +139,11 @@ impl Tcp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let labels = self.metric_labels;
-
         let mut connection = None;
         let mut blocks = self.block_cache.iter().cycle().peekable();
+
+        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
+        let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
             let blk = blocks.peek().unwrap();
@@ -157,9 +158,10 @@ impl Tcp {
                         Err(err) => {
                             trace!("connection to {} failed: {}", self.addr, err);
 
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("connection_failure", 1, &error_labels);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                     }
                 }
@@ -168,18 +170,14 @@ impl Tcp {
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {
                         Ok(()) => {
-                            counter!(
-                                "bytes_written",
-                                u64::from(blk.total_bytes.get()),
-                                &labels
-                            );
-                            counter!("packets_sent", 1, &labels);
+                            bytes_written.increment(u64::from(blk.total_bytes.get()));
+                            packets_sent.increment(1);
                             connection = Some(client);
                         }
                         Err(err) => {
                             trace!("write failed: {}", err);
 
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
                             connection = None;

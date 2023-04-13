@@ -16,7 +16,7 @@ use std::{
 
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
-use metrics::{counter, gauge};
+use metrics::{gauge, register_counter, register_gauge};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{
@@ -216,7 +216,7 @@ struct Child {
 impl Child {
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
         let bytes_per_second = self.bytes_per_second.get() as usize;
-        let mut bytes_written: u64 = 0;
+        let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
         let mut file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
@@ -233,6 +233,10 @@ impl Child {
         );
 
         let mut blocks = self.block_cache.iter().cycle();
+        let file_rotated = register_counter!("file_rotated");
+        let bytes_written = register_counter!("bytes_written");
+        let lines_written = register_counter!("lines_written");
+        let current_target_size_bytes = register_gauge!("current_target_size_bytes");
 
         loop {
             let block = blocks.next().unwrap();
@@ -245,14 +249,14 @@ impl Child {
                         fp.write_all(&block.bytes).await?;
                         fp.flush().await?;
 
-                        counter!("bytes_written", u64::from(total_bytes.get()));
-                        counter!("lines_written", total_newlines);
+                        bytes_written.increment(u64::from(total_bytes.get()));
+                        lines_written.increment(total_newlines);
 
-                        bytes_written += u64::from(total_bytes.get());
-                        gauge!("current_target_size_bytes", bytes_written as f64);
+                        total_bytes_written += u64::from(total_bytes.get());
+                        current_target_size_bytes.set(total_bytes_written as f64);
                     }
 
-                    if bytes_written > maximum_bytes_per_file {
+                    if total_bytes_written > maximum_bytes_per_file {
                         if self.rotate {
                             // Delete file, leaving any open file handlers intact. This
                             // includes our own `fp` for the time being.
@@ -272,8 +276,8 @@ impl Child {
                                 .open(&path)
                                 .await?,
                         );
-                        bytes_written = 0;
-                        counter!("file_rotated", 1);
+                        total_bytes_written = 0;
+                        file_rotated.increment(1);
                     }
                 }
                 _ = self.shutdown.recv() => {
