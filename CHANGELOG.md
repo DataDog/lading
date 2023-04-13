@@ -6,33 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0-rc8]
-## Changed
-- Remove biased select! to avoid failing to shutdown.
-
-## [0.14.0-rc7]
+## [0.14.0-rc9]
+## Added
+- Added the ability to configure details about DogStatsD payload
 ## Changed
 - Datadog logs generation now much faster, relying on an experimentally
   determined 'encoded size' rather than searching at runtime for the same.
-
-## [0.14.0-rc6]
-## Changed
-- Adjusted file_gen generator to consume less CPU by registering necessary
-  metrics.
-
-## [0.14.0-rc5]
-## Changed
+  (PR #564).
+- Adjust generators to consume less CPU by registering metrics where
+  possible. (PR #544)
 - Adjusted trace-agent msgpack payload generation to be much faster at the cost
-  of some memory during the generation process.
-
-## [0.14.0-rc4]
-## Changed
-- Adjusted internal TCP generator metrics to be registered where possible.
-- Biased internal TCP generator toward transmission case.
-
-## [0.14.0-rc3]
-## Added
-- Added the ability to configure details about DogStatsD payload
+  of some memory during the generation process. (PR #547)
 
 ## [0.13.1]
 ## Added
