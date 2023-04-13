@@ -170,6 +170,8 @@ impl Udp {
                     }
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
+                    tokio::task::yield_now().await;
+
                     let sock = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
