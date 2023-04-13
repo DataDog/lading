@@ -46,7 +46,8 @@ impl Server {
 
     /// Run this [`Server`] to completion
     ///
-    /// todo[gh]
+    /// The `target_metrics` server is responsible for fetching metrics directly
+    /// from the target software.
     ///
     /// # Errors
     ///
