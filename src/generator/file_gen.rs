@@ -243,8 +243,6 @@ impl Child {
             let total_newlines = block.lines;
 
             tokio::select! {
-                biased;
-
                 _ = self.throttle.wait_for(total_bytes) => {
                     {
                         fp.write_all(&block.bytes).await?;

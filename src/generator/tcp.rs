@@ -149,8 +149,6 @@ impl Tcp {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                biased;
-
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let mut client: TcpStream = connection.unwrap();
                     let blk = blocks.next().unwrap(); // actually advance through the blocks

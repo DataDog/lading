@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0-rc8]
+## Changed
+- Remove biased select! to avoid failing to shutdown.
+
 ## [0.14.0-rc7]
 ## Changed
 - Datadog logs generation now much faster, relying on an experimentally

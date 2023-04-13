@@ -209,8 +209,6 @@ impl Child {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                biased;
-
                 _ = self.throttle.wait_for(total_bytes) => {
                     // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case we
