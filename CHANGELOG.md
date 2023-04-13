@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0-rc7]
+## Changed
+- Datadog logs generation now much faster, relying on an experimentally
+  determined 'encoded size' rather than searching at runtime for the same.
+
 ## [0.14.0-rc6]
 ## Changed
 - Adjusted file_gen generator to consume less CPU by registering necessary

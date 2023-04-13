@@ -128,7 +128,7 @@ impl Distribution<Structured> for Standard {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 #[serde(untagged)]
 enum Message {
     Unstructured(String),
@@ -184,9 +184,54 @@ impl Distribution<Member> for Standard {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct DatadogLog {}
+#[derive(Debug)]
+struct MemberGenerator {
+    messages: Vec<Message>,
+}
+
+impl MemberGenerator {
+    fn new<R>(mut rng: &mut R) -> Self
+    where
+        R: Rng + ?Sized,
+    {
+        Self {
+            messages: Standard.sample_iter(&mut rng).take(1_000).collect(),
+        }
+    }
+}
+
+impl Generator<Member> for MemberGenerator {
+    fn generate<R>(&self, rng: &mut R) -> Member
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Member {
+            message: (*self.messages.choose(rng).unwrap()).clone(),
+            status: rng.gen(),
+            timestamp: rng.gen(),
+            hostname: rng.gen(),
+            service: rng.gen(),
+            ddsource: rng.gen(),
+            ddtags: (*TAG_OPTIONS.choose(rng).unwrap()).to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct DatadogLog {
+    member_generator: MemberGenerator,
+}
+
+impl DatadogLog {
+    pub(crate) fn new<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let member_generator = MemberGenerator::new(rng);
+
+        Self { member_generator }
+    }
+}
 
 impl Serialize for DatadogLog {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -194,7 +239,9 @@ impl Serialize for DatadogLog {
         W: Write,
         R: Rng + Sized,
     {
-        if max_bytes < 2 {
+        let approx_member_encoded_size = 220; // bytes, determined experimentally
+
+        if max_bytes < approx_member_encoded_size {
             // 'empty' payload  is []
             return Ok(());
         }
@@ -203,21 +250,15 @@ impl Serialize for DatadogLog {
         // serialize. If this is below `max_bytes` we'll add more until we're
         // over. Once we are we'll start removing instances until we're back
         // below the limit.
-
-        let mut members: Vec<Member> = Standard.sample_iter(&mut rng).take(1000).collect();
-
-        // Search for too many Member instances.
-        loop {
-            let encoding = serde_json::to_string(&members)?;
-            if encoding.len() > max_bytes {
-                break;
-            }
-            members.extend(Standard.sample_iter(&mut rng).take(100));
+        let cap = (max_bytes / approx_member_encoded_size) + 100;
+        let mut members: Vec<Member> = Vec::with_capacity(cap);
+        for _ in 0..cap {
+            members.push(self.member_generator.generate(&mut rng));
         }
 
         // Search for an encoding that's just right.
         let mut high = members.len();
-        loop {
+        while high != 0 {
             let encoding = serde_json::to_string(&members[0..high])?;
             if encoding.len() > max_bytes {
                 high /= 2;
