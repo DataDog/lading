@@ -7,7 +7,7 @@ use crate::{
     throttle::Throttle,
 };
 use byte_unit::{Byte, ByteUnit};
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use std::{
@@ -133,10 +133,11 @@ impl UnixStream {
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
         debug!("UnixStream generator running");
-        let labels = self.metric_labels;
-
         let mut blocks = self.block_cache.iter().cycle().peekable();
         let mut unix_stream = Option::<net::UnixStream>::None;
+
+        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
+        let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
             let blk = blocks.peek().unwrap();
@@ -152,7 +153,7 @@ impl UnixStream {
                         Err(err) => {
                             error!("Opening UDS path failed: {}", err);
 
-                            let mut error_labels = labels.clone();
+                            let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("connection_failure", 1, &error_labels);
                         }
@@ -180,8 +181,8 @@ impl UnixStream {
                             // if the readiness event is a false positive.
                             match stream.try_write(&blk.bytes[blk_offset..]) {
                                 Ok(bytes) => {
-                                    counter!("bytes_written", bytes as u64, &labels);
-                                    counter!("packets_sent", 1, &labels);
+                                    bytes_written.increment(bytes as u64);
+                                    packets_sent.increment(1);
                                     blk_offset = bytes;
                                 }
                                 Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
@@ -194,7 +195,7 @@ impl UnixStream {
                                 Err(err) => {
                                     debug!("write failed: {}", err);
 
-                                    let mut error_labels = labels.clone();
+                                    let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
                                     // NOTE we here skip replacing `stream` into
