@@ -285,8 +285,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let ddlogs = DatadogLog::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
@@ -304,8 +304,8 @@ mod test {
         #[test]
         fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let ddlogs = DatadogLog::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
