@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0-rc9]
+## [0.14.0]
 ## Added
 - Added the ability to configure details about DogStatsD payload
 ## Changed
