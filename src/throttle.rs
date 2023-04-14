@@ -268,7 +268,7 @@ where
             // need to pass before capacity is sufficient, force the client to
             // wait that amount of time.
             self.spare_capacity = 0;
-            let slop = capacity_request - refilled_capacity;
+            let slop = (capacity_request - refilled_capacity) / self.refill_per_tick;
             self.clock.wait(slop).await;
         }
         Ok(())
