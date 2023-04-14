@@ -31,4 +31,5 @@ pub mod observer;
 pub(crate) mod payload;
 pub mod signals;
 pub mod target;
+pub mod target_metrics;
 pub(crate) mod throttle;

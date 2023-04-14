@@ -19,6 +19,7 @@ use lading::{
     inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
+    target_metrics,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{rngs::StdRng, SeedableRng};
@@ -318,6 +319,21 @@ async fn inner_main(
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
                     Err(err) => warn!("blackhole failed with {:?}", err),
+                }
+            });
+        }
+    }
+
+    //
+    // TARGET METRICS
+    //
+    if let Some(cfgs) = config.target_metrics {
+        for cfg in cfgs {
+            let metrics_server = target_metrics::Server::new(cfg, shutdown.clone());
+            tokio::spawn(async {
+                match metrics_server.run().await {
+                    Ok(()) => debug!("target_metrics shut down successfully"),
+                    Err(err) => warn!("target_metrics failed with {:?}", err),
                 }
             });
         }

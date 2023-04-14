@@ -5,7 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
 use serde::Deserialize;
 
-use crate::{blackhole, generator, inspector, observer, target};
+use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 
 /// Main configuration struct for this program
 #[derive(Debug, Default, Deserialize, Eq, PartialEq)]
@@ -27,6 +27,10 @@ pub struct Config {
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub blackhole: Option<Vec<blackhole::Config>>,
+    /// The target_metrics to scrape from the target
+    #[serde(default)]
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub target_metrics: Option<Vec<target_metrics::Config>>,
     /// The target inspector sub-program
     pub inspector: Option<inspector::Config>,
 }
@@ -124,6 +128,7 @@ blackhole:
                 telemetry: crate::config::Telemetry::default(),
                 observer: observer::Config::default(),
                 inspector: Option::default(),
+                target_metrics: Option::default(),
             },
         );
     }
