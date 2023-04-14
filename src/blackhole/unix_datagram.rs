@@ -3,7 +3,7 @@
 use std::{io, path::PathBuf};
 
 use futures::TryFutureExt;
-use metrics::counter;
+use metrics::register_counter;
 use serde::Deserialize;
 use tokio::net;
 use tracing::info;
@@ -58,14 +58,15 @@ impl UnixDatagram {
         // socket, ignore any errors.
         let _res = tokio::fs::remove_file(&self.path).map_err(Error::Io);
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
+        let mut buf = [0; 65536];
+
+        let bytes_received = register_counter!("bytes_received");
 
         loop {
-            let mut buf = [0; 65536];
-
             tokio::select! {
                 res = socket.recv(&mut buf) => {
                     let n: usize = res.map_err(Error::Io)?;
-                    counter!("bytes_received", n as u64);
+                    bytes_received.increment(n as u64);
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
