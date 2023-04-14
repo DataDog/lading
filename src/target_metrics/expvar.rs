@@ -67,22 +67,18 @@ impl Expvar {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
 
-                let resp = if let Ok(resp) = client.get(&self.config.uri).send().await {
-                    resp
-                } else {
+                let Ok(resp) = client.get(&self.config.uri).send().await else {
                     info!("failed to get expvar uri");
                     continue;
                 };
 
-                let json = if let Ok(json) = resp.json::<Value>().await {
-                    json
-                } else {
+                let Ok(json) = resp.json::<Value>().await else {
                     info!("failed to parse expvar json");
                     continue;
                 };
 
-                for var_name in self.config.vars.iter().cloned() {
-                    let val = json.pointer(&var_name).and_then(|v| v.as_f64());
+                for var_name in &self.config.vars {
+                    let val = json.pointer(var_name).and_then(serde_json::Value::as_f64);
                     if let Some(val) = val {
                         trace!("expvar: {} = {}", var_name, val);
                         gauge!(format!("target/{name}", name = var_name.trim_start_matches('/')), val, "source" => "target_metrics/expvar");
@@ -94,11 +90,11 @@ impl Expvar {
         tokio::select! {
             _res = server => {
                 error!("server shutdown unexpectedly");
-                return Err(Error::EarlyShutdown);
+                 Err(Error::EarlyShutdown)
             }
             _ = self.shutdown.recv() => {
                 info!("shutdown signal received");
-                return Ok(())
+                 Ok(())
             }
         }
     }

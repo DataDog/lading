@@ -25,7 +25,7 @@ pub enum Config {
     Expvar(expvar::Config),
 }
 
-/// The target_metrics server.
+/// The `target_metrics` server.
 #[derive(Debug)]
 pub enum Server {
     /// See [`crate::target_metrics::expvar::Expvar`] for details.
@@ -35,9 +35,10 @@ pub enum Server {
 impl Server {
     /// Create a new [`Server`] instance
     ///
-    /// The target_metrics `Server` is responsible for scraping metrics from
+    /// The `target_metrics::Server` is responsible for scraping metrics from
     /// the target process.
     ///
+    #[must_use]
     pub fn new(config: Config, shutdown: Shutdown) -> Self {
         match config {
             Config::Expvar(conf) => Self::Expvar(expvar::Expvar::new(conf, shutdown)),
