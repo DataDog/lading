@@ -128,6 +128,7 @@ blackhole:
                 telemetry: crate::config::Telemetry::default(),
                 observer: observer::Config::default(),
                 inspector: Option::default(),
+                target_metrics: Option::default(),
             },
         );
     }
