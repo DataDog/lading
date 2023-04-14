@@ -85,6 +85,7 @@ pub(crate) struct GenericThrottle<C>
 where
     C: Clock,
 {
+    last_tick: u64,
     spare_capacity: u64,
     /// The maximum capacity of `Throttle` past which no more capacity will be
     /// added.
@@ -125,6 +126,7 @@ where
         // let interval_actual_budget = maximum_capacity / 10;
 
         Self {
+            last_tick: clock.ticks_elapsed(),
             maximum_capacity: u64::from(maximum_capacity.get()),
             refill_per_tick,
             requested_budget: 0,
@@ -206,7 +208,9 @@ where
         // called. Depending on how long ago this was we may have completely
         // filled up throttle capacity. Note we fill to the _projected_ budget
         // and not the maximum capacity.
-        let ticks_since = self.clock.ticks_elapsed();
+        let now = self.clock.ticks_elapsed();
+        let ticks_since = now - self.last_tick;
+        self.last_tick = now;
         let refilled_capacity: u64 = cmp::min(
             ticks_since
                 .saturating_mul(self.refill_per_tick)
