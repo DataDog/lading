@@ -3,13 +3,26 @@
 use std::{io, net::SocketAddr};
 
 use futures::stream::StreamExt;
-use metrics::counter;
+use metrics::{register_counter, Counter};
+use once_cell::sync;
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
 use crate::signals::Shutdown;
+
+static BYTES_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn bytes_received() -> &'static Counter {
+    BYTES_RECEIVED.get_or_init(|| register_counter!("bytes_received"))
+}
+
+static MESSAGE_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn message_received() -> &'static Counter {
+    MESSAGE_RECEIVED.get_or_init(|| register_counter!("message_received"))
+}
 
 #[derive(Debug)]
 /// Errors emitted by [`Tcp`]
@@ -46,9 +59,9 @@ impl Tcp {
         let mut stream = ReaderStream::new(socket);
 
         while let Some(msg) = stream.next().await {
-            counter!("message_received", 1);
+            message_received().increment(1);
             if let Ok(msg) = msg {
-                counter!("bytes_received", msg.len() as u64);
+                bytes_received().increment(msg.len() as u64);
             }
         }
     }
@@ -70,11 +83,13 @@ impl Tcp {
             .await
             .map_err(Error::Io)?;
 
+        let connection_accepted = register_counter!("connection_accepted");
+
         loop {
             tokio::select! {
                 conn = listener.accept() => {
                     let (socket, _) = conn.map_err(Error::Io)?;
-                    counter!("connection_accepted", 1);
+                    connection_accepted.increment(1);
                     tokio::spawn(async move {
                         Self::handle_connection(socket).await;
                     });

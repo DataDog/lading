@@ -8,6 +8,8 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
+use metrics::{register_counter, Counter};
+use once_cell::sync;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use tokio::time::Duration;
@@ -21,6 +23,18 @@ use crate::signals::Shutdown;
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
     Hyper(hyper::Error),
+}
+
+static BYTES_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn bytes_received() -> &'static Counter {
+    BYTES_RECEIVED.get_or_init(|| register_counter!("bytes_received"))
+}
+
+static REQUESTS_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn requests_received() -> &'static Counter {
+    REQUESTS_RECEIVED.get_or_init(|| register_counter!("requests_received"))
 }
 
 fn default_concurrent_requests_max() -> usize {
@@ -200,10 +214,10 @@ impl DeleteMessageBatch {
 }
 
 async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    metrics::counter!("requests_received", 1);
+    requests_received().increment(1);
 
     let bytes = body::to_bytes(req).await?;
-    metrics::counter!("bytes_received", bytes.len() as u64);
+    bytes_received().increment(bytes.len() as u64);
 
     let action: Action = serde_qs::from_bytes(&bytes).unwrap();
 

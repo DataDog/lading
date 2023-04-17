@@ -9,7 +9,8 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use once_cell::unsync::OnceCell;
+use metrics::{register_counter, Counter};
+use once_cell::{sync, unsync::OnceCell};
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
@@ -18,6 +19,18 @@ use crate::signals::Shutdown;
 
 #[allow(clippy::declare_interior_mutable_const)]
 const RESPONSE: OnceCell<Vec<u8>> = OnceCell::new();
+
+static BYTES_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn bytes_received() -> &'static Counter {
+    BYTES_RECEIVED.get_or_init(|| register_counter!("bytes_received"))
+}
+
+static REQUESTS_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
+#[inline]
+fn requests_received() -> &'static Counter {
+    REQUESTS_RECEIVED.get_or_init(|| register_counter!("requests_received"))
+}
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -105,7 +118,7 @@ async fn srv(
     req: Request<Body>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, hyper::Error> {
-    metrics::counter!("requests_received", 1);
+    requests_received().increment(1);
 
     let (parts, body) = req.into_parts();
 
@@ -114,7 +127,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            metrics::counter!("bytes_received", body.len() as u64);
+            bytes_received().increment(body.len() as u64);
 
             let mut okay = Response::default();
             *okay.status_mut() = status;

@@ -2,7 +2,7 @@
 
 use std::{io, net::SocketAddr};
 
-use metrics::counter;
+use metrics::register_counter;
 use serde::Deserialize;
 use tokio::net::UdpSocket;
 use tracing::info;
@@ -56,14 +56,17 @@ impl Udp {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
             .map_err(Error::Io)?;
-        let mut buf: Vec<u8> = vec![0; 65536];
+        let mut buf = [0; 65536];
+
+        let bytes_received = register_counter!("bytes_received");
+        let packet_received = register_counter!("packet_received");
 
         loop {
             tokio::select! {
                 packet = socket.recv_from(&mut buf) => {
                     let (bytes, _) = packet.map_err(Error::Io)?;
-                    counter!("packet_received", 1);
-                    counter!("bytes_received", bytes as u64);
+                    packet_received.increment(1);
+                    bytes_received.increment(bytes as u64);
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");
