@@ -119,11 +119,9 @@ where
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
 
-        let refill_per_tick = u64::from(maximum_capacity.get()) / INTERVAL_TICKS;
-
-        // let rate_limiter = RateLimiter::direct(Quota::per_second(maximum_capacity));
-        // let maximum_capacity = maximum_capacity.get();
-        // let interval_actual_budget = maximum_capacity / 10;
+        // We do not want a situation where refill never happens. If the maximum
+        // capacity is less than INTERVAL_TICKS we set the floor at 1.
+        let refill_per_tick = cmp::max(1, u64::from(maximum_capacity.get()) / INTERVAL_TICKS);
 
         Self {
             last_tick: clock.ticks_elapsed(),
@@ -208,11 +206,11 @@ where
         // called. Depending on how long ago this was we may have completely
         // filled up throttle capacity. Note we fill to the _projected_ budget
         // and not the maximum capacity.
-        let now = self.clock.ticks_elapsed();
-        let ticks_since = now - self.last_tick;
-        self.last_tick = now;
+        let ticks_since_start = self.clock.ticks_elapsed();
+        let ticks_since_last_wait = ticks_since_start.saturating_sub(self.last_tick);
+        self.last_tick = ticks_since_start;
         let refilled_capacity: u64 = cmp::min(
-            ticks_since
+            ticks_since_last_wait
                 .saturating_mul(self.refill_per_tick)
                 .saturating_add(self.spare_capacity),
             self.projected_budget,
@@ -225,7 +223,7 @@ where
         // budget for those 'missing' intervals, although that would be
         // interesting to do maybe.
 
-        let current_interval = ticks_since / INTERVAL_TICKS;
+        let current_interval = ticks_since_start / INTERVAL_TICKS;
         if current_interval == self.interval {
             // Intentionally blank. There is nothing to do in the event we are
             // in the same interval, with regard to budgets.
