@@ -27,8 +27,8 @@ impl Generator<String> for AsciiString {
         R: rand::Rng + ?Sized,
     {
         let len: usize = rng.gen_range(1..self.max_length) as usize;
-        let total_bytes = 4 * len; // max size of an `char` times length
-        let mut s = String::with_capacity(total_bytes);
+        let total_bytes = len;
+        let mut s = String::new();
         s.reserve(total_bytes);
         s.extend(
             CHARSET

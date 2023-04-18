@@ -5,13 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## Added
+### Added
 - Added target metrics support for Go expvars
 
+### Fixed
+- Fixed throttle behavior for generators that run very quickly
+
 ## [0.14.0]
-## Added
+### Added
 - Added the ability to configure details about DogStatsD payload
-## Changed
+### Changed
 - Datadog logs generation now much faster, relying on an experimentally
   determined 'encoded size' rather than searching at runtime for the same.
   (PR #564).
@@ -21,30 +24,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of some memory during the generation process. (PR #547)
 
 ## [0.13.1]
-## Added
+### Added
 - Introduced Proportional Set Size (PSS) memory measurement under the
   `pss_bytes` metric.
 - Convert `Block` to use `Bytes` type instead of `Vec<u8>`.
 - Introduce Datadog trace-agent payload support in JSON and MsgPack serialization.
 
 ## [0.13.0]
-## Added
+### Added
 - Introduced automatic throttling into generators to search for stable target load.
-## Fixed
+### Fixed
 - Use saturating addition in observer stats gathering routine
 
 ## [0.12.0]
-## Added
+### Added
 - Added the ability for lading to back-off load generation based on RSS limits.
 - Process tree generator contributed by @safchain
 - Fixed: OpenTelemetry message length calculation corrected for some messages.
 - **Breaking change:** Split UDS support between explict datagram and stream modules.
 - Fixed: Corrected mistakes in the DogStatsD payload implementation.
-## Changed
+### Changed
 - Adjusted the cardinality of DogStatsD keys, values and names downward.
 - **Breaking change:** Added support for DogStatsD payload.
 - **Breaking change:** Support for Kafka generator is removed.
-## Fixed
+### Fixed
 - Lading's UDS will now re-attempt to connect to a UDS socket, rather than
   erroring.
 
