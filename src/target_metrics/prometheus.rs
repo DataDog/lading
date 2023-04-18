@@ -87,6 +87,7 @@ impl Prometheus {
     /// None are known.
     #[allow(clippy::cast_sign_loss)]
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(mut self) -> Result<(), Error> {
         info!("Prometheus target metrics scraper running");
         let client = reqwest::Client::new();
