@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - Added target metrics support for Go expvars
+- Added target metrics support for Prometheus
 
 ### Fixed
 - Fixed throttle behavior for generators that run very quickly
