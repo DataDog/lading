@@ -85,6 +85,8 @@ impl Prometheus {
     /// # Panics
     ///
     /// None are known.
+    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_possible_truncation)]
     pub(crate) async fn run(mut self) -> Result<(), Error> {
         info!("Prometheus target metrics scraper running");
         let client = reqwest::Client::new();
@@ -167,7 +169,19 @@ impl Prometheus {
                                 continue;
                             };
 
-                            let value = value as u64;
+                            let value = if value < 0.0 {
+                                warn!("Negative counter value unhandled");
+                                continue;
+                            } else {
+                                // clippy shows "error: casting `f64` to `u64` may lose the sign of the value". This is
+                                // guarded by the sign check above.
+                                if value > u64::MAX as f64 {
+                                    warn!("Counter value above maximum limit");
+                                    continue;
+                                }
+                                value as u64
+                            };
+
                             trace!("counter: {name} = {value}");
                             counter!(format!("target/{name}"), value, &labels.unwrap_or_default());
                         }
