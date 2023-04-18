@@ -151,6 +151,13 @@ impl Prometheus {
 
                     let metric_type = typemap.get(name);
                     let name = name.replace("__", ".");
+
+                    if let Some(metrics) = &self.config.metrics {
+                        if !metrics.contains(&name) {
+                            continue;
+                        }
+                    }
+
                     match metric_type {
                         Some(MetricType::Gauge) => {
                             let Ok(value): Result<f64, _> = value.parse() else {
