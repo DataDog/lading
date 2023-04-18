@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added target metrics support for Go expvars
 
+### Fixed
+- Fixed throttle behavior for generators that run very quickly
+
 ## [0.14.0]
 ### Added
 - Added the ability to configure details about DogStatsD payload
