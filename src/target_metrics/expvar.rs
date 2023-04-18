@@ -44,7 +44,6 @@ impl Expvar {
     /// using Go's expvar format.
     ///
     pub(crate) fn new(config: Config, shutdown: Shutdown) -> Self {
-        info!("expvar created");
         Self { config, shutdown }
     }
 
@@ -67,7 +66,7 @@ impl Expvar {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
 
-                let Ok(resp) = client.get(&self.config.uri).send().await else {
+                let Ok(resp) = client.get(&self.config.uri).timeout(Duration::from_secs(1)).send().await else {
                     info!("failed to get expvar uri");
                     continue;
                 };
