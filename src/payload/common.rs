@@ -2,7 +2,7 @@ use rand::seq::SliceRandom;
 
 use super::Generator;
 
-const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789().,";
+const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct AsciiString {
