@@ -52,7 +52,7 @@ pub enum Error {
     ProcessTree(process_tree::Error),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Config {

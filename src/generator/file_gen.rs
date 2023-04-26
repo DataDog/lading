@@ -51,7 +51,7 @@ fn default_rotation() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq)]
 /// Configuration of [`FileGen`]
 pub struct Config {
     /// The seed for random operations against this target

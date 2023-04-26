@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 
 /// Main configuration struct for this program
-#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct Config {
     /// The method by which to express telemetry
     #[serde(default)]

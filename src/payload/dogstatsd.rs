@@ -1,6 +1,7 @@
 use std::{fmt, io::Write, num::NonZeroUsize, ops::Range};
 
-use rand::{seq::SliceRandom, Rng};
+use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
+use serde::Deserialize;
 
 use crate::payload::{Error, Serialize};
 
@@ -16,6 +17,65 @@ mod event;
 mod metric;
 mod service_check;
 
+fn default_metric_names_minimum() -> NonZeroUsize {
+    NonZeroUsize::new(1).unwrap()
+}
+
+fn default_metric_names_maximum() -> NonZeroUsize {
+    NonZeroUsize::new(64).unwrap()
+}
+
+fn default_tag_keys_minimum() -> usize {
+    0
+}
+
+fn default_tag_keys_maximum() -> usize {
+    64
+}
+
+/// Weights for `DogStatsD` kinds: metrics, events, service checks
+///
+/// Defines the relative probability of each kind of `DogStatsD` datagram.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct KindWeights {
+    metric: u8,
+    event: u8,
+    service_check: u8,
+}
+
+impl Default for KindWeights {
+    fn default() -> Self {
+        KindWeights {
+            metric: 80,        // 80%
+            event: 10,         // 10%
+            service_check: 10, // 10%
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+pub struct Config {
+    /// Defines the minimum number of metric names allowed in a payload.
+    #[serde(default = "default_metric_names_minimum")]
+    pub metric_names_minimum: NonZeroUsize,
+    /// Defines the maximum number of metric names allowed in a
+    /// payload. Must be greater or equal to minimum.
+    #[serde(default = "default_metric_names_maximum")]
+    pub metric_names_maximum: NonZeroUsize,
+    /// Defines the minimum number of metric names allowed in a payload.
+    #[serde(default = "default_tag_keys_minimum")]
+    pub tag_keys_minimum: usize,
+    /// Defines the maximum number of metric names allowed in a
+    /// payload. Must be greater or equal to minimum.
+    #[serde(default = "default_tag_keys_maximum")]
+    pub tag_keys_maximum: usize,
+    /// Defines the relative probability of each kind of DogStatsD kinds of
+    /// payload.
+    #[serde(default)]
+    pub kind_weights: KindWeights,
+}
+
 fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
 where
     T: Clone,
@@ -30,6 +90,7 @@ where
 
 #[derive(Debug, Clone)]
 struct MemberGenerator {
+    kind_weights: WeightedIndex<u8>,
     event_generator: EventGenerator,
     service_check_generator: ServiceCheckGenerator,
     metric_generator: MetricGenerator,
@@ -48,7 +109,12 @@ where
 }
 
 impl MemberGenerator {
-    fn new<R>(metric_range: Range<NonZeroUsize>, key_range: Range<usize>, mut rng: &mut R) -> Self
+    fn new<R>(
+        metric_range: Range<NonZeroUsize>,
+        key_range: Range<usize>,
+        kind_weights: KindWeights,
+        mut rng: &mut R,
+    ) -> Self
     where
         R: Rng + ?Sized,
     {
@@ -86,7 +152,14 @@ impl MemberGenerator {
             tags,
         };
 
+        // NOTE the ordering here of `choices` is very important! If you change
+        // it here you MUST also change it in `Generator<Member> for
+        // MemberGenerator`.
+        let choices = [kind_weights.metric, kind_weights.event, kind_weights.event];
+        let weights = WeightedIndex::new(&choices).unwrap();
+
         MemberGenerator {
+            kind_weights: weights,
             event_generator,
             service_check_generator,
             metric_generator,
@@ -99,11 +172,10 @@ impl Generator<Member> for MemberGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        let idx = rng.gen_range(0..3);
-        match idx {
-            0 => Member::Event(self.event_generator.generate(rng)),
-            1 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
-            2 => Member::Metric(self.metric_generator.generate(rng)),
+        match self.kind_weights.sample(rng) {
+            0 => Member::Metric(self.metric_generator.generate(rng)),
+            1 => Member::Event(self.event_generator.generate(rng)),
+            2 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
             _ => unreachable!(),
         }
     }
@@ -136,12 +208,14 @@ impl DogStatsD {
     pub(crate) fn new<R>(
         metric_names_range: Range<NonZeroUsize>,
         tag_keys_range: Range<usize>,
+        kind_weights: KindWeights,
         rng: &mut R,
     ) -> Self
     where
         R: rand::Rng + ?Sized,
     {
-        let member_generator = MemberGenerator::new(metric_names_range, tag_keys_range, rng);
+        let member_generator =
+            MemberGenerator::new(metric_names_range, tag_keys_range, kind_weights, rng);
 
         Self { member_generator }
     }
