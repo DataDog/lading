@@ -1,6 +1,10 @@
 use std::fmt;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom};
+use rand::{
+    distributions::{Standard, WeightedIndex},
+    prelude::Distribution,
+    seq::SliceRandom,
+};
 
 use crate::payload::Generator;
 
@@ -8,6 +12,7 @@ use super::{choose_or_not, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
+    pub(crate) metric_weights: WeightedIndex<u8>,
     pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
     pub(crate) tags: Vec<common::tags::Tags>,
@@ -26,7 +31,7 @@ impl Generator<Metric> for MetricGenerator {
         let value: Vec<common::NumValue> =
             Standard.sample_iter(&mut rng).take(total_values).collect();
 
-        match rng.gen_range(0..6) {
+        match self.metric_weights.sample(rng) {
             0 => Metric::Count(Count {
                 name,
                 value,

@@ -54,6 +54,31 @@ impl Default for KindWeights {
     }
 }
 
+/// Weights for `DogStatsD` metrics: gauges, counters, etc
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetricWeights {
+    count: u8,
+    gauge: u8,
+    timer: u8,
+    distribution: u8,
+    set: u8,
+    histogram: u8,
+}
+
+impl Default for MetricWeights {
+    fn default() -> Self {
+        MetricWeights {
+            count: 34,       // 34%
+            gauge: 34,       // 34%
+            timer: 5,        // 5%
+            distribution: 1, // 1%
+            set: 1,          // 1%
+            histogram: 25,   // 25%
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 pub struct Config {
     /// Defines the minimum number of metric names allowed in a payload.
@@ -74,6 +99,9 @@ pub struct Config {
     /// payload.
     #[serde(default)]
     pub kind_weights: KindWeights,
+    /// Defines the relative probability of each kind of DogStatsD metic.
+    #[serde(default)]
+    pub metric_weights: MetricWeights,
 }
 
 fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
@@ -113,6 +141,7 @@ impl MemberGenerator {
         metric_range: Range<NonZeroUsize>,
         key_range: Range<usize>,
         kind_weights: KindWeights,
+        metric_weights: MetricWeights,
         mut rng: &mut R,
     ) -> Self
     where
@@ -146,20 +175,31 @@ impl MemberGenerator {
             texts_or_messages,
             tags: tags.clone(),
         };
+
+        // NOTE the ordering here of `metric_choices` is very important! If you
+        // change it here you MUST also change it in `Generator<Metric> for
+        // MetricGenerator`.
+        let metric_choices = [
+            metric_weights.count,
+            metric_weights.gauge,
+            metric_weights.timer,
+            metric_weights.distribution,
+            metric_weights.set,
+            metric_weights.histogram,
+        ];
         let metric_generator = MetricGenerator {
+            metric_weights: WeightedIndex::new(&metric_choices).unwrap(),
             names: titles,
             container_ids: small_strings,
             tags,
         };
 
-        // NOTE the ordering here of `choices` is very important! If you change
-        // it here you MUST also change it in `Generator<Member> for
+        // NOTE the ordering here of `member_choices` is very important! If you
+        // change it here you MUST also change it in `Generator<Member> for
         // MemberGenerator`.
-        let choices = [kind_weights.metric, kind_weights.event, kind_weights.event];
-        let weights = WeightedIndex::new(&choices).unwrap();
-
+        let member_choices = [kind_weights.metric, kind_weights.event, kind_weights.event];
         MemberGenerator {
-            kind_weights: weights,
+            kind_weights: WeightedIndex::new(&member_choices).unwrap(),
             event_generator,
             service_check_generator,
             metric_generator,
@@ -209,13 +249,19 @@ impl DogStatsD {
         metric_names_range: Range<NonZeroUsize>,
         tag_keys_range: Range<usize>,
         kind_weights: KindWeights,
+        metric_weights: MetricWeights,
         rng: &mut R,
     ) -> Self
     where
         R: rand::Rng + ?Sized,
     {
-        let member_generator =
-            MemberGenerator::new(metric_names_range, tag_keys_range, kind_weights, rng);
+        let member_generator = MemberGenerator::new(
+            metric_names_range,
+            tag_keys_range,
+            kind_weights,
+            metric_weights,
+            rng,
+        );
 
         Self { member_generator }
     }

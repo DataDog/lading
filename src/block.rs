@@ -135,11 +135,18 @@ where
             tag_keys_minimum,
             tag_keys_maximum,
             kind_weights,
+            metric_weights,
         }) => {
             let mn_range = *metric_names_minimum..*metric_names_maximum;
             let tg_range = *tag_keys_minimum..*tag_keys_maximum;
 
-            let serializer = payload::DogStatsD::new(mn_range, tg_range, *kind_weights, &mut rng);
+            let serializer = payload::DogStatsD::new(
+                mn_range,
+                tg_range,
+                *kind_weights,
+                *metric_weights,
+                &mut rng,
+            );
 
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
