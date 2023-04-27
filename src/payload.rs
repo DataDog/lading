@@ -1,6 +1,5 @@
 use std::{
     io::{self, Write},
-    num::NonZeroUsize,
     path::PathBuf,
 };
 
@@ -25,7 +24,7 @@ mod apache_common;
 mod ascii;
 mod common;
 mod datadog_logs;
-mod dogstatsd;
+pub(crate) mod dogstatsd;
 mod fluent;
 mod json;
 mod opentelemetry_log;
@@ -64,7 +63,7 @@ pub(crate) trait Serialize {
 }
 
 /// Sub-configuration for `TraceAgent` format
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Encoding {
     /// Use JSON format
@@ -75,7 +74,7 @@ pub enum Encoding {
 }
 
 /// Configuration for `Payload`
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Config {
     /// Generates Fluent messages
@@ -106,18 +105,7 @@ pub enum Config {
     OpentelemetryMetrics,
     /// Generates DogStatsD
     #[serde(rename = "dogstatsd")]
-    DogStatsD {
-        /// Defines the minimum number of metric names allowed in a payload.
-        metric_names_minimum: Option<NonZeroUsize>,
-        /// Defines the maximum number of metric names allowed in a
-        /// payload. Must be greater or equal to minimum.
-        metric_names_maximum: Option<NonZeroUsize>,
-        /// Defines the minimum number of metric names allowed in a payload.
-        tag_keys_minimum: Option<usize>,
-        /// Defines the maximum number of metric names allowed in a
-        /// payload. Must be greater or equal to minimum.
-        tag_keys_maximum: Option<usize>,
-    },
+    DogStatsD(crate::payload::dogstatsd::Config),
     /// Generates TraceAgent payloads in JSON format
     TraceAgent(Encoding),
 }

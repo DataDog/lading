@@ -40,7 +40,7 @@ pub enum Error {
 }
 
 /// Config for [`Grpc`]
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq)]
 pub struct Config {
     /// The gRPC URI. Looks like http://host/service.path/endpoint
     pub target_uri: String,

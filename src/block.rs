@@ -1,7 +1,4 @@
-use std::{
-    cmp,
-    num::{NonZeroU32, NonZeroUsize},
-};
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use metrics::gauge;
@@ -132,22 +129,17 @@ where
             block_chunks,
             labels,
         ),
-        payload::Config::DogStatsD {
+        payload::Config::DogStatsD(payload::dogstatsd::Config {
             metric_names_minimum,
             metric_names_maximum,
             tag_keys_minimum,
             tag_keys_maximum,
-        } => {
-            let mn_min = metric_names_minimum.unwrap_or(NonZeroUsize::new(1).unwrap());
-            let mn_max =
-                metric_names_maximum.unwrap_or(cmp::max(mn_min, NonZeroUsize::new(64).unwrap()));
-            let mn_range = mn_min..mn_max;
+            kind_weights,
+        }) => {
+            let mn_range = *metric_names_minimum..*metric_names_maximum;
+            let tg_range = *tag_keys_minimum..*tag_keys_maximum;
 
-            let tg_min = tag_keys_minimum.unwrap_or(0);
-            let tg_max = tag_keys_maximum.unwrap_or(cmp::max(tg_min, 64));
-            let tg_range = tg_min..tg_max;
-
-            let serializer = payload::DogStatsD::new(mn_range, tg_range, &mut rng);
+            let serializer = payload::DogStatsD::new(mn_range, tg_range, *kind_weights, &mut rng);
 
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
