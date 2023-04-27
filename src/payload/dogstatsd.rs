@@ -297,7 +297,10 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{dogstatsd::KindWeights, DogStatsD, Serialize};
+    use crate::payload::{
+        dogstatsd::{KindWeights, MetricWeights},
+        DogStatsD, Serialize,
+    };
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -308,8 +311,9 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let metric_names_range =  NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap();
             let tag_keys_range =  0..32;
-            let kind_weights = KindWeights { metric: 2, event: 1, service_check: 1};
-            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, &mut rng);
+            let kind_weights = KindWeights::default();
+            let metric_weights = MetricWeights::default();
+            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights,  &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
