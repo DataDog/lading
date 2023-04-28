@@ -9,7 +9,7 @@ use super::{Clock, RealClock};
 
 const INTERVAL_TICKS: u64 = 1_000_000;
 
-/// Errors produced by [`Throttle`].
+/// Errors produced by [`Predictive`].
 #[derive(thiserror::Error, Debug, Clone, Copy)]
 pub(crate) enum Error {
     /// Requested capacity is greater than maximum allowed capacity.
