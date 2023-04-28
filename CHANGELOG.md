@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1-rc1]
+### Added
+- Added the ability for users to configure DogStatsD payload kind ratios
+- Added the ability for users to configure DogStatsd metric kind ratios
+
 ## [0.15.0]
 ### Added
 - Added target metrics support for Go expvars
