@@ -30,7 +30,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -86,6 +86,9 @@ pub struct Config {
     /// tailing software to remove old files.
     #[serde(default = "default_rotation")]
     rotate: bool,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 #[derive(Debug)]
@@ -154,7 +157,7 @@ impl FileGen {
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
         for _ in 0..config.duplicates {
-            let throttle = Throttle::new(bytes_per_second);
+            let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
             let block_cache =
                 construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);

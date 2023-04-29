@@ -30,7 +30,7 @@ use crate::{
     payload,
     payload::SplunkHecEncoding,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -40,7 +40,7 @@ const SPLUNK_HEC_TEXT_PATH: &str = "/services/collector/raw";
 const SPLUNK_HEC_CHANNEL_HEADER: &str = "x-splunk-request-channel";
 
 /// Optional Splunk HEC indexer acknowledgements configuration
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct AckSettings {
     /// The time in seconds between queries to /services/collector/ack
     pub ack_query_interval_seconds: u64,
@@ -50,7 +50,7 @@ pub struct AckSettings {
 }
 
 /// Configuration for [`SplunkHec`]
-#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
@@ -71,6 +71,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -192,7 +195,7 @@ impl SplunkHec {
             uri,
             token: config.token,
             block_cache,
-            throttle: Throttle::new(bytes_per_second),
+            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
             shutdown,
         })

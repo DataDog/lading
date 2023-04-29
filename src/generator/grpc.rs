@@ -22,7 +22,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 
 /// Errors produced by [`Grpc`]
@@ -57,6 +57,9 @@ pub struct Config {
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -182,13 +185,14 @@ impl Grpc {
             .cloned()
             .expect("target_uri should have an RPC path");
 
+        let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
         Ok(Self {
             target_uri,
             rpc_path,
             config,
             shutdown,
             block_cache,
-            throttle: Throttle::new(bytes_per_second),
+            throttle,
             metric_labels: labels,
         })
     }

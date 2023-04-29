@@ -4,7 +4,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
@@ -43,6 +43,9 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -131,7 +134,7 @@ impl UnixDatagram {
             let child = Child {
                 path: config.path.clone(),
                 block_cache,
-                throttle: Throttle::new(bytes_per_second),
+                throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
             };

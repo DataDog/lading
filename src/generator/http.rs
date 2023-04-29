@@ -19,7 +19,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -56,6 +56,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -155,7 +158,7 @@ impl Http {
                     method: hyper::Method::POST,
                     headers: config.headers,
                     block_cache,
-                    throttle: Throttle::new(bytes_per_second),
+                    throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                     metric_labels: labels,
                     shutdown,
                 })
