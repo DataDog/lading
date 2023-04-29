@@ -11,8 +11,10 @@ mod predictive;
 /// Configuration of this generator.
 #[serde(rename_all = "snake_case")]
 pub enum Config {
-    /// Create a throttle that predicts target capability
+    /// A throttle that predicts target capability
     Predictive,
+    /// A throttle that allows the user to produce as fast as possible.
+    AllOut,
 }
 
 impl Default for Config {
@@ -74,6 +76,7 @@ impl Clock for RealClock {
 #[derive(Debug)]
 pub(crate) enum Throttle<C = RealClock> {
     Predictive(predictive::Predictive<C>),
+    AllOut,
 }
 
 impl Throttle<RealClock> {
@@ -87,6 +90,7 @@ impl Throttle<RealClock> {
                 maximum_capacity,
                 RealClock::default(),
             )),
+            Config::AllOut => Throttle::AllOut,
         }
     }
 }
@@ -101,6 +105,7 @@ where
     pub(crate) async fn wait(&mut self) -> Result<(), Error> {
         match self {
             Throttle::Predictive(inner) => inner.wait().await?,
+            Throttle::AllOut => (),
         }
 
         Ok(())
@@ -111,6 +116,7 @@ where
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
         match self {
             Throttle::Predictive(inner) => inner.wait_for(request).await?,
+            Throttle::AllOut => (),
         }
 
         Ok(())
