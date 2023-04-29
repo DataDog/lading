@@ -9,6 +9,7 @@ mod predictive;
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of this generator.
+#[serde(rename_all = "snake_case")]
 pub enum Config {
     /// Create a throttle that predicts target capability
     Predictive,
