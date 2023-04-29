@@ -176,12 +176,7 @@ where
         }
         Ok(())
     }
-}
 
-impl<C> Predictive<C>
-where
-    C: Clock + Sync + Send,
-{
     pub(crate) fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
         // We set the maximum capacity of the bucket, X. We say that an
         // 'interval' happens once every second. If we allow for the tick of
