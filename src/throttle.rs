@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
 mod predictive;
+mod stable;
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of this generator.
@@ -15,6 +16,8 @@ pub enum Config {
     Predictive,
     /// A throttle that allows the user to produce as fast as possible.
     AllOut,
+    /// A throttle that attempts stable load
+    Stable,
 }
 
 impl Default for Config {
@@ -28,6 +31,8 @@ impl Default for Config {
 pub(crate) enum Error {
     #[error(transparent)]
     Predictive(#[from] predictive::Error),
+    #[error(transparent)]
+    Stable(#[from] stable::Error),
 }
 
 #[async_trait]
@@ -76,6 +81,7 @@ impl Clock for RealClock {
 #[derive(Debug)]
 pub(crate) enum Throttle<C = RealClock> {
     Predictive(predictive::Predictive<C>),
+    Stable(stable::Stable<C>),
     AllOut,
 }
 
@@ -87,6 +93,10 @@ impl Throttle<RealClock> {
     pub(crate) fn new_with_config(config: Config, maximum_capacity: NonZeroU32) -> Self {
         match config {
             Config::Predictive => Throttle::Predictive(predictive::Predictive::with_clock(
+                maximum_capacity,
+                RealClock::default(),
+            )),
+            Config::Stable => Throttle::Stable(stable::Stable::with_clock(
                 maximum_capacity,
                 RealClock::default(),
             )),
@@ -105,6 +115,7 @@ where
     pub(crate) async fn wait(&mut self) -> Result<(), Error> {
         match self {
             Throttle::Predictive(inner) => inner.wait().await?,
+            Throttle::Stable(inner) => inner.wait().await?,
             Throttle::AllOut => (),
         }
 
@@ -116,6 +127,7 @@ where
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
         match self {
             Throttle::Predictive(inner) => inner.wait_for(request).await?,
+            Throttle::Stable(inner) => inner.wait_for(request).await?,
             Throttle::AllOut => (),
         }
 
