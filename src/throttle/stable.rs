@@ -87,12 +87,7 @@ where
         }
         Ok(())
     }
-}
 
-impl<C> Stable<C>
-where
-    C: Clock + Sync + Send,
-{
     pub(crate) fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
         // We set the maximum capacity of the bucket, X. We say that an
         // 'interval' happens once every second. If we allow for the tick of
@@ -109,25 +104,5 @@ where
             spare_capacity: 0,
             clock,
         }
-    }
-
-    #[cfg(test)]
-    fn maximum_capacity(&self) -> u64 {
-        self.maximum_capacity
-    }
-
-    #[cfg(test)]
-    fn requested_budget(&self) -> u64 {
-        self.requested_budget
-    }
-
-    #[cfg(test)]
-    fn projected_budget(&self) -> u64 {
-        self.projected_budget
-    }
-
-    #[cfg(test)]
-    fn interval(&self) -> u64 {
-        self.interval
     }
 }
