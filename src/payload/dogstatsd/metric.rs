@@ -27,7 +27,7 @@ impl Generator<Metric> for MetricGenerator {
         let name = self.names.choose(&mut rng).unwrap().clone();
         let tags = choose_or_not(&mut rng, &self.tags);
         let sample_rate = rng.gen();
-        let total_values = rng.gen_range(0..32);
+        let total_values = rng.gen_range(1..32);
         let value: Vec<common::NumValue> =
             Standard.sample_iter(&mut rng).take(total_values).collect();
 
