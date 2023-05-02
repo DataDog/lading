@@ -6,14 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.15.1-rc2]
+## [0.15.1]
 ### Added
 - Add 'stable' throttle
 - Add 'all-out' throttle
 - Allow users to configure generators to use the various throttles
-
-## [0.15.1-rc1]
-### Added
 - Added the ability for users to configure DogStatsD payload kind ratios
 - Added the ability for users to configure DogStatsd metric kind ratios
 
