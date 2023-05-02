@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2-rc1]
+### Fixed
+- Disallow the creation of DogStatsD metrics with no values
+
 ## [0.15.1]
 ### Added
 - Add 'stable' throttle
