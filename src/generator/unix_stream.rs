@@ -4,7 +4,7 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::Throttle,
+    throttle::{self, Throttle},
 };
 use byte_unit::{Byte, ByteUnit};
 use metrics::{counter, gauge, register_counter};
@@ -32,6 +32,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 /// Errors produced by [`UnixStream`].
@@ -116,7 +119,7 @@ impl UnixStream {
         Ok(Self {
             path: config.path,
             block_cache,
-            throttle: Throttle::new(bytes_per_second),
+            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
             shutdown,
         })

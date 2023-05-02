@@ -73,6 +73,8 @@ mod tests {
 
     use http::HeaderMap;
 
+    use crate::throttle;
+
     use super::*;
 
     #[test]
@@ -115,6 +117,7 @@ blackhole:
                         .unwrap(),
                     block_sizes: Option::default(),
                     parallel_connections: 5,
+                    throttle: throttle::Config::default(),
                 })],
                 blackhole: Some(vec![
                     blackhole::Config::Tcp(blackhole::tcp::Config {

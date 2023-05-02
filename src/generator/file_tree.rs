@@ -22,7 +22,10 @@ use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::{signals::Shutdown, throttle::Throttle};
+use crate::{
+    signals::Shutdown,
+    throttle::{self, Throttle},
+};
 
 static FILE_EXTENSION: &str = "txt";
 
@@ -68,7 +71,7 @@ fn default_rename_per_name() -> NonZeroU32 {
     NonZeroU32::new(1).unwrap()
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 /// Configuration of [`FileTree`]
 pub struct Config {
     /// The seed for random operations against this target
@@ -96,6 +99,9 @@ pub struct Config {
     #[serde(default = "default_rename_per_name")]
     /// The number of rename per second
     pub rename_per_second: NonZeroU32,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 #[derive(Debug)]
@@ -105,8 +111,8 @@ pub struct Config {
 /// this without coordination to the target.
 pub struct FileTree {
     name_len: NonZeroUsize,
-    open_per_second: NonZeroU32,
-    rename_per_second: NonZeroU32,
+    open_throttle: Throttle,
+    rename_throttle: Throttle,
     total_folder: usize,
     nodes: VecDeque<PathBuf>,
     rng: StdRng,
@@ -124,10 +130,12 @@ impl FileTree {
         let mut rng = StdRng::from_seed(config.seed);
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config);
 
+        let open_throttle = Throttle::new_with_config(config.throttle, config.open_per_second);
+        let rename_throttle = Throttle::new_with_config(config.throttle, config.rename_per_second);
         Ok(Self {
             name_len: config.name_len,
-            open_per_second: config.open_per_second,
-            rename_per_second: config.rename_per_second,
+            open_throttle,
+            rename_throttle,
             total_folder,
             nodes,
             rng,
@@ -149,15 +157,12 @@ impl FileTree {
     ///
     /// Function will panic if one node is not path is not populated properly
     pub async fn spin(mut self) -> Result<(), Error> {
-        let mut open_throttle = Throttle::new(self.open_per_second);
-        let mut rename_throttle = Throttle::new(self.rename_per_second);
-
         let mut iter = self.nodes.iter().cycle();
         let mut folders = Vec::with_capacity(self.total_folder);
 
         loop {
             tokio::select! {
-                _ = open_throttle.wait() => {
+                _ = self.open_throttle.wait() => {
                     let node = iter.next().unwrap();
                     if node.exists() {
                         File::open(node.as_path()).await?;
@@ -169,7 +174,7 @@ impl FileTree {
                         }
                     }
                 },
-                _ = rename_throttle.wait() => {
+                _ = self.rename_throttle.wait() => {
                     if let Some(folder) = folders.choose_mut(&mut self.rng) {
                         rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }

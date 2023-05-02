@@ -1,14 +1,14 @@
 //! A throttle for input into the target program.
 
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
 mod predictive;
 mod stable;
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of this generator.
 #[serde(rename_all = "snake_case")]
 pub enum Config {
@@ -86,10 +86,6 @@ pub(crate) enum Throttle<C = RealClock> {
 }
 
 impl Throttle<RealClock> {
-    pub(crate) fn new(maximum_capacity: NonZeroU32) -> Self {
-        Throttle::new_with_config(Config::Predictive, maximum_capacity)
-    }
-
     pub(crate) fn new_with_config(config: Config, maximum_capacity: NonZeroU32) -> Self {
         match config {
             Config::Predictive => Throttle::Predictive(predictive::Predictive::with_clock(

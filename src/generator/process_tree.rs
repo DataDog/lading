@@ -4,7 +4,10 @@
 //! losely to the target but instead, without coordination, merely generates
 //! a process tree.
 
-use crate::{signals::Shutdown, throttle::Throttle};
+use crate::{
+    signals::Shutdown,
+    throttle::{self, Throttle},
+};
 use is_executable::IsExecutable;
 use nix::{
     sys::wait::{waitpid, WaitPidFlag, WaitStatus},
@@ -107,7 +110,7 @@ fn default_envs_count() -> NonZeroU32 {
     NonZeroU32::new(10).unwrap()
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum Args {
@@ -117,14 +120,14 @@ pub enum Args {
     Generate(GenerateArgs),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 pub struct StaticArgs {
     /// Argumments used with the `static` mode
     pub values: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of [`ProcessTree`]
 pub struct GenerateArgs {
     /// The maximum number argument per Process. Used by the `generate` mode
@@ -135,7 +138,7 @@ pub struct GenerateArgs {
     pub count: NonZeroU32,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum Envs {
@@ -145,14 +148,14 @@ pub enum Envs {
     Generate(GenerateEnvs),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 pub struct StaticEnvs {
     /// Environment variables used with the `static` mode
     pub values: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of [`ProcessTree`]
 pub struct GenerateEnvs {
     /// The maximum number environment variable per Process. Used by the `generate` mode
@@ -179,7 +182,7 @@ impl StaticEnvs {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 pub struct Executable {
     /// Path of the executable
@@ -190,7 +193,7 @@ pub struct Executable {
     pub envs: Envs,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 /// Configuration of [`ProcessTree`]
 pub struct Config {
     /// The seed for random operations against this target
@@ -209,6 +212,9 @@ pub struct Config {
     pub process_sleep_ns: NonZeroU32,
     /// List of executables
     pub executables: Vec<Executable>,
+    /// The load throttle configuration
+    #[serde(default)]
+    pub throttle: throttle::Config,
 }
 
 impl Config {
@@ -239,7 +245,7 @@ impl Config {
 pub struct ProcessTree {
     lading_path: PathBuf,
     config_content: String,
-    max_tree_per_second: NonZeroU32,
+    throttle: Throttle,
     shutdown: Shutdown,
 }
 
@@ -256,11 +262,12 @@ impl ProcessTree {
             Err(e) => return Err(Error::from(e)),
         };
 
+        let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
         match serde_yaml::to_string(config) {
             Ok(serialized) => Ok(Self {
                 lading_path,
                 config_content: serialized,
-                max_tree_per_second: config.max_tree_per_second,
+                throttle,
                 shutdown,
             }),
             Err(e) => Err(Error::from(e)),
@@ -280,12 +287,11 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let mut process_throttle = Throttle::new(self.max_tree_per_second);
         let lading_path = self.lading_path.to_str().unwrap();
 
         loop {
             tokio::select! {
-                _ = process_throttle.wait() => {
+                _ = self.throttle.wait() => {
                     // using pid as target pid just to pass laging clap constraints
                     let output = Command::new(lading_path)
                         .args(["--target-pid", "1"])
