@@ -156,18 +156,18 @@ impl FileGen {
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
+        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
+        let block_cache = Arc::new(block_cache);
+
         for _ in 0..config.duplicates {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
-
-            let block_cache =
-                construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 bytes_per_second,
                 throttle,
-                block_cache,
+                block_cache: Arc::clone(&block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
@@ -210,7 +210,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: Arc<Vec<Block>>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: Shutdown,

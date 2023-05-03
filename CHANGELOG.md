@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3-rc1]
+### Changed
+- `file_gen` now shares its pre-computed block between write children, reducing
+  memory consumption.
+
 ## [0.15.2]
 ### Fixed
 - Disallow the creation of DogStatsD metrics with no values
