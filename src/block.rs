@@ -21,13 +21,7 @@ impl From<ChunkError> for Error {
 #[derive(Debug)]
 pub(crate) struct Block {
     pub(crate) total_bytes: NonZeroU32,
-    pub(crate) lines: u64,
     pub(crate) bytes: Bytes,
-}
-
-#[inline]
-fn total_newlines(input: &[u8]) -> u64 {
-    bytecount::count(input, b'\n') as u64
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -245,12 +239,7 @@ where
             continue;
         }
         let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap()).unwrap();
-        let newlines = total_newlines(&bytes);
-        block_cache.push(Block {
-            total_bytes,
-            lines: newlines,
-            bytes,
-        });
+        block_cache.push(Block { total_bytes, bytes });
     }
     assert!(!block_cache.is_empty());
     gauge!("block_construction_complete", 1.0, labels);

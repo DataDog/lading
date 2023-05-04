@@ -16,7 +16,7 @@ use std::{
 
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
-use metrics::{gauge, register_counter, register_gauge};
+use metrics::{gauge, register_counter};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{
@@ -156,18 +156,18 @@ impl FileGen {
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
+        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
+        let block_cache = Arc::new(block_cache);
+
         for _ in 0..config.duplicates {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
-
-            let block_cache =
-                construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 bytes_per_second,
                 throttle,
-                block_cache,
+                block_cache: Arc::clone(&block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
@@ -210,7 +210,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: Arc<Vec<Block>>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: Shutdown,
@@ -235,31 +235,27 @@ impl Child {
                 .await?,
         );
 
-        let mut blocks = self.block_cache.iter().cycle();
-        let file_rotated = register_counter!("file_rotated");
+        let mut idx = 0;
+        let blocks = self.block_cache;
         let bytes_written = register_counter!("bytes_written");
-        let lines_written = register_counter!("lines_written");
-        let current_target_size_bytes = register_gauge!("current_target_size_bytes");
 
         loop {
-            let block = blocks.next().unwrap();
+            let block = &blocks[idx];
             let total_bytes = block.total_bytes;
-            let total_newlines = block.lines;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
+                    idx = (idx + 1) % blocks.len();
+                    let total_bytes = u64::from(total_bytes.get());
+
                     {
                         fp.write_all(&block.bytes).await?;
-                        fp.flush().await?;
-
-                        bytes_written.increment(u64::from(total_bytes.get()));
-                        lines_written.increment(total_newlines);
-
-                        total_bytes_written += u64::from(total_bytes.get());
-                        current_target_size_bytes.set(total_bytes_written as f64);
+                        bytes_written.increment(total_bytes);
+                        total_bytes_written += total_bytes;
                     }
 
                     if total_bytes_written > maximum_bytes_per_file {
+                        fp.flush().await?;
                         if self.rotate {
                             // Delete file, leaving any open file handlers intact. This
                             // includes our own `fp` for the time being.
@@ -280,7 +276,6 @@ impl Child {
                                 .await?,
                         );
                         total_bytes_written = 0;
-                        file_rotated.increment(1);
                     }
                 }
                 _ = self.shutdown.recv() => {

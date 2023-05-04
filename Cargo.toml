@@ -7,7 +7,7 @@ members = [
 
 [package]
 name = "lading"
-version = "0.15.2"
+version = "0.15.3"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2021"
 license = "MIT"
@@ -19,7 +19,6 @@ description = "A tool for load testing daemons."
 [dependencies]
 async-trait = { version = "0.1", default-features = false, features = [] }
 byte-unit = { version = "4.0", features = ["serde"] }
-bytecount = "0.6"
 bytes = { version = "1.4.0", default-features = false, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
 flate2 = { version = "1.0.26", default-features = false, features = ["rust_backend"] }
