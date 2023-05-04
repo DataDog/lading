@@ -6,13 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.15.3-rc2]
+## [0.15.3]
 ### Changed
 - Reduced the CPU time that `file_gen` consumes at the expense of slightly
   longer flush-to-disk times.
-
-## [0.15.3-rc1]
-### Changed
 - `file_gen` now shares its pre-computed block between write children, reducing
   memory consumption.
 
