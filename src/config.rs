@@ -126,12 +126,18 @@ blackhole:
                     }),
                 }],
                 blackhole: Some(vec![
-                    blackhole::Config::Tcp(blackhole::tcp::Config {
-                        binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
-                    }),
-                    blackhole::Config::Tcp(blackhole::tcp::Config {
-                        binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
-                    })
+                    blackhole::Config {
+                        general: blackhole::General { id: None },
+                        inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                        })
+                    },
+                    blackhole::Config {
+                        general: blackhole::General { id: None },
+                        inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
+                        })
+                    },
                 ]),
                 target: Option::default(),
                 telemetry: crate::config::Telemetry::default(),
