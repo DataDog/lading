@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `Generators` and `Blackholes` now support an `id` configuration field. This
+  will be added to all metrics produced by a component instance.
 
 ## [0.15.3]
 ### Changed
