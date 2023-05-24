@@ -33,6 +33,8 @@ use crate::{
     throttle::{self, Throttle},
 };
 
+use super::General;
+
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileGen`].
 pub enum Error {
@@ -113,7 +115,7 @@ impl FileGen {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
@@ -130,10 +132,13 @@ impl FileGen {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
-        let labels = vec![
+        let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "file_gen".to_string()),
         ];
+        if let Some(id) = general.id {
+            labels.push(("id".to_string(), id));
+        }
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         gauge!(

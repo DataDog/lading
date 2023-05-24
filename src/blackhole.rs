@@ -39,6 +39,17 @@ pub enum Error {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
+pub struct NamedConfig {
+    /// The name assigned to this blackhole
+    pub name: Option<String>,
+    /// The blackhole config
+    #[serde(flatten)]
+    pub config: Config,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
 pub enum Config {
     /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),

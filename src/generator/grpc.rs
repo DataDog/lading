@@ -25,6 +25,8 @@ use crate::{
     throttle::{self, Throttle},
 };
 
+use super::General;
+
 /// Errors produced by [`Grpc`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -136,7 +138,7 @@ impl Grpc {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         use byte_unit::{Byte, ByteUnit};
 
         let mut rng = StdRng::from_seed(config.seed);
@@ -158,10 +160,13 @@ impl Grpc {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
-        let labels = vec![
+        let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "grpc".to_string()),
         ];
+        if let Some(id) = general.id {
+            labels.push(("id".to_string(), id));
+        }
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         gauge!(

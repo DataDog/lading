@@ -101,24 +101,30 @@ blackhole:
         assert_eq!(
             config,
             Config {
-                generator: vec![generator::Config::Http(generator::http::Config {
-                    seed: Default::default(),
-                    target_uri: "http://localhost:1000/".try_into().unwrap(),
-                    method: generator::http::Method::Post {
-                        variant: crate::payload::Config::Fluent,
-                        maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
-                            8_f64,
+                generator: vec![generator::Config {
+                    general: generator::General { id: None },
+                    inner: generator::Inner::Http(generator::http::Config {
+                        seed: Default::default(),
+                        target_uri: "http://localhost:1000/".try_into().unwrap(),
+                        method: generator::http::Method::Post {
+                            variant: crate::payload::Config::Fluent,
+                            maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
+                                8_f64,
+                                byte_unit::ByteUnit::MB
+                            )
+                            .unwrap()
+                        },
+                        headers: HeaderMap::default(),
+                        bytes_per_second: byte_unit::Byte::from_unit(
+                            100_f64,
                             byte_unit::ByteUnit::MB
                         )
-                        .unwrap()
-                    },
-                    headers: HeaderMap::default(),
-                    bytes_per_second: byte_unit::Byte::from_unit(100_f64, byte_unit::ByteUnit::MB)
                         .unwrap(),
-                    block_sizes: Option::default(),
-                    parallel_connections: 5,
-                    throttle: throttle::Config::default(),
-                })],
+                        block_sizes: Option::default(),
+                        parallel_connections: 5,
+                        throttle: throttle::Config::default(),
+                    }),
+                }],
                 blackhole: Some(vec![
                     blackhole::Config::Tcp(blackhole::tcp::Config {
                         binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),

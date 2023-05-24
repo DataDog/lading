@@ -55,7 +55,26 @@ pub enum Error {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
-pub enum Config {
+pub struct Config {
+    /// Common generator configs
+    pub general: General,
+    /// The generator config
+    #[serde(flatten)]
+    pub inner: Inner,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+/// Configurations common to all [`Server`] variants
+pub struct General {
+    /// The ID assigned to this generator
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
+pub enum Inner {
     /// See [`crate::generator::tcp::Config`] for details.
     Tcp(tcp::Config),
     /// See [`crate::generator::udp::Config`] for details.
@@ -117,27 +136,38 @@ impl Server {
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let srv = match config {
-            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown).map_err(Error::Tcp)?),
-            Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown).map_err(Error::Udp)?),
-            Config::Http(conf) => Self::Http(http::Http::new(conf, shutdown).map_err(Error::Http)?),
-            Config::SplunkHec(conf) => Self::SplunkHec(
-                splunk_hec::SplunkHec::new(conf, shutdown).map_err(Error::SplunkHec)?,
-            ),
-            Config::FileGen(conf) => {
-                Self::FileGen(file_gen::FileGen::new(conf, shutdown).map_err(Error::FileGen)?)
+        let srv = match config.inner {
+            Inner::Tcp(conf) => {
+                Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown).map_err(Error::Tcp)?)
             }
-            Config::FileTree(conf) => {
+            Inner::Udp(conf) => {
+                Self::Udp(udp::Udp::new(config.general, &conf, shutdown).map_err(Error::Udp)?)
+            }
+            Inner::Http(conf) => {
+                Self::Http(http::Http::new(config.general, conf, shutdown).map_err(Error::Http)?)
+            }
+            Inner::SplunkHec(conf) => Self::SplunkHec(
+                splunk_hec::SplunkHec::new(config.general, conf, shutdown)
+                    .map_err(Error::SplunkHec)?,
+            ),
+            Inner::FileGen(conf) => Self::FileGen(
+                file_gen::FileGen::new(config.general, conf, shutdown).map_err(Error::FileGen)?,
+            ),
+            Inner::FileTree(conf) => {
                 Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
             }
-            Config::Grpc(conf) => Self::Grpc(grpc::Grpc::new(conf, shutdown).map_err(Error::Grpc)?),
-            Config::UnixStream(conf) => Self::UnixStream(
-                unix_stream::UnixStream::new(conf, shutdown).map_err(Error::UnixStream)?,
+            Inner::Grpc(conf) => {
+                Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown).map_err(Error::Grpc)?)
+            }
+            Inner::UnixStream(conf) => Self::UnixStream(
+                unix_stream::UnixStream::new(config.general, conf, shutdown)
+                    .map_err(Error::UnixStream)?,
             ),
-            Config::UnixDatagram(conf) => Self::UnixDatagram(
-                unix_datagram::UnixDatagram::new(&conf, shutdown).map_err(Error::UnixDatagram)?,
+            Inner::UnixDatagram(conf) => Self::UnixDatagram(
+                unix_datagram::UnixDatagram::new(config.general, &conf, shutdown)
+                    .map_err(Error::UnixDatagram)?,
             ),
-            Config::ProcessTree(conf) => Self::ProcessTree(
+            Inner::ProcessTree(conf) => Self::ProcessTree(
                 process_tree::ProcessTree::new(&conf, shutdown).map_err(Error::ProcessTree)?,
             ),
         };
