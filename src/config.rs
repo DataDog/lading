@@ -81,7 +81,8 @@ mod tests {
     fn config_deserializes() {
         let contents = r#"
 generator:
-  - http:
+  - id: "Data out"
+    http:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       headers: {}
       target_uri: "http://localhost:1000/"
@@ -92,7 +93,8 @@ generator:
           maximum_prebuild_cache_size_bytes: "8 Mb"
           variant: "fluent"
 blackhole:
-  - tcp:
+  - id: "Data in"
+    tcp:
       binding_addr: "127.0.0.1:1000"
   - tcp:
       binding_addr: "127.0.0.1:1001"
@@ -102,7 +104,9 @@ blackhole:
             config,
             Config {
                 generator: vec![generator::Config {
-                    general: generator::General { id: None },
+                    general: generator::General {
+                        id: Some(String::from("Data out"))
+                    },
                     inner: generator::Inner::Http(generator::http::Config {
                         seed: Default::default(),
                         target_uri: "http://localhost:1000/".try_into().unwrap(),
@@ -127,7 +131,9 @@ blackhole:
                 }],
                 blackhole: Some(vec![
                     blackhole::Config {
-                        general: blackhole::General { id: None },
+                        general: blackhole::General {
+                            id: Some(String::from("Data in"))
+                        },
                         inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
                             binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
                         })

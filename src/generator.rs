@@ -57,6 +57,7 @@ pub enum Error {
 /// Configuration for [`Server`]
 pub struct Config {
     /// Common generator configs
+    #[serde(flatten)]
     pub general: General,
     /// The generator config
     #[serde(flatten)]

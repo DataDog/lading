@@ -41,6 +41,7 @@ pub enum Error {
 /// Configuration for [`Server`]
 pub struct Config {
     /// Common blackhole configs
+    #[serde(flatten)]
     pub general: General,
     /// The blackhole config
     #[serde(flatten)]
