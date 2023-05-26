@@ -1,6 +1,6 @@
 //! The HTTP protocol speaking blackhole.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
@@ -9,7 +9,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use metrics::counter;
+use metrics::{register_counter, Counter};
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
@@ -104,12 +104,13 @@ struct KinesisPutRecordBatchResponse {
 #[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(
     status: StatusCode,
-    labels: Arc<Vec<(String, String)>>,
+    bytes_received: Counter,
+    requests_received: Counter,
     body_variant: BodyVariant,
     req: Request<Body>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, hyper::Error> {
-    counter!("bytes_received", 1, &*labels);
+    bytes_received.increment(1);
 
     let (parts, body) = req.into_parts();
 
@@ -118,7 +119,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            counter!("requests_received", body.len() as u64, &*labels);
+            requests_received.increment(body.len() as u64);
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
@@ -203,9 +204,11 @@ impl Http {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let labels = Arc::new(self.metric_labels.clone());
+        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
+        let requests_received = register_counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
-            let labels = labels.clone();
+            let bytes_received = bytes_received.clone();
+            let requests_received = requests_received.clone();
             let body_variant = self.body_variant.clone();
             let headers = self.headers.clone();
             async move {
@@ -213,7 +216,8 @@ impl Http {
                     debug!("REQUEST: {:?}", request);
                     srv(
                         self.status,
-                        labels.clone(),
+                        bytes_received.clone(),
+                        requests_received.clone(),
                         body_variant.clone(),
                         request,
                         headers.clone(),

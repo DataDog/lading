@@ -1,6 +1,6 @@
 //! The [SQS](https://aws.amazon.com/sqs/) protocol speaking blackhole.
 
-use std::{fmt::Write, net::SocketAddr, sync::Arc};
+use std::{fmt::Write, net::SocketAddr};
 
 use hyper::{
     body,
@@ -8,7 +8,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use metrics::counter;
+use metrics::{register_counter, Counter};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use tokio::time::Duration;
@@ -82,13 +82,16 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let labels = Arc::new(self.metric_labels.clone());
+        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
+        let requests_received = register_counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
-            let labels = labels.clone();
+            let bytes_received = bytes_received.clone();
+            let requests_received = requests_received.clone();
             async move {
                 Ok::<_, hyper::Error>(service_fn(move |req| {
-                    let labels = labels.clone();
-                    srv(req, labels)
+                    let bytes_received = bytes_received.clone();
+                    let requests_received = requests_received.clone();
+                    srv(req, requests_received, bytes_received)
                 }))
             }
         });
@@ -222,12 +225,13 @@ impl DeleteMessageBatch {
 
 async fn srv(
     req: Request<Body>,
-    labels: Arc<Vec<(String, String)>>,
+    requests_received: Counter,
+    bytes_received: Counter,
 ) -> Result<Response<Body>, hyper::Error> {
-    counter!("requests_received", 1, &*labels);
+    requests_received.increment(1);
 
     let bytes = body::to_bytes(req).await?;
-    counter!("bytes_received", bytes.len() as u64, &*labels);
+    bytes_received.increment(bytes.len() as u64);
 
     let action: Action = serde_qs::from_bytes(&bytes).unwrap();
 
