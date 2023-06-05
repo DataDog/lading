@@ -31,7 +31,7 @@ metrics = { version = "0.21", default-features = false }
 metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = ["http-listener"] }
 metrics-util = { version = "0.15" }
 nix = { version = "0.26" }
-once_cell = "1.17"
+once_cell = "1.18"
 opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-rust/", rev = "6078e32", features = ["traces", "metrics", "logs", "gen-tonic"] }
 prost = "0.11"
 rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng"] }
