@@ -174,6 +174,7 @@ impl UnixStream {
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
+                    let blk = blocks.next().unwrap(); // advance to the block that was previously peeked
                     while blk_offset < blk_max {
                         let stream = unix_stream.unwrap();
                         unix_stream = None;
@@ -184,7 +185,6 @@ impl UnixStream {
                             .map_err(Error::Io)
                             .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
-                            let blk = blocks.next().unwrap(); // actually advance through the blocks
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
                             match stream.try_write(&blk.bytes[blk_offset..]) {
