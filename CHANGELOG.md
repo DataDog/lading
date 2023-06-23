@@ -5,8 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.16.1]
 ### Changed
 - Unix datagram connect errors are now logged at the `error` level.
+
+### Fixed
+- No-target mode no longer hangs at startup
+- The `unix_datagram` generator doesn't start generating data until the target is running.
+- Panic fixed in `unix_datagram` generator
 
 ## [0.16.0]
 ### Added

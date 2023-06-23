@@ -286,7 +286,7 @@ async fn inner_main(
     // * the "observer" which reads procfs on Linux and reports relevant process
     //   detail to the capture log
 
-    let (tgt_snd, _) = broadcast::channel(1);
+    let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
     //
     // GENERATOR
@@ -355,6 +355,10 @@ async fn inner_main(
         let tsrv = tokio::spawn(target_server.run(tgt_snd));
         futures::future::Either::Left(tsrv)
     } else {
+        // Many lading servers synchronize on target startup.
+        tgt_snd
+            .send(None)
+            .expect("unable to transmit startup sync signal, catastrophic failure");
         futures::future::Either::Right(futures::future::pending())
     };
 
