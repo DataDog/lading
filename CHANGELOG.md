@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Unix datagram connect errors are now logged at the `error` level.
 
+### Fixed
+- No-target mode no longer hangs at startup
+- The `unix_datagram` generator doesn't start generating data until the target is running.
+
 ## [0.16.0]
 ### Added
 - `Generators` and `Blackholes` now support an `id` configuration field. This
