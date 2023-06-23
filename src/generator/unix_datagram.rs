@@ -19,7 +19,7 @@ use tokio::{
     net,
     task::{JoinError, JoinHandle},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 use super::General;
 
@@ -193,7 +193,7 @@ impl Child {
                     break;
                 }
                 Err(err) => {
-                    trace!(
+                    error!(
                         "Unable to connect to socket {path}: {err}",
                         path = &self.path.display()
                     );
