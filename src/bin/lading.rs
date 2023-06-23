@@ -286,7 +286,7 @@ async fn inner_main(
     // * the "observer" which reads procfs on Linux and reports relevant process
     //   detail to the capture log
 
-    let (tgt_snd, _) = broadcast::channel(1);
+    let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
     //
     // GENERATOR
