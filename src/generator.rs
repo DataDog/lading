@@ -11,10 +11,9 @@
 //! experimental control.
 
 use serde::Deserialize;
-use tokio::sync::broadcast::Receiver;
 use tracing::error;
 
-use crate::signals::Shutdown;
+use crate::{signals::Shutdown, target::TargetPidReceiver};
 
 pub mod file_gen;
 pub mod file_tree;
@@ -186,7 +185,7 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server signals
     /// error.
-    pub async fn run(self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
+    pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         // Pause until the target process is running.
         let _ = pid_snd.recv().await;
         drop(pid_snd);

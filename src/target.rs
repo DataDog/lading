@@ -30,7 +30,7 @@ use nix::{
     sys::signal::{kill, SIGTERM},
     unistd::Pid,
 };
-use tokio::{process::Command, sync::broadcast::Sender};
+use tokio::process::Command;
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
@@ -39,6 +39,13 @@ use crate::{common::stdio, observer::RSS_BYTES, signals::Shutdown};
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.
 pub(crate) static RSS_BYTES_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// Type used to receive the target PID once it is running.
+#[allow(clippy::module_name_repetitions)]
+pub type TargetPidReceiver = tokio::sync::broadcast::Receiver<Option<u32>>;
+
+#[allow(clippy::module_name_repetitions)]
+type TargetPidSender = tokio::sync::broadcast::Sender<Option<u32>>;
 
 /// Errors produced by [`Meta`]
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -195,7 +202,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(self, pid_snd: Sender<u32>) -> Result<(), Error> {
+    pub async fn run(self, pid_snd: TargetPidSender) -> Result<(), Error> {
         let config = self.config;
 
         // Note that each target mode has different expectations around target
@@ -218,7 +225,7 @@ impl Server {
     /// error if the process ends before the test completes.
     async fn watch(
         config: PidConfig,
-        pid_snd: Sender<u32>,
+        pid_snd: TargetPidSender,
         mut shutdown: Shutdown,
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
@@ -237,7 +244,7 @@ impl Server {
         }
 
         pid_snd
-            .send(config.pid.get())
+            .send(Some(config.pid.get()))
             .expect("target server unable to transmit PID, catastrophic failure");
         drop(pid_snd);
 
@@ -289,7 +296,7 @@ impl Server {
     /// process after the test has completed.
     async fn execute_binary(
         config: BinaryConfig,
-        pid_snd: Sender<u32>,
+        pid_snd: TargetPidSender,
         mut shutdown: Shutdown,
     ) -> Result<ExitStatus, Error> {
         let mut target_cmd = Command::new(config.command);
@@ -307,7 +314,7 @@ impl Server {
         let mut target_child = target_cmd.spawn().map_err(Error::TargetSpawn)?;
         let target_id = target_child.id().expect("target must have PID");
         pid_snd
-            .send(target_id)
+            .send(Some(target_id))
             .expect("target server unable to transmit PID, catastrophic failure");
         drop(pid_snd);
 

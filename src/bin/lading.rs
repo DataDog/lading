@@ -355,6 +355,10 @@ async fn inner_main(
         let tsrv = tokio::spawn(target_server.run(tgt_snd));
         futures::future::Either::Left(tsrv)
     } else {
+        // Many lading servers synchronize on target startup.
+        tgt_snd
+            .send(None)
+            .expect("unable to transmit startup sync signal, catastrophic failure");
         futures::future::Either::Right(futures::future::pending())
     };
 

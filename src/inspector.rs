@@ -21,12 +21,13 @@ use nix::{
     unistd::Pid,
 };
 use serde::Deserialize;
-use tokio::{process::Command, sync::broadcast::Receiver};
+use tokio::process::Command;
 use tracing::{error, info};
 
 use crate::{
     common::{stdio, Output},
     signals::Shutdown,
+    target::TargetPidReceiver,
 };
 
 #[derive(Debug)]
@@ -86,8 +87,9 @@ impl Server {
     /// a shutdown signal is received. Child exit status does not currently
     /// propagate. This is less than ideal.
     ///
-    /// Target server will use the `broadcast::Sender` passed here to transmit
-    /// its PID. This PID is passed to the sub-process as the first argument.
+    /// Target server will use the `TargetPidReceiver` passed here to transmit
+    /// its PID. This PID is passed to the sub-process in the `TARGET_PID`
+    /// environment variable. This variable is not set in no-target mode.
     ///
     /// # Errors
     ///
@@ -97,7 +99,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<ExitStatus, Error> {
+    pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<ExitStatus, Error> {
         let target_pid = pid_snd
             .recv()
             .await
@@ -108,7 +110,11 @@ impl Server {
 
         let mut target_cmd = Command::new(config.command);
         let mut environment_variables = config.environment_variables.clone();
-        environment_variables.insert(String::from("TARGET_PID"), target_pid.to_string());
+        if let Some(pid) = target_pid {
+            environment_variables.insert(String::from("TARGET_PID"), pid.to_string());
+        } else {
+            environment_variables.insert(String::from("NO_TARGET"), String::from("1"));
+        }
 
         target_cmd
             .stdin(Stdio::null())

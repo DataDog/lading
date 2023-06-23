@@ -10,10 +10,9 @@
 
 use std::{io, sync::atomic::AtomicU64};
 
+use crate::target::TargetPidReceiver;
 use nix::errno::Errno;
 use serde::Deserialize;
-use tokio::{self, sync::broadcast::Receiver};
-use tracing;
 
 use crate::signals::Shutdown;
 
@@ -112,7 +111,7 @@ impl Server {
     /// a shutdown signal is received. Child exit status does not currently
     /// propagate. This is less than ideal.
     ///
-    /// Target server will use the `broadcast::Sender` passed here to transmit
+    /// Target server will use the `TargetPidReceiver` passed here to transmit
     /// its PID. This PID is passed to the sub-process as the first argument.
     ///
     /// # Errors
@@ -125,7 +124,7 @@ impl Server {
     /// None are known.
     #[allow(clippy::similar_names)]
     #[cfg(target_os = "linux")]
-    pub async fn run(mut self, mut pid_snd: Receiver<u32>) -> Result<(), Error> {
+    pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         use std::{sync::atomic::Ordering, time::Duration};
 
         use metrics::gauge;
@@ -136,6 +135,8 @@ impl Server {
             .await
             .expect("target failed to transmit PID, catastrophic failure");
         drop(pid_snd);
+
+        let target_pid = target_pid.expect("observer cannot be used in no-target mode");
 
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
@@ -227,7 +228,7 @@ impl Server {
     /// None are known.
     #[allow(clippy::unused_async)]
     #[cfg(not(target_os = "linux"))]
-    pub async fn run(self, _pid_snd: Receiver<u32>) -> Result<(), Error> {
+    pub async fn run(self, _pid_snd: TargetPidReceiver) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");
         Ok(())
     }
