@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::{
     net,
+    sync::broadcast::Receiver,
     task::{JoinError, JoinHandle},
 };
 use tracing::{debug, error, info};
@@ -65,6 +66,12 @@ pub enum Error {
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(JoinError),
+    /// Startup send error.
+    #[error("Startup send error: {0}")]
+    StartupSend(#[from] tokio::sync::broadcast::error::SendError<()>),
+    /// Child startup wait error.
+    #[error("Child startup wait error: {0}")]
+    StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
 #[derive(Debug)]
@@ -75,6 +82,7 @@ pub enum Error {
 pub struct UnixDatagram {
     handles: Vec<JoinHandle<Result<(), Error>>>,
     shutdown: Shutdown,
+    startup: tokio::sync::broadcast::Sender<()>,
 }
 
 impl UnixDatagram {
@@ -131,6 +139,8 @@ impl UnixDatagram {
             &block_sizes,
         )?;
 
+        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
             let block_cache =
@@ -144,10 +154,14 @@ impl UnixDatagram {
                 shutdown: shutdown.clone(),
             };
 
-            handles.push(tokio::spawn(child.spin()));
+            handles.push(tokio::spawn(child.spin(startup.subscribe())));
         }
 
-        Ok(Self { handles, shutdown })
+        Ok(Self {
+            handles,
+            shutdown,
+            startup,
+        })
     }
 
     /// Run [`UnixDatagram`] to completion or until a shutdown signal is received.
@@ -160,6 +174,7 @@ impl UnixDatagram {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
+        self.startup.send(())?;
         self.shutdown.recv().await;
         info!("shutdown signal received");
         for res in join_all(self.handles.drain(..)).await {
@@ -183,7 +198,8 @@ struct Child {
 }
 
 impl Child {
-    async fn spin(mut self) -> Result<(), Error> {
+    async fn spin(mut self, mut startup_receiver: Receiver<()>) -> Result<(), Error> {
+        startup_receiver.recv().await?;
         debug!("UnixDatagram generator running");
         let socket = net::UnixDatagram::unbound().map_err(Error::Io)?;
         loop {
