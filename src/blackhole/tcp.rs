@@ -3,8 +3,7 @@
 use std::{io, net::SocketAddr};
 
 use futures::stream::StreamExt;
-use metrics::{register_counter, Counter};
-use once_cell::sync;
+use metrics::register_counter;
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
@@ -12,17 +11,7 @@ use tracing::info;
 
 use crate::signals::Shutdown;
 
-static BYTES_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
-#[inline]
-fn bytes_received() -> &'static Counter {
-    BYTES_RECEIVED.get_or_init(|| register_counter!("bytes_received"))
-}
-
-static MESSAGE_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
-#[inline]
-fn message_received() -> &'static Counter {
-    MESSAGE_RECEIVED.get_or_init(|| register_counter!("message_received"))
-}
+use super::General;
 
 #[derive(Debug)]
 /// Errors emitted by [`Tcp`]
@@ -43,25 +32,37 @@ pub struct Config {
 pub struct Tcp {
     binding_addr: SocketAddr,
     shutdown: Shutdown,
+    metric_labels: Vec<(String, String)>,
 }
 
 impl Tcp {
     /// Create a new [`Tcp`] server instance
     #[must_use]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+        let mut metric_labels = vec![
+            ("component".to_string(), "blackhole".to_string()),
+            ("component_name".to_string(), "tcp".to_string()),
+        ];
+        if let Some(id) = general.id {
+            metric_labels.push(("id".to_string(), id));
+        }
+
         Self {
             binding_addr: config.binding_addr,
             shutdown,
+            metric_labels,
         }
     }
 
-    async fn handle_connection(socket: TcpStream) {
+    async fn handle_connection(socket: TcpStream, labels: &'static [(String, String)]) {
         let mut stream = ReaderStream::new(socket);
+        let bytes_received = register_counter!("bytes_received", labels);
+        let message_received = register_counter!("message_received", labels);
 
         while let Some(msg) = stream.next().await {
-            message_received().increment(1);
+            message_received.increment(1);
             if let Ok(msg) = msg {
-                bytes_received().increment(msg.len() as u64);
+                bytes_received.increment(msg.len() as u64);
             }
         }
     }
@@ -83,16 +84,17 @@ impl Tcp {
             .await
             .map_err(Error::Io)?;
 
-        let connection_accepted = register_counter!("connection_accepted");
+        let connection_accepted = register_counter!("connection_accepted", &self.metric_labels);
+        let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
         loop {
             tokio::select! {
                 conn = listener.accept() => {
                     let (socket, _) = conn.map_err(Error::Io)?;
                     connection_accepted.increment(1);
-                    tokio::spawn(async move {
-                        Self::handle_connection(socket).await;
-                    });
+                    tokio::spawn(
+                        Self::handle_connection(socket, labels)
+                    );
                 }
                 _ = self.shutdown.recv() => {
                     info!("shutdown signal received");

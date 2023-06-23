@@ -10,6 +10,8 @@ use tracing::info;
 
 use crate::signals::Shutdown;
 
+use super::General;
+
 #[derive(Debug)]
 /// Errors produced by [`UnixDatagram`].
 pub enum Error {
@@ -29,15 +31,25 @@ pub struct Config {
 pub struct UnixDatagram {
     path: PathBuf,
     shutdown: Shutdown,
+    metric_labels: Vec<(String, String)>,
 }
 
 impl UnixDatagram {
     /// Create a new [`UnixDatagram`] server instance
     #[must_use]
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Self {
+        let mut metric_labels = vec![
+            ("component".to_string(), "blackhole".to_string()),
+            ("component_name".to_string(), "unix_datagram".to_string()),
+        ];
+        if let Some(id) = general.id {
+            metric_labels.push(("id".to_string(), id));
+        }
+
         Self {
             path: config.path,
             shutdown,
+            metric_labels,
         }
     }
 
@@ -60,7 +72,7 @@ impl UnixDatagram {
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = register_counter!("bytes_received");
+        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
 
         loop {
             tokio::select! {

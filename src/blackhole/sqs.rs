@@ -9,7 +9,6 @@ use hyper::{
     Body, Request, Response, Server, StatusCode,
 };
 use metrics::{register_counter, Counter};
-use once_cell::sync;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use tokio::time::Duration;
@@ -18,23 +17,13 @@ use tracing::{error, info};
 
 use crate::signals::Shutdown;
 
+use super::General;
+
 #[derive(Debug)]
 /// Errors produced by [`Sqs`]
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
     Hyper(hyper::Error),
-}
-
-static BYTES_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
-#[inline]
-fn bytes_received() -> &'static Counter {
-    BYTES_RECEIVED.get_or_init(|| register_counter!("bytes_received"))
-}
-
-static REQUESTS_RECEIVED: sync::OnceCell<Counter> = sync::OnceCell::new();
-#[inline]
-fn requests_received() -> &'static Counter {
-    REQUESTS_RECEIVED.get_or_init(|| register_counter!("requests_received"))
 }
 
 fn default_concurrent_requests_max() -> usize {
@@ -57,16 +46,26 @@ pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,
     shutdown: Shutdown,
+    metric_labels: Vec<(String, String)>,
 }
 
 impl Sqs {
     /// Create a new [`Sqs`] server instance
     #[must_use]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+        let mut metric_labels = vec![
+            ("component".to_string(), "blackhole".to_string()),
+            ("component_name".to_string(), "sqs".to_string()),
+        ];
+        if let Some(id) = general.id {
+            metric_labels.push(("id".to_string(), id));
+        }
+
         Self {
             httpd_addr: config.binding_addr,
             concurrency_limit: config.concurrent_requests_max,
             shutdown,
+            metric_labels,
         }
     }
 
@@ -83,8 +82,19 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let service =
-            make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
+        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
+        let requests_received = register_counter!("requests_received", &self.metric_labels);
+        let service = make_service_fn(|_: &AddrStream| {
+            let bytes_received = bytes_received.clone();
+            let requests_received = requests_received.clone();
+            async move {
+                Ok::<_, hyper::Error>(service_fn(move |req| {
+                    let bytes_received = bytes_received.clone();
+                    let requests_received = requests_received.clone();
+                    srv(req, requests_received, bytes_received)
+                }))
+            }
+        });
         let svc = ServiceBuilder::new()
             .load_shed()
             .concurrency_limit(self.concurrency_limit)
@@ -213,11 +223,15 @@ impl DeleteMessageBatch {
     }
 }
 
-async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    requests_received().increment(1);
+async fn srv(
+    req: Request<Body>,
+    requests_received: Counter,
+    bytes_received: Counter,
+) -> Result<Response<Body>, hyper::Error> {
+    requests_received.increment(1);
 
     let bytes = body::to_bytes(req).await?;
-    bytes_received().increment(bytes.len() as u64);
+    bytes_received.increment(bytes.len() as u64);
 
     let action: Action = serde_qs::from_bytes(&bytes).unwrap();
 

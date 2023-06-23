@@ -39,7 +39,27 @@ pub enum Error {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
-pub enum Config {
+pub struct Config {
+    /// Common blackhole configs
+    #[serde(flatten)]
+    pub general: General,
+    /// The blackhole config
+    #[serde(flatten)]
+    pub inner: Inner,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Configurations common to all [`Server`] variants
+pub struct General {
+    /// The ID assigned to this blackhole
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Configuration for [`Server`]
+pub enum Inner {
     /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),
     /// See [`crate::blackhole::http::Config`] for details.
@@ -89,20 +109,24 @@ impl Server {
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
-        let server = match config {
-            Config::Tcp(conf) => Self::Tcp(tcp::Tcp::new(&conf, shutdown)),
-            Config::Http(conf) => {
-                Self::Http(http::Http::new(&conf, shutdown).map_err(Error::Http)?)
+        let server = match config.inner {
+            Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
+            Inner::Http(conf) => {
+                Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
             }
-            Config::Udp(conf) => Self::Udp(udp::Udp::new(&conf, shutdown)),
-            Config::UnixStream(conf) => {
-                Self::UnixStream(unix_stream::UnixStream::new(conf, shutdown))
+            Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)),
+            Inner::UnixStream(conf) => {
+                Self::UnixStream(unix_stream::UnixStream::new(config.general, conf, shutdown))
             }
-            Config::UnixDatagram(conf) => {
-                Self::UnixDatagram(unix_datagram::UnixDatagram::new(conf, shutdown))
+            Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
+                config.general,
+                conf,
+                shutdown,
+            )),
+            Inner::Sqs(conf) => Self::Sqs(sqs::Sqs::new(config.general, &conf, shutdown)),
+            Inner::SplunkHec(conf) => {
+                Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, &conf, shutdown))
             }
-            Config::Sqs(conf) => Self::Sqs(sqs::Sqs::new(&conf, shutdown)),
-            Config::SplunkHec(conf) => Self::SplunkHec(splunk_hec::SplunkHec::new(&conf, shutdown)),
         };
         Ok(server)
     }

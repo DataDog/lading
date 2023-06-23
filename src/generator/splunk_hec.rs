@@ -33,6 +33,8 @@ use crate::{
     throttle::{self, Throttle},
 };
 
+use super::General;
+
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
 const SPLUNK_HEC_JSON_PATH: &str = "/services/collector/event";
@@ -132,7 +134,7 @@ impl SplunkHec {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroUsize> = config
             .block_sizes
@@ -149,10 +151,13 @@ impl SplunkHec {
             .iter()
             .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
             .collect();
-        let labels = vec![
+        let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "splunk_hec".to_string()),
         ];
+        if let Some(id) = general.id {
+            labels.push(("id".to_string(), id));
+        }
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
         gauge!(

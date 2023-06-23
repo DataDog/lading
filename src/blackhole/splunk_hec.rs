@@ -3,7 +3,10 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -18,6 +21,8 @@ use tower::ServiceBuilder;
 use tracing::{error, info};
 
 use crate::signals::Shutdown;
+
+use super::General;
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -72,8 +77,11 @@ struct HecResponse {
     ack_id: u64,
 }
 
-async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    metrics::counter!("requests_received", 1);
+async fn srv(
+    req: Request<Body>,
+    labels: Arc<Vec<(String, String)>>,
+) -> Result<Response<Body>, hyper::Error> {
+    metrics::counter!("requests_received", 1, &*labels);
 
     let (parts, body) = req.into_parts();
     let bytes = body::to_bytes(body).await?;
@@ -81,7 +89,7 @@ async fn srv(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            metrics::counter!("bytes_received", body.len() as u64);
+            metrics::counter!("bytes_received", body.len() as u64, &*labels);
 
             let mut okay = Response::default();
             *okay.status_mut() = StatusCode::OK;
@@ -135,16 +143,26 @@ pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,
     shutdown: Shutdown,
+    metric_labels: Vec<(String, String)>,
 }
 
 impl SplunkHec {
     /// Create a new [`SplunkHec`] server instance
     #[must_use]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+        let mut metric_labels = vec![
+            ("component".to_string(), "blackhole".to_string()),
+            ("component_name".to_string(), "splunk_hec".to_string()),
+        ];
+        if let Some(id) = general.id {
+            metric_labels.push(("id".to_string(), id));
+        }
+
         Self {
             httpd_addr: config.binding_addr,
             concurrency_limit: config.concurrent_requests_max,
             shutdown,
+            metric_labels,
         }
     }
 
@@ -161,8 +179,16 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let service =
-            make_service_fn(|_: &AddrStream| async move { Ok::<_, hyper::Error>(service_fn(srv)) });
+        let labels = Arc::new(self.metric_labels.clone());
+        let service = make_service_fn(|_: &AddrStream| {
+            let labels = labels.clone();
+            async move {
+                Ok::<_, hyper::Error>(service_fn(move |req| {
+                    let labels = Arc::clone(&labels);
+                    srv(req, labels)
+                }))
+            }
+        });
         let svc = ServiceBuilder::new()
             .load_shed()
             .concurrency_limit(self.concurrency_limit)

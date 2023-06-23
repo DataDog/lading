@@ -81,7 +81,8 @@ mod tests {
     fn config_deserializes() {
         let contents = r#"
 generator:
-  - http:
+  - id: "Data out"
+    http:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       headers: {}
       target_uri: "http://localhost:1000/"
@@ -92,7 +93,8 @@ generator:
           maximum_prebuild_cache_size_bytes: "8 Mb"
           variant: "fluent"
 blackhole:
-  - tcp:
+  - id: "Data in"
+    tcp:
       binding_addr: "127.0.0.1:1000"
   - tcp:
       binding_addr: "127.0.0.1:1001"
@@ -101,31 +103,47 @@ blackhole:
         assert_eq!(
             config,
             Config {
-                generator: vec![generator::Config::Http(generator::http::Config {
-                    seed: Default::default(),
-                    target_uri: "http://localhost:1000/".try_into().unwrap(),
-                    method: generator::http::Method::Post {
-                        variant: crate::payload::Config::Fluent,
-                        maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
-                            8_f64,
+                generator: vec![generator::Config {
+                    general: generator::General {
+                        id: Some(String::from("Data out"))
+                    },
+                    inner: generator::Inner::Http(generator::http::Config {
+                        seed: Default::default(),
+                        target_uri: "http://localhost:1000/".try_into().unwrap(),
+                        method: generator::http::Method::Post {
+                            variant: crate::payload::Config::Fluent,
+                            maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
+                                8_f64,
+                                byte_unit::ByteUnit::MB
+                            )
+                            .unwrap()
+                        },
+                        headers: HeaderMap::default(),
+                        bytes_per_second: byte_unit::Byte::from_unit(
+                            100_f64,
                             byte_unit::ByteUnit::MB
                         )
-                        .unwrap()
-                    },
-                    headers: HeaderMap::default(),
-                    bytes_per_second: byte_unit::Byte::from_unit(100_f64, byte_unit::ByteUnit::MB)
                         .unwrap(),
-                    block_sizes: Option::default(),
-                    parallel_connections: 5,
-                    throttle: throttle::Config::default(),
-                })],
-                blackhole: Some(vec![
-                    blackhole::Config::Tcp(blackhole::tcp::Config {
-                        binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                        block_sizes: Option::default(),
+                        parallel_connections: 5,
+                        throttle: throttle::Config::default(),
                     }),
-                    blackhole::Config::Tcp(blackhole::tcp::Config {
-                        binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
-                    })
+                }],
+                blackhole: Some(vec![
+                    blackhole::Config {
+                        general: blackhole::General {
+                            id: Some(String::from("Data in"))
+                        },
+                        inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                        })
+                    },
+                    blackhole::Config {
+                        general: blackhole::General { id: None },
+                        inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
+                        })
+                    },
                 ]),
                 target: Option::default(),
                 telemetry: crate::config::Telemetry::default(),

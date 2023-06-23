@@ -9,6 +9,8 @@ use tracing::info;
 
 use crate::signals::Shutdown;
 
+use super::General;
+
 #[derive(Debug)]
 /// Errors produced by [`Udp`].
 pub enum Error {
@@ -28,15 +30,25 @@ pub struct Config {
 pub struct Udp {
     binding_addr: SocketAddr,
     shutdown: Shutdown,
+    metric_labels: Vec<(String, String)>,
 }
 
 impl Udp {
     /// Create a new [`Udp`] server instance
     #[must_use]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+        let mut metric_labels = vec![
+            ("component".to_string(), "blackhole".to_string()),
+            ("component_name".to_string(), "udp".to_string()),
+        ];
+        if let Some(id) = general.id {
+            metric_labels.push(("id".to_string(), id));
+        }
+
         Self {
             binding_addr: config.binding_addr,
             shutdown,
+            metric_labels,
         }
     }
 
@@ -58,8 +70,8 @@ impl Udp {
             .map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = register_counter!("bytes_received");
-        let packet_received = register_counter!("packet_received");
+        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
+        let packet_received = register_counter!("packet_received", &self.metric_labels);
 
         loop {
             tokio::select! {
