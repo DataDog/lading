@@ -144,9 +144,9 @@ impl Server {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
-            Server::Udp(inner) => inner.run().await.map_err(Error::Udp),
+            Server::Udp(inner) => Box::pin(inner.run()).await.map_err(Error::Udp),
             Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
-            Server::UnixDatagram(inner) => inner.run().await.map_err(Error::UnixDatagram),
+            Server::UnixDatagram(inner) => Box::pin(inner.run()).await.map_err(Error::UnixDatagram),
             Server::Sqs(inner) => inner.run().await.map_err(Error::Sqs),
             Server::SplunkHec(inner) => inner.run().await.map_err(Error::SplunkHec),
         }

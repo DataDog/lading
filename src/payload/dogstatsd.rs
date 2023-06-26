@@ -188,7 +188,7 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
         let metric_generator = MetricGenerator {
-            metric_weights: WeightedIndex::new(&metric_choices).unwrap(),
+            metric_weights: WeightedIndex::new(metric_choices).unwrap(),
             names: titles,
             container_ids: small_strings,
             tags,
@@ -199,7 +199,7 @@ impl MemberGenerator {
         // MemberGenerator`.
         let member_choices = [kind_weights.metric, kind_weights.event, kind_weights.event];
         MemberGenerator {
-            kind_weights: WeightedIndex::new(&member_choices).unwrap(),
+            kind_weights: WeightedIndex::new(member_choices).unwrap(),
             event_generator,
             service_check_generator,
             metric_generator,
