@@ -190,7 +190,7 @@ impl Grpc {
             .cloned()
             .expect("target_uri should have an RPC path");
 
-        let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
+        let throttle = Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone());
         Ok(Self {
             target_uri,
             rpc_path,

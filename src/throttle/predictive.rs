@@ -13,7 +13,7 @@ const INTERVAL_TICKS: u64 = 1_000_000;
 #[derive(thiserror::Error, Debug, Clone, Copy)]
 pub(crate) enum Error {
     /// Requested capacity is greater than maximum allowed capacity.
-    #[error("Capacity")]
+    #[error("Requested capacity is greater than maximum allowed capacity")]
     Capacity,
 }
 
@@ -54,6 +54,8 @@ pub(crate) struct Predictive<C = RealClock> {
     refill_per_tick: u64,
     /// The clock that this `Throttle` will use.
     clock: C,
+    /// Metrics labels
+    labels: Vec<(String, String)>,
 }
 
 impl<C> Predictive<C>
@@ -84,10 +86,26 @@ where
         // that projected budget their next interval has more. The goal is to
         // narrow in on a 'true' rate for the caller.
 
-        gauge!("throttle_spare_capacity", self.spare_capacity as f64);
-        gauge!("throttle_refills_per_tick", self.refill_per_tick as f64);
-        gauge!("throttle_requested_budget", self.requested_budget as f64);
-        gauge!("throttle_projected_budget", self.projected_budget as f64);
+        gauge!(
+            "throttle_spare_capacity",
+            self.spare_capacity as f64,
+            &self.labels
+        );
+        gauge!(
+            "throttle_refills_per_tick",
+            self.refill_per_tick as f64,
+            &self.labels
+        );
+        gauge!(
+            "throttle_requested_budget",
+            self.requested_budget as f64,
+            &self.labels
+        );
+        gauge!(
+            "throttle_projected_budget",
+            self.projected_budget as f64,
+            &self.labels
+        );
 
         // RSS limit signal. Thankfully very simple: a loop that polls
         // `rss_bytes_limit_exceeded` once a second.
@@ -177,7 +195,11 @@ where
         Ok(())
     }
 
-    pub(crate) fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
+    pub(crate) fn with_clock(
+        maximum_capacity: NonZeroU32,
+        clock: C,
+        labels: Vec<(String, String)>,
+    ) -> Self {
         // We set the maximum capacity of the bucket, X. We say that an
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
@@ -195,6 +217,7 @@ where
             interval: 0,
             spare_capacity: 0,
             clock,
+            labels,
         }
     }
 
@@ -321,7 +344,7 @@ mod test {
                 .collect();
 
             let clock = TestClock::new(tick_progressions);
-            let mut throttle = Predictive::with_clock(maximum_capacity, clock);
+            let mut throttle = Predictive::with_clock(maximum_capacity, clock, vec![]);
 
             for request in requests {
                 assert!(throttle.maximum_capacity() >= throttle.projected_budget());
@@ -351,7 +374,7 @@ mod test {
                 .collect();
 
             let clock = TestClock::new(tick_progressions);
-            let mut throttle = Predictive::with_clock(maximum_capacity, clock);
+            let mut throttle = Predictive::with_clock(maximum_capacity, clock, vec![]);
 
             for request in requests {
                 assert!(throttle.maximum_capacity() >= throttle.requested_budget());
@@ -381,7 +404,7 @@ mod test {
                 .collect();
 
             let clock = TestClock::new(tick_progressions);
-            let mut throttle = Predictive::with_clock(maximum_capacity, clock);
+            let mut throttle = Predictive::with_clock(maximum_capacity, clock, vec![]);
 
             let mut prev_interval = throttle.interval();
 

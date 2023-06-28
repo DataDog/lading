@@ -86,15 +86,21 @@ pub(crate) enum Throttle<C = RealClock> {
 }
 
 impl Throttle<RealClock> {
-    pub(crate) fn new_with_config(config: Config, maximum_capacity: NonZeroU32) -> Self {
+    pub(crate) fn new_with_config(
+        config: Config,
+        maximum_capacity: NonZeroU32,
+        labels: Vec<(String, String)>,
+    ) -> Self {
         match config {
             Config::Predictive => Throttle::Predictive(predictive::Predictive::with_clock(
                 maximum_capacity,
                 RealClock::default(),
+                labels,
             )),
             Config::Stable => Throttle::Stable(stable::Stable::with_clock(
                 maximum_capacity,
                 RealClock::default(),
+                labels,
             )),
             Config::AllOut => Throttle::AllOut,
         }

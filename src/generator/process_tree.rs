@@ -262,7 +262,13 @@ impl ProcessTree {
             Err(e) => return Err(Error::from(e)),
         };
 
-        let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "process_tree".to_string()),
+        ];
+
+        let throttle =
+            Throttle::new_with_config(config.throttle, config.max_tree_per_second, labels);
         match serde_yaml::to_string(config) {
             Ok(serialized) => Ok(Self {
                 lading_path,

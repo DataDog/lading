@@ -159,13 +159,19 @@ impl FileGen {
             &block_sizes,
         )?;
 
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "file_gen".to_string()),
+        ];
+
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
         let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
         let block_cache = Arc::new(block_cache);
 
         for _ in 0..config.duplicates {
-            let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
+            let throttle =
+                Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone());
 
             let child = Child {
                 path_template: config.path_template.clone(),
