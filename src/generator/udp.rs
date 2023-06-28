@@ -130,7 +130,7 @@ impl Udp {
         Ok(Self {
             addr,
             block_cache,
-            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+            throttle: Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone()),
             metric_labels: labels,
             shutdown,
         })

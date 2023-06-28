@@ -29,6 +29,8 @@ pub(crate) struct Stable<C = RealClock> {
     refill_per_tick: u64,
     /// The clock that `Stable` will use.
     clock: C,
+    /// Metrics labels
+    labels: Vec<(String, String)>,
 }
 
 impl<C> Stable<C>
@@ -49,7 +51,11 @@ where
         // they draw down more than is available in the bucket they're made to
         // wait.
 
-        gauge!("throttle_refills_per_tick", self.refill_per_tick as f64);
+        gauge!(
+            "throttle_refills_per_tick",
+            self.refill_per_tick as f64,
+            &self.labels
+        );
 
         // Fast bail-out. There's no way for this to ever be satisfied and is a
         // bug on the part of the caller, arguably.
@@ -88,7 +94,11 @@ where
         Ok(())
     }
 
-    pub(crate) fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
+    pub(crate) fn with_clock(
+        maximum_capacity: NonZeroU32,
+        clock: C,
+        labels: Vec<(String, String)>,
+    ) -> Self {
         // We set the maximum capacity of the bucket, X. We say that an
         // 'interval' happens once every second. If we allow for the tick of
         // Throttle to be one per microsecond that's 1x10^6 ticks per interval.
@@ -103,6 +113,7 @@ where
             refill_per_tick,
             spare_capacity: 0,
             clock,
+            labels,
         }
     }
 }
