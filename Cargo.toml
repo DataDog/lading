@@ -58,7 +58,7 @@ serde_tuple = { version = "0.5", default-features = false }
 serde_yaml = "0.9"
 thiserror = { version = "1.0" }
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1.28", features = [
+tokio = { version = "1.29", features = [
     "rt",
     "rt-multi-thread",
     "macros",
