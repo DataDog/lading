@@ -145,7 +145,7 @@ impl Server {
             .map_err(Error::ProcError)?;
 
         let limits = process.limits().map_err(Error::ProcError)?;
-        // NOTE units on the CPU limits are 'CPU / second'
+        // NOTE units on the CPU limits are 'CPU-seconds / second'
         let max_cpu_time: Limit = limits.max_cpu_time;
         let soft_cpu_limit: f64 = match max_cpu_time.soft_limit {
             LimitValue::Unlimited => f64::MAX,
@@ -188,18 +188,18 @@ impl Server {
                         let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
                         let kernel_time_ticks: u64 = cstime.unsigned_abs() + stime; // CPU-ticks
-                        let kernel_time_seconds: f64 = kernel_time_ticks as f64 / ticks_per_second as f64; // CPU
+                        let kernel_time_seconds: f64 = kernel_time_ticks as f64 / ticks_per_second as f64; // CPU-seconds
                         let user_time_ticks: u64 = cutime.unsigned_abs() + utime; // CPU-ticks
-                        let user_time_seconds: f64 = user_time_ticks as f64 / ticks_per_second as f64; // CPU
+                        let user_time_seconds: f64 = user_time_ticks as f64 / ticks_per_second as f64; // CPU-seconds
 
                         let process_uptime_seconds_diff: f64 = process_uptime_seconds - prev_process_uptime_seconds; // second
                         let kernel_time_ticks_diff = (kernel_time_ticks - prev_kernel_time_ticks) as f64; // CPU-ticks
                         let user_time_ticks_diff = (user_time_ticks - prev_user_time_ticks) as f64; // CPU-ticks
                         let time_ticks_diff = (kernel_time_ticks + user_time_ticks) - (prev_kernel_time_ticks + prev_user_time_ticks); // CPU-ticks
 
-                        let kernel_time_seconds_diff: f64 = kernel_time_ticks_diff / ticks_per_second as f64; // CPU / second
-                        let user_time_seconds_diff: f64 = user_time_ticks_diff / ticks_per_second as f64; // CPU / second
-                        let time_seconds_diff: f64 = time_ticks_diff as f64 / ticks_per_second as f64; // CPU / second
+                        let kernel_time_seconds_diff: f64 = kernel_time_ticks_diff / ticks_per_second as f64; // CPU-seconds
+                        let user_time_seconds_diff: f64 = user_time_ticks_diff / ticks_per_second as f64; // CPU-seconds
+                        let time_seconds_diff: f64 = time_ticks_diff as f64 / ticks_per_second as f64; // CPU-seconds
 
                         let kernel_utilization_soft = (kernel_time_seconds_diff / process_uptime_seconds_diff) / soft_cpu_limit;
                         let kernel_utilization_hard = (kernel_time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
