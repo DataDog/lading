@@ -1,0 +1,34 @@
+{
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": "true",
+			"username": "vscode",
+			"userUid": "1000",
+			"userGid": "1000",
+			"upgradePackages": "true",
+			"nonFreePackage": "true"
+		},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"installDockerBuildx": "true"
+		},
+		"ghcr.io/devcontainers/features/rust:1": {
+			"version": "1.70",
+			"profile": "complete"
+		},
+		"ghcr.io/devcontainers/features/git:1": {
+			"version": "os-provided",
+			"ppa": "false"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer"
+			]
+		}
+	},
+	"postCreateCommand": "cargo clean --quiet && cargo check"
+}
