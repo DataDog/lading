@@ -161,8 +161,8 @@ impl Server {
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
                         let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
 
-                        let cutime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.cutime).unwrap()).sum();
-                        let cstime: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.cstime).unwrap()).sum();
+                        let cutime: u64 = all_stats.iter().map(|stat| stat.0.cutime).sum::<i64>().unsigned_abs();
+                        let cstime: u64 = all_stats.iter().map(|stat| stat.0.cstime).sum::<i64>().unsigned_abs();
                         let utime: u64 = all_stats.iter().map(|stat| stat.0.utime).sum();
                         let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
@@ -186,7 +186,7 @@ impl Server {
 
                         let rsslim: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rsslim));
                         let vsize: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.vsize));
-                        let num_threads: u64 = all_stats.iter().map(|stat| <i64 as std::convert::TryInto<u64>>::try_into(stat.0.num_threads).unwrap()).sum();
+                        let num_threads: u64 = all_stats.iter().map(|stat| stat.0.num_threads).sum::<i64>().unsigned_abs();
 
                         let rss_bytes: u64 = rss*page_size;
                         RSS_BYTES.store(rss_bytes, Ordering::Relaxed);
