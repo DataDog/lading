@@ -163,8 +163,8 @@ impl Server {
 
         let mut procfs_delay = tokio::time::interval(Duration::from_secs(1));
 
-        let mut prev_kernel_time_seconds = 0;
-        let mut prev_user_time_seconds = 0;
+        let mut prev_kernel_time_ticks = 0;
+        let mut prev_user_time_ticks = 0;
         let mut prev_process_uptime_seconds: f64 = 0.0;
 
         loop {
@@ -187,13 +187,19 @@ impl Server {
                         let utime: u64 = all_stats.iter().map(|stat| stat.0.utime).sum();
                         let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
-                        let kernel_time_seconds: u64 = (cstime.unsigned_abs() + stime)  / ticks_per_second; // CPU
-                        let user_time_seconds: u64 = (cutime.unsigned_abs() + utime)  / ticks_per_second; // CPU
+                        let kernel_time_ticks: u64 = cstime.unsigned_abs() + stime; // CPU-ticks
+                        let kernel_time_seconds: f64 = kernel_time_ticks as f64 / ticks_per_second as f64; // CPU
+                        let user_time_ticks: u64 = cutime.unsigned_abs() + utime; // CPU-ticks
+                        let user_time_seconds: f64 = user_time_ticks as f64 / ticks_per_second as f64; // CPU
 
                         let process_uptime_seconds_diff: f64 = process_uptime_seconds - prev_process_uptime_seconds; // second
-                        let kernel_time_seconds_diff = (kernel_time_seconds - prev_kernel_time_seconds) as f64; // CPU
-                        let user_time_seconds_diff = (user_time_seconds - prev_user_time_seconds) as f64; // CPU
-                        let time_seconds_diff = ((kernel_time_seconds + user_time_seconds) - (prev_kernel_time_seconds + prev_user_time_seconds)) as f64; // CPU
+                        let kernel_time_ticks_diff = (kernel_time_ticks - prev_kernel_time_ticks) as f64; // CPU-ticks
+                        let user_time_ticks_diff = (user_time_ticks - prev_user_time_ticks) as f64; // CPU-ticks
+                        let time_ticks_diff = (kernel_time_ticks + user_time_ticks) - (prev_kernel_time_ticks + prev_user_time_ticks); // CPU-ticks
+
+                        let kernel_time_seconds_diff: f64 = kernel_time_ticks_diff / ticks_per_second as f64; // CPU / second
+                        let user_time_seconds_diff: f64 = user_time_ticks_diff / ticks_per_second as f64; // CPU / second
+                        let time_seconds_diff: f64 = time_ticks_diff as f64 / ticks_per_second as f64; // CPU / second
 
                         let kernel_utilization_soft = (kernel_time_seconds_diff / process_uptime_seconds_diff) / soft_cpu_limit;
                         let kernel_utilization_hard = (kernel_time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
@@ -203,9 +209,9 @@ impl Server {
                         let utilization_hard = (time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
 
                         // The time spent in kernel-space in seconds.
-                        gauge!("kernel_time_seconds", kernel_time_seconds as f64);
+                        gauge!("kernel_time_seconds", kernel_time_seconds);
                         // The time spent in user-space in seconds.
-                        gauge!("user_time_seconds", user_time_seconds as f64);
+                        gauge!("user_time_seconds", user_time_seconds);
                         // The uptime of the process in fractional seconds.
                         gauge!("uptime_seconds", process_uptime_seconds);
                         // The utilization of CPU time in kernel-space with regard to soft cgroup CPU/second limit
@@ -221,8 +227,8 @@ impl Server {
                         // The utilization of CPU time in user-space and kernel-space with regard to hard cgroup CPU/second limit
                         gauge!("cpu_time_utilization_hard", utilization_hard);
 
-                        prev_kernel_time_seconds = kernel_time_seconds;
-                        prev_user_time_seconds = user_time_seconds;
+                        prev_kernel_time_ticks = kernel_time_ticks;
+                        prev_user_time_ticks = user_time_ticks;
                         prev_process_uptime_seconds = process_uptime_seconds;
 
                         let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rss));
