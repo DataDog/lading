@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.16.1"
+version = "0.16.2-rc1"
 dependencies = [
  "async-pidfd",
  "async-trait",
