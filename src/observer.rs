@@ -55,6 +55,27 @@ pub struct Server {
     shutdown: Shutdown,
 }
 
+#[inline]
+#[cfg(target_os = "linux")]
+fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
+    // Takes (heavy) inspiration from Datadog Agent, see https://github.com/DataDog/datadog-agent/blob/8914a281cf6f9cfa867e0d72899c39afa51abce7/pkg/process/checks/process_nix.go
+    if delta_time == 0.0 {
+        return 0.0;
+    }
+
+    let mut overall_percentage = (delta_ticks / delta_time) * 100.0;
+    if overall_percentage > 100.0 {
+        overall_percentage = 100.0;
+    }
+
+    let mut percent = overall_percentage * num_cores;
+    if percent < 0.0 {
+        percent = 0.0;
+    }
+
+    percent
+}
+
 impl Server {
     /// Create a new [`Server`] instance
     ///
@@ -122,12 +143,17 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    #[allow(clippy::similar_names)]
+    #[allow(
+        clippy::similar_names,
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     #[cfg(target_os = "linux")]
     pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         use std::{sync::atomic::Ordering, time::Duration};
 
-        use metrics::gauge;
+        use metrics::{gauge, register_counter, register_gauge};
         use procfs::Uptime;
 
         let target_pid = pid_snd
@@ -141,12 +167,26 @@ impl Server {
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
 
-        let ticks_per_second: f64 = procfs::ticks_per_second() as f64;
+        let num_cores = num_cpus::get(); // Cores, logical on Linux, obeying cgroup limits if present
+
+        let ticks_per_second: u64 = procfs::ticks_per_second(); // CPU-ticks / second
         let page_size = procfs::page_size();
 
-        gauge!("ticks_per_second", ticks_per_second);
+        gauge!("core_total", num_cores as f64);
+        gauge!("ticks_per_second", ticks_per_second as f64);
 
         let mut procfs_delay = tokio::time::interval(Duration::from_secs(1));
+
+        let mut prev_kernel_time_ticks = 0;
+        let mut prev_user_time_ticks = 0;
+        let mut prev_process_uptime_ticks = 0;
+
+        let kernel_ticks_counter = register_counter!("kernel_ticks");
+        let user_ticks_counter = register_counter!("user_ticks");
+        let target_uptime_ticks_counter = register_counter!("target_uptime_ticks");
+        let cpu_percentage_gauge = register_gauge!("cpu_percentage");
+        let kernel_cpu_percentage_gauge = register_gauge!("kernel_cpu_percentage");
+        let user_cpu_percentage_gauge = register_gauge!("user_cpu_percentage");
 
         loop {
             tokio::select! {
@@ -156,25 +196,46 @@ impl Server {
                         // information from the kernel: computer uptime and
                         // process starttime relative to power-on of the
                         // computer.
-                        let process_starttime_ticks: u64 = parent_stat.starttime;
-                        let process_starttime_seconds: f64 = process_starttime_ticks as f64 / ticks_per_second;
-                        let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime;
-                        let process_uptime_seconds = uptime_seconds - process_starttime_seconds;
+                        let process_starttime_ticks: u64 = parent_stat.starttime; // ticks after system boot
+                        let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime; // seconds since boot
+                        let uptime_ticks: u64 = uptime_seconds.round() as u64 * ticks_per_second; // CPU-ticks since boot
+                        let process_uptime_ticks: u64 = uptime_ticks - process_starttime_ticks;
 
-                        let cutime: u64 = all_stats.iter().map(|stat| stat.0.cutime).sum::<i64>().unsigned_abs();
-                        let cstime: u64 = all_stats.iter().map(|stat| stat.0.cstime).sum::<i64>().unsigned_abs();
+                        // Child process wait time
+                        let cutime: i64 = all_stats.iter().map(|stat| stat.0.cutime).sum();
+                        let cstime: i64 = all_stats.iter().map(|stat| stat.0.cstime).sum();
+                        // Parent process wait time
                         let utime: u64 = all_stats.iter().map(|stat| stat.0.utime).sum();
                         let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
-                        let kernel_time_seconds = (cstime + stime) as f64 / ticks_per_second;
-                        let user_time_seconds = (cutime + utime) as f64 / ticks_per_second;
+                        let kernel_time_ticks: u64 = cstime.unsigned_abs() + stime; // CPU-ticks
+                        let user_time_ticks: u64 = cutime.unsigned_abs() + utime; // CPU-ticks
 
-                        // The time spent in kernel-space in seconds.
-                        gauge!("kernel_time_seconds", kernel_time_seconds);
-                        // The time spent in user-space in seconds.
-                        gauge!("user_time_seconds", user_time_seconds);
-                        // The uptime of the process in fractional seconds.
-                        gauge!("uptime_seconds", process_uptime_seconds);
+                        let process_uptime_ticks_diff = process_uptime_ticks - prev_process_uptime_ticks; // CPU-ticks
+                        let kernel_time_ticks_diff = kernel_time_ticks - prev_kernel_time_ticks; // CPU-ticks
+                        let user_time_ticks_diff = user_time_ticks - prev_user_time_ticks; // CPU-ticks
+                        let time_ticks_diff = (kernel_time_ticks + user_time_ticks) - (prev_kernel_time_ticks + prev_user_time_ticks); // CPU-ticks
+
+                        let user_percentage = percentage(user_time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
+                        let kernel_percentage = percentage(kernel_time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
+                        let cpu_percentage = percentage(time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
+
+                        // The time spent in kernel-space in ticks.
+                        kernel_ticks_counter.absolute(kernel_time_ticks);
+                        // The time spent in user-space in ticks.
+                        user_ticks_counter.absolute(user_time_ticks);
+                        // The uptime of the process in CPU ticks.
+                        target_uptime_ticks_counter.absolute(process_uptime_ticks);
+                        // The percentage of CPU cores used in user and kernel space.
+                        cpu_percentage_gauge.set(cpu_percentage);
+                        // The percentage of CPU cores used in user space.
+                        user_cpu_percentage_gauge.set(user_percentage);
+                        // The percentage of CPU cores used in kernel space.
+                        kernel_cpu_percentage_gauge.set(kernel_percentage);
+
+                        prev_kernel_time_ticks = kernel_time_ticks;
+                        prev_user_time_ticks = user_time_ticks;
+                        prev_process_uptime_ticks = process_uptime_ticks;
 
                         let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rss));
                         let pss: u64 = all_stats.iter().fold(0, |val, stat| {
@@ -189,7 +250,7 @@ impl Server {
                         let num_threads: u64 = all_stats.iter().map(|stat| stat.0.num_threads).sum::<i64>().unsigned_abs();
 
                         let rss_bytes: u64 = rss*page_size;
-                        RSS_BYTES.store(rss_bytes, Ordering::Relaxed);
+                        RSS_BYTES.store(rss_bytes, Ordering::Relaxed); // stored for the purposes of throttling
 
                         // Number of pages that the process has in real memory.
                         gauge!("rss_bytes", rss_bytes as f64);
