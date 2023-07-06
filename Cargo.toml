@@ -3,7 +3,7 @@ members = ["./", "integration/sheepdog", "integration/ducks"]
 
 [package]
 name = "lading"
-version = "0.17.0-rc3"
+version = "0.17.0"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2021"
 license = "MIT"
