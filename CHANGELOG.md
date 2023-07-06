@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Fixed
+- Removed a leftover debug print in the Json payload implementation.
 
 ## [0.17.0]
 ### Changed
@@ -12,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On Linux calculate CPU utilization in terms of logical, not physical, cores when possible.
 - CPU percentage calculated in the same manner as Agent's
 - Throttle metrics are now labeled with the respective generator's labels.
-- Observer now calculates CPU utilization with respect to target cgroup hard, soft limits. 
+- Observer now calculates CPU utilization with respect to target cgroup hard, soft limits.
 
 ## [0.16.1]
 ### Changed
