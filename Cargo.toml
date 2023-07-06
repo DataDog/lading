@@ -3,7 +3,7 @@ members = ["./", "integration/sheepdog", "integration/ducks"]
 
 [package]
 name = "lading"
-version = "0.16.2-rc1"
+version = "0.17.0-rc1"
 authors = ["Brian L. Troutwine <brian@troutwine.us>"]
 edition = "2021"
 license = "MIT"
@@ -36,6 +36,7 @@ metrics-exporter-prometheus = { version = "0.12.1", default-features = false, fe
 ] }
 metrics-util = { version = "0.15" }
 nix = { version = "0.26" }
+num_cpus = { version = "1.16" }
 once_cell = "1.18"
 opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-rust/", rev = "6078e32", features = [
     "traces",

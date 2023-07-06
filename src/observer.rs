@@ -122,12 +122,17 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    #[allow(clippy::similar_names)]
+    #[allow(
+        clippy::similar_names,
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     #[cfg(target_os = "linux")]
     pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         use std::{sync::atomic::Ordering, time::Duration};
 
-        use metrics::gauge;
+        use metrics::{gauge, register_counter, register_gauge};
         use procfs::{
             process::{Limit, LimitValue},
             Uptime,
@@ -144,28 +149,28 @@ impl Server {
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
 
-        let limits = process.limits().map_err(Error::ProcError)?;
-        // NOTE units on the CPU limits are 'CPU-seconds / second'
-        let max_cpu_time: Limit = limits.max_cpu_time;
-        let soft_cpu_limit: f64 = match max_cpu_time.soft_limit {
-            LimitValue::Unlimited => f64::MAX,
-            LimitValue::Value(val) => val as f64,
-        };
-        let hard_cpu_limit: f64 = match max_cpu_time.hard_limit {
-            LimitValue::Unlimited => f64::MAX,
-            LimitValue::Value(val) => val as f64,
-        };
+        let num_cores = procfs::CpuInfo::new()
+            .map_err(Error::ProcError)?
+            .num_cores() as u64; // Cores
 
-        let ticks_per_second: u64 = procfs::ticks_per_second();
+        let ticks_per_second: u64 = procfs::ticks_per_second(); // CPU-ticks / second
         let page_size = procfs::page_size();
 
+        gauge!("core_total", num_cores as f64);
         gauge!("ticks_per_second", ticks_per_second as f64);
 
         let mut procfs_delay = tokio::time::interval(Duration::from_secs(1));
 
         let mut prev_kernel_time_ticks = 0;
         let mut prev_user_time_ticks = 0;
-        let mut prev_process_uptime_seconds: f64 = 0.0;
+        let mut prev_process_uptime_ticks = 0;
+
+        let kernel_ticks_counter = register_counter!("kernel_ticks");
+        let user_ticks_counter = register_counter!("user_ticks");
+        let target_uptime_ticks_counter = register_counter!("target_uptime_ticks");
+        let cpu_utilization_gauge = register_gauge!("cpu_utilization");
+        let kernel_cpu_utilization_gauge = register_gauge!("kernel_cpu_utilization");
+        let user_cpu_utilization_gauge = register_gauge!("user_cpu_utilization");
 
         loop {
             tokio::select! {
@@ -176,9 +181,9 @@ impl Server {
                         // process starttime relative to power-on of the
                         // computer.
                         let process_starttime_ticks: u64 = parent_stat.starttime; // ticks after system boot
-                        let process_starttime_seconds: f64 = (process_starttime_ticks as f64) / (ticks_per_second as f64);
                         let uptime_seconds: f64 = Uptime::new().expect("could not query uptime").uptime; // seconds since boot
-                        let process_uptime_seconds: f64 = uptime_seconds - process_starttime_seconds;
+                        let uptime_ticks: u64 = uptime_seconds.round() as u64 * ticks_per_second; // CPU-ticks since boot
+                        let process_uptime_ticks: u64 = uptime_ticks - process_starttime_ticks;
 
                         // Child process wait time
                         let cutime: i64 = all_stats.iter().map(|stat| stat.0.cutime).sum();
@@ -188,48 +193,33 @@ impl Server {
                         let stime: u64 = all_stats.iter().map(|stat| stat.0.stime).sum();
 
                         let kernel_time_ticks: u64 = cstime.unsigned_abs() + stime; // CPU-ticks
-                        let kernel_time_seconds: f64 = kernel_time_ticks as f64 / ticks_per_second as f64; // CPU-seconds
                         let user_time_ticks: u64 = cutime.unsigned_abs() + utime; // CPU-ticks
-                        let user_time_seconds: f64 = user_time_ticks as f64 / ticks_per_second as f64; // CPU-seconds
 
-                        let process_uptime_seconds_diff: f64 = process_uptime_seconds - prev_process_uptime_seconds; // second
-                        let kernel_time_ticks_diff = (kernel_time_ticks - prev_kernel_time_ticks) as f64; // CPU-ticks
-                        let user_time_ticks_diff = (user_time_ticks - prev_user_time_ticks) as f64; // CPU-ticks
+                        let process_uptime_ticks_diff = process_uptime_ticks - prev_process_uptime_ticks; // CPU-ticks
+                        let kernel_time_ticks_diff = kernel_time_ticks - prev_kernel_time_ticks; // CPU-ticks
+                        let user_time_ticks_diff = user_time_ticks - prev_user_time_ticks; // CPU-ticks
                         let time_ticks_diff = (kernel_time_ticks + user_time_ticks) - (prev_kernel_time_ticks + prev_user_time_ticks); // CPU-ticks
 
-                        let kernel_time_seconds_diff: f64 = kernel_time_ticks_diff / ticks_per_second as f64; // CPU-seconds
-                        let user_time_seconds_diff: f64 = user_time_ticks_diff / ticks_per_second as f64; // CPU-seconds
-                        let time_seconds_diff: f64 = time_ticks_diff as f64 / ticks_per_second as f64; // CPU-seconds
+                        let user_utilization = (user_time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
+                        let kernel_utilization = (kernel_time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
+                        let cpu_utilization = (time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
 
-                        let kernel_utilization_soft = (kernel_time_seconds_diff / process_uptime_seconds_diff) / soft_cpu_limit;
-                        let kernel_utilization_hard = (kernel_time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
-                        let user_utilization_soft = (user_time_seconds_diff / process_uptime_seconds_diff) / soft_cpu_limit;
-                        let user_utilization_hard = (user_time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
-                        let utilization_soft = (time_seconds_diff / process_uptime_seconds_diff) / soft_cpu_limit;
-                        let utilization_hard = (time_seconds_diff / process_uptime_seconds_diff) / hard_cpu_limit;
-
-                        // The time spent in kernel-space in seconds.
-                        gauge!("kernel_time_seconds", kernel_time_seconds);
-                        // The time spent in user-space in seconds.
-                        gauge!("user_time_seconds", user_time_seconds);
-                        // The uptime of the process in fractional seconds.
-                        gauge!("uptime_seconds", process_uptime_seconds);
-                        // The utilization of CPU time in kernel-space with regard to soft cgroup CPU/second limit
-                        gauge!("kernel_time_utilization_soft", kernel_utilization_soft);
-                        // The utilization of CPU time in kernel-space with regard to hard cgroup CPU/second limit
-                        gauge!("kernel_time_utilization_hard", kernel_utilization_hard);
-                        // The utilization of CPU time in user-space with regard to soft cgroup CPU/second limit
-                        gauge!("user_time_utilization_soft", user_utilization_soft);
-                        // The utilization of CPU time in user-space with regard to hard cgroup CPU/second limit
-                        gauge!("user_time_utilization_hard", user_utilization_hard);
-                        // The utilization of CPU time in user-space and kernel-space with regard to soft cgroup CPU/second limit
-                        gauge!("cpu_time_utilization_soft", utilization_soft);
-                        // The utilization of CPU time in user-space and kernel-space with regard to hard cgroup CPU/second limit
-                        gauge!("cpu_time_utilization_hard", utilization_hard);
+                        // The time spent in kernel-space in ticks.
+                        kernel_ticks_counter.absolute(kernel_time_ticks);
+                        // The time spent in user-space in ticks.
+                        user_ticks_counter.absolute(user_time_ticks);
+                        // The uptime of the process in CPU ticks.
+                        target_uptime_ticks_counter.absolute(process_uptime_ticks);
+                        // The utilization of available CPU cores in user and kernel space.
+                        cpu_utilization_gauge.set(cpu_utilization);
+                        // The utilization of available CPU cores in user space.
+                        user_cpu_utilization_gauge.set(user_utilization);
+                        // The utilization of available CPU cores in kernel space.
+                        kernel_cpu_utilization_gauge.set(kernel_utilization);
 
                         prev_kernel_time_ticks = kernel_time_ticks;
                         prev_user_time_ticks = user_time_ticks;
-                        prev_process_uptime_seconds = process_uptime_seconds;
+                        prev_process_uptime_ticks = process_uptime_ticks;
 
                         let rss: u64 = all_stats.iter().fold(0, |val, stat| val.saturating_add(stat.0.rss));
                         let pss: u64 = all_stats.iter().fold(0, |val, stat| {
