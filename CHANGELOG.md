@@ -6,13 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.1]
+### Fixed
+- Removed a leftover debug print in the Json payload implementation.
+
 ## [0.17.0]
 ### Changed
 - Adjusted the default throttle to stable from predictive
 - On Linux calculate CPU utilization in terms of logical, not physical, cores when possible.
 - CPU percentage calculated in the same manner as Agent's
 - Throttle metrics are now labeled with the respective generator's labels.
-- Observer now calculates CPU utilization with respect to target cgroup hard, soft limits. 
+- Observer now calculates CPU utilization with respect to target cgroup hard, soft limits.
 
 ## [0.16.1]
 ### Changed

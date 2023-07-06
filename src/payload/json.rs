@@ -63,7 +63,6 @@ impl Serialize for Json {
             let encoding = serde_json::to_string(&member)?;
             let line_length = encoding.len() + 1; // add one for the newline
 
-            println!("[{max_bytes}] {line_length} {bytes_remaining}");
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
                     writeln!(writer, "{encoding}")?;
