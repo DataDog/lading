@@ -133,10 +133,7 @@ impl Server {
         use std::{sync::atomic::Ordering, time::Duration};
 
         use metrics::{gauge, register_counter, register_gauge};
-        use procfs::{
-            process::{Limit, LimitValue},
-            Uptime,
-        };
+        use procfs::Uptime;
 
         let target_pid = pid_snd
             .recv()
