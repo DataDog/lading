@@ -22,7 +22,7 @@ pub enum Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::Predictive
+        Self::Stable
     }
 }
 
