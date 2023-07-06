@@ -167,9 +167,7 @@ impl Server {
         let process = Process::new(target_pid.try_into().expect("PID coercion failed"))
             .map_err(Error::ProcError)?;
 
-        let num_cores = procfs::CpuInfo::new()
-            .map_err(Error::ProcError)?
-            .num_cores() as u64; // Cores
+        let num_cores = num_cpus::get(); // Cores, logical on Linux, obeying cgroup limits if present
 
         let ticks_per_second: u64 = procfs::ticks_per_second(); // CPU-ticks / second
         let page_size = procfs::page_size();
