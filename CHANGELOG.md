@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.0-rc2]
+### Changed
+ - CPU percentage calculated in the same manner as Agent's
+
 ## [0.17.0-rc1]
 
 ### Changed

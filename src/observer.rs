@@ -55,6 +55,27 @@ pub struct Server {
     shutdown: Shutdown,
 }
 
+#[inline]
+#[cfg(target_os = "linux")]
+fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
+    // Takes (heavy) inspiration from Datadog Agent, see https://github.com/DataDog/datadog-agent/blob/8914a281cf6f9cfa867e0d72899c39afa51abce7/pkg/process/checks/process_nix.go
+    if delta_time == 0.0 {
+        return 0.0;
+    }
+
+    let mut overall_percentage = (delta_ticks / delta_time) * 100.0;
+    if overall_percentage > 100.0 {
+        overall_percentage = 100.0;
+    }
+
+    let mut percent = overall_percentage * num_cores;
+    if percent < 0.0 {
+        percent = 0.0;
+    }
+
+    percent
+}
+
 impl Server {
     /// Create a new [`Server`] instance
     ///
@@ -165,9 +186,9 @@ impl Server {
         let kernel_ticks_counter = register_counter!("kernel_ticks");
         let user_ticks_counter = register_counter!("user_ticks");
         let target_uptime_ticks_counter = register_counter!("target_uptime_ticks");
-        let cpu_utilization_gauge = register_gauge!("cpu_utilization");
-        let kernel_cpu_utilization_gauge = register_gauge!("kernel_cpu_utilization");
-        let user_cpu_utilization_gauge = register_gauge!("user_cpu_utilization");
+        let cpu_percentage_gauge = register_gauge!("cpu_percentage");
+        let kernel_cpu_percentage_gauge = register_gauge!("kernel_cpu_percentage");
+        let user_cpu_percentage_gauge = register_gauge!("user_cpu_percentage");
 
         loop {
             tokio::select! {
@@ -197,9 +218,9 @@ impl Server {
                         let user_time_ticks_diff = user_time_ticks - prev_user_time_ticks; // CPU-ticks
                         let time_ticks_diff = (kernel_time_ticks + user_time_ticks) - (prev_kernel_time_ticks + prev_user_time_ticks); // CPU-ticks
 
-                        let user_utilization = (user_time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
-                        let kernel_utilization = (kernel_time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
-                        let cpu_utilization = (time_ticks_diff * num_cores) as f64 / process_uptime_ticks_diff as f64; // Cores
+                        let user_percentage = percentage(user_time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
+                        let kernel_percentage = percentage(kernel_time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
+                        let cpu_percentage = percentage(time_ticks_diff as f64, process_uptime_ticks_diff as f64, num_cores as f64);
 
                         // The time spent in kernel-space in ticks.
                         kernel_ticks_counter.absolute(kernel_time_ticks);
@@ -207,12 +228,12 @@ impl Server {
                         user_ticks_counter.absolute(user_time_ticks);
                         // The uptime of the process in CPU ticks.
                         target_uptime_ticks_counter.absolute(process_uptime_ticks);
-                        // The utilization of available CPU cores in user and kernel space.
-                        cpu_utilization_gauge.set(cpu_utilization);
-                        // The utilization of available CPU cores in user space.
-                        user_cpu_utilization_gauge.set(user_utilization);
-                        // The utilization of available CPU cores in kernel space.
-                        kernel_cpu_utilization_gauge.set(kernel_utilization);
+                        // The percentage of CPU cores used in user and kernel space.
+                        cpu_percentage_gauge.set(cpu_percentage);
+                        // The percentage of CPU cores used in user space.
+                        user_cpu_percentage_gauge.set(user_percentage);
+                        // The percentage of CPU cores used in kernel space.
+                        kernel_cpu_percentage_gauge.set(kernel_percentage);
 
                         prev_kernel_time_ticks = kernel_time_ticks;
                         prev_user_time_ticks = user_time_ticks;
