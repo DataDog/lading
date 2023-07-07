@@ -13,7 +13,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use tokio::time::Duration;
 use tower::ServiceBuilder;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::signals::Shutdown;
 
