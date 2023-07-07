@@ -13,7 +13,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use tokio::time::Duration;
 use tower::ServiceBuilder;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::signals::Shutdown;
 
@@ -259,7 +259,7 @@ async fn srv(
                 .unwrap())
         }
         action => {
-            println!("Unknown action: {action:?}");
+            debug!("Unknown action: {action:?}");
             Ok(Response::builder()
                 .status(StatusCode::NOT_IMPLEMENTED)
                 .body(Body::from(vec![]))
