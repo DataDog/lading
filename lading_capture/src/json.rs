@@ -5,6 +5,8 @@ use serde::Serialize;
 use std::{borrow::Cow, collections::HashMap};
 use uuid::Uuid;
 
+use crate::proto::lading::v1;
+
 #[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 /// The kinds of metrics that are recorded in [`Line`].
@@ -13,6 +15,16 @@ pub enum MetricKind {
     Counter,
     /// A point-at-time value.
     Gauge,
+}
+
+impl From<v1::MetricKind> for MetricKind {
+    fn from(value: v1::MetricKind) -> Self {
+        match value {
+            v1::MetricKind::Unspecified => unreachable!(),
+            v1::MetricKind::Counter => MetricKind::Counter,
+            v1::MetricKind::Gauge => MetricKind::Gauge,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
