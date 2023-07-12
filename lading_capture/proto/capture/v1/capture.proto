@@ -1,7 +1,7 @@
 // Lading capture payloads
 syntax = "proto3";
 
-package lading.proto.capture.v1;
+package lading_capture.proto.capture.v1;
 
 // The kinds of metrics that Lading produces.
 enum MetricKind {
