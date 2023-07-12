@@ -10,7 +10,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-lading-capture = { path = "../lading-capture" }
+lading-capture = { path = "../lading_capture" }
 
 async-trait = { version = "0.1", default-features = false, features = [] }
 byte-unit = { version = "4.0", features = ["serde"] }

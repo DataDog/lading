@@ -4,6 +4,6 @@
 /// archival.
 pub mod lading {
     pub mod v1 {
-        include!("proto/lading.proto.capture.v1.rs");
+        include!("proto/lading_capture.proto.capture.v1.rs");
     }
 }
