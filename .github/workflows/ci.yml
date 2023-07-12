@@ -89,3 +89,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: cargo test -p sheepdog
         timeout-minutes: 30
+
+  buf:
+    runs-on: ubuntu-latest
+    steps:
+      # Check our protobufs for lint cleanliness and for lack of breaking
+      # changes
+      - uses: actions/checkout@v3
+      - name: buf-setup
+        uses: bufbuild/buf-setup-action@v1.15.0
+      - name: buf-lint
+        uses: bufbuild/buf-lint-action@v1.0.3
+      # NOTE we will need to actually have protos in main before this has the
+      # potential of working.
+      #
+      # - name: buf-breaking
+      #   uses: bufbuild/buf-breaking-action@v1.1.2
+      #   with:
+      #     against: 'https://github.com/datadog/lading.git#branch=main'
