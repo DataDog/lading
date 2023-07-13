@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.2-rc1]
+### Changed
+- We now expose two crates from this project, one for capture payloads and the
+  other the main lading project.
+
 ## [0.17.1]
 ### Fixed
 - Removed a leftover debug print in the Json payload implementation.
