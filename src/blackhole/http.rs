@@ -1,4 +1,10 @@
 //! The HTTP protocol speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//! `requests_received`: Total requests received
+//!
 
 use std::{net::SocketAddr, time::Duration};
 

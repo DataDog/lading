@@ -1,3 +1,5 @@
+//! Splunk HEC payload
+
 use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -105,11 +107,14 @@ impl Distribution<Member> for Standard {
     }
 }
 
+///
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub enum Encoding {
+    /// Use text-encoded log messages
     Text,
+    /// Use JSON-encoded log messages
     Json,
 }
 

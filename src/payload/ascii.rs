@@ -1,3 +1,5 @@
+//! ASCII payload.
+
 use std::io::Write;
 
 use rand::Rng;

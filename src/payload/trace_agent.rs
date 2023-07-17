@@ -1,3 +1,5 @@
+//! Trace-agent payload.
+
 use std::{collections::HashMap, io::Write};
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};

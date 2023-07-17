@@ -1,4 +1,15 @@
 //! The TCP protocol speaking generator.
+//!
+//! ## Metrics
+//!
+//! `bytes_written`: Bytes sent successfully
+//! `packets_sent`: Packets sent successfully
+//! `request_failure`: Number of failed writes; each occurrence causes a reconnect
+//! `connection_failure`: Number of connection failures
+//! `bytes_per_second`: Configured rate to send data
+//!
+//! Additional metrics may be emitted by this generator's [throttle].
+//!
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},

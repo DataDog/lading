@@ -1,3 +1,5 @@
+//! Static file/directory payload.
+
 use std::{
     fs,
     io::{BufRead, Write},

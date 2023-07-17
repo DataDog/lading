@@ -1,4 +1,4 @@
-//! Generates OpenTelemetry OTLP metric payloads
+//! OpenTelemetry OTLP metric payload.
 //!
 //! [Specification](https://opentelemetry.io/docs/reference/specification/protocol/otlp/),
 //! [data model](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/data-model.md)

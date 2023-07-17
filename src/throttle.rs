@@ -1,12 +1,18 @@
 //! A throttle for input into the target program.
+//!
+//! ## Metrics
+//!
+//! The [predictive] and [stable] throttles emit metrics. See those modules'
+//! documentation for details. The all-out throttle does not emit any metrics.
+//!
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
-mod predictive;
-mod stable;
+pub mod predictive;
+pub mod stable;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of this generator.

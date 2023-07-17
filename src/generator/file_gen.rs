@@ -3,6 +3,14 @@
 //! Unlike the other generators the file generator does not "connect" however
 //! losely to the target but instead, without coordination, merely writes files
 //! on disk.
+//!
+//! ## Metrics
+//!
+//! `bytes_written`: Total bytes written
+//! `bytes_per_second`: Configured rate to send data
+//!
+//! Additional metrics may be emitted by this generator's [throttle].
+//!
 
 use std::{
     num::{NonZeroU32, NonZeroUsize},
@@ -63,7 +71,7 @@ pub struct Config {
     pub path_template: String,
     /// Total number of duplicates to make from this template.
     pub duplicates: u8,
-    /// Sets the [`lading::payload::Config`] of this template.
+    /// Sets the [`crate::payload::Config`] of this template.
     pub variant: payload::Config,
     /// Sets the **soft** maximum bytes to be written into the `LogTarget`. This
     /// limit is soft, meaning a burst may go beyond this limit by no more than

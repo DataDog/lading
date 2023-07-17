@@ -1,4 +1,11 @@
 //! The TCP protocol speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `connection_accepted`: Incoming connections received
+//! `bytes_received`: Total bytes received
+//! `message_received`: Total messages received
+//!
 
 use std::{io, net::SocketAddr};
 

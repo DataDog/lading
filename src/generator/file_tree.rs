@@ -1,8 +1,14 @@
 //! The file tree generator.
 //!
 //! Unlike the other generators the file generator does not "connect" however
-//! losely to the target but instead, without coordination, merely generates
-//! a file tree and generates random acess/rename operations.
+//! loosely to the target but instead, without coordination, merely generates
+//! a file tree and generates random access/rename operations.
+//!
+//! ## Metrics
+//!
+//! This generator does not emit any metrics. Some metrics may be emitted by the
+//! configured [throttle].
+//!
 
 use rand::{
     distributions::{Alphanumeric, DistString},

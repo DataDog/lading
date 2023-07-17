@@ -1,3 +1,13 @@
+//! Stable throttle
+//!
+//! This throttle refills capacity at a steady rate.
+//!
+//! ## Metrics
+//!
+//! `throttle_refills_per_tick`: Throttle capacity will refill to allow this
+//! many operations per tick of the throttle's clock source.
+//!
+
 use std::{cmp, num::NonZeroU32};
 
 use metrics::gauge;
@@ -17,7 +27,9 @@ pub(crate) enum Error {
 #[derive(Debug)]
 /// A throttle type.
 ///
-/// This throttle is stable in that it will steadily refil units at a known rate and does not inspect the target in any way, compare to `Predictive` in that regard.
+/// This throttle is stable in that it will steadily refill units at a known
+/// rate and does not inspect the target in any way, compare to `Predictive` in
+/// that regard.
 pub(crate) struct Stable<C = RealClock> {
     last_tick: u64,
     /// The capacity left in `Stable` after a user request.

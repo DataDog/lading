@@ -1,4 +1,4 @@
-//! Generates OpenTelemetry OTLP trace payloads
+//! OpenTelemetry OTLP trace payload.
 //!
 //! [Specification](https://opentelemetry.io/docs/reference/specification/protocol/otlp/)
 //!

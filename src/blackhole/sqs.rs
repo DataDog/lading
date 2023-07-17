@@ -1,4 +1,10 @@
 //! The [SQS](https://aws.amazon.com/sqs/) protocol speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//! `requests_received`: Total messages received
+//!
 
 use std::{fmt::Write, net::SocketAddr};
 

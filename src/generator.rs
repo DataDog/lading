@@ -7,7 +7,7 @@
 //! into the target according to a user-defined rate limit in a cyclic
 //! manner. That is, we avoid runtime delays in payload generation by, well,
 //! building a lot of payloads in one shot and rotating through them
-//! indefinately, paying higher memory and longer startup for better
+//! indefinitely, paying higher memory and longer startup for better
 //! experimental control.
 
 use serde::Deserialize;
@@ -39,7 +39,7 @@ pub enum Error {
     SplunkHec(splunk_hec::Error),
     /// See [`crate::generator::file_gen::Error`] for details.
     FileGen(file_gen::Error),
-    /// See [`crate::generator::file_tree_gen::Error`] for details.
+    /// See [`crate::generator::file_tree::Error`] for details.
     FileTree(file_tree::Error),
     /// See [`crate::generator::grpc::Error`] for details.
     Grpc(grpc::Error),
@@ -47,7 +47,7 @@ pub enum Error {
     UnixStream(unix_stream::Error),
     /// See [`crate::generator::unix_datagram::Error`] for details.
     UnixDatagram(unix_datagram::Error),
-    /// See [`crate::generator::process_tree_gen::Error`] for details.
+    /// See [`crate::generator::process_tree::Error`] for details.
     ProcessTree(process_tree::Error),
 }
 
@@ -85,7 +85,7 @@ pub enum Inner {
     SplunkHec(splunk_hec::Config),
     /// See [`crate::generator::file_gen::Config`] for details.
     FileGen(file_gen::Config),
-    /// See [`crate::generator::file_tree_gen::Config`] for details.
+    /// See [`crate::generator::file_tree::Config`] for details.
     FileTree(file_tree::Config),
     /// See [`crate::generator::grpc::Config`] for details.
     Grpc(grpc::Config),
@@ -93,7 +93,7 @@ pub enum Inner {
     UnixStream(unix_stream::Config),
     /// See [`crate::generator::unix_datagram::Config`] for details.
     UnixDatagram(unix_datagram::Config),
-    /// See [`crate::generator::process_tree_gen::Config`] for details.
+    /// See [`crate::generator::process_tree::Config`] for details.
     ProcessTree(process_tree::Config),
 }
 
@@ -113,7 +113,7 @@ pub enum Server {
     SplunkHec(splunk_hec::SplunkHec),
     /// See [`crate::generator::file_gen::FileGen`] for details.
     FileGen(file_gen::FileGen),
-    /// See [`crate::generator::file_tree_gen::FileTree`] for details.
+    /// See [`crate::generator::file_tree::FileTree`] for details.
     FileTree(file_tree::FileTree),
     /// See [`crate::generator::grpc::Grpc`] for details.
     Grpc(grpc::Grpc),
@@ -121,7 +121,7 @@ pub enum Server {
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
     UnixDatagram(unix_datagram::UnixDatagram),
-    /// See [`crate::generator::process_tree_gen::ProcessTree`] for details.
+    /// See [`crate::generator::process_tree::ProcessTree`] for details.
     ProcessTree(process_tree::ProcessTree),
 }
 

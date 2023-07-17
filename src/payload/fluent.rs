@@ -1,3 +1,5 @@
+//! Fluentd payload.
+//!
 //! Implements [this
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
 use std::{collections::HashMap, io::Write};

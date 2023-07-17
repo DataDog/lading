@@ -1,8 +1,14 @@
 //! The process tree generator.
 //!
 //! Unlike the other generators the process tree generator does not "connect" however
-//! losely to the target but instead, without coordination, merely generates
+//! loosely to the target but instead, without coordination, merely generates
 //! a process tree.
+//!
+//! ## Metrics
+//!
+//! This generator does not emit any metrics. Some metrics may be emitted by the
+//! configured [throttle].
+//!
 
 use crate::{
     signals::Shutdown,

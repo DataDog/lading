@@ -1,4 +1,9 @@
 //! The Unix Domain Socket datagram speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//!
 
 use std::{io, path::PathBuf};
 
