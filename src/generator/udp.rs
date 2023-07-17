@@ -1,4 +1,15 @@
 //! The UDP protocol speaking generator.
+//!
+//! ## Metrics
+//!
+//! `bytes_written`: Bytes written successfully
+//! `packets_sent`: Packets written successfully
+//! `request_failure`: Number of failed writes; each occurrence causes a socket re-bind
+//! `connection_failure`: Number of socket bind failures
+//! `bytes_per_second`: Configured rate to send data
+//!
+//! Additional metrics may be emitted by this generator's [throttle].
+//!
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},

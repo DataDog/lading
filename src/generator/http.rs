@@ -1,4 +1,15 @@
 //! The HTTP protocol speaking generator.
+//!
+//! ## Metrics
+//!
+//! `requests_sent`: Total number of requests sent
+//! `request_ok`: Successful requests
+//! `request_failure`: Failed requests
+//! `bytes_written`: Total bytes written
+//! `bytes_per_second`: Configured rate to send data
+//!
+//! Additional metrics may be emitted by this generator's [throttle].
+//!
 
 use std::num::{NonZeroU32, NonZeroUsize};
 

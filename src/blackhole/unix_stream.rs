@@ -1,4 +1,11 @@
 //! The Unix Domain Socket stream speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `connection_accepted`: Incoming connections received
+//! `bytes_received`: Total bytes received
+//! `requests_received`: Total requests received
+//!
 
 use std::{io, path::PathBuf};
 

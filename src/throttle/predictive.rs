@@ -1,3 +1,35 @@
+//! Predictive throttle
+//!
+//! This throttle attempts to send data at the same rate the target is able to
+//! consume it.
+//!
+//! ## Algorithm
+//!
+//! This throttle participates in three signals:
+//!
+//! * time-based allocation of capacity, with user draw-down of that capacity,
+//! * binary back-off based on RSS consumption of the target and
+//! * a 'bean counter' approach to searching for target throughput setpoint.
+//!
+//! The last is based on a budget allocation heuristic in large political
+//! organizations:
+//!
+//! * Given parties Consumer, Provider and Budget which Provider dictates the
+//!   maximum of, doles out to Consumer. The initial budget is the maximum.
+//! * Allow the projected budget for an interval to be X and the actual
+//!   requested budget for that interval to be Y.
+//! * At each negotiation interval the Provider calculates a new projected budget:
+//!   - If Y < X then new budget is X - (X-Y)/8,
+//!   - If Y >= X then new budget is X + (Y-X)/4.
+//!
+//! ## Metrics
+//!
+//! `throttle_spare_capacity`: Unused throttle capacity
+//! `throttle_refills_per_tick`: Current throttle refill allowance
+//! `throttle_requested_budget`: Requested refill budget for the last throttle tick (may or may not have been satisfied)
+//! `throttle_projected_budget`: Projected refill budget for the last throttle tick
+//!
+
 use std::{cmp, num::NonZeroU32};
 
 use metrics::gauge;

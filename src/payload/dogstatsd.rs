@@ -1,3 +1,5 @@
+//! `DogStatsD` payload.
+
 use std::{fmt, io::Write, num::NonZeroUsize, ops::Range};
 
 use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
@@ -79,6 +81,7 @@ impl Default for MetricWeights {
     }
 }
 
+/// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 pub struct Config {
     /// Defines the minimum number of metric names allowed in a payload.

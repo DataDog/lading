@@ -1,4 +1,10 @@
 //! The UDP protocol speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//! `packet_received`: Total packets received
+//!
 
 use std::{io, net::SocketAddr};
 

@@ -1,3 +1,5 @@
+//! JSON payload.
+
 use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};

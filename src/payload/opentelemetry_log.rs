@@ -1,4 +1,4 @@
-//! Generates OpenTelemetry OTLP log payloads
+//! OpenTelemetry OTLP log payload.
 //!
 //! [Specification](https://opentelemetry.io/docs/reference/specification/protocol/otlp/),
 //! [data model](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/logs/data-model.md)

@@ -1,3 +1,10 @@
+//! Lading payloads
+//!
+//! The lading payload implementations are responsible for producing the data
+//! that is sent by [generators](crate::generator). Each payload implementation
+//! defines a particular type of message that can be sent by a generator.
+//!
+
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -20,20 +27,20 @@ pub(crate) use statik::Static;
 pub(crate) use syslog::Syslog5424;
 pub(crate) use trace_agent::TraceAgent;
 
-mod apache_common;
-mod ascii;
-mod common;
-mod datadog_logs;
-pub(crate) mod dogstatsd;
-mod fluent;
-mod json;
-mod opentelemetry_log;
-mod opentelemetry_metric;
-mod opentelemetry_trace;
-mod splunk_hec;
-mod statik;
-mod syslog;
-mod trace_agent;
+pub mod apache_common;
+pub mod ascii;
+pub(crate) mod common;
+pub mod datadog_logs;
+pub mod dogstatsd;
+pub mod fluent;
+pub mod json;
+pub mod opentelemetry_log;
+pub mod opentelemetry_metric;
+pub mod opentelemetry_trace;
+pub mod splunk_hec;
+pub mod statik;
+pub mod syslog;
+pub mod trace_agent;
 
 /// Errors related to serialization
 #[derive(thiserror::Error, Debug)]
@@ -82,7 +89,10 @@ pub enum Config {
     /// Generates syslog5424 messages
     Syslog5424,
     /// Generates Splunk HEC messages
-    SplunkHec { encoding: SplunkHecEncoding },
+    SplunkHec {
+        /// Defines the encoding to use for the Splunk HEC messages.
+        encoding: SplunkHecEncoding,
+    },
     /// Generates Datadog Logs JSON messages
     DatadogLog,
     /// Generates a static, user supplied data

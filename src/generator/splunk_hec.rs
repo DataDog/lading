@@ -1,4 +1,18 @@
 //! The Splunk HEC generator.
+//!
+//! ## Metrics
+//!
+//! `maximum_requests`: Total number of parallel connections to maintain
+//! `requests_sent`: Total number of requests sent
+//! `request_ok`: Successful requests
+//! `request_failure`: Failed requests
+//! `request_timeout`: Requests that timed out (these are not included in `request_failure`)
+//! `bytes_written`: Total bytes written
+//! `bytes_per_second`: Configured rate to send data
+//!
+//! Additional metrics may be emitted by this generator's [throttle].
+//!
+//!
 
 mod acknowledgements;
 

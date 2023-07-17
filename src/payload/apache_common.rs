@@ -1,3 +1,5 @@
+//! Apache common payload.
+
 use crate::payload::{Error, Serialize};
 
 use core::fmt;

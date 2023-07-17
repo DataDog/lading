@@ -1,3 +1,5 @@
+//! Syslog payload.
+
 use std::{io::Write, time::SystemTime};
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};

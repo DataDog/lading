@@ -1,4 +1,10 @@
 //! The Splunk HEC protocol speaking blackhole.
+//!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//! `requests_received`: Total requests received
+//!
 
 use std::{
     collections::HashMap,
