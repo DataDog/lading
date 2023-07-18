@@ -91,11 +91,11 @@ pub struct Config {
     /// payload. Must be greater or equal to minimum.
     #[serde(default = "default_metric_names_maximum")]
     pub metric_names_maximum: NonZeroUsize,
-    /// Defines the minimum number of metric names allowed in a payload.
+    /// Defines the minimum number of tag keys allowed in a payload.
     #[serde(default = "default_tag_keys_minimum")]
     pub tag_keys_minimum: usize,
-    /// Defines the maximum number of metric names allowed in a
-    /// payload. Must be greater or equal to minimum.
+    /// Defines the maximum number of tag keys allowed in a
+    /// payload. Must be at least one greater than minimum
     #[serde(default = "default_tag_keys_maximum")]
     pub tag_keys_maximum: usize,
     /// Defines the relative probability of each kind of DogStatsD kinds of
@@ -141,7 +141,9 @@ where
 
 impl MemberGenerator {
     fn new<R>(
+        // range of metric_names_min..metric_names_max
         metric_range: Range<NonZeroUsize>,
+        // range of tag_keys_min..tag_keys_max
         key_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
@@ -150,9 +152,14 @@ impl MemberGenerator {
     where
         R: Rng + ?Sized,
     {
+        let metric_name_prefix = "ld.".to_string();
         let metric_range = metric_range.start.get()..metric_range.end.get();
 
-        let titles = random_strings_with_length(metric_range, 64, &mut rng);
+        let raw_metric_names = random_strings_with_length(metric_range, 64, &mut rng);
+        let metric_names: Vec<String> = raw_metric_names
+            .into_iter()
+            .map(|m| format!("{}{}", metric_name_prefix, m))
+            .collect();
         let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
 
@@ -166,14 +173,14 @@ impl MemberGenerator {
         }
 
         let event_generator = EventGenerator {
-            titles: titles.clone(),
+            titles: metric_names.clone(),
             texts_or_messages: texts_or_messages.clone(),
             small_strings: small_strings.clone(),
             tags: tags.clone(),
         };
 
         let service_check_generator = ServiceCheckGenerator {
-            names: titles.clone(),
+            names: metric_names.clone(),
             small_strings: small_strings.clone(),
             texts_or_messages,
             tags: tags.clone(),
@@ -192,7 +199,7 @@ impl MemberGenerator {
         ];
         let metric_generator = MetricGenerator {
             metric_weights: WeightedIndex::new(metric_choices).unwrap(),
-            names: titles,
+            names: metric_names,
             container_ids: small_strings,
             tags,
         };
