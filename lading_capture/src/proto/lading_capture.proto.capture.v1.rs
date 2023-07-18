@@ -25,7 +25,7 @@ pub struct Payload {
     /// An ID that is unique to a single lading run.
     #[prost(string, tag = "1")]
     pub run_id: ::prost::alloc::string::String,
-    /// The time in milliseconds that this Payload was collected.
+    /// The time in milliseconds past the epoch that this Payload was collected.
     #[prost(uint64, tag = "2")]
     pub time: u64,
     /// Global labels to be applied to every Line.

@@ -29,7 +29,7 @@ message Line {
 message Payload {
   // An ID that is unique to a single lading run.
   string run_id = 1;
-  // The time in milliseconds that this Payload was collected.
+  // The time in milliseconds past the epoch that this Payload was collected.
   uint64 time = 2;
   // Global labels to be applied to every Line.
   map<string, string> global_labels = 3;

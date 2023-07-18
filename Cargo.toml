@@ -1,6 +1,5 @@
 [workspace]
 members = [
-        "./",
         "integration/sheepdog",
         "integration/ducks",
         "lading",
