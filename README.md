@@ -93,6 +93,10 @@ prometheus endpoint -- configurable with `--prometheus-addr` -- or can be
 written to disk by lading by specifying `--capture-path`. The captured data,
 when written to disk, is newline delimited json payloads.
 
+Logs about lading's operation can be controlled using the standard `RUST_LOG`
+environment variable. eg `RUST_LOG=debug ./lading` will emit logs at `debug`
+and above (ie, `info`, `warn`, `error`).
+
 ## Contributing
 
 See [Contributing][contributing].
