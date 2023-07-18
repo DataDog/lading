@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    env,
     fmt::{self, Display},
     io::Read,
     num::NonZeroU32,
@@ -162,16 +163,26 @@ struct ProcessTreeGen {
 }
 
 fn get_config(ops: &Opts) -> Config {
-    debug!(
-        "Attempting to open configuration file at: {}",
-        ops.config_path
-    );
-    let mut file: std::fs::File = std::fs::OpenOptions::new()
-        .read(true)
-        .open(&ops.config_path)
-        .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", &ops.config_path));
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).unwrap();
+    let contents = if let Ok(env_var_value) = env::var("LADING_CONFIG") {
+        debug!("Using config from env var 'LADING_CONFIG'");
+        env_var_value
+    } else {
+        debug!(
+            "Attempting to open configuration file at: {}",
+            ops.config_path
+        );
+        let mut file: std::fs::File = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&ops.config_path)
+            .unwrap_or_else(|_| {
+                panic!("Could not open configuration file at: {}", &ops.config_path)
+            });
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        contents
+    };
+
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
