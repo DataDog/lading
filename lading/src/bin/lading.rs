@@ -163,14 +163,14 @@ struct ProcessTreeGen {
 }
 
 fn get_config(ops: &Opts) -> Config {
-    debug!(
-        "Attempting to open configuration file at: {}",
-        ops.config_path
-    );
-
     let contents = if let Ok(env_var_value) = env::var("LADING_CONFIG") {
+        debug!("Using config from env var 'LADING_CONFIG'");
         env_var_value
     } else {
+        debug!(
+            "Attempting to open configuration file at: {}",
+            ops.config_path
+        );
         let mut file: std::fs::File = std::fs::OpenOptions::new()
             .read(true)
             .open(&ops.config_path)
