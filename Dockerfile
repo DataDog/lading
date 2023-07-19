@@ -1,4 +1,4 @@
-FROM docker.io/rust:1.71.0-bullseye@sha256:31e5ca2912dd2313ff4841a168224312a066df278cb873f546e0fd625758ff40 as builder
+FROM docker.io/rust:1.71.0-bullseye@sha256:bef59af02f103760cd57e8d6ccadf364954b0ae5e74ea7c7203d26744aeec051 as builder
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
