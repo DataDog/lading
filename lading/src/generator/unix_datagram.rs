@@ -19,12 +19,13 @@ use crate::{
 };
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
-use metrics::{counter, gauge, register_counter};
+use metrics::{counter, gauge, register_counter, register_histogram};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
+    time::Instant,
 };
 use tokio::{
     net,
@@ -240,6 +241,7 @@ impl Child {
         let mut blocks = self.block_cache.iter().cycle().peekable();
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
+        let packet_send_time = register_histogram!("packet_send_time", &self.metric_labels);
 
         loop {
             let blk = blocks.peek().unwrap();
@@ -255,10 +257,12 @@ impl Child {
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {
+                        let send_start = Instant::now();
                         match socket.send(&blk.bytes[blk_offset..]).await {
                             Ok(bytes) => {
                                 bytes_written.increment(bytes as u64);
                                 packets_sent.increment(1);
+                                packet_send_time.record(send_start.elapsed());
                                 blk_offset = bytes;
                             }
                             Err(err) => {

@@ -269,6 +269,12 @@ async fn inner_main(
             for (k, v) in global_labels {
                 builder = builder.add_global_label(k, v);
             }
+            builder = builder
+                .set_buckets(&[
+                    0.000001, 0.000005, 0.00001, 0.00005, 0.0001, 0.001, 0.005, 0.01, 0.025, 0.05,
+                    0.25, 0.5, 1.0,
+                ])
+                .unwrap();
             builder.install().unwrap();
         }
         Telemetry::Log {
