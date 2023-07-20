@@ -77,10 +77,6 @@ impl Sampler {
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
         // dereferencing the `/proc/<pid>/root` symlink.
-        //
-        // TODO this is not correct. We need to build a stack of processes.
-        // all_processes_with_root is for systems that have proc somewhere other
-        // than /proc
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
         processes.push_back(Process::new(self.parent.pid())?);
         while let Some(process) = processes.pop_back() {
