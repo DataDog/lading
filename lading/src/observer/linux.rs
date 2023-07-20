@@ -3,7 +3,7 @@ use std::{collections::VecDeque, io, sync::atomic::Ordering};
 use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::RSS_BYTES;
 
@@ -79,27 +79,49 @@ impl Sampler {
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
         // dereferencing the `/proc/<pid>/root` symlink.
+        let mut pids: FxHashSet<i32> = FxHashSet::default();
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
         processes.push_back(Process::new(self.parent.pid())?);
         while let Some(process) = processes.pop_back() {
             // Search for child processes. This is done by querying for every
-            // thread of `process` and inspecting each child of the thread.
+            // thread of `process` and inspecting each child of the thread. Note
+            // that processes on linux are those threads that have their group
+            // id equal to their pid. It's also possible for a pid to list
+            // itself as a child so we reference the pid hashset above to avoid
+            // infinite loops.
             if let Ok(tasks) = process.tasks() {
                 for task in tasks.filter(std::result::Result::is_ok) {
                     let task = task.unwrap(); // SAFETY: filter on iterator
                     if let Ok(mut children) = task.children() {
                         for child in children
                             .drain(..)
-                            .map(|c| Process::new(c as i32))
-                            .filter(std::result::Result::is_ok)
+                            .filter_map(|c| Process::new(c as i32).ok())
                         {
-                            processes.push_back(child.unwrap()); // SAFETY: filter on iterator
+                            let pid = child.pid();
+                            if !pids.contains(&pid) {
+                                // We have not seen this process and do need to
+                                // record it for child scanning and sampling if
+                                // it proves to be a process. 
+                                processes.push_back(child);
+                                pids.insert(pid);
+                            }
                         }
                     }
                 }
             }
 
             let pid = process.pid();
+            let status = process.status();
+            if status.is_err() {
+                // The pid may have exited since we scanned it or we may not
+                // have sufficient permission.
+                continue;
+            }
+            let status = status.unwrap(); // SAFETY: is_err check above
+            if status.tgid != pid {
+                // This is a thread, not a process and we do not wish to scan it.
+                continue;
+            }
 
             // Collect the 'name' of the process. This is pulled from
             // /proc/<pid>/exe and we take the last part of that, like posix
