@@ -251,13 +251,10 @@ fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
         return 0.0;
     }
 
-    let mut overall_percentage = (delta_ticks / delta_time) * 100.0;
-    let percent = overall_percentage / num_cores;
-    if percent > 100.0 {
-        100.0
-    } else if percent < 0.0 {
-        0.0
-    } else {
-        percent
-    }
+    // `delta_time` is the number of scheduler ticks elapsed during this slice
+    // of time. `delta_ticks` is the number of ticks spent across all cores
+    // during this time.
+    let overall_percentage = (delta_ticks / delta_time) * 100.0;
+
+    overall_percentage.clamp(0.0, 100.0 * num_cores)
 }
