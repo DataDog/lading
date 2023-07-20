@@ -1,10 +1,10 @@
 {
-    "[rust]" : {
+    "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.formatOnSave": true
     },
-    "[toml]" : {
+    "[toml]": {
         "editor.defaultFormatter": "tamasfe.even-better-toml",
-        "editor.formatOnSave": true
+        "editor.formatOnSave": false
     }
 }
