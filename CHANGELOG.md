@@ -6,32 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.17.2-rc6]
-### Changed
- - We now avoid scaling utilization and clamp it directly to the appropriate
-   range.
-
-## [0.17.2-rc5]
-### Changed
- - We now clamp CPU utilization to number of cores, not scaled to.
-
-## [0.17.2-rc4]
-### Changed
- - We now elide sampling threads that are not also processes in the observer.
-
-## [0.17.2-rc3]
-### Changed
- - Correct `rss` to be reported in terms of bytes, not pages, as before.
-
-## [0.17.2-rc2]
+## [0.17.2]
 ### Removed
 - Observer no longer emits tick data for kernel and user-space time.
 ### Changed
+- We now avoid scaling utilization and clamp it directly to the appropriate
+  range.
+- We now elide sampling threads that are not also processes in the observer.
 - Observer now distinguishes between parent and children processes.
 - Config can now be specified using an env var `LADING_CONFIG`. If set, the env var takes precedence over the on-disk config file.
-
-## [0.17.2-rc1]
-### Changed
 - We now expose two crates from this project, one for capture payloads and the
   other the main lading project.
 
