@@ -252,14 +252,12 @@ fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
     }
 
     let mut overall_percentage = (delta_ticks / delta_time) * 100.0;
-    if overall_percentage > 100.0 {
-        overall_percentage = 100.0;
+    let percent = overall_percentage / num_cores;
+    if percent > 100.0 {
+        100.0
+    } else if percent < 0.0 {
+        0.0
+    } else {
+        percent
     }
-
-    let mut percent = overall_percentage * num_cores;
-    if percent < 0.0 {
-        percent = 0.0;
-    }
-
-    percent
 }
