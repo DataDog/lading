@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.2-rc4]
+### Changed
+ - We now elide sampling threads that are not also processes in the observer.
+
 ## [0.17.2-rc3]
 ### Changed
  - Correct `rss` to be reported in terms of bytes, not pages, as before.
