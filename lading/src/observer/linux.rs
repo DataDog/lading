@@ -101,7 +101,7 @@ impl Sampler {
                             if !pids.contains(&pid) {
                                 // We have not seen this process and do need to
                                 // record it for child scanning and sampling if
-                                // it proves to be a process. 
+                                // it proves to be a process.
                                 processes.push_back(child);
                                 pids.insert(pid);
                             }
