@@ -6,6 +6,7 @@ use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom
 use serde::Deserialize;
 
 use crate::payload::{Error, Serialize};
+use metrics::gauge;
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -32,6 +33,14 @@ fn default_tag_keys_minimum() -> usize {
 }
 
 fn default_tag_keys_maximum() -> usize {
+    64
+}
+
+fn default_tag_values_minimum() -> usize {
+    0
+}
+
+fn default_tag_values_maximum() -> usize {
     64
 }
 
@@ -98,6 +107,13 @@ pub struct Config {
     /// payload. Must be at least one greater than minimum
     #[serde(default = "default_tag_keys_maximum")]
     pub tag_keys_maximum: usize,
+    /// Defines the minimum number of tag values allowed in a payload.
+    #[serde(default = "default_tag_values_minimum")]
+    pub tag_values_minimum: usize,
+    /// Defines the maximum number of tag values allowed in a
+    /// payload. Must be at least one greater than minimum
+    #[serde(default = "default_tag_values_maximum")]
+    pub tag_values_maximum: usize,
     /// Defines the relative probability of each kind of DogStatsD kinds of
     /// payload.
     #[serde(default)]
@@ -141,10 +157,9 @@ where
 
 impl MemberGenerator {
     fn new<R>(
-        // range of metric_names_min..metric_names_max
         metric_range: Range<NonZeroUsize>,
-        // range of tag_keys_min..tag_keys_max
-        key_range: Range<usize>,
+        tag_key_range: Range<usize>,
+        tag_value_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         mut rng: &mut R,
@@ -163,14 +178,42 @@ impl MemberGenerator {
         let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
 
+        // This represents the number of tagsets that we generate ahead of time.
+        // During metric generation, we sample from this set.
+        // So we need to generate at least tag_key_range.max * tag_value_range.max
+        // otherwise we'll just be choosing from the same set of 512 over and over
         let total_tag_sets = 512;
-        let max_values_per_tag_set = 512;
 
+        let key_range2 = tag_key_range.clone();
+        let value_range2 = tag_value_range.clone();
         let mut tags = Vec::with_capacity(total_tag_sets);
-        let tags_generator = tags::Generator::new(key_range, max_values_per_tag_set);
+        let tags_generator = tags::Generator::new(tag_key_range, tag_value_range, &mut rng);
         for _ in 0..total_tag_sets {
             tags.push(tags_generator.generate(&mut rng));
         }
+
+        let labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "dogstatsd".to_string()),
+        ];
+
+        gauge!(
+            "uniq_metric_names",
+            f64::from(metric_names.len() as u32),
+            &labels
+        );
+        gauge!("min_tag_keys", f64::from(key_range2.start as u32), &labels);
+        gauge!("max_tag_keys", f64::from(key_range2.end as u32), &labels);
+        gauge!(
+            "min_tag_values",
+            f64::from(value_range2.start as u32),
+            &labels
+        );
+        gauge!(
+            "max_tag_values",
+            f64::from(value_range2.end as u32),
+            &labels
+        );
 
         let event_generator = EventGenerator {
             titles: metric_names.clone(),
@@ -258,6 +301,7 @@ impl DogStatsD {
     pub(crate) fn new<R>(
         metric_names_range: Range<NonZeroUsize>,
         tag_keys_range: Range<usize>,
+        tag_values_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         rng: &mut R,
@@ -268,6 +312,7 @@ impl DogStatsD {
         let member_generator = MemberGenerator::new(
             metric_names_range,
             tag_keys_range,
+            tag_values_range,
             kind_weights,
             metric_weights,
             rng,
@@ -321,9 +366,10 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let metric_names_range =  NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap();
             let tag_keys_range =  0..32;
+            let tag_values_range = 0..32;
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights,  &mut rng);
+            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, tag_values_range, kind_weights, metric_weights,  &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

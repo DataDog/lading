@@ -8,16 +8,25 @@ pub(crate) type Tags = HashMap<String, String>;
 
 pub(crate) struct Generator {
     pub(crate) key_range: Range<usize>,
-    pub(crate) max_values: usize,
+    tag_keys: Vec<String>,
+    tag_values: Vec<String>,
 }
 
 impl Generator {
-    // key_range is tag_keys_min..tag_keys_max
-    // max_values is static. Value is 'max_values_per_tag_set' == 512
-    pub(crate) fn new(key_range: Range<usize>, max_values: usize) -> Self {
+    pub(crate) fn new<R>(
+        key_range: Range<usize>,
+        value_range: Range<usize>,
+        mut rng: &mut R,
+    ) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let tag_keys = random_strings_with_length(key_range.clone(), 64, &mut rng);
+        let tag_values = random_strings_with_length(value_range.clone(), 32, &mut rng);
         Self {
+            tag_keys,
+            tag_values,
             key_range,
-            max_values,
         }
     }
 }
@@ -27,22 +36,12 @@ impl payload::Generator<Tags> for Generator {
     where
         R: rand::Rng + ?Sized,
     {
-        // generates key_range number of tag names/keys with max string length of 64
-        let tag_keys = random_strings_with_length(self.key_range.clone(), 64, &mut rng);
-        // Generates max_values (512) strings with max string length of 32
-        let tag_values = random_strings_with_length(0..self.max_values, 32, &mut rng);
-
-        // the number of tags for this metric will be a random value chosen from
-        // tag_keys_min..tag_keys_max
         let total_keys = rng.gen_range(self.key_range.clone());
         let mut tags = HashMap::new();
-        for k in tag_keys.choose_multiple(&mut rng, total_keys) {
+        for k in self.tag_keys.choose_multiple(&mut rng, total_keys) {
             let key = k.clone();
-            // tag_values.choose will return None if tag_values has been exhausted.
-            // This implies that if tag_keys_max is greater than 512, we'll see repeated tag values
-            // repeated values are not really a big deal.
 
-            if let Some(val) = tag_values.choose(&mut rng) {
+            if let Some(val) = self.tag_values.choose(&mut rng) {
                 let val = val.clone();
                 tags.insert(key, val);
             }
