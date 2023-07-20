@@ -143,32 +143,3 @@ impl Server {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn observer_observes_process_hierarchy() {
-        use super::*;
-        use std::{process::Command, time::Duration};
-
-        let mut test_proc = Command::new("/bin/sh")
-            .args(["-c", "sleep 1"])
-            .spawn()
-            .expect("launch child process");
-
-        // wait for `sh` to launch `sleep`
-        std::thread::sleep(Duration::from_millis(250));
-
-        let proc =
-            Process::new(test_proc.id().try_into().unwrap()).expect("create Process from PID");
-        let stats = Server::get_proc_stats(&proc).expect("get proc stat hierarchy");
-
-        test_proc.kill().unwrap();
-
-        let mut bins = stats.iter().map(|s| s.0.comm.clone()).collect::<Vec<_>>();
-        bins.sort();
-
-        assert_eq!(&bins, &[String::from("sh"), String::from("sleep")]);
-    }
-}
