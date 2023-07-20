@@ -5,7 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.17.2-rc2]
+### Removed
+- Observer no longer emits tick data for kernel and user-space time. 
 ### Changed
+- Observer now distinguishes between parent and children processes.
 - Config can now be specified using an env var `LADING_CONFIG`. If set, the env var takes precedence over the on-disk config file.
 
 ## [0.17.2-rc1]
