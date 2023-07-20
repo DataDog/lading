@@ -34,6 +34,7 @@ pub(crate) struct Sampler {
     parent: Process,
     num_cores: usize,
     ticks_per_second: u64,
+    page_size: u64,
     previous_samples: FxHashMap<(i32, String), Sample>,
 }
 
@@ -45,6 +46,7 @@ impl Sampler {
             parent,
             num_cores: num_cpus::get(), // Cores, logical on Linux, obeying cgroup limits if present
             ticks_per_second: procfs::ticks_per_second(),
+            page_size: procfs::page_size(),
             previous_samples: FxHashMap::default(),
         })
     }
@@ -164,7 +166,7 @@ impl Sampler {
             // page. My VSize remains one page. Allocators muddy this even
             // further by trying to account for the behavior of the operating
             // system. Anyway, good luck out there. You'll be fine.
-            let rss: u64 = stats.rss;
+            let rss: u64 = stats.rss * self.page_size;
             let rsslim: u64 = stats.rsslim;
             let vsize: u64 = stats.vsize;
 

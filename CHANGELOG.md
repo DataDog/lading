@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.2-rc3]
+### Changed
+ - Correct `rss` to be reported in terms of bytes, not pages, as before.
+
 ## [0.17.2-rc2]
 ### Removed
 - Observer no longer emits tick data for kernel and user-space time. 
