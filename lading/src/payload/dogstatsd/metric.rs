@@ -13,6 +13,7 @@ use super::{choose_or_not, common};
 #[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
     pub(crate) metric_weights: WeightedIndex<u8>,
+    pub(crate) metric_multivalue: Vec<u8>,
     pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
     pub(crate) tags: Vec<common::tags::Tags>,
@@ -27,7 +28,7 @@ impl Generator<Metric> for MetricGenerator {
         let name = self.names.choose(&mut rng).unwrap().clone();
         let tags = choose_or_not(&mut rng, &self.tags);
         let sample_rate = rng.gen();
-        let total_values = rng.gen_range(1..32);
+        let total_values = *self.metric_multivalue.choose(&mut rng).unwrap() as usize;
         let value: Vec<common::NumValue> =
             Standard.sample_iter(&mut rng).take(total_values).collect();
 

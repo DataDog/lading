@@ -35,6 +35,13 @@ fn default_tag_keys_maximum() -> usize {
     64
 }
 
+fn default_metric_multivalue() -> Vec<u8> {
+    vec![
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+        26, 27, 28, 29, 30, 31,
+    ]
+}
+
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
@@ -82,7 +89,7 @@ impl Default for MetricWeights {
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct Config {
     /// Defines the minimum number of metric names allowed in a payload.
     #[serde(default = "default_metric_names_minimum")]
@@ -105,6 +112,9 @@ pub struct Config {
     /// Defines the relative probability of each kind of DogStatsD metic.
     #[serde(default)]
     pub metric_weights: MetricWeights,
+    /// Defines the relative probability of a metric having multiple values.
+    #[serde(default = "default_metric_multivalue")]
+    pub metric_multivalue: Vec<u8>,
 }
 
 fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
@@ -145,6 +155,7 @@ impl MemberGenerator {
         key_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
+        metric_multivalue: Vec<u8>,
         mut rng: &mut R,
     ) -> Self
     where
@@ -192,6 +203,7 @@ impl MemberGenerator {
         ];
         let metric_generator = MetricGenerator {
             metric_weights: WeightedIndex::new(metric_choices).unwrap(),
+            metric_multivalue,
             names: titles,
             container_ids: small_strings,
             tags,
@@ -253,6 +265,7 @@ impl DogStatsD {
         tag_keys_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
+        metric_multivalue: Vec<u8>,
         rng: &mut R,
     ) -> Self
     where
@@ -263,6 +276,7 @@ impl DogStatsD {
             tag_keys_range,
             kind_weights,
             metric_weights,
+            metric_multivalue,
             rng,
         );
 
@@ -316,7 +330,8 @@ mod test {
             let tag_keys_range =  0..32;
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights,  &mut rng);
+            let metric_multivalue_weights: default_metric_multivalue_weights();
+            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights, metric_multivalue_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
