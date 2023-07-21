@@ -113,6 +113,7 @@ pub struct Config {
     #[serde(default)]
     pub metric_weights: MetricWeights,
     /// Defines the relative probability of a metric having multiple values.
+    /// Choices are evenly weighted among those listed.
     #[serde(default = "default_metric_multivalue")]
     pub metric_multivalue: Vec<u8>,
 }
@@ -330,7 +331,7 @@ mod test {
             let tag_keys_range =  0..32;
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let metric_multivalue_weights: default_metric_multivalue_weights();
+            let metric_multivalue_weights: default_metric_multivalue();
             let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights, metric_multivalue_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
