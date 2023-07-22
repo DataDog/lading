@@ -35,11 +35,26 @@ fn default_tag_keys_maximum() -> usize {
     64
 }
 
-fn default_metric_multivalue() -> Vec<u8> {
-    vec![
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-        26, 27, 28, 29, 30, 31,
-    ]
+fn default_metric_multivalue() -> Vec<MetricValueWeight> {
+    let mut weights = Vec::with_capacity(32);
+    for idx in 1..32 {
+        weights.push(MetricValueWeight {
+            weight: 1,
+            value: idx,
+        });
+    }
+    weights
+}
+
+// Weight for a `DogStatsD` multivalue line.
+///
+/// Defines the relative weight of a certain number of 'values' packed into a
+/// single metric line.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetricValueWeight {
+    value: u8,
+    weight: u8,
 }
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
@@ -115,7 +130,7 @@ pub struct Config {
     /// Defines the relative probability of a metric having multiple values.
     /// Choices are evenly weighted among those listed.
     #[serde(default = "default_metric_multivalue")]
-    pub metric_multivalue: Vec<u8>,
+    pub metric_multivalue: Vec<MetricValueWeight>,
 }
 
 fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
@@ -156,7 +171,7 @@ impl MemberGenerator {
         key_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        metric_multivalue: Vec<u8>,
+        metric_multivalue: &[MetricValueWeight],
         mut rng: &mut R,
     ) -> Self
     where
@@ -204,7 +219,14 @@ impl MemberGenerator {
         ];
         let metric_generator = MetricGenerator {
             metric_weights: WeightedIndex::new(metric_choices).unwrap(),
-            metric_multivalue,
+            metric_multivalue_weights: WeightedIndex::new(
+                metric_multivalue
+                    .iter()
+                    .map(|x| x.weight)
+                    .collect::<Vec<u8>>(),
+            )
+            .unwrap(),
+            metric_multivalue_choices: metric_multivalue.iter().map(|x| x.value).collect(),
             names: titles,
             container_ids: small_strings,
             tags,
@@ -213,7 +235,11 @@ impl MemberGenerator {
         // NOTE the ordering here of `member_choices` is very important! If you
         // change it here you MUST also change it in `Generator<Member> for
         // MemberGenerator`.
-        let member_choices = [kind_weights.metric, kind_weights.event, kind_weights.event];
+        let member_choices = [
+            kind_weights.metric,
+            kind_weights.event,
+            kind_weights.service_check,
+        ];
         MemberGenerator {
             kind_weights: WeightedIndex::new(member_choices).unwrap(),
             event_generator,
@@ -266,7 +292,7 @@ impl DogStatsD {
         tag_keys_range: Range<usize>,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        metric_multivalue: Vec<u8>,
+        metric_multivalue: &[MetricValueWeight],
         rng: &mut R,
     ) -> Self
     where
@@ -316,7 +342,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use crate::payload::{
-        dogstatsd::{KindWeights, MetricWeights},
+        dogstatsd::{default_metric_multivalue, KindWeights, MetricWeights},
         DogStatsD, Serialize,
     };
 
@@ -331,8 +357,9 @@ mod test {
             let tag_keys_range =  0..32;
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let metric_multivalue_weights: default_metric_multivalue();
-            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights, metric_weights, metric_multivalue_weights, &mut rng);
+            let metric_multivalue_weights = default_metric_multivalue();
+            let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights,
+                                           metric_weights, &metric_multivalue_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

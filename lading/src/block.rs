@@ -140,7 +140,7 @@ where
                 tg_range,
                 *kind_weights,
                 *metric_weights,
-                metric_multivalue.clone(),
+                metric_multivalue,
                 &mut rng,
             );
 
