@@ -31,46 +31,46 @@ impl Generator<Metric> for MetricGenerator {
         let sample_rate = rng.gen();
         let metric_multivalue_choice_idx = self.metric_multivalue_weights.sample(rng);
         let total_values = self.metric_multivalue_choices[metric_multivalue_choice_idx] as usize;
-        let value: Vec<common::NumValue> =
+        let mut values: Vec<common::NumValue> =
             Standard.sample_iter(&mut rng).take(total_values).collect();
 
         match self.metric_weights.sample(rng) {
             0 => Metric::Count(Count {
                 name,
-                value,
+                values,
                 sample_rate,
                 tags,
                 container_id,
             }),
             1 => Metric::Gauge(Gauge {
                 name,
-                value,
+                values,
                 tags,
                 container_id,
             }),
             2 => Metric::Timer(Timer {
                 name,
-                value,
+                values,
                 sample_rate,
                 tags,
                 container_id,
             }),
             3 => Metric::Distribution(Dist {
                 name,
-                value,
+                values,
                 sample_rate,
                 tags,
                 container_id,
             }),
             4 => Metric::Set(Set {
                 name,
-                value,
+                value: values.pop().unwrap(), // SAFETY: we are guaranteed to have at least one member
                 tags,
                 container_id,
             }),
             5 => Metric::Histogram(Histogram {
                 name,
-                value,
+                values,
                 sample_rate,
                 tags,
                 container_id,
@@ -104,7 +104,7 @@ impl fmt::Display for Metric {
 
 pub(crate) struct Count {
     name: String,
-    value: Vec<common::NumValue>,
+    values: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
@@ -115,7 +115,7 @@ impl fmt::Display for Count {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
+        for val in &self.values {
             write!(f, ":{val}")?;
         }
         write!(f, "|c")?;
@@ -145,7 +145,7 @@ impl fmt::Display for Count {
 
 pub(crate) struct Gauge {
     name: String,
-    value: Vec<common::NumValue>,
+    values: Vec<common::NumValue>,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
@@ -155,7 +155,7 @@ impl fmt::Display for Gauge {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
+        for val in &self.values {
             write!(f, ":{val}")?;
         }
         write!(f, "|g")?;
@@ -182,7 +182,7 @@ impl fmt::Display for Gauge {
 
 pub(crate) struct Timer {
     name: String,
-    value: Vec<common::NumValue>,
+    values: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
@@ -193,7 +193,7 @@ impl fmt::Display for Timer {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
+        for val in &self.values {
             write!(f, ":{val}")?;
         }
         write!(f, "|ms")?;
@@ -223,7 +223,7 @@ impl fmt::Display for Timer {
 
 pub(crate) struct Dist {
     name: String,
-    value: Vec<common::NumValue>,
+    values: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
@@ -234,7 +234,7 @@ impl fmt::Display for Dist {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
+        for val in &self.values {
             write!(f, ":{val}")?;
         }
         write!(f, "|d")?;
@@ -264,7 +264,7 @@ impl fmt::Display for Dist {
 
 pub(crate) struct Set {
     name: String,
-    value: Vec<common::NumValue>,
+    value: common::NumValue,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
 }
@@ -272,12 +272,7 @@ pub(crate) struct Set {
 impl fmt::Display for Set {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
-        write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
-            write!(f, ":{val}")?;
-        }
-        write!(f, "|s")?;
+        write!(f, "{name}:{value}|s", name = self.name, value = self.value)?;
         if let Some(ref tags) = self.tags {
             if !tags.is_empty() {
                 write!(f, "|#")?;
@@ -301,7 +296,7 @@ impl fmt::Display for Set {
 
 pub(crate) struct Histogram {
     name: String,
-    value: Vec<common::NumValue>,
+    values: Vec<common::NumValue>,
     sample_rate: Option<common::ZeroToOne>,
     tags: Option<common::tags::Tags>,
     container_id: Option<String>,
@@ -312,7 +307,7 @@ impl fmt::Display for Histogram {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.value {
+        for val in &self.values {
             write!(f, ":{val}")?;
         }
         write!(f, "|h")?;

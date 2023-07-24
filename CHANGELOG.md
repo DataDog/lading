@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.3-rc1]
+### Fixed
+- We no longer incorrectly send multiple values on a SET metric in DogStatsD.
+### Changed
+- We now allow users to configure the number of multi-values in a DogStatsD metric.
+
 ## [0.17.2]
 ### Removed
 - Observer no longer emits tick data for kernel and user-space time.
