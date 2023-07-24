@@ -37,7 +37,8 @@ struct Inner {
 /// Wrangles internal metrics into capture files
 ///
 /// This struct is responsible for capturing all internal metrics sent through
-/// [`metrics`] and periodically writing them to disk with format [`Line`].
+/// [`metrics`] and periodically writing them to disk with format
+/// [`json::Line`].
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,
