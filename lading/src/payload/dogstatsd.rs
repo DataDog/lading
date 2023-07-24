@@ -46,6 +46,10 @@ fn default_metric_multivalue() -> Vec<MetricValueWeight> {
     weights
 }
 
+fn default_metric_range() -> MetricValueRange {
+    MetricValueRange::default()
+}
+
 /// Weight for a `DogStatsD` multivalue message.
 ///
 /// Defines the relative weight of a certain number of 'values' packed into a
@@ -55,6 +59,25 @@ fn default_metric_multivalue() -> Vec<MetricValueWeight> {
 pub struct MetricValueWeight {
     value: u8,
     weight: u8,
+}
+
+/// Range for `DogStatsD` values.
+///
+/// Defines the acceptable range of a 'value' in a metric message, [min,max).
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetricValueRange {
+    min: f32,
+    max: f32,
+}
+
+impl Default for MetricValueRange {
+    fn default() -> Self {
+        Self {
+            min: f32::MIN,
+            max: f32::MAX,
+        }
+    }
 }
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
@@ -131,6 +154,10 @@ pub struct Config {
     /// Choices are weighted according to the specified weight.
     #[serde(default = "default_metric_multivalue")]
     pub metric_multivalue: Vec<MetricValueWeight>,
+    /// Defines the range of values that may be produced into a metric,
+    /// [minimum,maximum).
+    #[serde(default = "default_metric_range")]
+    pub metric_value_range: MetricValueRange,
 }
 
 fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
@@ -172,6 +199,7 @@ impl MemberGenerator {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         metric_multivalue: &[MetricValueWeight],
+        metric_value_range: MetricValueRange,
         mut rng: &mut R,
     ) -> Self
     where
@@ -227,6 +255,7 @@ impl MemberGenerator {
             )
             .unwrap(),
             metric_multivalue_choices: metric_multivalue.iter().map(|x| x.value).collect(),
+            metric_value_range,
             names: titles,
             container_ids: small_strings,
             tags,
@@ -293,6 +322,7 @@ impl DogStatsD {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         metric_multivalue: &[MetricValueWeight],
+        metric_value_range: MetricValueRange,
         rng: &mut R,
     ) -> Self
     where
@@ -304,6 +334,7 @@ impl DogStatsD {
             kind_weights,
             metric_weights,
             metric_multivalue,
+            metric_value_range,
             rng,
         );
 

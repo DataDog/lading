@@ -1,25 +1,32 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 
+use crate::payload::Generator;
+
 pub(crate) mod tags;
+
+pub(crate) struct NumValueGenerator {
+    pub(crate) value_range: Range<f32>,
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
+impl Generator<NumValue> for NumValueGenerator {
+    fn generate<R>(&self, rng: &mut R) -> NumValue
+    where
+        R: rand::Rng + ?Sized,
+    {
+        match rng.gen_range(0..=1) {
+            0 => NumValue::Float(rng.gen_range(self.value_range.clone()) as f64),
+            1 => NumValue::Int(rng.gen_range(self.value_range.clone()) as i64),
+            _ => unreachable!(),
+        }
+    }
+}
 
 pub(crate) enum NumValue {
     Float(f64),
     Int(i64),
-}
-
-impl Distribution<NumValue> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> NumValue
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..=1) {
-            0 => NumValue::Float(rng.gen()),
-            1 => NumValue::Int(rng.gen()),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl fmt::Display for NumValue {

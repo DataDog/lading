@@ -1,20 +1,21 @@
 use std::fmt;
 
-use rand::{
-    distributions::{Standard, WeightedIndex},
-    prelude::Distribution,
-    seq::SliceRandom,
-};
+use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom};
 
 use crate::payload::Generator;
 
-use super::{choose_or_not, common};
+use super::{
+    choose_or_not,
+    common::{self, NumValueGenerator},
+    MetricValueRange,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
     pub(crate) metric_weights: WeightedIndex<u8>,
     pub(crate) metric_multivalue_weights: WeightedIndex<u8>,
     pub(crate) metric_multivalue_choices: Vec<u8>,
+    pub(crate) metric_value_range: MetricValueRange,
     pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
     pub(crate) tags: Vec<common::tags::Tags>,
@@ -31,8 +32,14 @@ impl Generator<Metric> for MetricGenerator {
         let sample_rate = rng.gen();
         let metric_multivalue_choice_idx = self.metric_multivalue_weights.sample(rng);
         let total_values = self.metric_multivalue_choices[metric_multivalue_choice_idx] as usize;
-        let mut values: Vec<common::NumValue> =
-            Standard.sample_iter(&mut rng).take(total_values).collect();
+
+        let value_gen = NumValueGenerator {
+            value_range: self.metric_value_range.min..self.metric_value_range.max,
+        };
+        let mut values = Vec::with_capacity(total_values);
+        for _ in 0..total_values {
+            values.push(value_gen.generate(rng));
+        }
 
         match self.metric_weights.sample(rng) {
             0 => Metric::Count(Count {

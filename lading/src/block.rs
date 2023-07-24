@@ -131,6 +131,7 @@ where
             kind_weights,
             metric_weights,
             metric_multivalue,
+            metric_value_range,
         }) => {
             let mn_range = *metric_names_minimum..*metric_names_maximum;
             let tg_range = *tag_keys_minimum..*tag_keys_maximum;
@@ -141,6 +142,7 @@ where
                 *kind_weights,
                 *metric_weights,
                 metric_multivalue,
+                *metric_value_range,
                 &mut rng,
             );
 
