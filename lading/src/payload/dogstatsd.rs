@@ -46,7 +46,7 @@ fn default_metric_multivalue() -> Vec<MetricValueWeight> {
     weights
 }
 
-/// Weight for a `DogStatsD` multivalue line.
+/// Weight for a `DogStatsD` multivalue message.
 ///
 /// Defines the relative weight of a certain number of 'values' packed into a
 /// single metric message.
