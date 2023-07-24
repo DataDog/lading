@@ -17,3 +17,6 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 
 [build-dependencies]
 prost-build = { version = "0.11" }
+
+[lib]
+doctest = false
