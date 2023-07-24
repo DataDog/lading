@@ -49,7 +49,7 @@ fn default_metric_multivalue() -> Vec<MetricValueWeight> {
 /// Weight for a `DogStatsD` multivalue line.
 ///
 /// Defines the relative weight of a certain number of 'values' packed into a
-/// single metric line.
+/// single metric message.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct MetricValueWeight {
