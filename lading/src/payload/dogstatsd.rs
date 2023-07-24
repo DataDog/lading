@@ -128,7 +128,7 @@ pub struct Config {
     #[serde(default)]
     pub metric_weights: MetricWeights,
     /// Defines the relative probability of a metric having multiple values.
-    /// Choices are evenly weighted among those listed.
+    /// Choices are weighted according to the specified weight.
     #[serde(default = "default_metric_multivalue")]
     pub metric_multivalue: Vec<MetricValueWeight>,
 }
