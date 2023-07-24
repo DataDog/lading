@@ -124,7 +124,7 @@ pub struct Config {
     /// payload.
     #[serde(default)]
     pub kind_weights: KindWeights,
-    /// Defines the relative probability of each kind of DogStatsD metic.
+    /// Defines the relative probability of each kind of DogStatsD metric.
     #[serde(default)]
     pub metric_weights: MetricWeights,
     /// Defines the relative probability of a metric having multiple values.
