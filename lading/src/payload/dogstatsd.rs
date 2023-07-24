@@ -127,7 +127,7 @@ pub struct Config {
     /// Defines the relative probability of each kind of DogStatsD metric.
     #[serde(default)]
     pub metric_weights: MetricWeights,
-    /// Defines the relative probability of a metric having multiple values.
+    /// Defines the relative probability of a dogstatsd message having multiple values.
     /// Choices are weighted according to the specified weight.
     #[serde(default = "default_metric_multivalue")]
     pub metric_multivalue: Vec<MetricValueWeight>,
