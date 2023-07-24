@@ -34,7 +34,8 @@ impl Generator<Metric> for MetricGenerator {
         let total_values = self.metric_multivalue_choices[metric_multivalue_choice_idx] as usize;
 
         let value_gen = NumValueGenerator {
-            value_range: self.metric_value_range.min..self.metric_value_range.max,
+            value_range: f64::from(self.metric_value_range.min)
+                ..f64::from(self.metric_value_range.max),
         };
         let mut values = Vec::with_capacity(total_values);
         for _ in 0..total_values {

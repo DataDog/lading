@@ -373,7 +373,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use crate::payload::{
-        dogstatsd::{default_metric_multivalue, KindWeights, MetricWeights},
+        dogstatsd::{default_metric_multivalue, KindWeights, MetricValueRange, MetricWeights},
         DogStatsD, Serialize,
     };
 
@@ -389,8 +389,11 @@ mod test {
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
             let metric_multivalue_weights = default_metric_multivalue();
+            let metric_value_range = MetricValueRange::default();
             let dogstatsd = DogStatsD::new(metric_names_range, tag_keys_range, kind_weights,
-                                           metric_weights, &metric_multivalue_weights, &mut rng);
+                                           metric_weights, &metric_multivalue_weights,
+                                           metric_value_range,
+                                           &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

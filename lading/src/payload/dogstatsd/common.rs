@@ -7,7 +7,7 @@ use crate::payload::Generator;
 pub(crate) mod tags;
 
 pub(crate) struct NumValueGenerator {
-    pub(crate) value_range: Range<f32>,
+    pub(crate) value_range: Range<f64>,
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
@@ -17,7 +17,7 @@ impl Generator<NumValue> for NumValueGenerator {
         R: rand::Rng + ?Sized,
     {
         match rng.gen_range(0..=1) {
-            0 => NumValue::Float(rng.gen_range(self.value_range.clone()) as f64),
+            0 => NumValue::Float(rng.gen_range(self.value_range.clone())),
             1 => NumValue::Int(rng.gen_range(self.value_range.clone()) as i64),
             _ => unreachable!(),
         }
