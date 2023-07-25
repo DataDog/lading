@@ -169,7 +169,7 @@ where
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
         payload::Config::Json => {
-            construct_block_cache_inner(&mut rng, &payload::Json::default(), block_chunks, labels)
+            construct_block_cache_inner(&mut rng, &payload::Json, block_chunks, labels)
         }
         payload::Config::Static { ref static_path } => construct_block_cache_inner(
             &mut rng,
@@ -177,24 +177,15 @@ where
             block_chunks,
             labels,
         ),
-        payload::Config::OpentelemetryTraces => construct_block_cache_inner(
-            rng,
-            &payload::OpentelemetryTraces::default(),
-            block_chunks,
-            labels,
-        ),
-        payload::Config::OpentelemetryLogs => construct_block_cache_inner(
-            rng,
-            &payload::OpentelemetryLogs::default(),
-            block_chunks,
-            labels,
-        ),
-        payload::Config::OpentelemetryMetrics => construct_block_cache_inner(
-            rng,
-            &payload::OpentelemetryMetrics::default(),
-            block_chunks,
-            labels,
-        ),
+        payload::Config::OpentelemetryTraces => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryTraces, block_chunks, labels)
+        }
+        payload::Config::OpentelemetryLogs => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryLogs, block_chunks, labels)
+        }
+        payload::Config::OpentelemetryMetrics => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryMetrics, block_chunks, labels)
+        }
     }
 }
 

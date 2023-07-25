@@ -61,5 +61,8 @@ proptest-derive = "0.3.0"
 [features]
 default = []
 
+[lib]
+doctest = false
+
 [[bin]]
 name = "lading"

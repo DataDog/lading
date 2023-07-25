@@ -241,7 +241,7 @@ impl Grpc {
             tonic::Status::new(tonic::Code::Unknown, format!("Service was not ready: {e}"))
         })?;
         let res = client
-            .unary(Request::new(request), rpc_path, NoopCodec::default())
+            .unary(Request::new(request), rpc_path, NoopCodec)
             .await?;
 
         Ok(res)

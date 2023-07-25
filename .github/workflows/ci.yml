@@ -30,23 +30,6 @@ jobs:
         if: matrix.os == 'macos-latest'
       - run: cargo check
 
-  test:
-    name: Test Suite
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
-      - name: Install protobuf (Apt)
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        if: matrix.os == 'ubuntu-latest'
-      - name: Install protobuf (Brew)
-        run: brew install protobuf
-        if: matrix.os == 'macos-latest'
-      - run: cargo test
-
   fmt:
     name: Rustfmt
     runs-on: ${{ matrix.os }}
@@ -78,6 +61,16 @@ jobs:
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
       - run: cargo clippy --all-features
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
+      - name: Install protobuf (Apt)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo test
 
   integration-test:
     name: Integration Tests
