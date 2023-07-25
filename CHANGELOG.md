@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.3-rc2]
+### Changed
+- We now allow users to set the range of values for DogStatsD metrics.
+
 ## [0.17.3-rc1]
 ### Fixed
 - We no longer incorrectly send multiple values on a SET metric in DogStatsD.
