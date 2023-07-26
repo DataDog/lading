@@ -1,13 +1,11 @@
 //! JSON form of a Lading capture Line, meant to be read line by line from a
 //! file.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap};
 use uuid::Uuid;
 
-use crate::proto::lading::v1;
-
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 /// The kinds of metrics that are recorded in [`Line`].
 pub enum MetricKind {
@@ -17,17 +15,7 @@ pub enum MetricKind {
     Gauge,
 }
 
-impl From<v1::MetricKind> for MetricKind {
-    fn from(value: v1::MetricKind) -> Self {
-        match value {
-            v1::MetricKind::Unspecified => unreachable!(),
-            v1::MetricKind::Counter => MetricKind::Counter,
-            v1::MetricKind::Gauge => MetricKind::Gauge,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 /// The value for [`Line`].
 #[serde(untagged)]
 pub enum LineValue {
@@ -37,7 +25,19 @@ pub enum LineValue {
     Float(f64),
 }
 
-#[derive(Debug, Serialize)]
+impl LineValue {
+    /// Get an f64 representation of this value. Extremely large integers will be truncated.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            LineValue::Int(int) => *int as f64,
+            LineValue::Float(float) => *float,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 /// The structure of a capture file line.
 pub struct Line<'a> {
     #[serde(borrow)]
@@ -60,4 +60,14 @@ pub struct Line<'a> {
     #[serde(flatten)]
     /// The labels associated with this metric.
     pub labels: HashMap<String, String>,
+}
+
+impl<'a> Line<'a> {
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    /// Returns the number of seconds since unix epoch
+    pub fn seconds_since_epoch(&self) -> u64 {
+        let seconds: u128 = self.time / 1_000;
+        seconds as u64
+    }
 }
