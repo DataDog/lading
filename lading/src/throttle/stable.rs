@@ -257,12 +257,12 @@ mod test {
                             granted_requests = u64::from(request.get());
                             current_interval = interval;
                         }
-                        prop_assert!(granted_requests <= maximum_capacity);
                     }
                     Err(_) => {
                         // ignored intentionally
                     }
                 }
+                prop_assert!(granted_requests <= maximum_capacity);
             }
         }
     }
