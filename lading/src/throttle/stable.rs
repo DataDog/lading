@@ -155,6 +155,11 @@ mod test {
 
     // The recording of the last tick must always monotonically increase.
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: 100_000,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn last_tick_monotonic_increase(maximum_capacity in (1..u64::MAX), last_tick: u64,
                                         mut ticks_requests in ticks_elapsed_and_cap_requests()) {
@@ -177,6 +182,11 @@ mod test {
 
     // Spare capacity must never exceed the maximum capacity.
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: 100_000,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn spare_capacity_never_exceed(maximum_capacity in (1..u64::MAX), last_tick: u64,
                                        mut ticks_requests in ticks_elapsed_and_cap_requests()) {
@@ -198,6 +208,11 @@ mod test {
     // The sum of capacity requests must never exceed maximum_capacity in one
     // INTERVAL_TICKS.
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: 100_000,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn capacity_never_exceeds_max_in_interval(
             maximum_capacity in (1..u64::MAX), last_tick: u64,
