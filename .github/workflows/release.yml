@@ -105,6 +105,11 @@ jobs:
         run: |
           aws s3 cp target/${{ matrix.target }}/release/lading s3://lading-releases/${{  github.ref_name }}/${{ matrix.target }}/lading
 
+  crates-io-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
       - name: Publish to crates.io
         run: |
           cargo publish \
