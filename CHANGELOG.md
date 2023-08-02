@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.17.4]
+### Added
+- `lading` and `lading-capture` releases are now published on crates.io.
+
 ## [0.17.3]
 ### Fixed
 - We no longer incorrectly send multiple values on a SET metric in DogStatsD.
