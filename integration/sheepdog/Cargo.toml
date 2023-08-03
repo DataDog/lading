@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
-escargot = "0.5.7"
+escargot = "0.5.8"
 serde_json = "1.0"
 shared = { path = "../shared" }
 tempfile = "3.7"
