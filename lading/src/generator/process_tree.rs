@@ -10,11 +10,9 @@
 //! configured [throttle].
 //!
 
-use crate::{
-    signals::Shutdown,
-    throttle::{self, Throttle},
-};
+use crate::signals::Shutdown;
 use is_executable::IsExecutable;
+use lading_throttle::Throttle;
 use nix::{
     sys::wait::{waitpid, WaitPidFlag, WaitStatus},
     unistd::{fork, ForkResult, Pid},
@@ -220,7 +218,7 @@ pub struct Config {
     pub executables: Vec<Executable>,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 impl Config {
@@ -268,13 +266,12 @@ impl ProcessTree {
             Err(e) => return Err(Error::from(e)),
         };
 
-        let labels = vec![
+        let _labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "process_tree".to_string()),
         ];
 
-        let throttle =
-            Throttle::new_with_config(config.throttle, config.max_tree_per_second, labels);
+        let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
         match serde_yaml::to_string(config) {
             Ok(serialized) => Ok(Self {
                 lading_path,

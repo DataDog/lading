@@ -20,6 +20,7 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes};
 use http::{uri::PathAndQuery, Uri};
+use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -34,7 +35,6 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::{self, Throttle},
 };
 
 use super::General;
@@ -73,7 +73,7 @@ pub struct Config {
     pub parallel_connections: u16,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -202,7 +202,7 @@ impl Grpc {
             .cloned()
             .expect("target_uri should have an RPC path");
 
-        let throttle = Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone());
+        let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
         Ok(Self {
             target_uri,
             rpc_path,

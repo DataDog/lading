@@ -28,6 +28,7 @@ use http::{
     Method, Request, Uri,
 };
 use hyper::{client::HttpConnector, Body, Client};
+use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
@@ -44,7 +45,6 @@ use crate::{
     payload,
     payload::SplunkHecEncoding,
     signals::Shutdown,
-    throttle::{self, Throttle},
 };
 
 use super::General;
@@ -89,7 +89,7 @@ pub struct Config {
     pub parallel_connections: u16,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -214,7 +214,7 @@ impl SplunkHec {
             uri,
             token: config.token,
             block_cache,
-            throttle: Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone()),
+            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
             shutdown,
         })

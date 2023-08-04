@@ -18,6 +18,7 @@ use crate::signals::Shutdown;
 #[cfg(target_os = "linux")]
 mod linux;
 
+#[allow(dead_code)] // used on Linux
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.
 pub(crate) static RSS_BYTES: AtomicU64 = AtomicU64::new(0);

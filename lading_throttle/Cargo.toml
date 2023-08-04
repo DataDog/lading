@@ -1,0 +1,25 @@
+[package]
+name = "lading-throttle"
+version = "0.1.0"
+authors = ["Brian L. Troutwine <brian.troutwine@datadoghq.com>", "George Hahn <george.hahn@datadoghq.com"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::profiling"]
+description = "A tool for load testing daemons."
+
+[dependencies]
+async-trait = { version = "0.1", default-features = false, features = [] }
+metrics = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.2"
+proptest-derive = "0.3.0"
+
+[lib]
+doctest = false

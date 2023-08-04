@@ -15,10 +15,10 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::{self, Throttle},
 };
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
+use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -59,7 +59,7 @@ pub struct Config {
     pub parallel_connections: u16,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -160,11 +160,7 @@ impl UnixDatagram {
             let child = Child {
                 path: config.path.clone(),
                 block_cache,
-                throttle: Throttle::new_with_config(
-                    config.throttle,
-                    bytes_per_second,
-                    labels.clone(),
-                ),
+                throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
             };
