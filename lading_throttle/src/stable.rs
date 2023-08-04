@@ -1,12 +1,6 @@
 //! Stable throttle
 //!
 //! This throttle refills capacity at a steady rate.
-//!
-//! ## Metrics
-//!
-//! `throttle_refills_per_tick`: Throttle capacity will refill to allow this
-//! many operations per tick of the throttle's clock source.
-//!
 
 use std::{cmp, num::NonZeroU32};
 
