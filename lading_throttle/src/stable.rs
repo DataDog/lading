@@ -241,9 +241,9 @@ mod test {
             .. ProptestConfig::default()
         })]
         #[test]
-        fn last_tick_monotonic_increase(maximum_capacity in (1..u64::MAX),
+        fn last_tick_monotonic_increase(maximum_capacity in (1..u32::MAX),
                                         mut ticks_requests in ticks_elapsed_and_cap_requests()) {
-            let mut valve = Valve::new(maximum_capacity);
+            let mut valve = Valve::new(NonZeroU32::new(maximum_capacity).unwrap());
 
             let mut ticks_elapsed = 0;
             let mut prev_last_tick = 0;
@@ -268,9 +268,10 @@ mod test {
             .. ProptestConfig::default()
         })]
         #[test]
-        fn spare_capacity_never_exceed(maximum_capacity in (1..u64::MAX),
+        fn spare_capacity_never_exceed(maximum_capacity in (1..u32::MAX),
                                        mut ticks_requests in ticks_elapsed_and_cap_requests()) {
-            let mut valve = Valve::new(maximum_capacity);
+            let mut valve = Valve::new(NonZeroU32::new(maximum_capacity).unwrap());
+            let maximum_capacity = u64::from(maximum_capacity);
 
             let mut ticks_elapsed = 0;
             for (ticks_elapsed_diff, request) in ticks_requests.drain(..) {
@@ -295,9 +296,10 @@ mod test {
         })]
         #[test]
         fn capacity_never_exceeds_max_in_interval(
-            maximum_capacity in (1..u64::MAX),
+            maximum_capacity in (1..u32::MAX),
             mut ticks_requests in ticks_elapsed_and_cap_requests()) {
-            let mut valve = Valve::new(maximum_capacity);
+            let mut valve = Valve::new(NonZeroU32::new(maximum_capacity).unwrap());
+            let maximum_capacity = u64::from(maximum_capacity);
 
             let mut ticks_elapsed: u64 = 0;
             let mut granted_requests: u64 = 0;
