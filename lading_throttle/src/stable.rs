@@ -144,12 +144,14 @@ impl Valve {
         // filled up throttle capacity.
         let cap = ((self.refill_per_tick * ticks_diff) * REFILL_MASK) + self.capacity;
         let refilled_capacity: u64 = cmp::min(cap, self.maximum_capacity);
+        println!("[{tick}] cap: {cap} | refilled_capacity: {refilled_capacity} | capacity_request: {capacity_request}", tick = self.last_tick);
 
         if refilled_capacity > capacity_request {
             // If the refilled capacity is greater than the request we respond
             // to the caller immediately and store the spare capacity for next
             // call.
             self.capacity = refilled_capacity - capacity_request;
+            println!("immediate return");
             Ok(0)
         } else {
             // If the refill is not sufficient we calculate how many ticks will
@@ -157,7 +159,11 @@ impl Valve {
             // wait that amount of time.
             self.capacity = 0;
             let cap_diff = capacity_request - refilled_capacity;
-            let slop = cap_diff / self.refill_per_tick;
+            // If the slop is zero this means that there's some fractional
+            // refill that is missing. This is not achievable because it's
+            // impossible for the caller to wait less than a tick.
+            let slop = cmp::max(1, cap_diff / self.refill_per_tick);
+            println!("wait || slop: {slop} | cap_diff: {cap_diff}");
             Ok(slop)
         }
     }
