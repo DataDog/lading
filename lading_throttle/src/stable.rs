@@ -86,9 +86,9 @@ struct Valve {
     /// The maximum capacity of `Valve` past which no more capacity will be
     /// added. Stored in megatick-units.
     maximum_capacity: u64,
-    /// The current capacity of the `Valve`. Stored in megatick-units. Must
-    /// never exceed `maximum_capacity`.
-    capacity: u64,
+    /// The spare capacity of the `Valve`. Stored in megatick-units. Does not
+    /// persist between more than two calls to `request`.
+    spare_capacity: u64,
     /// Per tick, how much capacity is added to the `Valve`. Stored in
     /// microtick-units.
     refill_per_tick: u64,
@@ -103,7 +103,7 @@ impl Valve {
         let refill_per_tick = u64::from(maximum_capacity.get());
         let maximum_capacity = u64::from(maximum_capacity.get()) * REFILL_MASK;
         Self {
-            capacity: 0,
+            spare_capacity: 0,
             maximum_capacity,
             refill_per_tick,
             last_tick: 0,
@@ -134,27 +134,31 @@ impl Valve {
         }
 
         let ticks_diff = ticks_elapsed - self.last_tick;
-        self.last_tick = ticks_elapsed;
 
         // Now that the preliminaries are out of the way, wake up and compute
         // how much the throttle capacity is refilled since we were last
         // called. Depending on how long ago this was we may have completely
         // filled up throttle capacity.
-        let cap = (self.refill_per_tick * ticks_diff) + self.capacity;
+        let cap = (self.refill_per_tick * ticks_diff) + self.spare_capacity;
         let refilled_capacity: u64 = cmp::min(cap, self.maximum_capacity);
-        println!("[{tick}] max: {max} | cap: {cap} | refilled_capacity: {refilled_capacity} | capacity_request: {capacity_request}", max = self.maximum_capacity, tick = self.last_tick);
-        self.capacity = refilled_capacity;
+        println!(
+            "[{tick}] max: {max} | refilled_capacity: {refilled_capacity} | request: {capacity_request}",
+            max = self.maximum_capacity,
+            tick = self.last_tick + ticks_diff,
+            refilled_capacity = refilled_capacity
+        );
 
         // If the refilled capacity is greater or equal to the request we deduct
         // the request from capacity and return 0 slop, signaling to the user
         // that their request is a success. Else, we calculate how long the
         // caller should wait for and _do not_ adjust the capacity. User must
         // call again with the same request.
-        if capacity_request <= self.capacity {
+        if capacity_request <= refilled_capacity {
             // If the refilled capacity is greater or equal to the request we
             // respond to the caller immediately and store the spare capacity
             // for next call.
-            self.capacity -= capacity_request;
+            self.spare_capacity = refilled_capacity - capacity_request;
+            self.last_tick = ticks_elapsed;
             println!("immediate return");
             Ok(0)
         } else {
@@ -162,14 +166,14 @@ impl Valve {
             // need to pass before capacity is sufficient, force the client to
             // wait that amount of time. We _do not_ change the actual capacity
             // as we do not know when the caller will request again.
-            let cap_diff = capacity_request - self.capacity;
+            let cap_diff = capacity_request - refilled_capacity;
             // If the slop is zero this means that there's some fractional
             // refill that is missing. This is not achievable because it's
             // impossible for the caller to wait less than a tick.
             let slop = cmp::max(1, cap_diff / self.refill_per_tick);
             println!(
-                "wait || slop: {slop} | cap_diff: {cap_diff} | capacity: {capacity}",
-                capacity = self.capacity
+                "wait || slop: {slop} | cap_diff: {cap_diff} | refill: {refill}",
+                refill = self.refill_per_tick
             );
             Ok(slop)
         }
@@ -186,7 +190,7 @@ mod test {
 
     fn capacity_never_exceeds_max_in_interval_inner(
         maximum_capacity: u32,
-        mut ticks_requests: Vec<(u64, NonZeroU32)>,
+        mut requests: Vec<NonZeroU32>,
     ) -> Result<(), proptest::test_runner::TestCaseError> {
         let mut valve = Valve::new(NonZeroU32::new(maximum_capacity).unwrap());
         let maximum_capacity = u64::from(maximum_capacity);
@@ -198,8 +202,8 @@ mod test {
         println!("\n\nTEST TEST TEST");
 
         let mut slop = 0;
-        for (ticks_elapsed_diff, request) in ticks_requests.drain(..) {
-            ticks_elapsed += ticks_elapsed_diff + slop;
+        for request in requests.drain(..) {
+            ticks_elapsed += slop;
 
             {
                 let interval = ticks_elapsed / INTERVAL_TICKS;
@@ -211,6 +215,7 @@ mod test {
                     granted_requests = 0;
                     current_interval = interval;
                 }
+                println!("[{ticks_elapsed}] interval: {current_interval} | granted_requests: {granted_requests}");
             }
 
             match valve.request(ticks_elapsed, request.get()) {
@@ -239,22 +244,16 @@ mod test {
     #[test]
     fn static_capacity_never_exceeds_max_in_interval() {
         let maximum_capacity = 490301363u32;
-        let ticks_requests: Vec<(u64, NonZeroU32)> = vec![
-            (0, NonZeroU32::new(1).unwrap()),
-            (0, NonZeroU32::new(490301363).unwrap()),
+        let requests: Vec<NonZeroU32> = vec![
+            NonZeroU32::new(1).unwrap(),
+            NonZeroU32::new(490301363).unwrap(),
         ];
-        capacity_never_exceeds_max_in_interval_inner(maximum_capacity, ticks_requests).unwrap()
+        capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests).unwrap()
     }
 
-    fn ticks_elapsed_and_cap_requests(max: u32) -> impl Strategy<Value = Vec<(u64, NonZeroU32)>> {
+    fn cap_requests(max: u32) -> impl Strategy<Value = Vec<NonZeroU32>> {
         let max = max + 100;
-        collection::vec(
-            (
-                (0..1_000u64),
-                (1..max).prop_map(|i| NonZeroU32::new(i).unwrap()),
-            ),
-            1..5,
-        )
+        collection::vec((1..max).prop_map(|i| NonZeroU32::new(i).unwrap()), 1..5)
     }
 
     // The sum of capacity requests must never exceed maximum_capacity in one
@@ -268,9 +267,9 @@ mod test {
         #[test]
         fn capacity_never_exceeds_max_in_interval(
             maximum_capacity in (1..40_u32), // u32::MAX),
-            ticks_requests in ticks_elapsed_and_cap_requests(256_u32)
+            requests in cap_requests(32_u32)
         ) {
-            capacity_never_exceeds_max_in_interval_inner(maximum_capacity, ticks_requests)?
+            capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests)?
         }
     }
 }

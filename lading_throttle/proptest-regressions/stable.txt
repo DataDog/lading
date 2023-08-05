@@ -12,3 +12,6 @@ cc a822f00a9cf042de3107ad569d45552e7a5e379baeac250a47d6d6dd52eebf42 # shrinks to
 cc 3192ad012c82e5d6b60157d12971d53c937c8bf8751ba56f07a5360efd73f231 # shrinks to maximum_capacity = 247, ticks_requests = [(0, 247), (0, 107), (0, 141), (1, 141)]
 cc ec07b3550308d1fb48608949905245f776df96af5f005b67b3bf3a06ab5061d4 # shrinks to maximum_capacity = 61, ticks_requests = [(0, 61), (0, 17), (0, 45), (1, 45)]
 cc fbc741078b4f7aa47ee037d8959d911b876b068d709419a2ec65a28793a39809 # shrinks to maximum_capacity = 36, ticks_requests = [(0, 36), (0, 12), (0, 25), (1, 25)]
+cc 5b7cfe1606d24b3b73ac2f9819abf8fc24e01335a57303e3a316492f158ff65e # shrinks to maximum_capacity = 34, requests = [34, 23, 13, 12]
+cc dc6ba9aaeeaf6e0f262609fb87dd62f1a970dce6d0a5b1ca43d04f9c5ebb8b73 # shrinks to maximum_capacity = 19, requests = [19, 10, 11, 10]
+cc 2d33aee1088d9b3cddae8b700fcbb97fa58fcf12c20af4d1c892ccde15597a43 # shrinks to maximum_capacity = 36, requests = [36, 11, 27, 26]
