@@ -99,9 +99,6 @@ impl Clock for RealClock {
     }
 
     async fn wait(&self, ticks: u64) {
-        if ticks == 0 {
-            return;
-        }
         time::sleep(Duration::from_micros(ticks)).await;
     }
 }

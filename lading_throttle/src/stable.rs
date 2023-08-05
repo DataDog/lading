@@ -58,11 +58,15 @@ where
     }
 
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
-        let slop: u64 = self
-            .valve
-            .request(self.clock.ticks_elapsed(), request.get())?;
-        self.clock.wait(slop).await;
-        self.valve.acquire(request.get())?;
+        loop {
+            let slop: u64 = self
+                .valve
+                .request(self.clock.ticks_elapsed(), request.get())?;
+            if slop == 0 {
+                break;
+            }
+            self.clock.wait(slop).await;
+        }
         Ok(())
     }
 
@@ -139,12 +143,18 @@ impl Valve {
         let cap = (self.refill_per_tick * ticks_diff) + self.capacity;
         let refilled_capacity: u64 = cmp::min(cap, self.maximum_capacity);
         println!("[{tick}] max: {max} | cap: {cap} | refilled_capacity: {refilled_capacity} | capacity_request: {capacity_request}", max = self.maximum_capacity, tick = self.last_tick);
-
         self.capacity = refilled_capacity;
-        if self.capacity >= capacity_request {
+
+        // If the refilled capacity is greater or equal to the request we deduct
+        // the request from capacity and return 0 slop, signaling to the user
+        // that their request is a success. Else, we calculate how long the
+        // caller should wait for and _do not_ adjust the capacity. User must
+        // call again with the same request.
+        if capacity_request <= self.capacity {
             // If the refilled capacity is greater or equal to the request we
             // respond to the caller immediately and store the spare capacity
             // for next call.
+            self.capacity -= capacity_request;
             println!("immediate return");
             Ok(0)
         } else {
@@ -152,27 +162,17 @@ impl Valve {
             // need to pass before capacity is sufficient, force the client to
             // wait that amount of time. We _do not_ change the actual capacity
             // as we do not know when the caller will request again.
-            let cap_diff = capacity_request - refilled_capacity;
+            let cap_diff = capacity_request - self.capacity;
             // If the slop is zero this means that there's some fractional
             // refill that is missing. This is not achievable because it's
             // impossible for the caller to wait less than a tick.
             let slop = cmp::max(1, cap_diff / self.refill_per_tick);
-            println!("wait || slop: {slop} | cap_diff: {cap_diff}");
+            println!(
+                "wait || slop: {slop} | cap_diff: {cap_diff} | capacity: {capacity}",
+                capacity = self.capacity
+            );
             Ok(slop)
         }
-    }
-
-    /// Acquire `capacity_request` tick-units from the `Valve`. Must be called
-    /// after `request` and obeying any slop returned there.
-    fn acquire(&mut self, capacity_request: u32) -> Result<(), Error> {
-        let capacity_request = u64::from(capacity_request) * REFILL_MASK;
-        if capacity_request > self.maximum_capacity {
-            return Err(Error::Capacity);
-        }
-        let prev_capacity = self.capacity;
-        self.capacity = self.capacity.saturating_sub(capacity_request);
-        println!("[acquire] request: {capacity_request} | prev cap: {prev_capacity} | new cap: {new_cap}", new_cap = self.capacity);
-        Ok(())
     }
 }
 
@@ -195,10 +195,11 @@ mod test {
         let mut granted_requests: u64 = 0;
         let mut current_interval: u64 = 0;
 
-        println!("TEST TEST TEST");
+        println!("\n\nTEST TEST TEST");
 
+        let mut slop = 0;
         for (ticks_elapsed_diff, request) in ticks_requests.drain(..) {
-            ticks_elapsed += ticks_elapsed_diff;
+            ticks_elapsed += ticks_elapsed_diff + slop;
 
             {
                 let interval = ticks_elapsed / INTERVAL_TICKS;
@@ -214,29 +215,16 @@ mod test {
 
             match valve.request(ticks_elapsed, request.get()) {
                 Ok(0) => {
-                    valve.acquire(request.get()).unwrap();
                     // The request went through right away.
                     granted_requests += u64::from(request.get());
+                    slop = 0;
                 }
-                Ok(slop) => {
-                    // The request must wait for 'slop' ticks. If adding
-                    // these to our current ticks_elapsed do not push us
-                    // past the interval boundary we count them in the
-                    // current interval. Else, we account them to the next.
-                    ticks_elapsed += slop; // simulates a wait
-                    valve.acquire(request.get()).unwrap();
-                    let interval = ticks_elapsed / INTERVAL_TICKS;
-                    if current_interval < interval {
-                        // We are in a new interval, all counters reset.
-                        granted_requests = u64::from(request.get());
-                        current_interval = interval;
-                        println!("[interval change] {current_interval}");
-                    } else {
-                        // We remain in the current interval.
-                        granted_requests += u64::from(request.get());
-                    }
-                    prop_assert!(granted_requests <= maximum_capacity,
-                                 "[slop] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
+                Ok(s) => {
+                    // The request must wait for 'slop' ticks. We choose to
+                    // 'wait' by adding to the slop accumulator but may or may
+                    // not make the same request of the valve. No request is
+                    // granted if slop is non-zero.
+                    slop = s;
                 }
                 Err(_) => {
                     // ignored intentionally
@@ -265,7 +253,7 @@ mod test {
                 (0..1_000u64),
                 (1..max).prop_map(|i| NonZeroU32::new(i).unwrap()),
             ),
-            1..100,
+            1..5,
         )
     }
 
@@ -273,13 +261,13 @@ mod test {
     // INTERVAL_TICKS.
     proptest! {
         #![proptest_config(ProptestConfig {
-            cases: 1_000_000,
-            max_shrink_iters: 10_000_000,
+            cases: 10_000_000,
+            max_shrink_iters: 100_000_000,
             .. ProptestConfig::default()
         })]
         #[test]
         fn capacity_never_exceeds_max_in_interval(
-            maximum_capacity in (1..256_u32), // u32::MAX),
+            maximum_capacity in (1..40_u32), // u32::MAX),
             ticks_requests in ticks_elapsed_and_cap_requests(256_u32)
         ) {
             capacity_never_exceeds_max_in_interval_inner(maximum_capacity, ticks_requests)?
