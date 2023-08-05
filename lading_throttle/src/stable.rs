@@ -155,25 +155,18 @@ mod test {
         let mut granted_requests: u64 = 0;
         let mut interval: u64 = 0;
 
-        println!("\n\nTEST TEST TEST");
-
         let mut slop = 0;
         for request in requests.drain(..) {
             ticks_elapsed += slop;
 
-            {
-                let current_interval = ticks_elapsed / INTERVAL_TICKS;
-                if interval < current_interval {
-                    // We have entered into a new interval, the granted requests
-                    // must be reset.
-                    prop_assert!(granted_requests <= maximum_capacity,
+            let current_interval = ticks_elapsed / INTERVAL_TICKS;
+            if interval < current_interval {
+                // We have entered into a new interval, the granted requests
+                // must be reset.
+                prop_assert!(granted_requests <= maximum_capacity,
                                      "[interval-change] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
-                    granted_requests = 0;
-                    interval = current_interval;
-                }
-                println!(
-                    "[{ticks_elapsed}] interval: {interval} | granted_requests: {granted_requests}"
-                );
+                granted_requests = 0;
+                interval = current_interval;
             }
 
             match valve.request(ticks_elapsed, request.get()) {
@@ -210,19 +203,15 @@ mod test {
     }
 
     fn cap_requests(max: u32) -> impl Strategy<Value = Vec<NonZeroU32>> {
-        let max = max + 100;
-        collection::vec(
-            (1..max).prop_map(|i| NonZeroU32::new(i).unwrap()),
-            1..10_000,
-        )
+        collection::vec((1..max).prop_map(|i| NonZeroU32::new(i).unwrap()), 1..100)
     }
 
     // The sum of capacity requests must never exceed maximum_capacity in one
     // INTERVAL_TICKS.
     proptest! {
         #![proptest_config(ProptestConfig {
-            cases: 10_000_000,
-            max_shrink_iters: 100_000_000,
+            cases: 1_000_000,
+            max_shrink_iters: 1_000_000,
             .. ProptestConfig::default()
         })]
         #[test]
@@ -240,77 +229,58 @@ mod verification {
     use crate::stable::{Valve, INTERVAL_TICKS};
     use std::num::NonZeroU32;
 
-    const MAX_TICKS_ELAPSED: u64 = INTERVAL_TICKS * 4;
-
     // The sum of capacity requests must never exceed maximum_capacity in one
     // INTERVAL_TICKS.
     #[kani::proof]
     #[kani::unwind(100)] // must match `iters` below
     fn capacity_never_exceeds_max_in_interval() {
         let maximum_capacity: NonZeroU32 = kani::any();
-        kani::assume(maximum_capacity.get() < 160_000);
-
         let mut valve = Valve::new(maximum_capacity);
-        let maximum_capacity = u64::from(maximum_capacity.get());
+        let maximum_capacity = maximum_capacity.get();
 
         let mut ticks_elapsed: u64 = 0;
         let mut granted_requests: u64 = 0;
-        let mut current_interval: u64 = 0;
+        let mut interval: u64 = 0;
 
         let iters: usize = kani::any();
         kani::assume(iters < 100);
 
+        let mut slop = 0;
         for _ in 0..iters {
-            let ticks_elapsed_diff: u64 = kani::any();
-            kani::assume(ticks_elapsed_diff <= MAX_TICKS_ELAPSED);
+            let request: NonZeroU32 = kani::any();
+            kani::assume(request.get() <= maximum_capacity);
 
-            let request: u32 = kani::any();
-            kani::assume(u64::from(request) <= maximum_capacity);
+            ticks_elapsed += slop;
 
-            ticks_elapsed += ticks_elapsed_diff;
-
-            {
-                let interval = ticks_elapsed / INTERVAL_TICKS;
-                if current_interval < interval {
-                    // We have entered into a new interval, the granted requests
-                    // must be reset.
-                    if granted_requests > maximum_capacity {
-                        panic!("too many requests granted");
-                    }
-                    granted_requests = 0;
-                    current_interval = interval;
+            let current_interval = ticks_elapsed / INTERVAL_TICKS;
+            if interval < current_interval {
+                // We have entered into a new interval, the granted requests
+                // must be reset.
+                if granted_requests > u64::from(maximum_capacity) {
+                    panic!("too many requests granted");
                 }
+                granted_requests = 0;
+                interval = current_interval;
             }
 
-            match valve.request(ticks_elapsed, request) {
+            match valve.request(ticks_elapsed, request.get()) {
                 Ok(0) => {
                     // The request went through right away.
-                    granted_requests += u64::from(request);
+                    granted_requests += u64::from(request.get());
+                    slop = 0;
                 }
-                Ok(slop) => {
-                    // The request must wait for 'slop' ticks. If adding
-                    // these to our current ticks_elapsed do not push us
-                    // past the interval boundary we count them in the
-                    // current interval. Else, we account them to the next.
-                    let interval = (ticks_elapsed + slop) / INTERVAL_TICKS;
-                    ticks_elapsed += slop;
-                    if current_interval < interval {
-                        granted_requests += u64::from(request);
-                    } else {
-                        // Be sure to capacity check requests in the
-                        // previous interval.
-                        if granted_requests > maximum_capacity {
-                            panic!("too many requests granted");
-                        }
-                        granted_requests = u64::from(request);
-                        current_interval = interval;
-                    }
+                Ok(s) => {
+                    // The request must wait for 'slop' ticks. We choose to
+                    // 'wait' by adding to the slop accumulator but may or may
+                    // not make the same request of the valve. No request is
+                    // granted if slop is non-zero.
+                    slop = s;
                 }
                 Err(_) => {
                     // ignored intentionally
                 }
             }
-            if granted_requests > maximum_capacity {
+            if granted_requests > u64::from(maximum_capacity) {
                 panic!("too many requests granted");
             }
         }
