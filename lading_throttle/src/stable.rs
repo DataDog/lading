@@ -142,14 +142,14 @@ impl Valve {
         // how much the throttle capacity is refilled since we were last
         // called. Depending on how long ago this was we may have completely
         // filled up throttle capacity.
-        let cap = ((self.refill_per_tick * ticks_diff) * REFILL_MASK) + self.capacity;
+        let cap = (self.refill_per_tick * ticks_diff) + self.capacity;
         let refilled_capacity: u64 = cmp::min(cap, self.maximum_capacity);
-        println!("[{tick}] cap: {cap} | refilled_capacity: {refilled_capacity} | capacity_request: {capacity_request}", tick = self.last_tick);
+        println!("[{tick}] max: {max} | cap: {cap} | refilled_capacity: {refilled_capacity} | capacity_request: {capacity_request}", max = self.maximum_capacity, tick = self.last_tick);
 
-        if refilled_capacity > capacity_request {
-            // If the refilled capacity is greater than the request we respond
-            // to the caller immediately and store the spare capacity for next
-            // call.
+        if refilled_capacity >= capacity_request {
+            // If the refilled capacity is greater or equal to the request we
+            // respond to the caller immediately and store the spare capacity
+            // for next call.
             self.capacity = refilled_capacity - capacity_request;
             println!("immediate return");
             Ok(0)
@@ -233,7 +233,7 @@ mod test {
                     // We have entered into a new interval, the granted requests
                     // must be reset.
                     prop_assert!(granted_requests <= maximum_capacity,
-                                     "Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
+                                     "[interval-change] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
                     granted_requests = 0;
                     current_interval = interval;
                 }
@@ -251,13 +251,15 @@ mod test {
                     // current interval. Else, we account them to the next.
                     let interval = (ticks_elapsed + slop) / INTERVAL_TICKS;
                     ticks_elapsed += slop;
-                    granted_requests += u64::from(request.get());
-                    prop_assert!(granted_requests <= maximum_capacity,
-                                 "Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
                     if current_interval < interval {
                         // We are in a new interval, all counters reset.
-                        granted_requests = 0;
+                        granted_requests = u64::from(request.get());
                         current_interval = interval;
+                    } else {
+                        // We remain in the current interval.
+                        granted_requests += u64::from(request.get());
+                        prop_assert!(granted_requests <= maximum_capacity,
+                                 "[slop] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
                     }
                 }
                 Err(_) => {
@@ -265,7 +267,7 @@ mod test {
                 }
             }
             prop_assert!(granted_requests <= maximum_capacity,
-                             "Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
+                             "[end] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
         }
         Ok(())
     }
