@@ -2,7 +2,7 @@
 //!
 //! This throttle refills capacity at a steady rate.
 
-use std::{cmp, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use super::{Clock, RealClock};
 
@@ -10,21 +10,7 @@ use super::{Clock, RealClock};
 // no claims on units, but consider if a user intends to produce 1Mb/s the
 // 'interval' is one second and each tick corresponds to one microsecond. Each
 // microsecond accumulates 1 byte.
-#[cfg(test)]
 const INTERVAL_TICKS: u64 = 1_000_000;
-// The user is only allowed to set the maximum capacity to 2**32. That means the
-// maximum value that can be refilled per tick in an interval is
-// 4_294.967_296. The largest fractional value is then 999_999. From this we
-// construct a mask that allows us to get at the integer part of a refill in one
-// tick and the fractional part. This happens to be INTERVAL_TICKS. The integer
-// portion is gotten at with a division, the factional with a remainder.
-const REFILL_MASK: u64 = 1_000_000;
-
-// In order to preserve integer operations and avoid the use of
-// floating point we make the following simplifications:
-//
-//  * the maximum refill-per-tick is 4_295,
-//  * the minimum
 
 /// Errors produced by [`Stable`].
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -84,29 +70,24 @@ where
 #[derive(Debug)]
 struct Valve {
     /// The maximum capacity of `Valve` past which no more capacity will be
-    /// added. Stored in megatick-units.
-    maximum_capacity: u64,
-    /// The spare capacity of the `Valve`. Stored in megatick-units. Does not
-    /// persist between more than two calls to `request`.
-    spare_capacity: u64,
-    /// Per tick, how much capacity is added to the `Valve`. Stored in
-    /// microtick-units.
-    refill_per_tick: u64,
-    /// The tick of the last request.
-    last_tick: u64,
+    /// added.
+    maximum_capacity: u32,
+    /// The capacity of the `Valve`. This amount will be drawn on by every
+    /// request. It is refilled to maximum at every interval roll-over.
+    capacity: u32,
+    /// The current interval -- multiple of `INTERVAL_TICKS` --  of time.
+    interval: u64,
 }
 
 impl Valve {
     /// Create a new `Valve` instance with a maximum capacity, given in
     /// tick-units.
     fn new(maximum_capacity: NonZeroU32) -> Self {
-        let refill_per_tick = u64::from(maximum_capacity.get());
-        let maximum_capacity = u64::from(maximum_capacity.get()) * REFILL_MASK;
+        let maximum_capacity = maximum_capacity.get();
         Self {
-            spare_capacity: 0,
+            capacity: maximum_capacity,
             maximum_capacity,
-            refill_per_tick,
-            last_tick: 0,
+            interval: 0,
         }
     }
 
@@ -117,65 +98,40 @@ impl Valve {
     /// Note that `ticks_elapsed` must be an absolute value.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn request(&mut self, ticks_elapsed: u64, capacity_request: u32) -> Result<u64, Error> {
-        // Okay, here's the idea. At the base of `Stable` is a cell rate
-        // algorithm. We have bucket that gradually fills up and when it's full
-        // it doesn't fill up anymore. Callers draw down on this capacity and if
-        // they draw down more than is available in the bucket they're made to
-        // wait.
+        // Okay, here's the idea. We have bucket that fills every INTERVAL_TICKS
+        // seconds up and requests draw down on that bucket. When it's empty, we
+        // return the number of ticks until the next interval roll-over. Callers
+        // are expected to wait although nothing forces them to. Capacity is
+        // only drawn on when it is immediately available.
         if capacity_request == 0 {
             return Ok(0);
         }
-        // Scale the capacity up to megatick-units.
-        let capacity_request = u64::from(capacity_request) * REFILL_MASK;
+
         // Fast bail-out. There's no way for this to ever be satisfied and is a
         // bug on the part of the caller, arguably.
         if capacity_request > self.maximum_capacity {
             return Err(Error::Capacity);
         }
 
-        let ticks_diff = ticks_elapsed - self.last_tick;
+        let current_interval = ticks_elapsed / INTERVAL_TICKS;
+        if current_interval > self.interval {
+            // We have rolled forward into a new interval. At this point the
+            // capacity is reset to maximum -- no matter how deep we are into
+            // the interval -- and we record the new interval index.
+            self.capacity = self.maximum_capacity;
+            self.interval = current_interval;
+        }
 
-        // Now that the preliminaries are out of the way, wake up and compute
-        // how much the throttle capacity is refilled since we were last
-        // called. Depending on how long ago this was we may have completely
-        // filled up throttle capacity.
-        let cap = (self.refill_per_tick * ticks_diff) + self.spare_capacity;
-        let refilled_capacity: u64 = cmp::min(cap, self.maximum_capacity);
-        println!(
-            "[{tick}] max: {max} | refilled_capacity: {refilled_capacity} | request: {capacity_request}",
-            max = self.maximum_capacity,
-            tick = self.last_tick + ticks_diff,
-            refilled_capacity = refilled_capacity
-        );
-
-        // If the refilled capacity is greater or equal to the request we deduct
-        // the request from capacity and return 0 slop, signaling to the user
-        // that their request is a success. Else, we calculate how long the
-        // caller should wait for and _do not_ adjust the capacity. User must
-        // call again with the same request.
-        if capacity_request <= refilled_capacity {
-            // If the refilled capacity is greater or equal to the request we
-            // respond to the caller immediately and store the spare capacity
-            // for next call.
-            self.spare_capacity = refilled_capacity - capacity_request;
-            self.last_tick = ticks_elapsed;
-            println!("immediate return");
+        // If the capacity is greater or equal to the request we deduct the
+        // request from capacity and return 0 slop, signaling to the user that
+        // their request is a success. Else, we calculate how long the caller
+        // should wait until the interval rolls over. The capacity will never
+        // increase in this interval so they will have to call again later.
+        if capacity_request <= self.capacity {
+            self.capacity -= capacity_request;
             Ok(0)
         } else {
-            // If the refill is not sufficient we calculate how many ticks will
-            // need to pass before capacity is sufficient, force the client to
-            // wait that amount of time. We _do not_ change the actual capacity
-            // as we do not know when the caller will request again.
-            let cap_diff = capacity_request - refilled_capacity;
-            // If the slop is zero this means that there's some fractional
-            // refill that is missing. This is not achievable because it's
-            // impossible for the caller to wait less than a tick.
-            let slop = cmp::max(1, cap_diff / self.refill_per_tick);
-            println!(
-                "wait || slop: {slop} | cap_diff: {cap_diff} | refill: {refill}",
-                refill = self.refill_per_tick
-            );
-            Ok(slop)
+            Ok(INTERVAL_TICKS - (ticks_elapsed % INTERVAL_TICKS))
         }
     }
 }
@@ -197,7 +153,7 @@ mod test {
 
         let mut ticks_elapsed: u64 = 0;
         let mut granted_requests: u64 = 0;
-        let mut current_interval: u64 = 0;
+        let mut interval: u64 = 0;
 
         println!("\n\nTEST TEST TEST");
 
@@ -206,16 +162,18 @@ mod test {
             ticks_elapsed += slop;
 
             {
-                let interval = ticks_elapsed / INTERVAL_TICKS;
-                if current_interval < interval {
+                let current_interval = ticks_elapsed / INTERVAL_TICKS;
+                if interval < current_interval {
                     // We have entered into a new interval, the granted requests
                     // must be reset.
                     prop_assert!(granted_requests <= maximum_capacity,
                                      "[interval-change] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
                     granted_requests = 0;
-                    current_interval = interval;
+                    interval = current_interval;
                 }
-                println!("[{ticks_elapsed}] interval: {current_interval} | granted_requests: {granted_requests}");
+                println!(
+                    "[{ticks_elapsed}] interval: {interval} | granted_requests: {granted_requests}"
+                );
             }
 
             match valve.request(ticks_elapsed, request.get()) {
@@ -253,7 +211,10 @@ mod test {
 
     fn cap_requests(max: u32) -> impl Strategy<Value = Vec<NonZeroU32>> {
         let max = max + 100;
-        collection::vec((1..max).prop_map(|i| NonZeroU32::new(i).unwrap()), 1..5)
+        collection::vec(
+            (1..max).prop_map(|i| NonZeroU32::new(i).unwrap()),
+            1..10_000,
+        )
     }
 
     // The sum of capacity requests must never exceed maximum_capacity in one
@@ -266,8 +227,8 @@ mod test {
         })]
         #[test]
         fn capacity_never_exceeds_max_in_interval(
-            maximum_capacity in (1..40_u32), // u32::MAX),
-            requests in cap_requests(32_u32)
+            maximum_capacity in (1..u32::MAX),
+            requests in cap_requests(u16::MAX as u32)
         ) {
             capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests)?
         }
