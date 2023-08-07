@@ -11,7 +11,7 @@ pub(crate) struct EventGenerator {
     pub(crate) titles: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
     pub(crate) small_strings: Vec<String>,
-    pub(crate) tags: Vec<common::tags::Tags>,
+    pub(crate) tagsets: common::tags::Tagsets,
 }
 
 impl Generator<Event> for EventGenerator {
@@ -21,7 +21,7 @@ impl Generator<Event> for EventGenerator {
     {
         let title = self.titles.choose(&mut rng).unwrap().clone();
         let text = self.texts_or_messages.choose(&mut rng).unwrap().clone();
-        let tags = choose_or_not(&mut rng, &self.tags);
+        let tags = choose_or_not(&mut rng, &self.tagsets);
 
         Event {
             title_utf8_length: title.len(),
@@ -50,7 +50,7 @@ pub(crate) struct Event {
     priority: Option<Priority>,
     source_type_name: Option<String>,
     alert_type: Option<Alert>,
-    tags: Option<common::tags::Tags>,
+    tags: Option<common::tags::Tagset>,
 }
 
 impl fmt::Display for Event {
@@ -86,8 +86,8 @@ impl fmt::Display for Event {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
+                for tag in tags.iter() {
+                    write!(f, "{tag}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
                         commas_remaining -= 1;

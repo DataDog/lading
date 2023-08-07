@@ -130,17 +130,16 @@ where
             tag_keys_maximum,
             kind_weights,
             metric_weights,
-            metric_multivalue,
         }) => {
-            let mn_range = *metric_names_minimum..*metric_names_maximum;
-            let tg_range = *tag_keys_minimum..*tag_keys_maximum;
+            let context_range = *contexts_minimum..*contexts_maximum;
+            let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
+            let multivalue_cnt_range = *multivalue_cnt_minimum..*multivalue_cnt_maximum;
 
             let serializer = lading_payload::DogStatsD::new(
                 mn_range,
                 tg_range,
                 *kind_weights,
                 *metric_weights,
-                metric_multivalue,
                 &mut rng,
             );
 

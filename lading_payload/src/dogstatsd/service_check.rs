@@ -11,7 +11,7 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) tags: Vec<common::tags::Tags>,
+    pub(crate) tagsets: common::tags::Tagsets,
 }
 
 pub(crate) struct ServiceCheck {
@@ -19,7 +19,7 @@ pub(crate) struct ServiceCheck {
     status: Status,
     timestamp_second: Option<u32>,
     hostname: Option<String>,
-    tags: Option<common::tags::Tags>,
+    tags: Option<Vec<String>>,
     message: Option<String>,
 }
 
@@ -31,7 +31,7 @@ impl Generator<ServiceCheck> for ServiceCheckGenerator {
         let name = self.names.choose(&mut rng).unwrap().clone();
         let hostname = choose_or_not(&mut rng, &self.small_strings);
         let message = choose_or_not(&mut rng, &self.texts_or_messages);
-        let tags = choose_or_not(&mut rng, &self.tags);
+        let tags = choose_or_not(&mut rng, &self.tagsets);
 
         ServiceCheck {
             name,
@@ -63,8 +63,8 @@ impl fmt::Display for ServiceCheck {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
+                for tag in tags.iter() {
+                    write!(f, "{tag}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;
                         commas_remaining -= 1;

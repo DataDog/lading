@@ -4,6 +4,7 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 pub(crate) mod tags;
 
+#[derive(Clone)]
 pub(crate) enum NumValue {
     Float(f64),
     Int(i64),
