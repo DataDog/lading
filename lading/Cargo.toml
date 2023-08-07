@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.17.4"
+version = "0.18.0"
 authors = ["Brian L. Troutwine <brian.troutwine@datadoghq.com>", "George Hahn <george.hahn@datadoghq.com"]
 edition = "2021"
 license = "MIT"
@@ -11,8 +11,8 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 lading-capture = { version = "0.1", path = "../lading_capture" }
+lading-throttle = { path = "../lading_throttle" }
 
-async-trait = { version = "0.1", default-features = false, features = [] }
 byte-unit = { version = "4.0", features = ["serde"] }
 bytes = { version = "1.4.0", default-features = false, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
@@ -22,7 +22,7 @@ http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
-metrics = { version = "0.21", default-features = false }
+metrics = { workspace = true }
 metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = ["http-listener"]}
 metrics-util = { version = "0.15" }
 nix = { version = "0.26" }
@@ -39,9 +39,9 @@ serde_json = {workspace = true }
 serde_qs = "0.12"
 serde_tuple = { version = "0.5", default-features = false }
 serde_yaml = "0.9"
-thiserror = { version = "1.0" }
+thiserror = { workspace = true }
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1.29", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }

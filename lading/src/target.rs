@@ -80,6 +80,7 @@ impl Meta {
         Ok(())
     }
 
+    #[allow(dead_code)] // used on Linux
     #[inline]
     pub(crate) fn rss_bytes_limit_exceeded() -> bool {
         let limit: u64 = RSS_BYTES_LIMIT.load(Ordering::Relaxed);

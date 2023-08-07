@@ -35,4 +35,3 @@ pub mod payload;
 pub mod signals;
 pub mod target;
 pub mod target_metrics;
-pub mod throttle;

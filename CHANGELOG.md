@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.0]
+### Changed
+- The predictive throttle no longer exists. The only options are stable and
+  all-out.
+
 ## [0.17.4]
 ### Added
 - `lading` and `lading-capture` releases are now published on crates.io.

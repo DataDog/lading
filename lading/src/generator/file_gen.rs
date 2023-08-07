@@ -24,6 +24,7 @@ use std::{
 
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
+use lading_throttle::Throttle;
 use metrics::{gauge, register_counter};
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
@@ -38,7 +39,6 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::{self, Throttle},
 };
 
 use super::General;
@@ -98,7 +98,7 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 #[derive(Debug)]
@@ -178,8 +178,7 @@ impl FileGen {
         let block_cache = Arc::new(block_cache);
 
         for _ in 0..config.duplicates {
-            let throttle =
-                Throttle::new_with_config(config.throttle, bytes_per_second, labels.clone());
+            let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
             let child = Child {
                 path_template: config.path_template.clone(),

@@ -10,6 +10,7 @@
 //! configured [throttle].
 //!
 
+use lading_throttle::Throttle;
 use rand::{
     distributions::{Alphanumeric, DistString},
     seq::SliceRandom,
@@ -28,10 +29,7 @@ use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::{
-    signals::Shutdown,
-    throttle::{self, Throttle},
-};
+use crate::signals::Shutdown;
 
 static FILE_EXTENSION: &str = "txt";
 
@@ -107,7 +105,7 @@ pub struct Config {
     pub rename_per_second: NonZeroU32,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 #[derive(Debug)]
@@ -136,15 +134,13 @@ impl FileTree {
         let mut rng = StdRng::from_seed(config.seed);
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config);
 
-        let labels = vec![
+        let _labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "file_tree".to_string()),
         ];
 
-        let open_throttle =
-            Throttle::new_with_config(config.throttle, config.open_per_second, labels.clone());
-        let rename_throttle =
-            Throttle::new_with_config(config.throttle, config.rename_per_second, labels);
+        let open_throttle = Throttle::new_with_config(config.throttle, config.open_per_second);
+        let rename_throttle = Throttle::new_with_config(config.throttle, config.rename_per_second);
         Ok(Self {
             name_len: config.name_len,
             open_throttle,

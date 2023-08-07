@@ -1,4 +1,7 @@
-//! A throttle for input into the target program.
+//! The lading throttle mechanism
+//!
+//! This library supports throttling mechanisms for the rest of the lading
+//! project.
 //!
 //! ## Metrics
 //!
@@ -6,20 +9,34 @@
 //! documentation for details. The all-out throttle does not emit any metrics.
 //!
 
+#![deny(clippy::all)]
+#![deny(clippy::cargo)]
+#![deny(clippy::pedantic)]
+#![deny(clippy::print_stdout)]
+#![deny(clippy::print_stderr)]
+#![deny(clippy::dbg_macro)]
+#![deny(unused_extern_crates)]
+#![deny(unused_allocation)]
+#![deny(unused_assignments)]
+#![deny(unused_comparisons)]
+#![deny(unreachable_pub)]
+#![deny(missing_docs)]
+#![deny(missing_copy_implementations)]
+#![deny(missing_debug_implementations)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::multiple_crate_versions)]
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
-pub mod predictive;
 pub mod stable;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 /// Configuration of this generator.
 #[serde(rename_all = "snake_case")]
 pub enum Config {
-    /// A throttle that predicts target capability
-    Predictive,
     /// A throttle that allows the user to produce as fast as possible.
     AllOut,
     /// A throttle that attempts stable load
@@ -34,22 +51,24 @@ impl Default for Config {
 
 /// Errors produced by [`Throttle`].
 #[derive(thiserror::Error, Debug, Clone, Copy)]
-pub(crate) enum Error {
-    #[error(transparent)]
-    Predictive(#[from] predictive::Error),
+pub enum Error {
+    /// Stable
     #[error(transparent)]
     Stable(#[from] stable::Error),
 }
 
 #[async_trait]
-pub(crate) trait Clock {
+/// The `Clock` used for every throttle
+pub trait Clock {
+    /// The number of ticks elapsed since last queried
     fn ticks_elapsed(&self) -> u64;
+    /// Wait for `ticks` amount of time
     async fn wait(&self, ticks: u64);
 }
 
 #[derive(Debug, Clone, Copy)]
 /// A clock that operates with respect to real-clock time.
-pub(crate) struct RealClock {
+pub struct RealClock {
     start: Instant,
 }
 
@@ -84,29 +103,24 @@ impl Clock for RealClock {
     }
 }
 
+/// The throttle mechanism
 #[derive(Debug)]
-pub(crate) enum Throttle<C = RealClock> {
-    Predictive(predictive::Predictive<C>),
+pub enum Throttle<C = RealClock> {
+    /// Load that comes from this variant is stable with respect to the clock
     Stable(stable::Stable<C>),
+    /// Load that comes from this variant is as fast as possible with respect to
+    /// the clock
     AllOut,
 }
 
 impl Throttle<RealClock> {
-    pub(crate) fn new_with_config(
-        config: Config,
-        maximum_capacity: NonZeroU32,
-        labels: Vec<(String, String)>,
-    ) -> Self {
+    /// Create a new instance of `Throttle` with a real-time clock
+    #[must_use]
+    pub fn new_with_config(config: Config, maximum_capacity: NonZeroU32) -> Self {
         match config {
-            Config::Predictive => Throttle::Predictive(predictive::Predictive::with_clock(
-                maximum_capacity,
-                RealClock::default(),
-                labels,
-            )),
             Config::Stable => Throttle::Stable(stable::Stable::with_clock(
                 maximum_capacity,
                 RealClock::default(),
-                labels,
             )),
             Config::AllOut => Throttle::AllOut,
         }
@@ -119,10 +133,13 @@ where
 {
     /// Wait for a single unit of capacity to be available, equivalent to
     /// `wait_for` of 1.
+    ///
+    /// # Errors
+    ///
+    /// See documentation in `Error`
     #[inline]
-    pub(crate) async fn wait(&mut self) -> Result<(), Error> {
+    pub async fn wait(&mut self) -> Result<(), Error> {
         match self {
-            Throttle::Predictive(inner) => inner.wait().await?,
             Throttle::Stable(inner) => inner.wait().await?,
             Throttle::AllOut => (),
         }
@@ -131,10 +148,13 @@ where
     }
 
     /// Wait for `request` capacity to be available in the throttle
+    ///
+    /// # Errors
+    ///
+    /// See documentation in `Error`
     #[inline]
-    pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
+    pub async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
         match self {
-            Throttle::Predictive(inner) => inner.wait_for(request).await?,
             Throttle::Stable(inner) => inner.wait_for(request).await?,
             Throttle::AllOut => (),
         }

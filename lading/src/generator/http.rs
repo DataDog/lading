@@ -19,6 +19,7 @@ use hyper::{
     header::CONTENT_LENGTH,
     Body, HeaderMap, Request, Uri,
 };
+use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
@@ -30,7 +31,6 @@ use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     payload,
     signals::Shutdown,
-    throttle::{self, Throttle},
 };
 
 use super::General;
@@ -71,7 +71,7 @@ pub struct Config {
     pub parallel_connections: u16,
     /// The load throttle configuration
     #[serde(default)]
-    pub throttle: throttle::Config,
+    pub throttle: lading_throttle::Config,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -174,11 +174,7 @@ impl Http {
                     method: hyper::Method::POST,
                     headers: config.headers,
                     block_cache,
-                    throttle: Throttle::new_with_config(
-                        config.throttle,
-                        bytes_per_second,
-                        labels.clone(),
-                    ),
+                    throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                     metric_labels: labels,
                     shutdown,
                 })
