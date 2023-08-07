@@ -110,6 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Install protobuf
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Publish to crates.io
         run: |
           cargo publish \
