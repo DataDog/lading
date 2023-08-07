@@ -24,8 +24,7 @@ pub enum Error {
 /// A throttle type.
 ///
 /// This throttle is stable in that it will steadily refill units at a known
-/// rate and does not inspect the target in any way, compare to `Predictive` in
-/// that regard.
+/// rate and does not inspect the target in any way.
 pub struct Stable<C = RealClock> {
     valve: Valve,
     /// The clock that `Stable` will use.
