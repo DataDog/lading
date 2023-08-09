@@ -1,4 +1,4 @@
-use std::{fmt, num::NonZeroUsize, ops::Range};
+use std::{fmt, ops::Range};
 
 use rand::{
     distributions::{OpenClosed01, Standard, WeightedIndex},
@@ -10,7 +10,7 @@ use crate::Generator;
 
 use super::{
     choose_or_not,
-    common::{self, ZeroToOne},
+    common::{self},
 };
 
 #[derive(Clone, Debug)]
@@ -23,14 +23,14 @@ pub(crate) struct MetricGenerator {
 }
 
 impl MetricGenerator {
-    pub fn new<R>(
+    pub(crate) fn new<R>(
         num_contexts: usize,
-        tags_per_msg_range: Range<usize>,
         multivalue_cnt_range: Range<usize>,
         multivalue_pack_probability: f32,
         metric_weights: WeightedIndex<u8>,
         container_ids: Vec<String>,
-        mut rng: &mut R,
+        tagsets: common::tags::Tagsets,
+        rng: &mut R,
     ) -> Self
     where
         R: Rng + ?Sized,
@@ -46,58 +46,50 @@ impl MetricGenerator {
 
         let mut buf = Vec::with_capacity(num_contexts);
 
-        for _ in 0..num_contexts {
+        assert!(tagsets.len() >= num_contexts);
+        debug!("Generating metric templates for {} contexts.", num_contexts);
+        for tagset in tagsets {
             let name = AsciiString::with_maximum_length(max_name_length).generate(rng);
-            // TODO this is duplicated from tag generator, use that instead.
-            let num_tags = rng.gen_range(tags_per_msg_range);
-            let mut tags = Vec::with_capacity(num_tags);
-            for _ in 0..num_tags {
-                // Currently re-using max name-length to be the max length of the tag key and tag value as well
-                let mut tag = AsciiString::with_maximum_length(max_name_length).generate(rng);
-                let tag_value = AsciiString::with_maximum_length(max_name_length).generate(rng);
-                tag.push_str(&tag_value);
-                tags.push(tag);
-            }
 
             let res = match metric_weights.sample(rng) {
                 0 => Metric::Count(Count {
                     name: name,
                     values: None,
                     sample_rate: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 1 => Metric::Gauge(Gauge {
                     name: name,
                     values: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 2 => Metric::Timer(Timer {
                     name: name,
                     values: None,
                     sample_rate: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 3 => Metric::Distribution(Dist {
                     name: name,
                     values: None,
                     sample_rate: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 4 => Metric::Set(Set {
                     name: name,
                     value: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 5 => Metric::Histogram(Histogram {
                     name: name,
                     values: None,
                     sample_rate: None,
-                    tags: tags,
+                    tags: tagset,
                     container_id: None,
                 }),
                 _ => unreachable!(),
@@ -119,9 +111,16 @@ impl Generator<Metric> for MetricGenerator {
     where
         R: rand::Rng + ?Sized,
     {
+        debug!(
+            "Have {} metric templates, choosing one to generate new msg",
+            self.metric_templates.len()
+        );
         let mut new_metric = choose_or_not(&mut rng, &self.metric_templates)
             .unwrap()
             .to_owned();
+
+        let multivalue_cnt_range: Range<usize> = self.multivalue_cnt_range.start.try_into().unwrap()
+            ..self.multivalue_cnt_range.end.try_into().unwrap();
 
         let container_id = choose_or_not(&mut rng, &self.container_ids);
         // TODO sample_rate should be option and have a probability that determines if its present
@@ -134,9 +133,8 @@ impl Generator<Metric> for MetricGenerator {
         let mut values = vec![value.clone()];
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
-        let probb: ZeroToOne = rng.gen();
         if prob < self.multivalue_pack_probability {
-            let num_desired_values = rng.gen_range(self.multivalue_cnt_range);
+            let num_desired_values = rng.gen_range(multivalue_cnt_range);
             for _ in 0..num_desired_values {
                 values.push(Standard.sample(&mut rng));
             }
@@ -202,7 +200,14 @@ impl fmt::Display for Metric {
 
 impl std::fmt::Debug for Metric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt(f)
+        match self {
+            Self::Count(ref count) => write!(f, "{count}"),
+            Self::Gauge(ref gauge) => write!(f, "{gauge}"),
+            Self::Timer(ref timer) => write!(f, "{timer}"),
+            Self::Histogram(ref histogram) => write!(f, "{histogram}"),
+            Self::Set(ref set) => write!(f, "{set}"),
+            Self::Distribution(ref distribution) => write!(f, "{distribution}"),
+        }
     }
 }
 
@@ -220,7 +225,7 @@ impl fmt::Display for Count {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        if let Some(values) = self.values {
+        if let Some(values) = &self.values {
             for val in values {
                 write!(f, ":{val}")?;
             }
@@ -261,7 +266,7 @@ impl fmt::Display for Gauge {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        if let Some(values) = self.values {
+        if let Some(values) = &self.values {
             for val in values {
                 write!(f, ":{val}")?;
             }
@@ -300,7 +305,7 @@ impl fmt::Display for Timer {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        if let Some(values) = self.values {
+        if let Some(values) = &self.values {
             for val in values {
                 write!(f, ":{val}")?;
             }
@@ -342,7 +347,7 @@ impl fmt::Display for Dist {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        if let Some(values) = self.values {
+        if let Some(values) = &self.values {
             for val in values {
                 write!(f, ":{val}")?;
             }
@@ -381,7 +386,9 @@ pub(crate) struct Set {
 impl fmt::Display for Set {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        if let Some(value) = self.value {
+        let name = &self.name;
+        write!(f, "{name}")?;
+        if let Some(value) = &self.value {
             write!(f, ":{value}")?;
         }
         if !self.tags.is_empty() {
@@ -417,7 +424,7 @@ impl fmt::Display for Histogram {
         // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        if let Some(values) = self.values {
+        if let Some(values) = &self.values {
             for val in values {
                 write!(f, ":{val}")?;
             }

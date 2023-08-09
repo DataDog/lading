@@ -1,0 +1,37 @@
+# This is not the lading under test! This is the stable, released version of
+# lading that is used to run the test.
+
+
+generator:
+  - unix_datagram:
+      seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+             59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+      path: "/home/lima.linux/dd-run/dsd.sock"
+      variant:
+        dogstatsd:
+          contexts_minimum: 100
+          contexts_maximum: 200
+          tags_per_msg_maximum: 71
+          tags_per_msg_minimum: 50
+          multivalue_pack_probability: 0.5
+          multivalue_cnt_minimum: 2
+          multivalue_cnt_maximum: 40
+          kind_weights:
+            metric: 80
+            event: 10
+            service_check: 10
+          metric_weights:
+            count: 20
+            gauge: 20
+            timer: 20
+            distribution: 0
+            set: 20
+            histogram: 20
+      bytes_per_second: "150 Mb"
+      parallel_connections: 1
+      block_sizes: ["1Kb", "2Kb", "3Kb"]
+      maximum_prebuild_cache_size_bytes: "50 Mb"
+
+blackhole:
+  - http:
+      binding_addr: "0.0.0.0:8089"
