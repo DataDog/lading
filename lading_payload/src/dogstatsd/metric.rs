@@ -2,7 +2,7 @@ use std::{fmt, ops::Range};
 
 use rand::{
     distributions::{OpenClosed01, Standard, WeightedIndex},
-    prelude::Distribution,
+    prelude::{Distribution, SliceRandom},
     Rng,
 };
 
@@ -111,13 +111,7 @@ impl Generator<Metric> for MetricGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        debug!(
-            "Have {} metric templates, choosing one to generate new msg",
-            self.metric_templates.len()
-        );
-        let mut new_metric = choose_or_not(&mut rng, &self.metric_templates)
-            .unwrap()
-            .to_owned();
+        let mut new_metric = self.metric_templates.choose(&mut rng).unwrap().to_owned();
 
         let multivalue_cnt_range: Range<usize> = self.multivalue_cnt_range.start.try_into().unwrap()
             ..self.multivalue_cnt_range.end.try_into().unwrap();
