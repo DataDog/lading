@@ -1,5 +1,3 @@
-use rand::seq::SliceRandom;
-
 use super::Generator;
 
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -27,14 +25,12 @@ impl Generator<String> for AsciiString {
         R: rand::Rng + ?Sized,
     {
         let len: usize = rng.gen_range(1..self.max_length) as usize;
-        let total_bytes = len;
         let mut s = String::new();
-        s.reserve(total_bytes);
-        s.extend(
-            CHARSET
-                .choose_multiple(rng, len)
-                .map(|c| unsafe { char::from_u32_unchecked(u32::from(*c)) }),
-        );
+        s.reserve(len);
+        for _ in 0..len {
+            let idx = rng.gen_range(0..CHARSET.len());
+            s.push(unsafe { char::from_u32_unchecked(u32::from(CHARSET[idx])) });
+        }
         s
     }
 }
