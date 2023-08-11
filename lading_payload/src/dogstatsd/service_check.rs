@@ -14,7 +14,9 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
-pub(crate) struct ServiceCheck {
+/// Check of a service.
+#[derive(Debug)]
+pub struct ServiceCheck {
     name: String,
     status: Status,
     timestamp_second: Option<u32>,
@@ -79,7 +81,7 @@ impl fmt::Display for ServiceCheck {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Status {
     Ok,
     Warning,

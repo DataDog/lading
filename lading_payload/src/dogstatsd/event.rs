@@ -39,7 +39,9 @@ impl Generator<Event> for EventGenerator {
     }
 }
 
-pub(crate) struct Event {
+/// An event, like a syslog kind of.
+#[derive(Debug)]
+pub struct Event {
     title: String,
     text: String,
     title_utf8_length: usize,
@@ -99,6 +101,7 @@ impl fmt::Display for Event {
     }
 }
 
+#[derive(Debug)]
 enum Priority {
     Normal,
     Low,
@@ -126,7 +129,7 @@ impl fmt::Display for Priority {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Alert {
     Error,
     Warning,
