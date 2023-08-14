@@ -11,7 +11,8 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 lading-capture = { version = "0.1", path = "../lading_capture" }
-lading-throttle = { path = "../lading_throttle" }
+lading-payload = { version = "0.1", path = "../lading_payload" }
+lading-throttle = { version = "0.1", path = "../lading_throttle" }
 
 byte-unit = { version = "4.0", features = ["serde"] }
 bytes = { version = "1.4.0", default-features = false, features = ["std"] }
@@ -28,24 +29,19 @@ metrics-util = { version = "0.15" }
 nix = { version = "0.26" }
 num_cpus = { version = "1.16" }
 once_cell = "1.18"
-opentelemetry-proto = { version = "0.1.0", features = ["traces", "metrics", "logs", "gen-tonic" ] }
-prost = "0.11"
-rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng" ]}
+rand = { workspace = true, default-features = false, features = ["small_rng", "std", "std_rng" ]}
 reqwest = { version = "0.11", default-features = false, features = ["json"] }
-rmp-serde = { version = "1.1", default-features = false }
 rustc-hash = { version = "1.1.0" }
 serde = { workspace = true }
 serde_json = {workspace = true }
 serde_qs = "0.12"
-serde_tuple = { version = "0.5", default-features = false }
 serde_yaml = "0.9"
 thiserror = { workspace = true }
-time = { version = "0.3", features = ["formatting"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
 

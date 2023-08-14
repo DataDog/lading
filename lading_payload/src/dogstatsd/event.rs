@@ -2,7 +2,7 @@ use std::fmt;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::payload::Generator;
+use crate::Generator;
 
 use super::{choose_or_not, common};
 

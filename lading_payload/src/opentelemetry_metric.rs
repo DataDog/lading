@@ -9,7 +9,7 @@
 
 use std::io::Write;
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 use opentelemetry_proto::tonic::metrics::v1::{self};
 use prost::Message;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -128,9 +128,10 @@ impl Distribution<Metric> for Standard {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct OpentelemetryMetrics;
+/// OTLP metric payload
+pub struct OpentelemetryMetrics;
 
-impl Serialize for OpentelemetryMetrics {
+impl crate::Serialize for OpentelemetryMetrics {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -165,7 +166,7 @@ impl Serialize for OpentelemetryMetrics {
 #[cfg(test)]
 mod test {
     use super::OpentelemetryMetrics;
-    use crate::payload::Serialize;
+    use crate::Serialize;
     use proptest::prelude::*;
     use prost::Message;
     use rand::{rngs::SmallRng, SeedableRng};

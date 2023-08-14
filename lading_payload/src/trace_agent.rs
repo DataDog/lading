@@ -5,7 +5,7 @@ use std::{collections::HashMap, io::Write};
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
 
-use crate::payload::Error;
+use crate::Error;
 use serde::Serialize;
 
 use super::{common::AsciiString, Generator};
@@ -134,7 +134,8 @@ impl Distribution<Span> for Standard {
 
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) enum Encoding {
+/// Encoding options for the trace-agent
+pub enum Encoding {
     /// Encode TraceAgent payload in JSON format
     Json,
     /// Encode TraceAgent payload in MsgPack format
@@ -145,24 +146,30 @@ pub(crate) enum Encoding {
 #[derive(Debug, Default, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct TraceAgent {
+/// Trace Agent payload
+pub struct TraceAgent {
     encoding: Encoding,
 }
 
 impl TraceAgent {
-    pub(crate) fn json() -> Self {
+    /// JSON encoding
+    #[must_use]
+    pub fn json() -> Self {
         Self {
             encoding: Encoding::Json,
         }
     }
-    pub(crate) fn msg_pack() -> Self {
+
+    /// `MsgPack` encoding
+    #[must_use]
+    pub fn msg_pack() -> Self {
         Self {
             encoding: Encoding::MsgPack,
         }
     }
 }
 
-impl crate::payload::Serialize for TraceAgent {
+impl crate::Serialize for TraceAgent {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -233,7 +240,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{Serialize, TraceAgent};
+    use crate::{Serialize, TraceAgent};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

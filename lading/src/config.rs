@@ -109,7 +109,7 @@ blackhole:
                         seed: Default::default(),
                         target_uri: "http://localhost:1000/".try_into().unwrap(),
                         method: generator::http::Method::Post {
-                            variant: crate::payload::Config::Fluent,
+                            variant: lading_payload::Config::Fluent,
                             maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
                                 8_f64,
                                 byte_unit::ByteUnit::MB

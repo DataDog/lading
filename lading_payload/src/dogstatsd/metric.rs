@@ -6,7 +6,7 @@ use rand::{
     seq::SliceRandom,
 };
 
-use crate::payload::Generator;
+use crate::Generator;
 
 use super::{choose_or_not, common};
 

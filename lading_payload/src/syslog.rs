@@ -5,12 +5,13 @@ use std::{io::Write, time::SystemTime};
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 #[derive(Debug, Default, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct Syslog5424 {}
+/// Syslog 5424 payload
+pub struct Syslog5424 {}
 
 const HOSTNAMES: [&str; 4] = [
     "troutwine.us",
@@ -98,7 +99,7 @@ impl Member {
     }
 }
 
-impl Serialize for Syslog5424 {
+impl crate::Serialize for Syslog5424 {
     fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -132,7 +133,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{Serialize, Syslog5424};
+    use crate::{Serialize, Syslog5424};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
