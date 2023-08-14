@@ -42,8 +42,6 @@ use tracing::info;
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
     generator::splunk_hec::acknowledgements::Channel,
-    payload,
-    payload::SplunkHecEncoding,
     signals::Shutdown,
 };
 
@@ -74,7 +72,7 @@ pub struct Config {
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
     /// Format used when submitting event data to Splunk HEC
-    pub format: SplunkHecEncoding,
+    pub format: lading_payload::splunk_hec::Encoding,
     /// Splunk HEC authentication token
     pub token: String,
     /// Splunk HEC indexer acknowledgements behavior options
@@ -122,10 +120,10 @@ pub struct SplunkHec {
 
 /// Derive the intended path from the format configuration
 // https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_uri_by_format(base_uri: &Uri, format: payload::SplunkHecEncoding) -> Uri {
+fn get_uri_by_format(base_uri: &Uri, format: lading_payload::splunk_hec::Encoding) -> Uri {
     let path = match format {
-        payload::SplunkHecEncoding::Text => SPLUNK_HEC_TEXT_PATH,
-        payload::SplunkHecEncoding::Json => SPLUNK_HEC_JSON_PATH,
+        lading_payload::splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
+        lading_payload::splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
     };
 
     Uri::builder()
@@ -188,7 +186,7 @@ impl SplunkHec {
                 .expect("bytes must be non-zero"),
             &block_sizes,
         )?;
-        let payload_config = payload::Config::SplunkHec {
+        let payload_config = lading_payload::Config::SplunkHec {
             encoding: config.format,
         };
         let block_cache = construct_block_cache(&mut rng, &payload_config, &block_chunks, &labels);

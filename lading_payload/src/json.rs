@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 use super::Generator;
 
@@ -39,9 +39,10 @@ impl Distribution<Member> for Standard {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct Json;
+/// A JSON payload
+pub struct Json;
 
 impl Generator<Member> for Json {
     fn generate<R>(&self, rng: &mut R) -> Member
@@ -52,7 +53,7 @@ impl Generator<Member> for Json {
     }
 }
 
-impl Serialize for Json {
+impl crate::Serialize for Json {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -83,7 +84,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
-    use crate::payload::{Json, Serialize};
+    use crate::{Json, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::payload::{common::AsciiString, Error, Generator, Serialize};
+use crate::{common::AsciiString, Error, Generator};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -220,12 +220,14 @@ impl Generator<Member> for MemberGenerator {
 }
 
 #[derive(Debug)]
-pub(crate) struct DatadogLog {
+/// Datadog log format payload
+pub struct DatadogLog {
     member_generator: MemberGenerator,
 }
 
 impl DatadogLog {
-    pub(crate) fn new<R>(rng: &mut R) -> Self
+    /// Create a new instance of `DatadogLog`
+    pub fn new<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
     {
@@ -235,7 +237,7 @@ impl DatadogLog {
     }
 }
 
-impl Serialize for DatadogLog {
+impl crate::Serialize for DatadogLog {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write,
@@ -279,7 +281,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
-    use crate::payload::{DatadogLog, Serialize};
+    use crate::{DatadogLog, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

@@ -9,7 +9,7 @@ use std::{
 use rand::{prelude::IteratorRandom, Rng};
 use tracing::debug;
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 #[derive(Debug)]
 struct Source {
@@ -18,13 +18,19 @@ struct Source {
 }
 
 #[derive(Debug)]
-pub(crate) struct Static {
+/// Static payload
+pub struct Static {
     sources: Vec<Source>,
 }
 
 impl Static {
     #[must_use]
-    pub(crate) fn new(path: &Path) -> Self {
+    /// Create a new instance of `Static`
+    ///
+    /// # Panics
+    ///
+    /// Will panic if `path` is not a valid directory or file.
+    pub fn new(path: &Path) -> Self {
         let mut sources = Vec::with_capacity(16);
 
         // Attempt to open the path, if this fails we assume that it is a directory.
@@ -56,7 +62,7 @@ impl Static {
     }
 }
 
-impl Serialize for Static {
+impl crate::Serialize for Static {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,

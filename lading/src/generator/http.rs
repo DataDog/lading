@@ -29,7 +29,6 @@ use tracing::info;
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
     signals::Shutdown,
 };
 
@@ -44,7 +43,7 @@ pub enum Method {
     /// Make HTTP Post requests
     Post {
         /// The payload generator to use for this target
-        variant: payload::Config,
+        variant: lading_payload::Config,
         /// The maximum size in bytes of the cache of prebuilt messages
         maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     },

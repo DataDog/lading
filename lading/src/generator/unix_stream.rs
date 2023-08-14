@@ -13,7 +13,6 @@
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
     signals::Shutdown,
 };
 use byte_unit::{Byte, ByteUnit};
@@ -38,7 +37,7 @@ pub struct Config {
     /// The path of the socket to write to.
     pub path: PathBuf,
     /// The payload variant
-    pub variant: payload::Config,
+    pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target

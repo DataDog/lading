@@ -8,11 +8,12 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 use serde_tuple::Serialize_tuple;
 
 use super::{common::AsciiString, Generator};
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct Fluent {}
+/// Fluent payload
+pub struct Fluent {}
 
 pub(crate) type Object = HashMap<String, u8>;
 
@@ -139,7 +140,7 @@ impl Distribution<Member> for Standard {
     }
 }
 
-impl Serialize for Fluent {
+impl crate::Serialize for Fluent {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write,
@@ -199,7 +200,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{Fluent, Serialize};
+    use crate::{Fluent, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

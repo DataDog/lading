@@ -37,7 +37,6 @@ use tracing::info;
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
     signals::Shutdown,
 };
 
@@ -72,7 +71,7 @@ pub struct Config {
     /// Total number of duplicates to make from this template.
     pub duplicates: u8,
     /// Sets the [`crate::payload::Config`] of this template.
-    pub variant: payload::Config,
+    pub variant: lading_payload::Config,
     /// Sets the **soft** maximum bytes to be written into the `LogTarget`. This
     /// limit is soft, meaning a burst may go beyond this limit by no more than
     /// `maximum_token_burst`.

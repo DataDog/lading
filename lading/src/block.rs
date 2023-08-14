@@ -4,7 +4,7 @@ use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use metrics::gauge;
 use rand::{prelude::SliceRandom, Rng};
 
-use crate::payload::{self, Serialize, TraceAgent};
+use lading_payload::{Serialize, TraceAgent};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, thiserror::Error)]
 pub enum Error {
@@ -101,7 +101,7 @@ where
 
 pub(crate) fn construct_block_cache<R>(
     mut rng: R,
-    payload: &payload::Config,
+    payload: &lading_payload::Config,
     block_chunks: &[usize],
     labels: &Vec<(String, String)>,
 ) -> Vec<Block>
@@ -109,21 +109,21 @@ where
     R: Rng,
 {
     match payload {
-        payload::Config::TraceAgent(enc) => {
+        lading_payload::Config::TraceAgent(enc) => {
             let ta = match enc {
-                payload::Encoding::Json => TraceAgent::json(),
-                payload::Encoding::MsgPack => TraceAgent::msg_pack(),
+                lading_payload::Encoding::Json => TraceAgent::json(),
+                lading_payload::Encoding::MsgPack => TraceAgent::msg_pack(),
             };
 
             construct_block_cache_inner(&mut rng, &ta, block_chunks, labels)
         }
-        payload::Config::Syslog5424 => construct_block_cache_inner(
+        lading_payload::Config::Syslog5424 => construct_block_cache_inner(
             &mut rng,
-            &payload::Syslog5424::default(),
+            &lading_payload::Syslog5424::default(),
             block_chunks,
             labels,
         ),
-        payload::Config::DogStatsD(payload::dogstatsd::Config {
+        lading_payload::Config::DogStatsD(lading_payload::dogstatsd::Config {
             metric_names_minimum,
             metric_names_maximum,
             tag_keys_minimum,
@@ -135,7 +135,7 @@ where
             let mn_range = *metric_names_minimum..*metric_names_maximum;
             let tg_range = *tag_keys_minimum..*tag_keys_maximum;
 
-            let serializer = payload::DogStatsD::new(
+            let serializer = lading_payload::DogStatsD::new(
                 mn_range,
                 tg_range,
                 *kind_weights,
@@ -146,46 +146,61 @@ where
 
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
-        payload::Config::Fluent => {
-            construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
-        }
-        payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
+        lading_payload::Config::Fluent => construct_block_cache_inner(
             &mut rng,
-            &payload::SplunkHec::new(*encoding),
+            &lading_payload::Fluent::default(),
             block_chunks,
             labels,
         ),
-        payload::Config::ApacheCommon => construct_block_cache_inner(
+        lading_payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
             &mut rng,
-            &payload::ApacheCommon::default(),
+            &lading_payload::SplunkHec::new(*encoding),
             block_chunks,
             labels,
         ),
-        payload::Config::Ascii => {
-            construct_block_cache_inner(&mut rng, &payload::Ascii::default(), block_chunks, labels)
-        }
-        payload::Config::DatadogLog => {
-            let serializer = payload::DatadogLog::new(&mut rng);
+        lading_payload::Config::ApacheCommon => construct_block_cache_inner(
+            &mut rng,
+            &lading_payload::ApacheCommon::default(),
+            block_chunks,
+            labels,
+        ),
+        lading_payload::Config::Ascii => construct_block_cache_inner(
+            &mut rng,
+            &lading_payload::Ascii::default(),
+            block_chunks,
+            labels,
+        ),
+        lading_payload::Config::DatadogLog => {
+            let serializer = lading_payload::DatadogLog::new(&mut rng);
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
-        payload::Config::Json => {
-            construct_block_cache_inner(&mut rng, &payload::Json, block_chunks, labels)
+        lading_payload::Config::Json => {
+            construct_block_cache_inner(&mut rng, &lading_payload::Json, block_chunks, labels)
         }
-        payload::Config::Static { ref static_path } => construct_block_cache_inner(
+        lading_payload::Config::Static { ref static_path } => construct_block_cache_inner(
             &mut rng,
-            &payload::Static::new(static_path),
+            &lading_payload::Static::new(static_path),
             block_chunks,
             labels,
         ),
-        payload::Config::OpentelemetryTraces => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryTraces, block_chunks, labels)
-        }
-        payload::Config::OpentelemetryLogs => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryLogs, block_chunks, labels)
-        }
-        payload::Config::OpentelemetryMetrics => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryMetrics, block_chunks, labels)
-        }
+        lading_payload::Config::OpentelemetryTraces => construct_block_cache_inner(
+            rng,
+            &lading_payload::OpentelemetryTraces,
+            block_chunks,
+            labels,
+        ),
+        lading_payload::Config::OpentelemetryLogs => construct_block_cache_inner(
+            rng,
+            &lading_payload::OpentelemetryLogs,
+            block_chunks,
+            labels,
+        ),
+        lading_payload::Config::OpentelemetryMetrics => construct_block_cache_inner(
+            rng,
+            &lading_payload::OpentelemetryMetrics,
+            block_chunks,
+            labels,
+        ),
     }
 }
 

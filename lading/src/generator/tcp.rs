@@ -26,7 +26,6 @@ use tracing::{info, trace};
 
 use crate::{
     block::{self, chunk_bytes, construct_block_cache, Block},
-    payload,
     signals::Shutdown,
 };
 
@@ -40,7 +39,7 @@ pub struct Config {
     /// The address for the target, must be a valid SocketAddr
     pub addr: String,
     /// The payload variant
-    pub variant: payload::Config,
+    pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target

@@ -1,6 +1,6 @@
 //! Apache common payload.
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 use core::fmt;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -334,9 +334,10 @@ impl fmt::Display for Member {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct ApacheCommon {}
+/// Apache Common log format payload
+pub struct ApacheCommon {}
 
-impl Serialize for ApacheCommon {
+impl crate::Serialize for ApacheCommon {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -364,7 +365,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{ApacheCommon, Serialize};
+    use crate::{ApacheCommon, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

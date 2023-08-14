@@ -5,7 +5,7 @@ use std::io::Write;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::Deserialize;
 
-use crate::payload::{Error, Serialize};
+use crate::Error;
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
 const STAGES: [&str; 4] = ["production", "performance", "noprod", "staging"];
@@ -126,19 +126,20 @@ impl Default for Encoding {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub(crate) struct SplunkHec {
+/// Splunk's HEC
+pub struct SplunkHec {
     encoding: Encoding,
 }
 
 impl SplunkHec {
     /// Create a new instance of [`SplunkHec`]
     #[must_use]
-    pub(crate) fn new(encoding: Encoding) -> Self {
+    pub fn new(encoding: Encoding) -> Self {
         Self { encoding }
     }
 }
 
-impl Serialize for SplunkHec {
+impl crate::Serialize for SplunkHec {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -178,7 +179,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use super::Member;
-    use crate::payload::{Serialize, SplunkHec};
+    use crate::{Serialize, SplunkHec};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
