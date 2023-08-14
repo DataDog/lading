@@ -288,6 +288,21 @@ pub struct DogStatsD {
 }
 
 impl DogStatsD {
+    /// Create a new, default instance of `DogStatsD` with reasonable settings.
+    pub fn default<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Self::new(
+            NonZeroUsize::new(1).unwrap()..NonZeroUsize::new(64).unwrap(),
+            0..32,
+            KindWeights::default(),
+            MetricWeights::default(),
+            &default_metric_multivalue(),
+            rng,
+        )
+    }
+
     /// Create a new instance of `DogStatsD`
     pub fn new<R>(
         metric_names_range: Range<NonZeroUsize>,
