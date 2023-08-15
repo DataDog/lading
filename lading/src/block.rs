@@ -1,10 +1,9 @@
 use std::num::{NonZeroU32, NonZeroUsize};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
+use lading_payload as payload;
 use metrics::gauge;
 use rand::{prelude::SliceRandom, Rng};
-
-use lading_payload::{Serialize, TraceAgent};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, thiserror::Error)]
 pub enum Error {
@@ -101,7 +100,7 @@ where
 
 pub(crate) fn construct_block_cache<R>(
     mut rng: R,
-    payload: &lading_payload::Config,
+    payload: &payload::Config,
     block_chunks: &[usize],
     labels: &Vec<(String, String)>,
 ) -> Vec<Block>
@@ -109,35 +108,41 @@ where
     R: Rng,
 {
     match payload {
-        lading_payload::Config::TraceAgent(enc) => {
+        payload::Config::TraceAgent(enc) => {
             let ta = match enc {
-                lading_payload::Encoding::Json => TraceAgent::json(),
-                lading_payload::Encoding::MsgPack => TraceAgent::msg_pack(),
+                payload::Encoding::Json => payload::TraceAgent::json(),
+                payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(),
             };
 
             construct_block_cache_inner(&mut rng, &ta, block_chunks, labels)
         }
-        lading_payload::Config::Syslog5424 => construct_block_cache_inner(
+        payload::Config::Syslog5424 => construct_block_cache_inner(
             &mut rng,
-            &lading_payload::Syslog5424::default(),
+            &payload::Syslog5424::default(),
             block_chunks,
             labels,
         ),
-        lading_payload::Config::DogStatsD(lading_payload::dogstatsd::Config {
-            metric_names_minimum,
-            metric_names_maximum,
-            tag_keys_minimum,
-            tag_keys_maximum,
+        payload::Config::DogStatsD(payload::dogstatsd::Config {
+            contexts_minimum,
+            contexts_maximum,
+            tags_per_msg_minimum,
+            tags_per_msg_maximum,
+            // TODO -- how can I validate user input for multivalue_pack_probability
+            multivalue_pack_probability,
+            multivalue_count_minimum,
+            multivalue_count_maximum,
             kind_weights,
             metric_weights,
         }) => {
             let context_range = *contexts_minimum..*contexts_maximum;
             let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
-            let multivalue_cnt_range = *multivalue_cnt_minimum..*multivalue_cnt_maximum;
+            let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
 
-            let serializer = lading_payload::DogStatsD::new(
-                mn_range,
-                tg_range,
+            let serializer = payload::DogStatsD::new(
+                context_range,
+                tags_per_msg_range,
+                multivalue_count_range,
+                *multivalue_pack_probability,
                 *kind_weights,
                 *metric_weights,
                 &mut rng,
@@ -145,61 +150,46 @@ where
 
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
-        lading_payload::Config::Fluent => construct_block_cache_inner(
+        payload::Config::Fluent => {
+            construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
+        }
+        payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
             &mut rng,
-            &lading_payload::Fluent::default(),
+            &payload::SplunkHec::new(*encoding),
             block_chunks,
             labels,
         ),
-        lading_payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
+        payload::Config::ApacheCommon => construct_block_cache_inner(
             &mut rng,
-            &lading_payload::SplunkHec::new(*encoding),
+            &payload::ApacheCommon::default(),
             block_chunks,
             labels,
         ),
-        lading_payload::Config::ApacheCommon => construct_block_cache_inner(
-            &mut rng,
-            &lading_payload::ApacheCommon::default(),
-            block_chunks,
-            labels,
-        ),
-        lading_payload::Config::Ascii => construct_block_cache_inner(
-            &mut rng,
-            &lading_payload::Ascii::default(),
-            block_chunks,
-            labels,
-        ),
-        lading_payload::Config::DatadogLog => {
-            let serializer = lading_payload::DatadogLog::new(&mut rng);
+        payload::Config::Ascii => {
+            construct_block_cache_inner(&mut rng, &payload::Ascii, block_chunks, labels)
+        }
+        payload::Config::DatadogLog => {
+            let serializer = payload::DatadogLog::new(&mut rng);
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
-        lading_payload::Config::Json => {
-            construct_block_cache_inner(&mut rng, &lading_payload::Json, block_chunks, labels)
+        payload::Config::Json => {
+            construct_block_cache_inner(&mut rng, &payload::Json, block_chunks, labels)
         }
-        lading_payload::Config::Static { ref static_path } => construct_block_cache_inner(
+        payload::Config::Static { ref static_path } => construct_block_cache_inner(
             &mut rng,
-            &lading_payload::Static::new(static_path),
+            &payload::Static::new(static_path),
             block_chunks,
             labels,
         ),
-        lading_payload::Config::OpentelemetryTraces => construct_block_cache_inner(
-            rng,
-            &lading_payload::OpentelemetryTraces,
-            block_chunks,
-            labels,
-        ),
-        lading_payload::Config::OpentelemetryLogs => construct_block_cache_inner(
-            rng,
-            &lading_payload::OpentelemetryLogs,
-            block_chunks,
-            labels,
-        ),
-        lading_payload::Config::OpentelemetryMetrics => construct_block_cache_inner(
-            rng,
-            &lading_payload::OpentelemetryMetrics,
-            block_chunks,
-            labels,
-        ),
+        payload::Config::OpentelemetryTraces => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryTraces, block_chunks, labels)
+        }
+        payload::Config::OpentelemetryLogs => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryLogs, block_chunks, labels)
+        }
+        payload::Config::OpentelemetryMetrics => {
+            construct_block_cache_inner(rng, &payload::OpentelemetryMetrics, block_chunks, labels)
+        }
     }
 }
 
@@ -225,7 +215,7 @@ fn construct_block_cache_inner<R, S>(
     labels: &Vec<(String, String)>,
 ) -> Vec<Block>
 where
-    S: Serialize,
+    S: payload::Serialize,
     R: Rng,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());

@@ -1,10 +1,12 @@
 use std::ops::Range;
 
-use crate::payload::{self, dogstatsd::AsciiString};
+use crate::common::AsciiString;
 
-use crate::dogstatsd::random_strings_with_length;
-
-pub(crate) type Tags = HashMap<String, String>;
+// This represents a list of tags that will be present on a single
+// dogstatsd message.
+pub(crate) type Tagset = Vec<String>;
+// Multiple tagsets. Useful to generate as a batch (is it??)
+pub(crate) type Tagsets = Vec<Tagset>;
 
 pub(crate) struct Generator {
     pub(crate) num_tagsets: usize,
@@ -12,17 +14,9 @@ pub(crate) struct Generator {
     pub(crate) max_length: u16,
 }
 
-impl Generator {
-    pub(crate) fn new(key_range: Range<usize>, max_values: usize) -> Self {
-        Self {
-            key_range,
-            max_values,
-        }
-    }
-}
-
-impl crate::Generator<Tags> for Generator {
-    fn generate<R>(&self, mut rng: &mut R) -> Tags
+// https://docs.datadoghq.com/getting_started/tagging/#define-tags
+impl crate::Generator<Tagsets> for Generator {
+    fn generate<R>(&self, rng: &mut R) -> Tagsets
     where
         R: rand::Rng + ?Sized,
     {

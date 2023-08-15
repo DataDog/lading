@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::Rng;
 
-use crate::Error;
+use crate::{Error, Serialize};
 
 use super::{common::AsciiString, Generator};
 
@@ -12,10 +12,10 @@ const MAX_LENGTH: u16 = 6_144; // 6 KiB
 
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-/// ASCII text payload
-pub struct Ascii {}
+/// Ascii text payload
+pub struct Ascii;
 
-impl crate::Serialize for Ascii {
+impl Serialize for Ascii {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -42,7 +42,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::{Ascii, Serialize};
+    use crate::payload::{Ascii, Serialize};
 
     // The serialized size of the payload must not exceed `max_bytes`.
     proptest! {

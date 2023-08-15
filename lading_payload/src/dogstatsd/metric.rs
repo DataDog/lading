@@ -6,7 +6,7 @@ use rand::{
     Rng,
 };
 
-use crate::Generator;
+use crate::{common::AsciiString, Generator};
 
 use super::{
     choose_or_not,
@@ -47,7 +47,6 @@ impl MetricGenerator {
         let mut buf = Vec::with_capacity(num_contexts);
 
         assert!(tagsets.len() >= num_contexts);
-        debug!("Generating metric templates for {} contexts.", num_contexts);
         for tagset in tagsets {
             let name = AsciiString::with_maximum_length(max_name_length).generate(rng);
 
