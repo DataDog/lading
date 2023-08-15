@@ -19,14 +19,15 @@ pub(crate) struct MetricGenerator {
     pub(crate) container_ids: Vec<String>,
     // A "metric_template" is a Metric that has a type, name, and tag set, but no values or container id.
     pub(crate) metric_templates: Vec<Metric>,
-    pub(crate) multivalue_count_range: Range<usize>,
+    pub(crate) multivalue_count_range: Range<u16>,
     pub(crate) multivalue_pack_probability: f32,
 }
 
 impl MetricGenerator {
     pub(crate) fn new<R>(
         num_contexts: usize,
-        multivalue_count_range: Range<usize>,
+        name_length_range: Range<u16>,
+        multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
         metric_weights: &WeightedIndex<u8>,
         container_ids: Vec<String>,
@@ -36,21 +37,13 @@ impl MetricGenerator {
     where
         R: Rng + ?Sized,
     {
-        // TODO find some ground truth for a good default here.
-        // I remember reading that we have a recommended max metric name length,
-        // but I can't find it in our public docs anymore...
-        let max_name_length = 120;
-        // TODO -- somewhere we should track if the requested number of contexts
-        // does not fit into the block_cache_size. This is a footgun
-        // If you specify 10k contexts but only give 5kb of cache size
-        // then that is not possible and ideally we'd issue a WARN
-
         let mut buf = Vec::with_capacity(num_contexts);
 
         assert!(tagsets.len() >= num_contexts);
         debug!("Generating metric templates for {} contexts.", num_contexts);
+        let name_generator = AsciiString::with_length_range(name_length_range);
         for tagset in tagsets {
-            let name = AsciiString::with_maximum_length(max_name_length).generate(rng);
+            let name = name_generator.generate(rng);
 
             let res = match metric_weights.sample(rng) {
                 0 => Metric::Count(Count {
@@ -114,7 +107,7 @@ impl Generator<Metric> for MetricGenerator {
     {
         let mut new_metric = self.metric_templates.choose(&mut rng).unwrap().clone();
 
-        let multivalue_count_range: Range<usize> =
+        let multivalue_count_range =
             self.multivalue_count_range.start..self.multivalue_count_range.end;
 
         let container_id = choose_or_not(&mut rng, &self.container_ids);

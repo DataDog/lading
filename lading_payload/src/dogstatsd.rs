@@ -27,6 +27,15 @@ fn contexts_maximum() -> u16 {
     10_000
 }
 
+// https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
+fn name_length_minimum() -> u16 {
+    1
+}
+
+fn name_length_maximum() -> u16 {
+    200
+}
+
 fn tags_per_msg_minimum() -> u16 {
     2
 }
@@ -106,6 +115,14 @@ pub struct Config {
     #[serde(default = "contexts_maximum")]
     pub contexts_maximum: u16,
 
+    /// Minimum length for a dogstatsd message name
+    #[serde(default = "name_length_minimum")]
+    pub name_length_minimum: u16,
+
+    /// Maximum length for a dogstatsd message name
+    #[serde(default = "name_length_maximum")]
+    pub name_length_maximum: u16,
+
     /// Maximum number of tags per individual dogstatsd msg
     /// a tag is a key-value pair separated by a :
     #[serde(default = "tags_per_msg_maximum")]
@@ -177,13 +194,17 @@ where
 #[inline]
 /// Generate a `total` number of strings with a maximum length per string of
 /// `max_length`.
-fn random_strings<R>(total: usize, max_length: u16, rng: &mut R) -> Vec<String>
+fn random_strings_with_length_range<R>(
+    total: usize,
+    length_range: Range<u16>,
+    rng: &mut R,
+) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
     let mut buf = Vec::with_capacity(total);
     for _ in 0..total {
-        buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
+        buf.push(AsciiString::with_length_range(length_range.clone()).generate(rng));
     }
     buf
 }
@@ -191,6 +212,7 @@ where
 impl MemberGenerator {
     fn new<R>(
         context_range: Range<u16>,
+        name_length_range: Range<u16>,
         tags_per_msg_range: Range<u16>,
         multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
@@ -218,7 +240,8 @@ impl MemberGenerator {
             max_length: max_tag_length,
         };
 
-        let service_event_titles = random_strings(num_contexts, 64, &mut rng); // TODO assert that num_context less than 64
+        let service_event_titles =
+            random_strings_with_length_range(num_contexts, name_length_range.clone(), &mut rng);
         let tagsets = tags_generator.generate(&mut rng);
         let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
@@ -251,13 +274,12 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
 
-        let multivalue_count_range: Range<usize> = multivalue_count_range.start.try_into().unwrap()
+        let multivalue_count_range = multivalue_count_range.start.try_into().unwrap()
             ..multivalue_count_range.end.try_into().unwrap();
 
-        // TODO pass in a TagsGenerator instead of the `tags_per_msg_range`
-        // Its both the more correct way to do it and solves a borrow-checker problem
         let metric_generator = MetricGenerator::new(
             num_contexts,
+            name_length_range,
             multivalue_count_range,
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices).unwrap(),
@@ -334,6 +356,7 @@ impl DogStatsD {
     {
         Self::new(
             contexts_minimum()..contexts_maximum(),
+            name_length_minimum()..name_length_maximum(),
             tags_per_msg_minimum()..tags_per_msg_maximum(),
             multivalue_count_minimum()..multivalue_count_maximum(),
             multivalue_pack_probability(),
@@ -359,6 +382,7 @@ impl DogStatsD {
     /// Create a new instance of `DogStatsD`.
     pub fn new<R>(
         context_range: Range<u16>,
+        name_length_range: Range<u16>,
         tags_per_msg_range: Range<u16>,
         multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
@@ -371,6 +395,7 @@ impl DogStatsD {
     {
         let member_generator = MemberGenerator::new(
             context_range,
+            name_length_range,
             tags_per_msg_range,
             multivalue_count_range,
             multivalue_pack_probability,
@@ -414,8 +439,8 @@ mod test {
     use crate::{
         dogstatsd::{
             contexts_maximum, contexts_minimum, multivalue_count_maximum, multivalue_count_minimum,
-            multivalue_pack_probability, tags_per_msg_maximum, tags_per_msg_minimum, KindWeights,
-            MetricWeights,
+            multivalue_pack_probability, name_length_maximum, name_length_minimum,
+            tags_per_msg_maximum, tags_per_msg_minimum, KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -428,13 +453,14 @@ mod test {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
             let context_range = contexts_minimum()..contexts_maximum();
+            let name_length_range = name_length_minimum()..name_length_maximum();
             let tags_per_msg_range = tags_per_msg_minimum()..tags_per_msg_maximum();
             let multivalue_count_range = multivalue_count_minimum()..multivalue_count_maximum();
             let multivalue_pack_probability = multivalue_pack_probability();
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(context_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
+            let dogstatsd = DogStatsD::new(context_range, name_length_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
                                            metric_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);

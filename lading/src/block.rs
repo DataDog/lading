@@ -125,6 +125,8 @@ where
         payload::Config::DogStatsD(payload::dogstatsd::Config {
             contexts_minimum,
             contexts_maximum,
+            name_length_minimum,
+            name_length_maximum,
             tags_per_msg_minimum,
             tags_per_msg_maximum,
             // TODO -- how can I validate user input for multivalue_pack_probability
@@ -136,10 +138,12 @@ where
         }) => {
             let context_range = *contexts_minimum..*contexts_maximum;
             let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
+            let name_length_range = *name_length_minimum..*name_length_maximum;
             let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
 
             let serializer = payload::DogStatsD::new(
                 context_range,
+                name_length_range,
                 tags_per_msg_range,
                 multivalue_count_range,
                 *multivalue_pack_probability,
