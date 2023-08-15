@@ -193,12 +193,12 @@ mod test {
 
     #[test]
     fn static_capacity_never_exceeds_max_in_interval() {
-        let maximum_capacity = 490301363u32;
+        let maximum_capacity = 490_301_363u32;
         let requests: Vec<NonZeroU32> = vec![
             NonZeroU32::new(1).unwrap(),
-            NonZeroU32::new(490301363).unwrap(),
+            NonZeroU32::new(490_301_363).unwrap(),
         ];
-        capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests).unwrap()
+        capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests).unwrap();
     }
 
     fn cap_requests(max: u32) -> impl Strategy<Value = Vec<NonZeroU32>> {
@@ -216,9 +216,9 @@ mod test {
         #[test]
         fn capacity_never_exceeds_max_in_interval(
             maximum_capacity in (1..u32::MAX),
-            requests in cap_requests(u16::MAX as u32)
+            requests in cap_requests(u32::from(u16::MAX))
         ) {
-            capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests)?
+            capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests)?;
         }
     }
 }
