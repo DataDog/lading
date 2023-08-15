@@ -1,7 +1,3 @@
-# This is not the lading under test! This is the stable, released version of
-# lading that is used to run the test.
-
-
 generator:
   - unix_datagram:
       seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
@@ -13,7 +9,7 @@ generator:
           contexts_maximum: 8000
           tags_per_msg_minimum: 50
           tags_per_msg_maximum: 71
-          multivalue_pack_probability: 0.08
+          multivalue_pack_probability: 1108
           multivalue_count_minimum: 2
           multivalue_count_maximum: 40
           kind_weights:

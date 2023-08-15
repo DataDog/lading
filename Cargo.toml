@@ -23,4 +23,3 @@ prost = "0.11"
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
-debug = true      # WARN: This _must_ be removed before merging this PR.
