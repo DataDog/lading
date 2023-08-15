@@ -1,23 +1,104 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use rand::{
-    distributions::{Standard, WeightedIndex},
-    prelude::Distribution,
-    seq::SliceRandom,
+    distributions::{OpenClosed01, Standard, WeightedIndex},
+    prelude::{Distribution, SliceRandom},
+    Rng,
 };
 
-use crate::Generator;
+use crate::{common::AsciiString, Generator};
+use tracing::debug;
 
-use super::{choose_or_not, common};
+use super::{
+    choose_or_not,
+    common::{self},
+};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct MetricGenerator {
-    pub(crate) metric_weights: WeightedIndex<u8>,
-    pub(crate) metric_multivalue_weights: WeightedIndex<u8>,
-    pub(crate) metric_multivalue_choices: Vec<u8>,
-    pub(crate) names: Vec<String>,
     pub(crate) container_ids: Vec<String>,
-    pub(crate) tags: Vec<common::tags::Tags>,
+    // A "metric_template" is a Metric that has a type, name, and tag set, but no values or container id.
+    pub(crate) metric_templates: Vec<Metric>,
+    pub(crate) multivalue_count_range: Range<u16>,
+    pub(crate) multivalue_pack_probability: f32,
+}
+
+impl MetricGenerator {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new<R>(
+        num_contexts: usize,
+        name_length_range: Range<u16>,
+        multivalue_count_range: Range<u16>,
+        multivalue_pack_probability: f32,
+        metric_weights: &WeightedIndex<u8>,
+        container_ids: Vec<String>,
+        tagsets: common::tags::Tagsets,
+        rng: &mut R,
+    ) -> Self
+    where
+        R: Rng + ?Sized,
+    {
+        let mut buf = Vec::with_capacity(num_contexts);
+
+        assert!(tagsets.len() >= num_contexts);
+        debug!("Generating metric templates for {} contexts.", num_contexts);
+        let name_generator = AsciiString::with_length_range(name_length_range);
+        for tagset in tagsets {
+            let name = name_generator.generate(rng);
+
+            let res = match metric_weights.sample(rng) {
+                0 => Metric::Count(Count {
+                    name,
+                    values: None,
+                    sample_rate: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                1 => Metric::Gauge(Gauge {
+                    name,
+                    values: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                2 => Metric::Timer(Timer {
+                    name,
+                    values: None,
+                    sample_rate: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                3 => Metric::Distribution(Dist {
+                    name,
+                    values: None,
+                    sample_rate: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                4 => Metric::Set(Set {
+                    name,
+                    value: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                5 => Metric::Histogram(Histogram {
+                    name,
+                    values: None,
+                    sample_rate: None,
+                    tags: tagset,
+                    container_id: None,
+                }),
+                _ => unreachable!(),
+            };
+            buf.push(res);
+        }
+
+        MetricGenerator {
+            metric_templates: buf,
+            container_ids,
+            multivalue_count_range,
+            multivalue_pack_probability,
+        }
+    }
 }
 
 impl Generator<Metric> for MetricGenerator {
@@ -25,62 +106,66 @@ impl Generator<Metric> for MetricGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        let container_id = choose_or_not(&mut rng, &self.container_ids);
-        let name = self.names.choose(&mut rng).unwrap().clone();
-        let tags = choose_or_not(&mut rng, &self.tags);
-        let sample_rate = rng.gen();
-        let metric_multivalue_choice_idx = self.metric_multivalue_weights.sample(rng);
-        let total_values = self.metric_multivalue_choices[metric_multivalue_choice_idx] as usize;
-        let mut values: Vec<common::NumValue> =
-            Standard.sample_iter(&mut rng).take(total_values).collect();
+        let mut new_metric = self.metric_templates.choose(&mut rng).unwrap().clone();
 
-        match self.metric_weights.sample(rng) {
-            0 => Metric::Count(Count {
-                name,
-                values,
-                sample_rate,
-                tags,
-                container_id,
-            }),
-            1 => Metric::Gauge(Gauge {
-                name,
-                values,
-                tags,
-                container_id,
-            }),
-            2 => Metric::Timer(Timer {
-                name,
-                values,
-                sample_rate,
-                tags,
-                container_id,
-            }),
-            3 => Metric::Distribution(Dist {
-                name,
-                values,
-                sample_rate,
-                tags,
-                container_id,
-            }),
-            4 => Metric::Set(Set {
-                name,
-                value: values.pop().unwrap(), // SAFETY: we are guaranteed to have at least one member
-                tags,
-                container_id,
-            }),
-            5 => Metric::Histogram(Histogram {
-                name,
-                values,
-                sample_rate,
-                tags,
-                container_id,
-            }),
-            _ => unreachable!(),
+        let multivalue_count_range =
+            self.multivalue_count_range.start..self.multivalue_count_range.end;
+
+        let container_id = choose_or_not(&mut rng, &self.container_ids);
+        // TODO sample_rate should be option and have a probability that determines if its present
+        // Mostly inconsequential for the Agent, for certain metric types the Agent
+        // applies some correction based on this value. Affects count and histogram computation.
+        // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
+        let sample_rate = rng.gen();
+
+        let value: common::NumValue = Standard.sample(&mut rng);
+        let mut values = vec![value.clone()];
+
+        let prob: f32 = OpenClosed01.sample(&mut rng);
+        if prob < self.multivalue_pack_probability {
+            let num_desired_values = rng.gen_range(multivalue_count_range);
+            for _ in 1..num_desired_values {
+                values.push(Standard.sample(&mut rng));
+            }
         }
+
+        match &mut new_metric {
+            Metric::Count(count) => {
+                count.container_id = container_id;
+                count.sample_rate = sample_rate;
+                count.values = Some(values);
+            }
+            Metric::Gauge(gauge) => {
+                gauge.container_id = container_id;
+                gauge.values = Some(values);
+            }
+            Metric::Distribution(count) => {
+                count.container_id = container_id;
+                count.sample_rate = sample_rate;
+                count.values = Some(values);
+            }
+            Metric::Histogram(ref mut count) => {
+                count.container_id = container_id;
+                count.sample_rate = sample_rate;
+                count.values = Some(values);
+            }
+            Metric::Timer(ref mut count) => {
+                count.container_id = container_id;
+                count.sample_rate = sample_rate;
+                count.values = Some(values);
+            }
+            Metric::Set(ref mut count) => {
+                count.container_id = container_id;
+                count.value = Some(value);
+            }
+        }
+
+        new_metric
     }
 }
 
-pub(crate) enum Metric {
+#[derive(Clone)]
+pub enum Metric {
     Count(Count),
     Gauge(Gauge),
     Timer(Timer),
@@ -102,36 +187,51 @@ impl fmt::Display for Metric {
     }
 }
 
-pub(crate) struct Count {
+impl std::fmt::Debug for Metric {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Count(ref count) => write!(f, "{count}"),
+            Self::Gauge(ref gauge) => write!(f, "{gauge}"),
+            Self::Timer(ref timer) => write!(f, "{timer}"),
+            Self::Histogram(ref histogram) => write!(f, "{histogram}"),
+            Self::Set(ref set) => write!(f, "{set}"),
+            Self::Distribution(ref distribution) => write!(f, "{distribution}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+/// The count type in `DogStatsD` metric format. Monotonically increasing value.
+pub struct Count {
     name: String,
-    values: Vec<common::NumValue>,
+    values: Option<Vec<common::NumValue>>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::tags::Tags>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Count {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAGVALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.values {
-            write!(f, ":{val}")?;
+        if let Some(values) = &self.values {
+            for val in values {
+                write!(f, ":{val}")?;
+            }
         }
         write!(f, "|c")?;
         if let Some(ref sample_rate) = self.sample_rate {
             write!(f, "|@{sample_rate}")?;
         }
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }
@@ -143,32 +243,34 @@ impl fmt::Display for Count {
     }
 }
 
-pub(crate) struct Gauge {
+#[derive(Clone, Debug)]
+/// The gauge type in `DogStatsD` format.
+pub struct Gauge {
     name: String,
-    values: Vec<common::NumValue>,
-    tags: Option<common::tags::Tags>,
+    values: Option<Vec<common::NumValue>>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Gauge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.values {
-            write!(f, ":{val}")?;
+        if let Some(values) = &self.values {
+            for val in values {
+                write!(f, ":{val}")?;
+            }
         }
         write!(f, "|g")?;
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }
@@ -180,36 +282,38 @@ impl fmt::Display for Gauge {
     }
 }
 
-pub(crate) struct Timer {
+#[derive(Clone, Debug)]
+/// The timer type in `DogStatsD` format.
+pub struct Timer {
     name: String,
-    values: Vec<common::NumValue>,
+    values: Option<Vec<common::NumValue>>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::tags::Tags>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Timer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.values {
-            write!(f, ":{val}")?;
+        if let Some(values) = &self.values {
+            for val in values {
+                write!(f, ":{val}")?;
+            }
         }
         write!(f, "|ms")?;
         if let Some(ref sample_rate) = self.sample_rate {
             write!(f, "|@{sample_rate}")?;
         }
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }
@@ -221,36 +325,38 @@ impl fmt::Display for Timer {
     }
 }
 
-pub(crate) struct Dist {
+#[derive(Clone, Debug)]
+/// The distribution type in `DogStatsD` format.
+pub struct Dist {
     name: String,
-    values: Vec<common::NumValue>,
+    values: Option<Vec<common::NumValue>>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::tags::Tags>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Dist {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.values {
-            write!(f, ":{val}")?;
+        if let Some(values) = &self.values {
+            for val in values {
+                write!(f, ":{val}")?;
+            }
         }
         write!(f, "|d")?;
         if let Some(ref sample_rate) = self.sample_rate {
             write!(f, "|@{sample_rate}")?;
         }
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }
@@ -262,27 +368,32 @@ impl fmt::Display for Dist {
     }
 }
 
-pub(crate) struct Set {
+#[derive(Clone, Debug)]
+/// The set type in `DogStatsD` format.
+pub struct Set {
     name: String,
-    value: common::NumValue,
-    tags: Option<common::tags::Tags>,
+    value: Option<common::NumValue>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Set {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        write!(f, "{name}:{value}|s", name = self.name, value = self.value)?;
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        // <METRIC_NAME>:<VALUE>|s|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        let name = &self.name;
+        write!(f, "{name}")?;
+        if let Some(value) = &self.value {
+            write!(f, ":{value}")?;
+        }
+        write!(f, "|s")?;
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }
@@ -294,36 +405,38 @@ impl fmt::Display for Set {
     }
 }
 
-pub(crate) struct Histogram {
+#[derive(Clone, Debug)]
+/// The histogram type in `DogStatsD` format.
+pub struct Histogram {
     name: String,
-    values: Vec<common::NumValue>,
+    values: Option<Vec<common::NumValue>>,
     sample_rate: Option<common::ZeroToOne>,
-    tags: Option<common::tags::Tags>,
+    tags: common::tags::Tagset,
     container_id: Option<String>,
 }
 
 impl fmt::Display for Histogram {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // <METRIC_NAME>:<VALUE>|<TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
-        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        // <METRIC_NAME>:<VALUE>|h|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
+        // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|h|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(f, "{name}", name = self.name)?;
-        for val in &self.values {
-            write!(f, ":{val}")?;
+        if let Some(values) = &self.values {
+            for val in values {
+                write!(f, ":{val}")?;
+            }
         }
         write!(f, "|h")?;
         if let Some(ref sample_rate) = self.sample_rate {
             write!(f, "|@{sample_rate}")?;
         }
-        if let Some(ref tags) = self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for (k, v) in tags.iter() {
-                    write!(f, "{k}:{v}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if !self.tags.is_empty() {
+            write!(f, "|#")?;
+            let mut commas_remaining = self.tags.len() - 1;
+            for tag in &self.tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }

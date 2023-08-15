@@ -4,6 +4,7 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 pub(crate) mod tags;
 
+#[derive(Clone, Debug)]
 pub(crate) enum NumValue {
     Float(f64),
     Int(i64),
@@ -31,7 +32,7 @@ impl fmt::Display for NumValue {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ZeroToOne {
     One,
     Frac(u32),

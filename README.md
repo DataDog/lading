@@ -12,6 +12,11 @@ component of a larger performance testing strategy for complex programs. The
 [installation instructions](https://grpc.io/docs/protoc-installation/) from the
 protobuf docs.
 
+For criterion benchmarks, you can run them via `cargo bench`.
+[`cargo-criterion`](https://github.com/bheisler/cargo-criterion)
+ is a more advanced cargo extension that provides
+historical (ie baseline) tracking functionality.
+
 ## Operating Model
 
 `lading` operates on three conceptual components:
