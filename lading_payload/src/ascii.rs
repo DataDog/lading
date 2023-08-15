@@ -42,7 +42,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{Ascii, Serialize};
+    use crate::{Ascii, Serialize};
 
     // The serialized size of the payload must not exceed `max_bytes`.
     proptest! {

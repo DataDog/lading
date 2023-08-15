@@ -7,6 +7,7 @@ use rand::{
 };
 
 use crate::{common::AsciiString, Generator};
+use tracing::debug;
 
 use super::{
     choose_or_not,
@@ -18,14 +19,14 @@ pub(crate) struct MetricGenerator {
     pub(crate) container_ids: Vec<String>,
     // A "metric_template" is a Metric that has a type, name, and tag set, but no values or container id.
     pub(crate) metric_templates: Vec<Metric>,
-    pub(crate) multivalue_cnt_range: Range<usize>,
+    pub(crate) multivalue_count_range: Range<usize>,
     pub(crate) multivalue_pack_probability: f32,
 }
 
 impl MetricGenerator {
     pub(crate) fn new<R>(
         num_contexts: usize,
-        multivalue_cnt_range: Range<usize>,
+        multivalue_count_range: Range<usize>,
         multivalue_pack_probability: f32,
         metric_weights: &WeightedIndex<u8>,
         container_ids: Vec<String>,
@@ -47,6 +48,7 @@ impl MetricGenerator {
         let mut buf = Vec::with_capacity(num_contexts);
 
         assert!(tagsets.len() >= num_contexts);
+        debug!("Generating metric templates for {} contexts.", num_contexts);
         for tagset in tagsets {
             let name = AsciiString::with_maximum_length(max_name_length).generate(rng);
 
@@ -99,7 +101,7 @@ impl MetricGenerator {
         MetricGenerator {
             metric_templates: buf,
             container_ids,
-            multivalue_cnt_range,
+            multivalue_count_range,
             multivalue_pack_probability,
         }
     }
@@ -112,8 +114,8 @@ impl Generator<Metric> for MetricGenerator {
     {
         let mut new_metric = self.metric_templates.choose(&mut rng).unwrap().clone();
 
-        let multivalue_cnt_range: Range<usize> =
-            self.multivalue_cnt_range.start..self.multivalue_cnt_range.end;
+        let multivalue_count_range: Range<usize> =
+            self.multivalue_count_range.start..self.multivalue_count_range.end;
 
         let container_id = choose_or_not(&mut rng, &self.container_ids);
         // TODO sample_rate should be option and have a probability that determines if its present
@@ -127,7 +129,7 @@ impl Generator<Metric> for MetricGenerator {
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
         if prob < self.multivalue_pack_probability {
-            let num_desired_values = rng.gen_range(multivalue_cnt_range);
+            let num_desired_values = rng.gen_range(multivalue_count_range);
             for _ in 1..num_desired_values {
                 values.push(Standard.sample(&mut rng));
             }

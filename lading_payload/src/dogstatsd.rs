@@ -1,48 +1,50 @@
 //! `DogStatsD` payload.
 
-use std::{fmt, io::Write, num::NonZeroUsize, ops::Range};
+use std::{fmt, io::Write, ops::Range};
 
 use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::Deserialize;
 
-use crate::{common::AsciiString, Error, Generator, Serialize};
+use crate::{Error, Serialize};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
     service_check::ServiceCheckGenerator,
 };
 
+use super::{common::AsciiString, Generator};
+
 mod common;
 mod event;
 mod metric;
 mod service_check;
 
-fn contexts_minimum() -> NonZeroUsize {
-    NonZeroUsize::new(5000).unwrap()
+fn contexts_minimum() -> u16 {
+    5000
 }
 
-fn contexts_maximum() -> NonZeroUsize {
-    NonZeroUsize::new(10000).unwrap()
+fn contexts_maximum() -> u16 {
+    10_000
 }
 
-fn tags_per_msg_minimum() -> NonZeroUsize {
-    NonZeroUsize::new(5000).unwrap()
+fn tags_per_msg_minimum() -> u16 {
+    2
 }
 
-fn tags_per_msg_maximum() -> NonZeroUsize {
-    NonZeroUsize::new(10000).unwrap()
+fn tags_per_msg_maximum() -> u16 {
+    50
 }
 
 fn multivalue_pack_probability() -> f32 {
     0.08
 }
 
-fn multivalue_count_minimum() -> NonZeroUsize {
-    NonZeroUsize::new(2).unwrap()
+fn multivalue_count_minimum() -> u16 {
+    2
 }
 
-fn multivalue_count_maximum() -> NonZeroUsize {
-    NonZeroUsize::new(32).unwrap()
+fn multivalue_count_maximum() -> u16 {
+    32
 }
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
@@ -97,22 +99,22 @@ pub struct Config {
     /// Minimum number of unique metric contexts to generate
     /// A context is a set of unique metric name + tags
     #[serde(default = "contexts_minimum")]
-    pub contexts_minimum: NonZeroUsize,
+    pub contexts_minimum: u16,
 
     /// Maximum number of unique metric contexts to generate
     /// A context is a set of unique metric name + tags
     #[serde(default = "contexts_maximum")]
-    pub contexts_maximum: NonZeroUsize,
+    pub contexts_maximum: u16,
 
     /// Maximum number of tags per individual dogstatsd msg
     /// a tag is a key-value pair separated by a :
     #[serde(default = "tags_per_msg_maximum")]
-    pub tags_per_msg_maximum: NonZeroUsize,
+    pub tags_per_msg_maximum: u16,
 
     /// Minimum number of tags per individual dogstatsd msg
     /// a tag is a key-value pair separated by a :
     #[serde(default = "tags_per_msg_minimum")]
-    pub tags_per_msg_minimum: NonZeroUsize,
+    pub tags_per_msg_minimum: u16,
 
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
@@ -122,12 +124,12 @@ pub struct Config {
     /// The minimum count of values that will be generated if
     /// multi-value is chosen to be generated
     #[serde(default = "multivalue_count_minimum")]
-    pub multivalue_count_minimum: NonZeroUsize,
+    pub multivalue_count_minimum: u16,
 
     /// The maximum count of values that will be generated if
     /// multi-value is chosen to be generated
     #[serde(default = "multivalue_count_maximum")]
-    pub multivalue_count_maximum: NonZeroUsize,
+    pub multivalue_count_maximum: u16,
 
     /// Defines the relative probability of each kind of DogStatsD kinds of
     /// payload.
@@ -188,9 +190,9 @@ where
 
 impl MemberGenerator {
     fn new<R>(
-        context_range: Range<NonZeroUsize>,
-        tags_per_msg_range: Range<NonZeroUsize>,
-        multivalue_cnt_range: Range<NonZeroUsize>,
+        context_range: Range<u16>,
+        tags_per_msg_range: Range<u16>,
+        multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
@@ -249,14 +251,14 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
 
-        let multivalue_cnt_range: Range<usize> = multivalue_cnt_range.start.try_into().unwrap()
-            ..multivalue_cnt_range.end.try_into().unwrap();
+        let multivalue_count_range: Range<usize> = multivalue_count_range.start.try_into().unwrap()
+            ..multivalue_count_range.end.try_into().unwrap();
 
         // TODO pass in a TagsGenerator instead of the `tags_per_msg_range`
         // Its both the more correct way to do it and solves a borrow-checker problem
         let metric_generator = MetricGenerator::new(
             num_contexts,
-            multivalue_cnt_range,
+            multivalue_count_range,
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices).unwrap(),
             small_strings,
@@ -325,12 +327,7 @@ pub struct DogStatsD {
 }
 
 impl DogStatsD {
-    /// Create a new, default instance of `DogStatsD` with reasonable settings.
-    ///
-    /// # Panics
-    ///
-    /// Panics indicate a serious internal failure that has nothing to do with
-    /// user input.
+    /// Create a new default instance of `DogStatsD` with reasonable settings.
     pub fn default<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
@@ -346,11 +343,24 @@ impl DogStatsD {
         )
     }
 
+    #[cfg(feature = "dogstatsd_perf")]
+    /// Call the internal member generator and count the in-memory byte
+    /// size. This is not useful except in a loop to track how quickly we can do
+    /// this operation. It's meant to be a proxy by which we can determine how
+    /// quickly members are able to be generated and then serialized. An
+    /// approximation.
+    pub fn generate<R>(&self, rng: &mut R) -> Member
+    where
+        R: rand::Rng + ?Sized,
+    {
+        self.member_generator.generate(rng)
+    }
+
     /// Create a new instance of `DogStatsD`.
     pub fn new<R>(
-        context_range: Range<NonZeroUsize>,
-        tags_per_msg_range: Range<NonZeroUsize>,
-        multivalue_cnt_range: Range<NonZeroUsize>,
+        context_range: Range<u16>,
+        tags_per_msg_range: Range<u16>,
+        multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
@@ -362,7 +372,7 @@ impl DogStatsD {
         let member_generator = MemberGenerator::new(
             context_range,
             tags_per_msg_range,
-            multivalue_cnt_range,
+            multivalue_count_range,
             multivalue_pack_probability,
             kind_weights,
             metric_weights,
@@ -401,9 +411,9 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::payload::{
+    use crate::{
         dogstatsd::{
-            contexts_maximum, contexts_minimum, multivalue_cnt_maximum, multivalue_cnt_minimum,
+            contexts_maximum, contexts_minimum, multivalue_count_maximum, multivalue_count_minimum,
             multivalue_pack_probability, tags_per_msg_maximum, tags_per_msg_minimum, KindWeights,
             MetricWeights,
         },
@@ -419,12 +429,12 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let context_range = contexts_minimum()..contexts_maximum();
             let tags_per_msg_range = tags_per_msg_minimum()..tags_per_msg_maximum();
-            let multivalue_cnt_range = multivalue_cnt_minimum()..multivalue_cnt_maximum();
+            let multivalue_count_range = multivalue_count_minimum()..multivalue_count_maximum();
             let multivalue_pack_probability = multivalue_pack_probability();
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(context_range, tags_per_msg_range, multivalue_cnt_range, multivalue_pack_probability, kind_weights,
+            let dogstatsd = DogStatsD::new(context_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
                                            metric_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
