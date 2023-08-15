@@ -19,6 +19,28 @@ mod event;
 mod metric;
 mod service_check;
 
+#[derive(Deserialize, PartialEq, Debug, Clone, Copy)]
+#[serde(try_from = "f32")]
+pub struct ProbabilityPercentage(f32);
+impl ProbabilityPercentage {
+    pub fn try_new(value: f32) -> Result<Self, String> {
+        if value >= 0.0 && value <= 1.0 {
+            Ok(Self(value))
+        } else {
+            Err(format!(
+                "Invalid percentage '{}', must be between 0.0 and 1.0 (inclusive).",
+                value
+            ))
+        }
+    }
+}
+impl TryFrom<f32> for ProbabilityPercentage {
+    type Error = String;
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
 fn contexts_minimum() -> u16 {
     5000
 }
@@ -168,7 +190,7 @@ pub struct Config {
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
     #[serde(default = "multivalue_pack_probability")]
-    pub multivalue_pack_probability: f32,
+    pub multivalue_pack_probability: ProbabilityPercentage,
 
     /// The minimum count of values that will be generated if
     /// multi-value is chosen to be generated
