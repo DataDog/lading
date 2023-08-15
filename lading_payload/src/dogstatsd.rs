@@ -36,6 +36,22 @@ fn name_length_maximum() -> u16 {
     200
 }
 
+fn tag_key_length_minimum() -> u16 {
+    1
+}
+
+fn tag_key_length_maximum() -> u16 {
+    100
+}
+
+fn tag_value_length_minimum() -> u16 {
+    1
+}
+
+fn tag_value_length_maximum() -> u16 {
+    100
+}
+
 fn tags_per_msg_minimum() -> u16 {
     2
 }
@@ -122,6 +138,22 @@ pub struct Config {
     /// Maximum length for a dogstatsd message name
     #[serde(default = "name_length_maximum")]
     pub name_length_maximum: u16,
+
+    /// Minimum length for the 'key' part of a dogstatsd tag
+    #[serde(default = "tag_key_length_minimum")]
+    pub tag_key_length_minimum: u16,
+
+    /// Maximum length for the 'key' part of a dogstatsd tag
+    #[serde(default = "tag_key_length_maximum")]
+    pub tag_key_length_maximum: u16,
+
+    /// Minimum length for the 'value' part of a dogstatsd tag
+    #[serde(default = "tag_value_length_minimum")]
+    pub tag_value_length_minimum: u16,
+
+    /// Maximum length for the 'value' part of a dogstatsd tag
+    #[serde(default = "tag_value_length_maximum")]
+    pub tag_value_length_maximum: u16,
 
     /// Maximum number of tags per individual dogstatsd msg
     /// a tag is a key-value pair separated by a :
@@ -213,6 +245,8 @@ impl MemberGenerator {
     fn new<R>(
         context_range: Range<u16>,
         name_length_range: Range<u16>,
+        tag_key_length_range: Range<u16>,
+        tag_value_length_range: Range<u16>,
         tags_per_msg_range: Range<u16>,
         multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
@@ -231,13 +265,11 @@ impl MemberGenerator {
 
         let num_contexts = rng.gen_range(context_range);
 
-        // TODO pick a value for this or make it configurable
-        let max_tag_length = 36_u16;
-
         let tags_generator = tags::Generator {
             num_tagsets: num_contexts,
             tags_per_msg_range,
-            max_length: max_tag_length,
+            tag_key_length_range,
+            tag_value_length_range,
         };
 
         let service_event_titles =
@@ -357,6 +389,8 @@ impl DogStatsD {
         Self::new(
             contexts_minimum()..contexts_maximum(),
             name_length_minimum()..name_length_maximum(),
+            tag_key_length_minimum()..tag_key_length_maximum(),
+            tag_value_length_minimum()..tag_value_length_maximum(),
             tags_per_msg_minimum()..tags_per_msg_maximum(),
             multivalue_count_minimum()..multivalue_count_maximum(),
             multivalue_pack_probability(),
@@ -383,6 +417,8 @@ impl DogStatsD {
     pub fn new<R>(
         context_range: Range<u16>,
         name_length_range: Range<u16>,
+        tag_key_length_range: Range<u16>,
+        tag_value_length_range: Range<u16>,
         tags_per_msg_range: Range<u16>,
         multivalue_count_range: Range<u16>,
         multivalue_pack_probability: f32,
@@ -396,6 +432,8 @@ impl DogStatsD {
         let member_generator = MemberGenerator::new(
             context_range,
             name_length_range,
+            tag_key_length_range,
+            tag_value_length_range,
             tags_per_msg_range,
             multivalue_count_range,
             multivalue_pack_probability,
@@ -440,7 +478,9 @@ mod test {
         dogstatsd::{
             contexts_maximum, contexts_minimum, multivalue_count_maximum, multivalue_count_minimum,
             multivalue_pack_probability, name_length_maximum, name_length_minimum,
-            tags_per_msg_maximum, tags_per_msg_minimum, KindWeights, MetricWeights,
+            tag_key_length_maximum, tag_key_length_minimum, tag_value_length_maximum,
+            tag_value_length_minimum, tags_per_msg_maximum, tags_per_msg_minimum, KindWeights,
+            MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -454,13 +494,15 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let context_range = contexts_minimum()..contexts_maximum();
             let name_length_range = name_length_minimum()..name_length_maximum();
+            let tag_key_length_range = tag_key_length_minimum()..tag_key_length_maximum();
+            let tag_value_length_range = tag_value_length_minimum()..tag_value_length_maximum();
             let tags_per_msg_range = tags_per_msg_minimum()..tags_per_msg_maximum();
             let multivalue_count_range = multivalue_count_minimum()..multivalue_count_maximum();
             let multivalue_pack_probability = multivalue_pack_probability();
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(context_range, name_length_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
+            let dogstatsd = DogStatsD::new(context_range, name_length_range, tag_key_length_range, tag_value_length_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
                                            metric_weights, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
