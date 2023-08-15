@@ -24,6 +24,7 @@ pub(crate) struct MetricGenerator {
 }
 
 impl MetricGenerator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         num_contexts: usize,
         name_length_range: Range<u16>,

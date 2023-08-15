@@ -242,6 +242,7 @@ where
 }
 
 impl MemberGenerator {
+    #[allow(clippy::too_many_arguments)]
     fn new<R>(
         context_range: Range<u16>,
         name_length_range: Range<u16>,
@@ -411,6 +412,7 @@ impl DogStatsD {
     }
 
     /// Create a new instance of `DogStatsD`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new<R>(
         context_range: Range<u16>,
         name_length_range: Range<u16>,
