@@ -306,13 +306,10 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
 
-        let multivalue_count_range = multivalue_count_range.start.try_into().unwrap()
-            ..multivalue_count_range.end.try_into().unwrap();
-
         let metric_generator = MetricGenerator::new(
             num_contexts,
             name_length_range,
-            multivalue_count_range,
+            multivalue_count_range.clone(),
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices).unwrap(),
             small_strings,
