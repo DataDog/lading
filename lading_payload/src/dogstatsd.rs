@@ -1,11 +1,11 @@
 //! `DogStatsD` payload.
 
-use std::{fmt, io::Write, ops::Range};
+use std::{fmt, io::Write, ops::Range, rc::Rc};
 
 use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::Deserialize;
 
-use crate::{Error, Serialize};
+use crate::{common::strings, Error, Serialize};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -201,12 +201,17 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-struct MemberGenerator {
-    kind_weights: WeightedIndex<u8>,
-    event_generator: EventGenerator,
-    service_check_generator: ServiceCheckGenerator,
-    metric_generator: MetricGenerator,
+fn choose_or_not_fn<R, T, F>(mut rng: &mut R, func: F) -> Option<T>
+where
+    T: Clone,
+    R: rand::Rng + ?Sized,
+    F: FnOnce(&mut R) -> Option<T>,
+{
+    if rng.gen() {
+        func(&mut rng)
+    } else {
+        None
+    }
 }
 
 #[inline]
@@ -241,6 +246,14 @@ where
     buf
 }
 
+#[derive(Debug, Clone)]
+struct MemberGenerator {
+    kind_weights: WeightedIndex<u8>,
+    event_generator: EventGenerator,
+    service_check_generator: ServiceCheckGenerator,
+    metric_generator: MetricGenerator,
+}
+
 impl MemberGenerator {
     #[allow(clippy::too_many_arguments)]
     fn new<R>(
@@ -258,6 +271,8 @@ impl MemberGenerator {
     where
         R: Rng + ?Sized,
     {
+        let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
+
         let context_range: Range<usize> =
             context_range.start.try_into().unwrap()..context_range.end.try_into().unwrap();
 
@@ -278,15 +293,6 @@ impl MemberGenerator {
         let tagsets = tags_generator.generate(&mut rng);
         let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
-
-        // For service checks and events, there is no "aggregation" going on, so the idea of a "context"
-        // does not really make sense. Therefore "titles" and "tags" can be independently chosen freely.
-        let event_generator = EventGenerator {
-            titles: service_event_titles.clone(),
-            texts_or_messages: texts_or_messages.clone(),
-            small_strings: small_strings.clone(),
-            tagsets: tagsets.clone(),
-        };
 
         let service_check_generator = ServiceCheckGenerator {
             names: service_event_titles.clone(),
@@ -309,7 +315,7 @@ impl MemberGenerator {
 
         let metric_generator = MetricGenerator::new(
             num_contexts,
-            name_length_range,
+            name_length_range.clone(),
             multivalue_count_range.clone(),
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices).unwrap(),
@@ -328,21 +334,30 @@ impl MemberGenerator {
         ];
         MemberGenerator {
             kind_weights: WeightedIndex::new(member_choices).unwrap(),
-            event_generator,
+            event_generator: EventGenerator {
+                str_pool: Rc::clone(&pool),
+                title_length_range: name_length_range.clone(),
+                texts_or_messages_length_range: 1..1024,
+                small_strings_length_range: 1..8,
+                tagsets: tagsets.clone(),
+            },
             service_check_generator,
             metric_generator,
         }
     }
 }
 
-impl Generator<Member> for MemberGenerator {
-    fn generate<R>(&self, rng: &mut R) -> Member
+impl MemberGenerator {
+    fn generate<'a, R>(&'a self, rng: &mut R) -> Member<'a>
     where
         R: rand::Rng + ?Sized,
     {
         match self.kind_weights.sample(rng) {
             0 => Member::Metric(self.metric_generator.generate(rng)),
-            1 => Member::Event(self.event_generator.generate(rng)),
+            1 => {
+                let event = self.event_generator.generate(rng);
+                Member::Event(event)
+            }
             2 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
             _ => unreachable!(),
         }
@@ -352,16 +367,16 @@ impl Generator<Member> for MemberGenerator {
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
 #[derive(Debug)]
 /// Supra-type for all dogstatsd variants
-pub enum Member {
+pub enum Member<'a> {
     /// Metrics
     Metric(metric::Metric),
     /// Events, think syslog.
-    Event(event::Event),
+    Event(event::Event<'a>),
     /// Services, checked.
     ServiceCheck(service_check::ServiceCheck),
 }
 
-impl fmt::Display for Member {
+impl<'a> fmt::Display for Member<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Metric(ref m) => write!(f, "{m}"),

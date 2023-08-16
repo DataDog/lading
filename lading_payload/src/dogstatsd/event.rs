@@ -1,26 +1,34 @@
-use std::fmt;
+use std::{fmt, ops::Range, rc::Rc};
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::Generator;
+use crate::common::strings;
 
-use super::{choose_or_not, common};
+use super::{choose_or_not, choose_or_not_fn, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
-    pub(crate) titles: Vec<String>,
-    pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) small_strings: Vec<String>,
+    pub(crate) title_length_range: Range<u16>,
+    pub(crate) texts_or_messages_length_range: Range<u16>,
+    pub(crate) small_strings_length_range: Range<u16>,
+    pub(crate) str_pool: Rc<strings::Pool>,
+    // TODO adjust so that tagsets is not allocating
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
-impl Generator<Event> for EventGenerator {
-    fn generate<R>(&self, mut rng: &mut R) -> Event
+impl EventGenerator {
+    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Event<'a>
     where
         R: rand::Rng + ?Sized,
     {
-        let title = self.titles.choose(&mut rng).unwrap().clone();
-        let text = self.texts_or_messages.choose(&mut rng).unwrap().clone();
+        let title = self
+            .str_pool
+            .of_size_range(&mut rng, self.title_length_range.clone())
+            .unwrap();
+        let text = self
+            .str_pool
+            .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
+            .unwrap();
         let tags = choose_or_not(&mut rng, &self.tagsets);
 
         Event {
@@ -29,10 +37,19 @@ impl Generator<Event> for EventGenerator {
             title,
             text,
             timestamp_second: rng.gen(),
-            hostname: choose_or_not(&mut rng, &self.small_strings),
-            aggregation_key: choose_or_not(&mut rng, &self.small_strings),
+            hostname: choose_or_not_fn(&mut rng, |r| {
+                self.str_pool
+                    .of_size_range(r, self.small_strings_length_range.clone())
+            }),
+            aggregation_key: choose_or_not_fn(&mut rng, |r| {
+                self.str_pool
+                    .of_size_range(r, self.small_strings_length_range.clone())
+            }),
             priority: rng.gen(),
-            source_type_name: choose_or_not(&mut rng, &self.small_strings),
+            source_type_name: choose_or_not_fn(&mut rng, |r| {
+                self.str_pool
+                    .of_size_range(r, self.small_strings_length_range.clone())
+            }),
             alert_type: rng.gen(),
             tags,
         }
@@ -41,21 +58,21 @@ impl Generator<Event> for EventGenerator {
 
 /// An event, like a syslog kind of.
 #[derive(Debug)]
-pub struct Event {
-    title: String,
-    text: String,
+pub struct Event<'a> {
+    title: &'a str,
+    text: &'a str,
     title_utf8_length: usize,
     text_utf8_length: usize,
     timestamp_second: Option<u32>,
-    hostname: Option<String>,
-    aggregation_key: Option<String>,
+    hostname: Option<&'a str>,
+    aggregation_key: Option<&'a str>,
     priority: Option<Priority>,
-    source_type_name: Option<String>,
+    source_type_name: Option<&'a str>,
     alert_type: Option<Alert>,
     tags: Option<common::tags::Tagset>,
 }
 
-impl fmt::Display for Event {
+impl<'a> fmt::Display for Event<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(

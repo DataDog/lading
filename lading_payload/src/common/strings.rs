@@ -1,6 +1,8 @@
 //! Code for the quick creation of randomize strings
 
-use rand::seq::SliceRandom;
+use std::ops::Range;
+
+use rand::{distributions::uniform::SampleUniform, seq::SliceRandom};
 
 const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -69,6 +71,21 @@ impl Pool {
         let upper_idx = lower_idx + bytes;
 
         Some(&self.inner[lower_idx..upper_idx])
+    }
+
+    /// Return a `&str` from the interior storage with size selected from `bytes_range`. Result will
+    /// be `None` if the request cannot be satisfied.
+    pub(crate) fn of_size_range<'a, R, T>(
+        &'a self,
+        rng: &mut R,
+        bytes_range: Range<T>,
+    ) -> Option<&'a str>
+    where
+        R: rand::Rng + ?Sized,
+        T: Into<usize> + Copy + PartialOrd + SampleUniform,
+    {
+        let bytes: usize = rng.gen_range(bytes_range).into();
+        self.of_size(rng, bytes)
     }
 }
 
