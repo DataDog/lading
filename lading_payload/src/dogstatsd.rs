@@ -189,18 +189,6 @@ pub struct Config {
     pub metric_weights: MetricWeights,
 }
 
-fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
-where
-    T: Clone,
-    R: rand::Rng + ?Sized,
-{
-    if rng.gen() {
-        pool.choose(&mut rng).cloned()
-    } else {
-        None
-    }
-}
-
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
 where
     R: rand::Rng + ?Sized,
@@ -354,7 +342,7 @@ impl MemberGenerator {
             &WeightedIndex::new(metric_choices).unwrap(),
             small_strings,
             tagsets.clone(),
-            &pool,
+            pool.as_ref(),
             &mut rng,
         );
 
@@ -397,7 +385,7 @@ impl MemberGenerator {
 /// Supra-type for all dogstatsd variants
 pub enum Member<'a> {
     /// Metrics
-    Metric(metric::Metric),
+    Metric(metric::Metric<'a>),
     /// Events, think syslog.
     Event(event::Event<'a>),
     /// Services, checked.
