@@ -6,7 +6,7 @@ use rand::{
     Rng,
 };
 
-use crate::{common::AsciiString, Generator};
+use crate::{common::strings, Generator};
 use tracing::debug;
 
 use super::{
@@ -33,7 +33,8 @@ impl MetricGenerator {
         metric_weights: &WeightedIndex<u8>,
         container_ids: Vec<String>,
         tagsets: common::tags::Tagsets,
-        rng: &mut R,
+        str_pool: &strings::Pool,
+        mut rng: &mut R,
     ) -> Self
     where
         R: Rng + ?Sized,
@@ -42,9 +43,12 @@ impl MetricGenerator {
 
         assert!(tagsets.len() >= num_contexts);
         debug!("Generating metric templates for {} contexts.", num_contexts);
-        let name_generator = AsciiString::with_length_range(name_length_range);
         for tagset in tagsets {
-            let name = name_generator.generate(rng);
+            let name = String::from(
+                str_pool
+                    .of_size_range(&mut rng, name_length_range.clone())
+                    .unwrap(),
+            );
 
             let res = match metric_weights.sample(rng) {
                 0 => Metric::Count(Count {

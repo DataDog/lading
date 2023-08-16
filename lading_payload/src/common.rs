@@ -1,7 +1,5 @@
 pub(crate) mod strings;
 
-use std::ops::Range;
-
 use crate::Generator;
 
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -17,21 +15,6 @@ impl Default for AsciiString {
         Self {
             min_length: 1,
             max_length: 16,
-        }
-    }
-}
-
-impl AsciiString {
-    pub(crate) fn with_maximum_length(cap: u16) -> Self {
-        Self {
-            min_length: 1,
-            max_length: cap,
-        }
-    }
-    pub(crate) fn with_length_range(range: Range<u16>) -> Self {
-        Self {
-            min_length: range.start,
-            max_length: range.end,
         }
     }
 }

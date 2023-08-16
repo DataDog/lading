@@ -12,7 +12,7 @@ use self::{
     service_check::ServiceCheckGenerator,
 };
 
-use super::{common::AsciiString, Generator};
+use super::Generator;
 
 mod common;
 mod event;
@@ -226,33 +226,40 @@ where
 }
 
 #[inline]
-/// Generate a total number of strings between min and max with a maximum length
+/// Generate a total number of strings randomly chosen from the range `min_max` with a maximum length
 /// per string of `max_length`.
-fn random_strings_with_length<R>(min_max: Range<usize>, max_length: u16, rng: &mut R) -> Vec<String>
+fn random_strings_with_length<R>(
+    pool: &strings::Pool,
+    min_max: Range<usize>,
+    max_length: u16,
+    rng: &mut R,
+) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
-    let mut buf = Vec::with_capacity(min_max.end);
-    for _ in 0..rng.gen_range(min_max) {
-        buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
-    }
-    buf
+    let total = rng.gen_range(min_max);
+    let length_range = 1..max_length;
+
+    random_strings_with_length_range(pool, total, length_range, rng)
 }
 
 #[inline]
 /// Generate a `total` number of strings with a maximum length per string of
 /// `max_length`.
 fn random_strings_with_length_range<R>(
+    pool: &strings::Pool,
     total: usize,
     length_range: Range<u16>,
-    rng: &mut R,
+    mut rng: &mut R,
 ) -> Vec<String>
 where
     R: Rng + ?Sized,
 {
     let mut buf = Vec::with_capacity(total);
     for _ in 0..total {
-        buf.push(AsciiString::with_length_range(length_range.clone()).generate(rng));
+        buf.push(String::from(
+            pool.of_size_range(&mut rng, length_range.clone()).unwrap(),
+        ));
     }
     buf
 }
@@ -297,20 +304,20 @@ impl MemberGenerator {
             tags_per_msg_range,
             tag_key_length_range,
             tag_value_length_range,
+            str_pool: Rc::clone(&pool),
         };
 
-        let service_event_titles =
-            random_strings_with_length_range(num_contexts, name_length_range.clone(), &mut rng);
+        let service_event_titles = random_strings_with_length_range(
+            pool.as_ref(),
+            num_contexts,
+            name_length_range.clone(),
+            &mut rng,
+        );
         let tagsets = tags_generator.generate(&mut rng);
-        let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
-        let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
+        drop(tags_generator); // now unused, clear up its allocation s
 
-        let service_check_generator = ServiceCheckGenerator {
-            names: service_event_titles.clone(),
-            small_strings: small_strings.clone(),
-            texts_or_messages,
-            tagsets: tagsets.clone(),
-        };
+        let texts_or_messages = random_strings_with_length(pool.as_ref(), 4..128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(pool.as_ref(), 16..1024, 8, &mut rng);
 
         // NOTE the ordering here of `metric_choices` is very important! If you
         // change it here you MUST also change it in `Generator<Metric> for
@@ -324,6 +331,21 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
 
+        let event_generator = EventGenerator {
+            str_pool: Rc::clone(&pool),
+            title_length_range: name_length_range.clone(),
+            texts_or_messages_length_range: 1..1024,
+            small_strings_length_range: 1..8,
+            tagsets: tagsets.clone(),
+        };
+
+        let service_check_generator = ServiceCheckGenerator {
+            names: service_event_titles.clone(),
+            small_strings: small_strings.clone(),
+            texts_or_messages,
+            tagsets: tagsets.clone(),
+        };
+
         let metric_generator = MetricGenerator::new(
             num_contexts,
             name_length_range.clone(),
@@ -332,6 +354,7 @@ impl MemberGenerator {
             &WeightedIndex::new(metric_choices).unwrap(),
             small_strings,
             tagsets.clone(),
+            &pool,
             &mut rng,
         );
 
@@ -345,13 +368,7 @@ impl MemberGenerator {
         ];
         MemberGenerator {
             kind_weights: WeightedIndex::new(member_choices).unwrap(),
-            event_generator: EventGenerator {
-                str_pool: Rc::clone(&pool),
-                title_length_range: name_length_range.clone(),
-                texts_or_messages_length_range: 1..1024,
-                small_strings_length_range: 1..8,
-                tagsets: tagsets.clone(),
-            },
+            event_generator,
             service_check_generator,
             metric_generator,
         }
