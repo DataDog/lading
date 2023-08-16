@@ -17,8 +17,8 @@ fn main() {
     // reacquire the stdio lock each write and, also, to elide as many writes as
     // possible.
     let stdout = std::io::stdout();
-    let mut fp = BufWriter::with_capacity(1_000_000, stdout.lock());
-    for _ in 0..1_000 {
+    let mut fp = BufWriter::with_capacity(10_000_000, stdout.lock());
+    for _ in 0..1_000_000 {
         let member = dg.generate(&mut rng);
         writeln!(fp, "{member}").unwrap();
     }
