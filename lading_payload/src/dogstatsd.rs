@@ -201,14 +201,25 @@ where
     }
 }
 
-fn choose_or_not_fn<R, T, F>(mut rng: &mut R, func: F) -> Option<T>
+fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
+where
+    R: rand::Rng + ?Sized,
+{
+    if rng.gen() {
+        pool.choose(&mut rng)
+    } else {
+        None
+    }
+}
+
+fn choose_or_not_fn<R, T, F>(rng: &mut R, func: F) -> Option<T>
 where
     T: Clone,
     R: rand::Rng + ?Sized,
     F: FnOnce(&mut R) -> Option<T>,
 {
     if rng.gen() {
-        func(&mut rng)
+        func(rng)
     } else {
         None
     }
@@ -373,7 +384,7 @@ pub enum Member<'a> {
     /// Events, think syslog.
     Event(event::Event<'a>),
     /// Services, checked.
-    ServiceCheck(service_check::ServiceCheck),
+    ServiceCheck(service_check::ServiceCheck<'a>),
 }
 
 impl<'a> fmt::Display for Member<'a> {

@@ -2,9 +2,7 @@ use std::fmt;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::Generator;
-
-use super::{choose_or_not, common};
+use super::{choose_or_not_ref, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
@@ -14,26 +12,15 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
-/// Check of a service.
-#[derive(Debug)]
-pub struct ServiceCheck {
-    name: String,
-    status: Status,
-    timestamp_second: Option<u32>,
-    hostname: Option<String>,
-    tags: Option<Vec<String>>,
-    message: Option<String>,
-}
-
-impl Generator<ServiceCheck> for ServiceCheckGenerator {
-    fn generate<R>(&self, mut rng: &mut R) -> ServiceCheck
+impl ServiceCheckGenerator {
+    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> ServiceCheck<'a>
     where
         R: rand::Rng + ?Sized,
     {
-        let name = self.names.choose(&mut rng).unwrap().clone();
-        let hostname = choose_or_not(&mut rng, &self.small_strings);
-        let message = choose_or_not(&mut rng, &self.texts_or_messages);
-        let tags = choose_or_not(&mut rng, &self.tagsets);
+        let name = self.names.choose(&mut rng).unwrap();
+        let hostname = choose_or_not_ref(&mut rng, &self.small_strings).map(String::as_str);
+        let message = choose_or_not_ref(&mut rng, &self.texts_or_messages).map(String::as_str);
+        let tags = choose_or_not_ref(&mut rng, &self.tagsets);
 
         ServiceCheck {
             name,
@@ -46,7 +33,18 @@ impl Generator<ServiceCheck> for ServiceCheckGenerator {
     }
 }
 
-impl fmt::Display for ServiceCheck {
+/// Check of a service.
+#[derive(Debug)]
+pub struct ServiceCheck<'a> {
+    name: &'a str,
+    status: Status,
+    timestamp_second: Option<u32>,
+    hostname: Option<&'a str>,
+    tags: Option<&'a Vec<String>>,
+    message: Option<&'a str>,
+}
+
+impl<'a> fmt::Display for ServiceCheck<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         write!(
@@ -58,10 +56,10 @@ impl fmt::Display for ServiceCheck {
         if let Some(timestamp) = self.timestamp_second {
             write!(f, "|d:{timestamp}")?;
         }
-        if let Some(ref hostname) = self.hostname {
+        if let Some(hostname) = self.hostname {
             write!(f, "|h:{hostname}")?;
         }
-        if let Some(ref tags) = self.tags {
+        if let Some(tags) = self.tags {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
@@ -74,7 +72,7 @@ impl fmt::Display for ServiceCheck {
                 }
             }
         }
-        if let Some(ref msg) = self.message {
+        if let Some(msg) = self.message {
             write!(f, "|m:{msg}")?;
         }
         Ok(())

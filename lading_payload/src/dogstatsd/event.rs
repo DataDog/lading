@@ -4,7 +4,7 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use crate::common::strings;
 
-use super::{choose_or_not, choose_or_not_fn, common};
+use super::{choose_or_not_fn, choose_or_not_ref, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
@@ -12,7 +12,6 @@ pub(crate) struct EventGenerator {
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
     pub(crate) str_pool: Rc<strings::Pool>,
-    // TODO adjust so that tagsets is not allocating
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
@@ -29,7 +28,7 @@ impl EventGenerator {
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .unwrap();
-        let tags = choose_or_not(&mut rng, &self.tagsets);
+        let tags = choose_or_not_ref(&mut rng, &self.tagsets);
 
         Event {
             title_utf8_length: title.len(),
@@ -69,7 +68,7 @@ pub struct Event<'a> {
     priority: Option<Priority>,
     source_type_name: Option<&'a str>,
     alert_type: Option<Alert>,
-    tags: Option<common::tags::Tagset>,
+    tags: Option<&'a common::tags::Tagset>,
 }
 
 impl<'a> fmt::Display for Event<'a> {
@@ -86,22 +85,22 @@ impl<'a> fmt::Display for Event<'a> {
         if let Some(timestamp) = self.timestamp_second {
             write!(f, "|d:{timestamp}")?;
         }
-        if let Some(ref hostname) = self.hostname {
+        if let Some(hostname) = self.hostname {
             write!(f, "|h:{hostname}")?;
         }
-        if let Some(ref priority) = self.priority {
+        if let Some(priority) = self.priority {
             write!(f, "|p:{priority}")?;
         }
-        if let Some(ref alert_type) = self.alert_type {
+        if let Some(alert_type) = self.alert_type {
             write!(f, "|t:{alert_type}")?;
         }
-        if let Some(ref aggregation_key) = self.aggregation_key {
+        if let Some(aggregation_key) = self.aggregation_key {
             write!(f, "|k:{aggregation_key}")?;
         }
-        if let Some(ref source_type_name) = self.source_type_name {
+        if let Some(source_type_name) = self.source_type_name {
             write!(f, "|s:{source_type_name}")?;
         }
-        if let Some(ref tags) = self.tags {
+        if let Some(tags) = self.tags {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
@@ -118,7 +117,7 @@ impl<'a> fmt::Display for Event<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum Priority {
     Normal,
     Low,
