@@ -178,7 +178,8 @@ where
             labels,
         ),
         payload::Config::Ascii => {
-            construct_block_cache_inner(&mut rng, &payload::Ascii, block_chunks, labels)
+            let pyld = payload::Ascii::new(&mut rng);
+            construct_block_cache_inner(&mut rng, &pyld, block_chunks, labels)
         }
         payload::Config::DatadogLog => {
             let serializer = payload::DatadogLog::new(&mut rng);

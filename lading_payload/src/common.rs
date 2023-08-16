@@ -1,5 +1,8 @@
-use super::Generator;
+pub(crate) mod strings;
+
 use std::ops::Range;
+
+use crate::Generator;
 
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
