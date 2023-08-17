@@ -2,13 +2,12 @@
 
 use std::{collections::HashMap, io::Write};
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
 
-use crate::Error;
+use crate::{common::strings, Error};
 use serde::Serialize;
 
-use super::{common::AsciiString, Generator};
 const SERVICES: [&str; 7] = [
     "tablet",
     "phone",
@@ -73,13 +72,13 @@ const SERVICE_KIND: [&str; 4] = ["web", "db", "lambda", "cicd"];
 
 /// `TraceAgent` span
 #[derive(serde::Serialize)]
-struct Span {
+pub(crate) struct Span<'a> {
     /// service is the name of the service with which this span is associated.
-    service: String,
+    service: &'a str,
     /// name is the operation name of this span.
-    name: String,
+    name: &'a str,
     /// resource is the resource name of this span, also sometimes called the endpoint (for web spans).
-    resource: String,
+    resource: &'a str,
     /// traceID is the ID of the trace to which this span belongs.
     trace_id: u64,
     /// spanID is the ID of this span.
@@ -93,43 +92,14 @@ struct Span {
     /// error is 1 if there is an error associated with this span, or 0 if there is not.
     error: i32,
     /// meta is a mapping from tag name to tag value for string-valued tags.
-    meta: HashMap<String, String>,
+    meta: HashMap<&'a str, &'a str>,
     /// metrics is a mapping from tag name to tag value for numeric-valued tags.
-    metrics: HashMap<String, f64>,
+    metrics: HashMap<&'a str, f64>,
     /// type is the type of the service with which this span is associated.  Example values: web, db, lambda.
     #[serde(alias = "type")]
-    kind: String,
+    kind: &'a str,
     /// meta_struct is a registry of structured "other" data used by, e.g., AppSec.
-    meta_struct: HashMap<String, Vec<u8>>,
-}
-
-impl Distribution<Span> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Span
-    where
-        R: Rng + ?Sized,
-    {
-        let total_metrics = rng.gen_range(0..6);
-        let mut metrics: HashMap<String, f64> = HashMap::new();
-        for k in TAG_NAMES.choose_multiple(rng, total_metrics) {
-            metrics.insert(String::from(*k), rng.gen());
-        }
-
-        Span {
-            service: String::from(*SERVICES.choose(rng).unwrap()),
-            name: AsciiString::default().generate(rng),
-            resource: String::new(),
-            trace_id: rng.gen(),
-            span_id: rng.gen(),
-            parent_id: rng.gen(),
-            start: rng.gen(),
-            duration: rng.gen(),
-            error: rng.gen_range(0..=1),
-            meta: HashMap::new(),
-            metrics,
-            kind: String::from(*SERVICE_KIND.choose(rng).unwrap()),
-            meta_struct: HashMap::new(),
-        }
-    }
+    meta_struct: HashMap<&'a str, Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -143,28 +113,67 @@ pub enum Encoding {
     MsgPack,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 /// Trace Agent payload
 pub struct TraceAgent {
     encoding: Encoding,
+    str_pool: strings::Pool,
 }
 
 impl TraceAgent {
     /// JSON encoding
     #[must_use]
-    pub fn json() -> Self {
+    pub fn json<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
         Self {
             encoding: Encoding::Json,
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
 
     /// `MsgPack` encoding
     #[must_use]
-    pub fn msg_pack() -> Self {
+    pub fn msg_pack<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
         Self {
             encoding: Encoding::MsgPack,
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+
+    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Span<'a>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let total_metrics = rng.gen_range(0..6);
+        let mut metrics: HashMap<&'static str, f64> = HashMap::new();
+        for _ in 0..total_metrics {}
+        for k in TAG_NAMES.choose_multiple(rng, total_metrics) {
+            metrics.insert(*k, rng.gen());
+        }
+
+        let name = self.str_pool.of_size_range(&mut rng, 1_u8..16).unwrap();
+        let resource = self.str_pool.of_size_range(&mut rng, 1_u8..8).unwrap();
+
+        Span {
+            service: SERVICES.choose(rng).unwrap(),
+            name,
+            resource,
+            trace_id: rng.gen(),
+            span_id: rng.gen(),
+            parent_id: rng.gen(),
+            start: rng.gen(),
+            duration: rng.gen(),
+            error: rng.gen_range(0..=1),
+            meta: HashMap::new(),
+            metrics,
+            kind: SERVICE_KIND.choose(rng).unwrap(),
+            meta_struct: HashMap::new(),
         }
     }
 }
@@ -184,10 +193,10 @@ impl crate::Serialize for TraceAgent {
         // obeyed, as an example. We could then have a 'shrink' or 'expand'
         // method on that tree to avoid this loop.
         let mut members: Vec<Vec<Span>> = vec![];
-        let mut remaining = 10_000;
+        let mut remaining: u16 = 10_000;
         while remaining > 0 {
             let total = rng.gen_range(0..=remaining);
-            let spans: Vec<Span> = Standard.sample_iter(&mut rng).take(total).collect();
+            let spans: Vec<Span> = (0..total).map(|_| self.generate(&mut rng)).collect();
             members.push(spans);
             remaining = remaining.saturating_sub(total);
         }
@@ -206,7 +215,7 @@ impl crate::Serialize for TraceAgent {
                 break;
             }
 
-            members.push(Standard.sample_iter(&mut rng).take(5_000).collect());
+            members.push((0..5_000).map(|_| self.generate(&mut rng)).collect());
         }
 
         // Search for an encoding that's just right.
@@ -248,8 +257,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes_json(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let trace_agent = TraceAgent::json();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes).unwrap();
@@ -265,8 +274,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes_msg_pack(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let trace_agent = TraceAgent::msg_pack();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes).unwrap();

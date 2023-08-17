@@ -6,13 +6,13 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
-use crate::Error;
+use crate::{common::strings, Error};
 use opentelemetry_proto::tonic::trace::v1;
 use prost::Message;
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 use std::io::Write;
 
-use super::{common::AsciiString, Generator};
+use super::Generator;
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportTraceServiceRequest`](opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest)
 struct ExportTraceServiceRequest(Vec<Span>);
@@ -38,10 +38,28 @@ impl ExportTraceServiceRequest {
 }
 struct Span(v1::Span);
 
-impl Distribution<Span> for Standard {
-    fn sample<R>(&self, mut rng: &mut R) -> Span
+#[derive(Debug, Clone)]
+/// OTLP trace payload
+pub struct OpentelemetryTraces {
+    str_pool: strings::Pool,
+}
+
+impl OpentelemetryTraces {
+    /// Construct a new instance of `OpentelemetryTraces`
+    pub fn new<R>(rng: &mut R) -> Self
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
+    {
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+}
+
+impl Generator<Span> for OpentelemetryTraces {
+    fn generate<R>(&self, mut rng: &mut R) -> Span
+    where
+        R: rand::Rng + ?Sized,
     {
         let trace_id = Standard.sample_iter(&mut rng).take(16).collect();
         let span_id = Standard.sample_iter(&mut rng).take(8).collect();
@@ -52,6 +70,8 @@ impl Distribution<Span> for Standard {
         // end time is expected to be greater than or equal to start time
         let end_time_unix_nano: u64 = rng.gen_range(start_time_unix_nano..=u64::MAX);
 
+        let name = self.str_pool.of_size_range(&mut rng, 1_u8..16).unwrap();
+
         Span(v1::Span {
             trace_id,
             span_id,
@@ -59,7 +79,7 @@ impl Distribution<Span> for Standard {
             trace_state: String::new(),
             // zeros: root span
             parent_span_id: vec![0; 8],
-            name: AsciiString::default().generate(rng),
+            name: String::from(name),
             kind: rng.gen_range(0..=5),
             start_time_unix_nano,
             end_time_unix_nano,
@@ -73,11 +93,6 @@ impl Distribution<Span> for Standard {
         })
     }
 }
-
-#[derive(Debug, Default, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-/// OTLP trace payload
-pub struct OpentelemetryTraces;
 
 impl crate::Serialize for OpentelemetryTraces {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -95,7 +110,7 @@ impl crate::Serialize for OpentelemetryTraces {
 
         let mut acc = ExportTraceServiceRequest(Vec::new());
         loop {
-            let member: Span = rng.gen();
+            let member: Span = self.generate(&mut rng);
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
@@ -126,8 +141,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let traces = OpentelemetryTraces::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             traces.to_bytes(rng, max_bytes, &mut bytes).unwrap();
@@ -140,11 +155,11 @@ mod test {
         #[test]
         fn payload_is_at_least_half_of_max_bytes(seed: u64, max_bytes in 16u16..u16::MAX) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let logs = OpentelemetryTraces::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            traces.to_bytes(rng, max_bytes, &mut bytes).unwrap();
 
             assert!(!bytes.is_empty());
         }
@@ -156,8 +171,8 @@ mod test {
         #[test]
         fn payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let traces = OpentelemetryTraces::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             traces.to_bytes(rng, max_bytes, &mut bytes).unwrap();

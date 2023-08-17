@@ -110,8 +110,8 @@ where
     match payload {
         payload::Config::TraceAgent(enc) => {
             let ta = match enc {
-                payload::Encoding::Json => payload::TraceAgent::json(),
-                payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(),
+                payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
+                payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
             };
 
             construct_block_cache_inner(&mut rng, &ta, block_chunks, labels)
@@ -163,7 +163,8 @@ where
             construct_block_cache_inner(&mut rng, &serializer, block_chunks, labels)
         }
         payload::Config::Fluent => {
-            construct_block_cache_inner(&mut rng, &payload::Fluent::default(), block_chunks, labels)
+            let pyld = payload::Fluent::new(&mut rng);
+            construct_block_cache_inner(&mut rng, &pyld, block_chunks, labels)
         }
         payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
             &mut rng,
@@ -171,12 +172,10 @@ where
             block_chunks,
             labels,
         ),
-        payload::Config::ApacheCommon => construct_block_cache_inner(
-            &mut rng,
-            &payload::ApacheCommon::default(),
-            block_chunks,
-            labels,
-        ),
+        payload::Config::ApacheCommon => {
+            let pyld = payload::ApacheCommon::new(&mut rng);
+            construct_block_cache_inner(&mut rng, &pyld, block_chunks, labels)
+        }
         payload::Config::Ascii => {
             let pyld = payload::Ascii::new(&mut rng);
             construct_block_cache_inner(&mut rng, &pyld, block_chunks, labels)
@@ -195,13 +194,16 @@ where
             labels,
         ),
         payload::Config::OpentelemetryTraces => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryTraces, block_chunks, labels)
+            let pyld = payload::OpentelemetryTraces::new(&mut rng);
+            construct_block_cache_inner(rng, &pyld, block_chunks, labels)
         }
         payload::Config::OpentelemetryLogs => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryLogs, block_chunks, labels)
+            let pyld = payload::OpentelemetryLogs::new(&mut rng);
+            construct_block_cache_inner(rng, &pyld, block_chunks, labels)
         }
         payload::Config::OpentelemetryMetrics => {
-            construct_block_cache_inner(rng, &payload::OpentelemetryMetrics, block_chunks, labels)
+            let pyld = payload::OpentelemetryMetrics::new(&mut rng);
+            construct_block_cache_inner(rng, &pyld, block_chunks, labels)
         }
     }
 }
