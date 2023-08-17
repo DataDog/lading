@@ -59,8 +59,10 @@ impl OpentelemetryLogs {
     }
 }
 
-impl Generator<LogRecord> for OpentelemetryLogs {
-    fn generate<R>(&self, mut rng: &mut R) -> LogRecord
+impl<'a> Generator<'a> for OpentelemetryLogs {
+    type Output = LogRecord;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

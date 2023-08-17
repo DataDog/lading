@@ -1,6 +1,6 @@
 //! Apache common payload.
 
-use crate::{common::strings, Error};
+use crate::{common::strings, Error, Generator};
 
 use core::fmt;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -310,8 +310,12 @@ impl ApacheCommon {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
+}
 
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Member<'a>
+impl<'a> Generator<'a> for ApacheCommon {
+    type Output = Member<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

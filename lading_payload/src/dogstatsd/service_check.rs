@@ -2,6 +2,8 @@ use std::fmt;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
+use crate::Generator;
+
 use super::{choose_or_not_ref, common};
 
 #[derive(Debug, Clone)]
@@ -12,8 +14,10 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
-impl ServiceCheckGenerator {
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> ServiceCheck<'a>
+impl<'a> Generator<'a> for ServiceCheckGenerator {
+    type Output = ServiceCheck<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

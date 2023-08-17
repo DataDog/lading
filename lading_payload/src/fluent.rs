@@ -7,7 +7,7 @@ use std::{collections::HashMap, io::Write};
 use rand::Rng;
 use serde_tuple::Serialize_tuple;
 
-use crate::{common::strings, Error};
+use crate::{common::strings, Error, Generator};
 
 #[derive(Debug, Clone)]
 /// Fluent payload
@@ -25,8 +25,12 @@ impl Fluent {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
+}
 
-    pub(crate) fn generate<'a, R>(&'a self, rng: &mut R) -> Member<'a>
+impl<'a> Generator<'a> for Fluent {
+    type Output = Member<'a>;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

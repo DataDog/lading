@@ -5,7 +5,7 @@ use std::{collections::HashMap, io::Write};
 use rand::{seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
 
-use crate::{common::strings, Error};
+use crate::{common::strings, Error, Generator};
 use serde::Serialize;
 
 const SERVICES: [&str; 7] = [
@@ -145,8 +145,12 @@ impl TraceAgent {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
+}
 
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Span<'a>
+impl<'a> Generator<'a> for TraceAgent {
+    type Output = Span<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

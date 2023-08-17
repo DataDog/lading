@@ -2,7 +2,7 @@ use std::{fmt, ops::Range, rc::Rc};
 
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::common::strings;
+use crate::{common::strings, Generator};
 
 use super::{choose_or_not_fn, choose_or_not_ref, common};
 
@@ -15,8 +15,10 @@ pub(crate) struct EventGenerator {
     pub(crate) tagsets: common::tags::Tagsets,
 }
 
-impl EventGenerator {
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Event<'a>
+impl<'a> Generator<'a> for EventGenerator {
+    type Output = Event<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

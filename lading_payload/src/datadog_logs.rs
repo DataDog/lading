@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::{common::strings, Error};
+use crate::{common::strings, Error, Generator};
 
 const STATUSES: [&str; 3] = ["notice", "info", "warning"];
 const HOSTNAMES: [&str; 4] = ["alpha", "beta", "gamma", "localhost"];
@@ -95,8 +95,12 @@ impl DatadogLog {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
+}
 
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Member<'a>
+impl<'a> Generator<'a> for DatadogLog {
+    type Output = Member<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

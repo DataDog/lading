@@ -37,7 +37,10 @@ impl ExportMetricsServiceRequest {
     }
 }
 
-struct Metric(v1::Metric);
+/// A OTLP metric
+#[derive(Debug)]
+pub struct Metric(v1::Metric);
+
 struct NumberDataPoint(v1::NumberDataPoint);
 struct Gauge(v1::Gauge);
 struct Sum(v1::Sum);
@@ -122,8 +125,10 @@ impl OpentelemetryMetrics {
     }
 }
 
-impl Generator<Metric> for OpentelemetryMetrics {
-    fn generate<R>(&self, mut rng: &mut R) -> Metric
+impl<'a> Generator<'a> for OpentelemetryMetrics {
+    type Output = Metric;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

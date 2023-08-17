@@ -6,7 +6,7 @@ use rand::{
     Rng,
 };
 
-use crate::{common::strings, dogstatsd::metric::template::Template};
+use crate::{common::strings, dogstatsd::metric::template::Template, Generator};
 use tracing::debug;
 
 use super::{choose_or_not_ref, common};
@@ -67,8 +67,12 @@ impl MetricGenerator {
             multivalue_pack_probability,
         }
     }
+}
 
-    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Metric<'a>
+impl<'a> Generator<'a> for MetricGenerator {
+    type Output = Metric<'a>;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {
