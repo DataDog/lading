@@ -4,104 +4,20 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::{common::AsciiString, Error, Generator};
+use crate::{common::strings, Error};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Status {
-    Notice,
-    Info,
-    Warning,
-}
-
-impl Distribution<Status> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Status
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..3) {
-            0 => Status::Notice,
-            1 => Status::Info,
-            2 => Status::Warning,
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Hostname {
-    Alpha,
-    Beta,
-    Gamma,
-    Localhost,
-}
-
-impl Distribution<Hostname> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Hostname
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..4) {
-            0 => Hostname::Alpha,
-            1 => Hostname::Beta,
-            2 => Hostname::Gamma,
-            3 => Hostname::Localhost,
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Service {
-    Vector,
-    Lading,
-    Cernan,
-}
-
-impl Distribution<Service> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Service
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..3) {
-            0 => Service::Vector,
-            1 => Service::Lading,
-            2 => Service::Cernan,
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Source {
-    Bergman,
-    Keaton,
-    Kurosawa,
-    Lynch,
-    Waters,
-    Tarkovsky,
-}
-
-impl Distribution<Source> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Source
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..6) {
-            0 => Source::Bergman,
-            1 => Source::Keaton,
-            2 => Source::Kurosawa,
-            3 => Source::Lynch,
-            4 => Source::Waters,
-            5 => Source::Tarkovsky,
-            _ => unreachable!(),
-        }
-    }
-}
-
+const STATUSES: [&str; 3] = ["notice", "info", "warning"];
+const HOSTNAMES: [&str; 4] = ["alpha", "beta", "gamma", "localhost"];
+const SERVICES: [&str; 4] = ["vector", "lading", "cernan", "agent"];
+const SOURCES: [&str; 7] = [
+    "bergman",
+    "keaton",
+    "kurosawa",
+    "lynch",
+    "waters",
+    "tarkovsky",
+    "herzog",
+];
 const TAG_OPTIONS: [&str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -110,7 +26,6 @@ struct Structured {
     integral: u64,
     derivative: f64,
     vegetable: i16,
-    mineral: String,
 }
 
 impl Distribution<Structured> for Standard {
@@ -118,111 +33,56 @@ impl Distribution<Structured> for Standard {
     where
         R: Rng + ?Sized,
     {
-        let mineral: String = AsciiString::default().generate(rng);
-
         Structured {
             proportional: rng.gen(),
             integral: rng.gen(),
             derivative: rng.gen(),
             vegetable: rng.gen(),
-            mineral,
         }
     }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 #[serde(untagged)]
-enum Message {
-    Unstructured(String),
+pub(crate) enum Message<'a> {
+    Unstructured(&'a str),
     Structured(String),
 }
 
-impl Distribution<Message> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Message
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..2) {
-            0 => Message::Unstructured(AsciiString::default().generate(rng)),
-            1 => Message::Structured(serde_json::to_string(&rng.gen::<Structured>()).unwrap()),
-            _ => unreachable!(),
-        }
+fn message<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> Message<'a>
+where
+    R: rand::Rng + ?Sized,
+{
+    match rng.gen_range(0..2) {
+        0 => Message::Unstructured(str_pool.of_size_range(rng, 1_u8..16).unwrap()),
+        1 => Message::Structured(serde_json::to_string(&rng.gen::<Structured>()).unwrap()),
+        _ => unreachable!(),
     }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-// https://github.com/DataDog/datadog-agent/blob/a33248c2bc125920a9577af1e16f12298875a4ad/pkg/logs/processor/json.go#L23-L49
-struct Member {
+/// Derived from Datadog Agent sources, [here](https://github.com/DataDog/datadog-agent/blob/a33248c2bc125920a9577af1e16f12298875a4ad/pkg/logs/processor/json.go#L23-L49).
+pub struct Member<'a> {
     /// The message is a short ascii string, without newlines for now
-    pub(crate) message: Message,
+    pub(crate) message: Message<'a>,
     /// The message status
-    pub(crate) status: Status,
+    pub(crate) status: &'a str,
     /// The timestamp is a simple integer value since epoch, presumably
     pub(crate) timestamp: u32,
     /// The hostname that sent the logs
-    pub(crate) hostname: Hostname,
+    pub(crate) hostname: &'a str,
     /// The service that sent the logs
-    pub(crate) service: Service,
+    pub(crate) service: &'a str,
     /// The ultimate source of the logs
-    pub(crate) ddsource: Source,
+    pub(crate) ddsource: &'a str,
     /// Comma-separate list of tags
-    pub(crate) ddtags: String,
-}
-
-impl Distribution<Member> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Member
-    where
-        R: Rng + ?Sized,
-    {
-        Member {
-            message: rng.gen(),
-            status: rng.gen(),
-            timestamp: rng.gen(),
-            hostname: rng.gen(),
-            service: rng.gen(),
-            ddsource: rng.gen(),
-            ddtags: (*TAG_OPTIONS.choose(rng).unwrap()).to_string(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct MemberGenerator {
-    messages: Vec<Message>,
-}
-
-impl MemberGenerator {
-    fn new<R>(mut rng: &mut R) -> Self
-    where
-        R: Rng + ?Sized,
-    {
-        Self {
-            messages: Standard.sample_iter(&mut rng).take(1_000).collect(),
-        }
-    }
-}
-
-impl Generator<Member> for MemberGenerator {
-    fn generate<R>(&self, rng: &mut R) -> Member
-    where
-        R: rand::Rng + ?Sized,
-    {
-        Member {
-            message: (*self.messages.choose(rng).unwrap()).clone(),
-            status: rng.gen(),
-            timestamp: rng.gen(),
-            hostname: rng.gen(),
-            service: rng.gen(),
-            ddsource: rng.gen(),
-            ddtags: (*TAG_OPTIONS.choose(rng).unwrap()).to_string(),
-        }
-    }
+    pub(crate) ddtags: &'a str,
 }
 
 #[derive(Debug)]
 /// Datadog log format payload
 pub struct DatadogLog {
-    member_generator: MemberGenerator,
+    str_pool: strings::Pool,
 }
 
 impl DatadogLog {
@@ -231,9 +91,24 @@ impl DatadogLog {
     where
         R: rand::Rng + ?Sized,
     {
-        let member_generator = MemberGenerator::new(rng);
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
 
-        Self { member_generator }
+    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Member<'a>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Member {
+            message: message(&mut rng, &self.str_pool),
+            status: STATUSES.choose(rng).unwrap(),
+            timestamp: rng.gen(),
+            hostname: HOSTNAMES.choose(rng).unwrap(),
+            service: SERVICES.choose(rng).unwrap(),
+            ddsource: SOURCES.choose(rng).unwrap(),
+            ddtags: TAG_OPTIONS.choose(rng).unwrap(),
+        }
     }
 }
 
@@ -257,7 +132,7 @@ impl crate::Serialize for DatadogLog {
         let cap = (max_bytes / approx_member_encoded_size) + 100;
         let mut members: Vec<Member> = Vec::with_capacity(cap);
         for _ in 0..cap {
-            members.push(self.member_generator.generate(&mut rng));
+            members.push(self.generate(&mut rng));
         }
 
         // Search for an encoding that's just right.

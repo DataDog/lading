@@ -7,16 +7,16 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
-use crate::Error;
+use crate::{common::strings, Error};
 use opentelemetry_proto::tonic::{
     common::v1::{any_value, AnyValue},
     logs::v1,
 };
 use prost::Message;
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::Rng;
 use std::io::Write;
 
-use super::{common::AsciiString, Generator};
+use super::Generator;
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportLogsServiceRequests`](opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest)
 struct ExportLogsServiceRequest(Vec<LogRecord>);
@@ -39,18 +39,36 @@ impl ExportLogsServiceRequest {
     }
 }
 
-struct LogRecord(v1::LogRecord);
+pub(crate) struct LogRecord(v1::LogRecord);
 
-impl Distribution<LogRecord> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> LogRecord
+#[derive(Debug, Clone)]
+/// OTLP log payload
+pub struct OpentelemetryLogs {
+    str_pool: strings::Pool,
+}
+
+impl OpentelemetryLogs {
+    /// Construct a new instance of `OpentelemetryLogs`
+    pub fn new<R>(rng: &mut R) -> Self
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
     {
-        let body = Some(AnyValue {
-            value: Some(any_value::Value::StringValue(
-                AsciiString::default().generate(rng),
-            )),
-        });
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+}
+
+impl Generator<LogRecord> for OpentelemetryLogs {
+    fn generate<R>(&self, mut rng: &mut R) -> LogRecord
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let body: String = String::from(
+            self.str_pool
+                .of_size_range(&mut rng, 1_u16..16_u16)
+                .unwrap(),
+        );
 
         #[allow(deprecated)]
         LogRecord(v1::LogRecord {
@@ -59,7 +77,9 @@ impl Distribution<LogRecord> for Standard {
             severity_number: rng.gen_range(1..=24),
             severity_text: String::new(),
             name: String::new(),
-            body,
+            body: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(body)),
+            }),
             attributes: Vec::new(),
             dropped_attributes_count: 0,
             flags: 0,
@@ -68,11 +88,6 @@ impl Distribution<LogRecord> for Standard {
         })
     }
 }
-
-#[derive(Debug, Default, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-/// OTLP log payload
-pub struct OpentelemetryLogs;
 
 impl crate::Serialize for OpentelemetryLogs {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -90,7 +105,7 @@ impl crate::Serialize for OpentelemetryLogs {
 
         let mut acc = ExportLogsServiceRequest(Vec::new());
         loop {
-            let member: LogRecord = rng.gen();
+            let member: LogRecord = self.generate(&mut rng);
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
@@ -122,8 +137,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let logs = OpentelemetryLogs::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
@@ -136,8 +151,8 @@ mod test {
         #[test]
         fn payload_is_at_least_half_of_max_bytes(seed: u64, max_bytes in 16u16..u16::MAX) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let logs = OpentelemetryLogs::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
@@ -152,8 +167,8 @@ mod test {
         #[test]
         fn payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let logs = OpentelemetryLogs::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();

@@ -1,12 +1,10 @@
 //! Apache common payload.
 
-use crate::Error;
+use crate::{common::strings, Error};
 
 use core::fmt;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use std::io::Write;
-
-use super::{common::AsciiString, Generator};
 
 const PATH_NAMES: [&str; 25] = [
     "alfa", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliett",
@@ -76,7 +74,7 @@ impl fmt::Display for Protocol {
 
 #[derive(Debug)]
 struct Path {
-    components: Vec<&'static str>,
+    components: [Option<&'static str>; 16],
 }
 
 impl Distribution<Path> for Standard {
@@ -85,10 +83,10 @@ impl Distribution<Path> for Standard {
         R: Rng + ?Sized,
     {
         let total_components: usize = rng.gen_range(1..=16);
-        let mut components = Vec::with_capacity(total_components);
+        let mut components = [None; 16];
 
-        for _ in 0..total_components {
-            components.push(*PATH_NAMES.choose(rng).unwrap());
+        for idx in components.iter_mut().take(total_components) {
+            *idx = PATH_NAMES.choose(rng).copied();
         }
 
         Path { components }
@@ -97,8 +95,8 @@ impl Distribution<Path> for Standard {
 
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for comp in &self.components {
-            write!(f, "/{comp}")?;
+        for component in self.components.iter().flatten() {
+            write!(f, "/{component}")?;
         }
         Ok(())
     }
@@ -202,24 +200,6 @@ impl fmt::Display for Timestamp {
 }
 
 #[derive(Debug)]
-struct User(String);
-
-impl Distribution<User> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> User
-    where
-        R: Rng + ?Sized,
-    {
-        User(AsciiString::default().generate(rng))
-    }
-}
-
-impl fmt::Display for User {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.as_str())
-    }
-}
-
-#[derive(Debug)]
 struct IpV4 {
     zero: u8,
     one: u8,
@@ -286,9 +266,9 @@ impl fmt::Display for Method {
 }
 
 #[derive(Debug)]
-struct Member {
+pub(crate) struct Member<'a> {
     host: IpV4,
-    user: User,
+    user: &'a str,
     timestamp: Timestamp,
     method: Method,
     path: Path,
@@ -297,25 +277,7 @@ struct Member {
     bytes_out: u16,
 }
 
-impl Distribution<Member> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Member
-    where
-        R: Rng + ?Sized,
-    {
-        Member {
-            host: rng.gen(),
-            user: rng.gen(),
-            timestamp: rng.gen(),
-            method: rng.gen(),
-            path: rng.gen(),
-            protocol: rng.gen(),
-            status_code: rng.gen(),
-            bytes_out: rng.gen(),
-        }
-    }
-}
-
-impl fmt::Display for Member {
+impl<'a> fmt::Display for Member<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -332,10 +294,42 @@ impl fmt::Display for Member {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[derive(Debug, Clone)]
 /// Apache Common log format payload
-pub struct ApacheCommon {}
+pub struct ApacheCommon {
+    str_pool: strings::Pool,
+}
+
+impl ApacheCommon {
+    /// Construct a new instance of `ApacheCommon`
+    pub fn new<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+
+    pub(crate) fn generate<'a, R>(&'a self, mut rng: &mut R) -> Member<'a>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Member {
+            host: rng.gen(),
+            user: self
+                .str_pool
+                .of_size_range(&mut rng, 1_u16..16_u16)
+                .unwrap(),
+            timestamp: rng.gen(),
+            method: rng.gen(),
+            path: rng.gen(),
+            protocol: rng.gen(),
+            status_code: rng.gen(),
+            bytes_out: rng.gen(),
+        }
+    }
+}
 
 impl crate::Serialize for ApacheCommon {
     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
@@ -345,7 +339,7 @@ impl crate::Serialize for ApacheCommon {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let member: Member = rng.gen();
+            let member: Member = self.generate(&mut rng);
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
@@ -373,8 +367,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let apache = ApacheCommon::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let apache = ApacheCommon::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             apache.to_bytes(rng, max_bytes, &mut bytes).unwrap();

@@ -4,140 +4,125 @@
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
 use std::{collections::HashMap, io::Write};
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::Rng;
 use serde_tuple::Serialize_tuple;
 
-use super::{common::AsciiString, Generator};
-use crate::Error;
+use crate::{common::strings, Error};
 
-#[derive(Debug, Default, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[derive(Debug, Clone)]
 /// Fluent payload
-pub struct Fluent {}
-
-pub(crate) type Object = HashMap<String, u8>;
-
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-enum RecordValue {
-    String(String),
-    Object(Object),
+pub struct Fluent {
+    str_pool: strings::Pool,
 }
 
-impl Distribution<RecordValue> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> RecordValue
+impl Fluent {
+    /// Construct a new instance of `Fluent`
+    pub fn new<R>(rng: &mut R) -> Self
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
+    {
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+
+    pub(crate) fn generate<'a, R>(&'a self, rng: &mut R) -> Member<'a>
+    where
+        R: rand::Rng + ?Sized,
     {
         match rng.gen_range(0..2) {
-            0 => RecordValue::String(AsciiString::default().generate(rng)),
-            1 => {
-                let mut obj = HashMap::new();
+            0 => {
+                let mut rec = HashMap::new();
+                rec.insert("message", record_value(rng, &self.str_pool));
                 for _ in 0..rng.gen_range(0..128) {
-                    let key = AsciiString::default().generate(rng);
-                    let val = rng.gen();
-
-                    obj.insert(key, val);
+                    let key = self.str_pool.of_size_range(rng, 1_u8..16).unwrap();
+                    let val = record_value(rng, &self.str_pool);
+                    rec.insert(key, val);
                 }
-                RecordValue::Object(obj)
+                Member::Message(FluentMessage {
+                    tag: self.str_pool.of_size_range(rng, 1_u8..16).unwrap(),
+                    time: rng.gen(),
+                    record: rec,
+                })
             }
-            _ => unreachable!(),
-        }
-    }
-}
+            1 => {
+                let mut entries = Vec::with_capacity(32);
+                for _ in 0..32 {
+                    let mut rec = HashMap::new();
+                    rec.insert("message", record_value(rng, &self.str_pool));
+                    rec.insert("event", record_value(rng, &self.str_pool));
+                    for _ in 0..rng.gen_range(0..128) {
+                        let key = self.str_pool.of_size_range(rng, 1_u8..16).unwrap();
+                        let val = record_value(rng, &self.str_pool);
+                        rec.insert(key, val);
+                    }
+                    entries.push(Entry {
+                        time: rng.gen(),
+                        record: rec,
+                    });
+                }
 
-#[derive(Serialize_tuple)]
-struct Entry {
-    time: u32,
-    record: HashMap<String, RecordValue>, // always contains 'message' and 'event' -> object key
-}
-
-impl Distribution<Entry> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Entry
-    where
-        R: Rng + ?Sized,
-    {
-        let mut rec = HashMap::new();
-        rec.insert(String::from("message"), rng.gen());
-        rec.insert(String::from("event"), rng.gen());
-        for _ in 0..rng.gen_range(0..128) {
-            let key = AsciiString::default().generate(rng);
-            let val = rng.gen();
-
-            rec.insert(key, val);
-        }
-        Entry {
-            time: rng.gen(),
-            record: rec,
-        }
-    }
-}
-
-#[derive(Serialize_tuple)]
-struct FluentForward {
-    tag: String,
-    entries: Vec<Entry>,
-}
-
-impl Distribution<FluentForward> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> FluentForward
-    where
-        R: Rng + ?Sized,
-    {
-        let total_entries = rng.gen_range(0..32);
-        FluentForward {
-            tag: AsciiString::default().generate(rng),
-            entries: rng.sample_iter(Standard).take(total_entries).collect(),
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-struct FluentMessage {
-    tag: String,
-    time: u32,
-    record: HashMap<String, RecordValue>, // always contains 'message' key
-}
-
-impl Distribution<FluentMessage> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> FluentMessage
-    where
-        R: Rng + ?Sized,
-    {
-        let mut rec = HashMap::new();
-        rec.insert(String::from("message"), rng.gen());
-        for _ in 0..rng.gen_range(0..128) {
-            let key = AsciiString::default().generate(rng);
-            let val = rng.gen();
-
-            rec.insert(key, val);
-        }
-        FluentMessage {
-            tag: AsciiString::default().generate(rng),
-            time: rng.gen(),
-            record: rec,
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-enum Member {
-    Message(FluentMessage),
-    Forward(FluentForward),
-}
-
-impl Distribution<Member> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> Member
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..2) {
-            0 => Member::Message(rng.gen()),
-            1 => Member::Forward(rng.gen()),
+                Member::Forward(FluentForward {
+                    tag: self.str_pool.of_size_range(rng, 1_u8..16).unwrap(),
+                    entries,
+                })
+            }
             _ => unimplemented!(),
         }
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub(crate) enum Member<'a> {
+    Message(FluentMessage<'a>),
+    Forward(FluentForward<'a>),
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct FluentMessage<'a> {
+    tag: &'a str,
+    time: u32,
+    record: HashMap<&'a str, RecordValue<'a>>, // always contains 'message' key
+}
+
+#[derive(Serialize_tuple)]
+pub(crate) struct FluentForward<'a> {
+    tag: &'a str,
+    entries: Vec<Entry<'a>>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RecordValue<'a> {
+    String(&'a str),
+    Object(HashMap<&'a str, u8>),
+}
+
+fn record_value<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> RecordValue<'a>
+where
+    R: rand::Rng + ?Sized,
+{
+    match rng.gen_range(0..2) {
+        0 => RecordValue::String(str_pool.of_size_range(rng, 1_u8..16).unwrap()),
+        1 => {
+            let mut obj = HashMap::new();
+            for _ in 0..rng.gen_range(0..128) {
+                let key = str_pool.of_size_range(rng, 1_u8..16).unwrap();
+                let val = rng.gen();
+
+                obj.insert(key, val);
+            }
+            RecordValue::Object(obj)
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[derive(Serialize_tuple)]
+struct Entry<'a> {
+    time: u32,
+    record: HashMap<&'a str, RecordValue<'a>>, // always contains 'message' and 'event' -> object key
 }
 
 impl crate::Serialize for Fluent {
@@ -156,9 +141,8 @@ impl crate::Serialize for Fluent {
         // over. Once we are we'll start removing instances until we're back
         // below the limit.
 
-        let mut members: Vec<Vec<u8>> = Standard
-            .sample_iter(&mut rng)
-            .take(10)
+        let mut members: Vec<Vec<u8>> = (0..10)
+            .map(|_| self.generate(&mut rng))
             .map(|m: Member| rmp_serde::to_vec(&m).unwrap())
             .collect();
 
@@ -170,9 +154,8 @@ impl crate::Serialize for Fluent {
             }
 
             members.extend(
-                Standard
-                    .sample_iter(&mut rng)
-                    .take(10)
+                (0..10)
+                    .map(|_| self.generate(&mut rng))
                     .map(|m: Member| rmp_serde::to_vec(&m).unwrap()),
             );
         }
@@ -208,8 +191,8 @@ mod test {
         #[test]
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
-            let rng = SmallRng::seed_from_u64(seed);
-            let fluent = Fluent::default();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let fluent = Fluent::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             fluent.to_bytes(rng, max_bytes, &mut bytes).unwrap();

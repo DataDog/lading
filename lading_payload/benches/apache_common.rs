@@ -1,0 +1,39 @@
+use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
+
+use lading_payload::{apache_common, Serialize};
+use rand::{rngs::SmallRng, SeedableRng};
+use std::time::Duration;
+
+fn apache_common_setup(c: &mut Criterion) {
+    c.bench_function("apache_common_setup", |b| {
+        b.iter(|| {
+            let mut rng = SmallRng::seed_from_u64(19690716);
+            let _ac = apache_common::ApacheCommon::new(&mut rng);
+        })
+    });
+}
+
+fn apache_common_all(c: &mut Criterion) {
+    let mb = 1_000_000; // 1 MiB
+
+    let mut group = c.benchmark_group("apache_common_all");
+    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+        group.throughput(Throughput::Bytes(*size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            b.iter(|| {
+                let mut rng = SmallRng::seed_from_u64(19690716);
+                let ac = apache_common::ApacheCommon::new(&mut rng);
+                let mut writer = Vec::with_capacity(size);
+
+                ac.to_bytes(rng, size, &mut writer).unwrap();
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    name = benches;
+    config = Criterion::default().measurement_time(Duration::from_secs(90));
+    targets = apache_common_setup, apache_common_all,
+);
