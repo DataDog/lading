@@ -1,18 +1,18 @@
 //! `DogStatsD` payload.
 
-use std::{fmt, io::Write, ops::Range};
+use std::{fmt, io::Write, ops::Range, rc::Rc};
 
 use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::Deserialize;
 
-use crate::{Error, Serialize};
+use crate::{common::strings, Error, Serialize};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
     service_check::ServiceCheckGenerator,
 };
 
-use super::{common::AsciiString, Generator};
+use super::Generator;
 
 mod common;
 mod event;
@@ -189,16 +189,67 @@ pub struct Config {
     pub metric_weights: MetricWeights,
 }
 
-fn choose_or_not<R, T>(mut rng: &mut R, pool: &[T]) -> Option<T>
+fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
 where
-    T: Clone,
     R: rand::Rng + ?Sized,
 {
     if rng.gen() {
-        pool.choose(&mut rng).cloned()
+        pool.choose(&mut rng)
     } else {
         None
     }
+}
+
+fn choose_or_not_fn<R, T, F>(rng: &mut R, func: F) -> Option<T>
+where
+    T: Clone,
+    R: rand::Rng + ?Sized,
+    F: FnOnce(&mut R) -> Option<T>,
+{
+    if rng.gen() {
+        func(rng)
+    } else {
+        None
+    }
+}
+
+#[inline]
+/// Generate a total number of strings randomly chosen from the range `min_max` with a maximum length
+/// per string of `max_length`.
+fn random_strings_with_length<R>(
+    pool: &strings::Pool,
+    min_max: Range<usize>,
+    max_length: u16,
+    rng: &mut R,
+) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    let total = rng.gen_range(min_max);
+    let length_range = 1..max_length;
+
+    random_strings_with_length_range(pool, total, length_range, rng)
+}
+
+#[inline]
+/// Generate a `total` number of strings with a maximum length per string of
+/// `max_length`.
+fn random_strings_with_length_range<R>(
+    pool: &strings::Pool,
+    total: usize,
+    length_range: Range<u16>,
+    mut rng: &mut R,
+) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    let mut buf = Vec::with_capacity(total);
+    for _ in 0..total {
+        buf.push(String::from(
+            pool.of_size_range(&mut rng, length_range.clone()).unwrap(),
+        ));
+    }
+    buf
 }
 
 #[derive(Debug, Clone)]
@@ -207,38 +258,6 @@ struct MemberGenerator {
     event_generator: EventGenerator,
     service_check_generator: ServiceCheckGenerator,
     metric_generator: MetricGenerator,
-}
-
-#[inline]
-/// Generate a total number of strings between min and max with a maximum length
-/// per string of `max_length`.
-fn random_strings_with_length<R>(min_max: Range<usize>, max_length: u16, rng: &mut R) -> Vec<String>
-where
-    R: Rng + ?Sized,
-{
-    let mut buf = Vec::with_capacity(min_max.end);
-    for _ in 0..rng.gen_range(min_max) {
-        buf.push(AsciiString::with_maximum_length(max_length).generate(rng));
-    }
-    buf
-}
-
-#[inline]
-/// Generate a `total` number of strings with a maximum length per string of
-/// `max_length`.
-fn random_strings_with_length_range<R>(
-    total: usize,
-    length_range: Range<u16>,
-    rng: &mut R,
-) -> Vec<String>
-where
-    R: Rng + ?Sized,
-{
-    let mut buf = Vec::with_capacity(total);
-    for _ in 0..total {
-        buf.push(AsciiString::with_length_range(length_range.clone()).generate(rng));
-    }
-    buf
 }
 
 impl MemberGenerator {
@@ -258,6 +277,8 @@ impl MemberGenerator {
     where
         R: Rng + ?Sized,
     {
+        let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
+
         let context_range: Range<usize> =
             context_range.start.try_into().unwrap()..context_range.end.try_into().unwrap();
 
@@ -271,29 +292,20 @@ impl MemberGenerator {
             tags_per_msg_range,
             tag_key_length_range,
             tag_value_length_range,
+            str_pool: Rc::clone(&pool),
         };
 
-        let service_event_titles =
-            random_strings_with_length_range(num_contexts, name_length_range.clone(), &mut rng);
+        let service_event_titles = random_strings_with_length_range(
+            pool.as_ref(),
+            num_contexts,
+            name_length_range.clone(),
+            &mut rng,
+        );
         let tagsets = tags_generator.generate(&mut rng);
-        let texts_or_messages = random_strings_with_length(4..128, 1024, &mut rng);
-        let small_strings = random_strings_with_length(16..1024, 8, &mut rng);
+        drop(tags_generator); // now unused, clear up its allocation s
 
-        // For service checks and events, there is no "aggregation" going on, so the idea of a "context"
-        // does not really make sense. Therefore "titles" and "tags" can be independently chosen freely.
-        let event_generator = EventGenerator {
-            titles: service_event_titles.clone(),
-            texts_or_messages: texts_or_messages.clone(),
-            small_strings: small_strings.clone(),
-            tagsets: tagsets.clone(),
-        };
-
-        let service_check_generator = ServiceCheckGenerator {
-            names: service_event_titles.clone(),
-            small_strings: small_strings.clone(),
-            texts_or_messages,
-            tagsets: tagsets.clone(),
-        };
+        let texts_or_messages = random_strings_with_length(pool.as_ref(), 4..128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(pool.as_ref(), 16..1024, 8, &mut rng);
 
         // NOTE the ordering here of `metric_choices` is very important! If you
         // change it here you MUST also change it in `Generator<Metric> for
@@ -307,14 +319,30 @@ impl MemberGenerator {
             metric_weights.histogram,
         ];
 
+        let event_generator = EventGenerator {
+            str_pool: Rc::clone(&pool),
+            title_length_range: name_length_range.clone(),
+            texts_or_messages_length_range: 1..1024,
+            small_strings_length_range: 1..8,
+            tagsets: tagsets.clone(),
+        };
+
+        let service_check_generator = ServiceCheckGenerator {
+            names: service_event_titles.clone(),
+            small_strings: small_strings.clone(),
+            texts_or_messages,
+            tagsets: tagsets.clone(),
+        };
+
         let metric_generator = MetricGenerator::new(
             num_contexts,
-            name_length_range,
+            name_length_range.clone(),
             multivalue_count_range.clone(),
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices).unwrap(),
             small_strings,
             tagsets.clone(),
+            pool.as_ref(),
             &mut rng,
         );
 
@@ -335,14 +363,17 @@ impl MemberGenerator {
     }
 }
 
-impl Generator<Member> for MemberGenerator {
-    fn generate<R>(&self, rng: &mut R) -> Member
+impl MemberGenerator {
+    fn generate<'a, R>(&'a self, rng: &mut R) -> Member<'a>
     where
         R: rand::Rng + ?Sized,
     {
         match self.kind_weights.sample(rng) {
             0 => Member::Metric(self.metric_generator.generate(rng)),
-            1 => Member::Event(self.event_generator.generate(rng)),
+            1 => {
+                let event = self.event_generator.generate(rng);
+                Member::Event(event)
+            }
             2 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
             _ => unreachable!(),
         }
@@ -352,16 +383,16 @@ impl Generator<Member> for MemberGenerator {
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
 #[derive(Debug)]
 /// Supra-type for all dogstatsd variants
-pub enum Member {
+pub enum Member<'a> {
     /// Metrics
-    Metric(metric::Metric),
+    Metric(metric::Metric<'a>),
     /// Events, think syslog.
-    Event(event::Event),
+    Event(event::Event<'a>),
     /// Services, checked.
-    ServiceCheck(service_check::ServiceCheck),
+    ServiceCheck(service_check::ServiceCheck<'a>),
 }
 
-impl fmt::Display for Member {
+impl<'a> fmt::Display for Member<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Metric(ref m) => write!(f, "{m}"),
