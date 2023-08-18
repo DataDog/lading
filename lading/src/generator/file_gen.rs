@@ -35,10 +35,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    signals::Shutdown,
-};
+use crate::{block, signals::Shutdown};
 
 use super::General;
 
@@ -156,15 +153,6 @@ impl FileGen {
 
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).unwrap();
-        let maximum_prebuild_cache_size_bytes =
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32).unwrap();
-
-        let block_chunks = chunk_bytes(
-            &mut rng,
-            NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-        )?;
 
         let labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -173,7 +161,14 @@ impl FileGen {
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
-        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
+        let block_cache = block::Cache::fixed(
+            &mut rng,
+            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                .expect("bytes must be non-zero"),
+            &block_sizes,
+            &config.variant,
+            &labels,
+        )?;
         let block_cache = Arc::new(block_cache);
 
         for _ in 0..config.duplicates {
@@ -227,7 +222,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     throttle: Throttle,
-    block_cache: Arc<Vec<Block>>,
+    block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: Shutdown,
@@ -253,16 +248,16 @@ impl Child {
         );
 
         let mut idx = 0;
-        let blocks = self.block_cache;
+        let block_cache = self.block_cache;
         let bytes_written = register_counter!("bytes_written");
 
         loop {
-            let block = &blocks[idx];
+            let block = &block_cache.at_idx(idx);
             let total_bytes = block.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    idx = (idx + 1) % blocks.len();
+                    idx = (idx + 1) % block_cache.len();
                     let total_bytes = u64::from(total_bytes.get());
 
                     {

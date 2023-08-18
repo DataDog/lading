@@ -27,10 +27,7 @@ use serde::Deserialize;
 use tokio::sync::Semaphore;
 use tracing::info;
 
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    signals::Shutdown,
-};
+use crate::{block, signals::Shutdown};
 
 use super::General;
 
@@ -101,7 +98,7 @@ pub struct Http {
     headers: hyper::HeaderMap,
     parallel_connections: u16,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
 }
@@ -155,13 +152,14 @@ impl Http {
                 variant,
                 maximum_prebuild_cache_size_bytes,
             } => {
-                let block_chunks = chunk_bytes(
+                let block_cache = block::Cache::fixed(
                     &mut rng,
                     NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get_bytes() as usize)
                         .expect("bytes must be non-zero"),
                     &block_sizes,
+                    &variant,
+                    &labels,
                 )?;
-                let block_cache = construct_block_cache(&mut rng, &variant, &block_chunks, &labels);
 
                 CONNECTION_SEMAPHORE
                     .set(Semaphore::new(config.parallel_connections as usize))
@@ -201,10 +199,10 @@ impl Http {
         let uri = self.uri;
 
         let labels = self.metric_labels;
-        let mut blocks = self.block_cache.iter().cycle();
+        let mut block_cache = self.block_cache;
 
         loop {
-            let blk = blocks.next().unwrap();
+            let blk = block_cache.next().unwrap();
             let total_bytes = blk.total_bytes;
 
             let body = Body::from(blk.bytes.clone());

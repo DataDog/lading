@@ -11,10 +11,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    signals::Shutdown,
-};
+use crate::{block, signals::Shutdown};
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
 use lading_throttle::Throttle;
@@ -24,6 +21,7 @@ use serde::Deserialize;
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
+    sync::Arc,
 };
 use tokio::{
     net,
@@ -142,23 +140,22 @@ impl UnixDatagram {
             &labels
         );
 
-        let block_chunks = chunk_bytes(
+        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+        let block_cache = block::Cache::fixed(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
                 .expect("bytes must be non-zero"),
             &block_sizes,
+            &config.variant,
+            &labels,
         )?;
-
-        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+        let block_cache = Arc::new(block_cache);
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
-            let block_cache =
-                construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
-
             let child = Child {
                 path: config.path.clone(),
-                block_cache,
+                block_cache: Arc::clone(&block_cache),
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
@@ -202,7 +199,7 @@ impl UnixDatagram {
 struct Child {
     path: PathBuf,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
 }
@@ -232,12 +229,13 @@ impl Child {
             }
         }
 
-        let mut blocks = self.block_cache.iter().cycle().peekable();
+        let mut idx = 0;
+        let block_cache = self.block_cache;
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = blocks.peek().unwrap();
+            let blk = &block_cache.at_idx(idx);
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -246,7 +244,8 @@ impl Child {
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
-                    let blk = blocks.next().unwrap(); // actually advance through the blocks
+                    idx = (idx + 1) % block_cache.len();
+                    let blk = &block_cache.at_idx(idx);
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {
