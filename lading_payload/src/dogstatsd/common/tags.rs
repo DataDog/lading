@@ -17,8 +17,10 @@ pub(crate) struct Generator {
 }
 
 // https://docs.datadoghq.com/getting_started/tagging/#define-tags
-impl crate::Generator<Tagsets> for Generator {
-    fn generate<R>(&self, mut rng: &mut R) -> Tagsets
+impl<'a> crate::Generator<'a> for Generator {
+    type Output = Tagsets;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

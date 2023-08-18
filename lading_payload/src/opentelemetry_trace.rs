@@ -36,7 +36,10 @@ impl ExportTraceServiceRequest {
         }
     }
 }
-struct Span(v1::Span);
+
+/// An OTLP span
+#[derive(Debug)]
+pub struct Span(v1::Span);
 
 #[derive(Debug, Clone)]
 /// OTLP trace payload
@@ -56,8 +59,10 @@ impl OpentelemetryTraces {
     }
 }
 
-impl Generator<Span> for OpentelemetryTraces {
-    fn generate<R>(&self, mut rng: &mut R) -> Span
+impl<'a> Generator<'a> for OpentelemetryTraces {
+    type Output = Span;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {

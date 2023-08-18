@@ -12,7 +12,7 @@ const SIZES: [usize; 13] = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048
 
 /// A simplistic 'Payload' structure without self-reference
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct Member {
+pub struct Member {
     /// A u64. Its name has no meaning.
     pub(crate) id: u64,
     /// A u64. Its name has no meaning.
@@ -44,8 +44,10 @@ impl Distribution<Member> for Standard {
 /// A JSON payload
 pub struct Json;
 
-impl Generator<Member> for Json {
-    fn generate<R>(&self, rng: &mut R) -> Member
+impl<'a> Generator<'a> for Json {
+    type Output = Member;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {
