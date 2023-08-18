@@ -31,10 +31,7 @@ use tonic::{
 };
 use tracing::{debug, info};
 
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    signals::Shutdown,
-};
+use crate::{block, signals::Shutdown};
 
 use super::General;
 
@@ -133,7 +130,7 @@ pub struct Grpc {
     rpc_path: PathAndQuery,
     shutdown: Shutdown,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
 }
 
@@ -186,13 +183,14 @@ impl Grpc {
             &labels
         );
 
-        let block_chunks = chunk_bytes(
+        let block_cache = block::Cache::fixed(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
                 .expect("bytes must be non-zero"),
             &block_sizes,
+            &config.variant,
+            &labels,
         )?;
-        let block_cache = construct_block_cache(&mut rng, &config.variant, &block_chunks, &labels);
 
         let target_uri =
             http::uri::Uri::try_from(config.target_uri.clone()).expect("target_uri must be valid");
@@ -266,7 +264,7 @@ impl Grpc {
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
 
-        let mut blocks = self.block_cache.iter().cycle().peekable();
+        let mut block_cache = self.block_cache;
         let rpc_path = self.rpc_path;
 
         let requests_sent = register_counter!("requests_sent", &self.metric_labels);
@@ -275,14 +273,14 @@ impl Grpc {
         let response_bytes = register_counter!("response_bytes", &self.metric_labels);
 
         loop {
-            let blk = blocks.peek().unwrap();
+            let blk = block_cache.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     requests_sent.increment(1);
-                    let blk = blocks.next().unwrap(); // actually advance through the blocks
+                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),

@@ -39,11 +39,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
-    block::{self, chunk_bytes, construct_block_cache, Block},
-    generator::splunk_hec::acknowledgements::Channel,
-    signals::Shutdown,
-};
+use crate::{block, generator::splunk_hec::acknowledgements::Channel, signals::Shutdown};
 
 use super::General;
 
@@ -112,7 +108,7 @@ pub struct SplunkHec {
     token: String,
     parallel_connections: u16,
     throttle: Throttle,
-    block_cache: Vec<Block>,
+    block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
     shutdown: Shutdown,
@@ -180,16 +176,17 @@ impl SplunkHec {
 
         let uri = get_uri_by_format(&config.target_uri, config.format);
 
-        let block_chunks = chunk_bytes(
+        let payload_config = lading_payload::Config::SplunkHec {
+            encoding: config.format,
+        };
+        let block_cache = block::Cache::fixed(
             &mut rng,
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
                 .expect("bytes must be non-zero"),
             &block_sizes,
+            &payload_config,
+            &labels,
         )?;
-        let payload_config = lading_payload::Config::SplunkHec {
-            encoding: config.format,
-        };
-        let block_cache = construct_block_cache(&mut rng, &payload_config, &block_chunks, &labels);
 
         let mut channels = Channels::new(config.parallel_connections);
         if let Some(ack_settings) = config.acknowledgements {
@@ -244,12 +241,12 @@ impl SplunkHec {
             f64::from(self.parallel_connections),
             &labels
         );
-        let mut blocks = self.block_cache.iter().cycle().peekable();
+        let mut block_cache = self.block_cache;
         let mut channels = self.channels.iter().cycle();
 
         loop {
             let channel: Channel = channels.next().unwrap().clone();
-            let blk = blocks.peek().unwrap();
+            let blk = block_cache.peek().unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -258,7 +255,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let blk = blocks.next().unwrap(); // actually advance through the blocks
+                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 
