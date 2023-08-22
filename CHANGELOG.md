@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.1-rc0]
+### Added
+- `lading-payload` crate is now split out from the `lading` crate
+### Changed
+- The block mechanism is reworked to provide a 'fixed' and 'streaming' model,
+  running in a separate OS thread from the tokio runtime.
+
 ## [0.18.0]
 ### Changed
 - The predictive throttle no longer exists. The only options are stable and
