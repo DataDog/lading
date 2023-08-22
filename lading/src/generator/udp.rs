@@ -14,6 +14,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
+    thread,
     time::Duration,
 };
 
@@ -22,10 +23,14 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, info, trace};
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -125,7 +130,6 @@ impl Udp {
                 .expect("bytes must be non-zero"),
             &block_sizes,
             &config.variant,
-            &labels,
         )?;
 
         let addr = config
@@ -156,13 +160,19 @@ impl Udp {
     pub async fn spin(mut self) -> Result<(), Error> {
         debug!("UDP generator running");
         let mut connection = Option::<UdpSocket>::None;
-        let mut block_cache = self.block_cache;
+
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = block_cache.peek().unwrap();
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,
@@ -188,7 +198,7 @@ impl Udp {
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let sock = connection.unwrap();
-                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             bytes_written.increment(bytes as u64);

@@ -26,29 +26,39 @@ pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`].
 pub enum Error {
     /// See [`crate::generator::tcp::Error`] for details.
-    Tcp(tcp::Error),
+    #[error(transparent)]
+    Tcp(#[from] tcp::Error),
     /// See [`crate::generator::udp::Error`] for details.
-    Udp(udp::Error),
+    #[error(transparent)]
+    Udp(#[from] udp::Error),
     /// See [`crate::generator::http::Error`] for details.
-    Http(http::Error),
+    #[error(transparent)]
+    Http(#[from] http::Error),
     /// See [`crate::generator::splunk_hec::Error`] for details.
-    SplunkHec(splunk_hec::Error),
+    #[error(transparent)]
+    SplunkHec(#[from] splunk_hec::Error),
     /// See [`crate::generator::file_gen::Error`] for details.
-    FileGen(file_gen::Error),
+    #[error(transparent)]
+    FileGen(#[from] file_gen::Error),
     /// See [`crate::generator::file_tree::Error`] for details.
-    FileTree(file_tree::Error),
+    #[error(transparent)]
+    FileTree(#[from] file_tree::Error),
     /// See [`crate::generator::grpc::Error`] for details.
-    Grpc(grpc::Error),
+    #[error(transparent)]
+    Grpc(#[from] grpc::Error),
     /// See [`crate::generator::unix_stream::Error`] for details.
-    UnixStream(unix_stream::Error),
+    #[error(transparent)]
+    UnixStream(#[from] unix_stream::Error),
     /// See [`crate::generator::unix_datagram::Error`] for details.
-    UnixDatagram(unix_datagram::Error),
+    #[error(transparent)]
+    UnixDatagram(#[from] unix_datagram::Error),
     /// See [`crate::generator::process_tree::Error`] for details.
-    ProcessTree(process_tree::Error),
+    #[error(transparent)]
+    ProcessTree(#[from] process_tree::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -137,39 +147,30 @@ impl Server {
     /// signals error.
     pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let srv = match config.inner {
-            Inner::Tcp(conf) => {
-                Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown).map_err(Error::Tcp)?)
+            Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
+            Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
+            Inner::Http(conf) => Self::Http(http::Http::new(config.general, conf, shutdown)?),
+            Inner::SplunkHec(conf) => {
+                Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, conf, shutdown)?)
             }
-            Inner::Udp(conf) => {
-                Self::Udp(udp::Udp::new(config.general, &conf, shutdown).map_err(Error::Udp)?)
+            Inner::FileGen(conf) => {
+                Self::FileGen(file_gen::FileGen::new(config.general, conf, shutdown)?)
             }
-            Inner::Http(conf) => {
-                Self::Http(http::Http::new(config.general, conf, shutdown).map_err(Error::Http)?)
+            Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
+            Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),
+            Inner::UnixStream(conf) => Self::UnixStream(unix_stream::UnixStream::new(
+                config.general,
+                conf,
+                shutdown,
+            )?),
+            Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
+                config.general,
+                &conf,
+                shutdown,
+            )?),
+            Inner::ProcessTree(conf) => {
+                Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
             }
-            Inner::SplunkHec(conf) => Self::SplunkHec(
-                splunk_hec::SplunkHec::new(config.general, conf, shutdown)
-                    .map_err(Error::SplunkHec)?,
-            ),
-            Inner::FileGen(conf) => Self::FileGen(
-                file_gen::FileGen::new(config.general, conf, shutdown).map_err(Error::FileGen)?,
-            ),
-            Inner::FileTree(conf) => {
-                Self::FileTree(file_tree::FileTree::new(&conf, shutdown).map_err(Error::FileTree)?)
-            }
-            Inner::Grpc(conf) => {
-                Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown).map_err(Error::Grpc)?)
-            }
-            Inner::UnixStream(conf) => Self::UnixStream(
-                unix_stream::UnixStream::new(config.general, conf, shutdown)
-                    .map_err(Error::UnixStream)?,
-            ),
-            Inner::UnixDatagram(conf) => Self::UnixDatagram(
-                unix_datagram::UnixDatagram::new(config.general, &conf, shutdown)
-                    .map_err(Error::UnixDatagram)?,
-            ),
-            Inner::ProcessTree(conf) => Self::ProcessTree(
-                process_tree::ProcessTree::new(&conf, shutdown).map_err(Error::ProcessTree)?,
-            ),
         };
         Ok(srv)
     }
@@ -190,22 +191,19 @@ impl Server {
         let _ = pid_snd.recv().await;
         drop(pid_snd);
 
-        let res = match self {
-            Server::Tcp(inner) => inner.spin().await.map_err(Error::Tcp),
-            Server::Udp(inner) => inner.spin().await.map_err(Error::Udp),
-            Server::Http(inner) => inner.spin().await.map_err(Error::Http),
-            Server::SplunkHec(inner) => inner.spin().await.map_err(Error::SplunkHec),
-            Server::FileGen(inner) => inner.spin().await.map_err(Error::FileGen),
-            Server::FileTree(inner) => inner.spin().await.map_err(Error::FileTree),
-            Server::Grpc(inner) => inner.spin().await.map_err(Error::Grpc),
-            Server::UnixStream(inner) => inner.spin().await.map_err(Error::UnixStream),
-            Server::UnixDatagram(inner) => inner.spin().await.map_err(Error::UnixDatagram),
-            Server::ProcessTree(inner) => inner.spin().await.map_err(Error::ProcessTree),
+        match self {
+            Server::Tcp(inner) => inner.spin().await?,
+            Server::Udp(inner) => inner.spin().await?,
+            Server::Http(inner) => inner.spin().await?,
+            Server::SplunkHec(inner) => inner.spin().await?,
+            Server::FileGen(inner) => inner.spin().await?,
+            Server::FileTree(inner) => inner.spin().await?,
+            Server::Grpc(inner) => inner.spin().await?,
+            Server::UnixStream(inner) => inner.spin().await?,
+            Server::UnixDatagram(inner) => inner.spin().await?,
+            Server::ProcessTree(inner) => inner.spin().await?,
         };
 
-        if let Err(e) = &res {
-            error!("Generator error: {:?}", e);
-        }
-        res
+        Ok(())
     }
 }

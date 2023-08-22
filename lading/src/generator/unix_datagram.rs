@@ -11,7 +11,11 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
 use lading_throttle::Throttle;
@@ -21,11 +25,11 @@ use serde::Deserialize;
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
-    sync::Arc,
+    thread,
 };
 use tokio::{
     net,
-    sync::broadcast::Receiver,
+    sync::{broadcast::Receiver, mpsc},
     task::{JoinError, JoinHandle},
 };
 use tracing::{debug, error, info};
@@ -51,6 +55,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// Whether to use a fixed or streaming block cache
+    #[serde(default = "crate::block::default_cache_method")]
+    pub block_cache_method: block::CacheMethod,
     /// The total number of parallel connections to maintain
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
@@ -141,21 +148,27 @@ impl UnixDatagram {
         );
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
-        let block_cache = block::Cache::fixed(
-            &mut rng,
-            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-            &config.variant,
-            &labels,
-        )?;
-        let block_cache = Arc::new(block_cache);
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
+            let total_bytes =
+                NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                    .expect("bytes must be non-zero");
+            let block_cache = match config.block_cache_method {
+                block::CacheMethod::Streaming => block::Cache::stream(
+                    config.seed,
+                    total_bytes,
+                    &block_sizes,
+                    config.variant.clone(),
+                )?,
+                block::CacheMethod::Fixed => {
+                    block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
+                }
+            };
+
             let child = Child {
                 path: config.path.clone(),
-                block_cache: Arc::clone(&block_cache),
+                block_cache,
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
@@ -199,7 +212,7 @@ impl UnixDatagram {
 struct Child {
     path: PathBuf,
     throttle: Throttle,
-    block_cache: Arc<block::Cache>,
+    block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Shutdown,
 }
@@ -229,13 +242,17 @@ impl Child {
             }
         }
 
-        let mut idx = 0;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
         let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = &block_cache.at_idx(idx);
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -244,8 +261,7 @@ impl Child {
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
-                    idx = (idx + 1) % block_cache.len();
-                    let blk = &block_cache.at_idx(idx);
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {

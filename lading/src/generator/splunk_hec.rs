@@ -18,6 +18,7 @@ mod acknowledgements;
 
 use std::{
     num::{NonZeroU32, NonZeroUsize},
+    thread,
     time::Duration,
 };
 
@@ -34,12 +35,17 @@ use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
 use tokio::{
-    sync::{Semaphore, SemaphorePermit},
+    sync::{mpsc, Semaphore, SemaphorePermit},
     time::timeout,
 };
 use tracing::info;
 
-use crate::{block, generator::splunk_hec::acknowledgements::Channel, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    generator::splunk_hec::acknowledgements::Channel,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -75,6 +81,9 @@ pub struct Config {
     pub acknowledgements: Option<AckSettings>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// Whether to use a fixed or streaming block cache
+    #[serde(default = "crate::block::default_cache_method")]
+    pub block_cache_method: block::CacheMethod,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The block sizes for messages to this target
@@ -86,7 +95,7 @@ pub struct Config {
     pub throttle: lading_throttle::Config,
 }
 
-#[derive(thiserror::Error, Debug, Clone, Copy)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`SplunkHec`].
 pub enum Error {
     /// User supplied HEC path is invalid.
@@ -98,6 +107,9 @@ pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// IO error
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -179,14 +191,17 @@ impl SplunkHec {
         let payload_config = lading_payload::Config::SplunkHec {
             encoding: config.format,
         };
-        let block_cache = block::Cache::fixed(
-            &mut rng,
+        let total_bytes =
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-            &payload_config,
-            &labels,
-        )?;
+                .expect("bytes must be non-zero");
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Streaming => {
+                block::Cache::stream(config.seed, total_bytes, &block_sizes, payload_config)?
+            }
+            block::CacheMethod::Fixed => {
+                block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &payload_config)?
+            }
+        };
 
         let mut channels = Channels::new(config.parallel_connections);
         if let Some(ack_settings) = config.acknowledgements {
@@ -241,12 +256,17 @@ impl SplunkHec {
             f64::from(self.parallel_connections),
             &labels
         );
-        let mut block_cache = self.block_cache;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let mut channels = self.channels.iter().cycle();
 
         loop {
             let channel: Channel = channels.next().unwrap().clone();
-            let blk = block_cache.peek().unwrap();
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -255,7 +275,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 
