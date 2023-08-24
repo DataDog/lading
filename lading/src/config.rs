@@ -73,6 +73,8 @@ mod tests {
 
     use http::HeaderMap;
 
+    use crate::block;
+
     use super::*;
 
     #[test]
@@ -114,7 +116,8 @@ blackhole:
                                 8_f64,
                                 byte_unit::ByteUnit::MB
                             )
-                            .unwrap()
+                            .unwrap(),
+                            block_cache_method: block::CacheMethod::Fixed,
                         },
                         headers: HeaderMap::default(),
                         bytes_per_second: byte_unit::Byte::from_unit(

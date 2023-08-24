@@ -11,7 +11,10 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    thread,
+};
 
 use byte_unit::{Byte, ByteUnit};
 use hyper::{
@@ -24,10 +27,14 @@ use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{mpsc, Semaphore};
 use tracing::info;
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -43,6 +50,9 @@ pub enum Method {
         variant: lading_payload::Config,
         /// The maximum size in bytes of the cache of prebuilt messages
         maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+        /// Whether to use a fixed or streaming block cache
+        #[serde(default = "crate::block::default_cache_method")]
+        block_cache_method: block::CacheMethod,
     },
 }
 
@@ -151,15 +161,22 @@ impl Http {
             Method::Post {
                 variant,
                 maximum_prebuild_cache_size_bytes,
+                block_cache_method,
             } => {
-                let block_cache = block::Cache::fixed(
-                    &mut rng,
+                let total_bytes =
                     NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                        .expect("bytes must be non-zero"),
-                    &block_sizes,
-                    &variant,
-                    &labels,
-                )?;
+                        .expect("bytes must be non-zero");
+                let block_cache = match block_cache_method {
+                    block::CacheMethod::Streaming => block::Cache::stream(
+                        config.seed,
+                        total_bytes,
+                        &block_sizes,
+                        variant.clone(),
+                    )?,
+                    block::CacheMethod::Fixed => {
+                        block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &variant)?
+                    }
+                };
 
                 CONNECTION_SEMAPHORE
                     .set(Semaphore::new(config.parallel_connections as usize))
@@ -199,10 +216,15 @@ impl Http {
         let uri = self.uri;
 
         let labels = self.metric_labels;
-        let mut block_cache = self.block_cache;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         loop {
-            let blk = block_cache.next().unwrap();
+            let blk = rcv.next().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             let body = Body::from(blk.bytes.clone());

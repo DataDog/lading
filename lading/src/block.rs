@@ -1,20 +1,24 @@
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::{
+    collections::VecDeque,
+    num::{NonZeroU32, NonZeroUsize},
+};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use lading_payload as payload;
-use metrics::gauge;
-use rand::{prelude::SliceRandom, Rng};
+use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
+use serde::Deserialize;
+use tokio::sync::mpsc::{self, error::SendError, Sender};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SpinError {
+    #[error(transparent)]
+    Send(#[from] SendError<Block>),
+}
 
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum Error {
     #[error("Chunk error: {0}")]
     Chunk(#[from] ChunkError),
-}
-
-#[derive(Debug)]
-pub(crate) struct Block {
-    pub(crate) total_bytes: NonZeroU32,
-    pub(crate) bytes: Bytes,
 }
 
 #[derive(Debug, thiserror::Error, Clone, Copy)]
@@ -25,6 +29,327 @@ pub enum ChunkError {
     /// The `total_bytes` parameter is insufficient.
     #[error("Insufficient total bytes.")]
     InsufficientTotalBytes,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Block {
+    pub(crate) total_bytes: NonZeroU32,
+    pub(crate) bytes: Bytes,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+/// The method for which caching will be configure
+pub enum CacheMethod {
+    /// Create a single fixed size block cache and rotate through it
+    Fixed,
+    /// Maintain a fixed sized block cache buffer and stream from it
+    Streaming,
+}
+
+pub(crate) fn default_cache_method() -> CacheMethod {
+    CacheMethod::Fixed
+}
+
+#[derive(Debug)]
+/// A mechanism for streaming byte blobs, 'blocks'
+///
+/// The `Cache` is a mechanism to allow generators to request 'blocks' without
+/// needing to be aware of the origin or generation mechanism of these
+/// blocks. We support a single mode of operation where all blocks are computed
+/// ahead-of-time and stored in the `Cache`. Callers are responsible for timing
+/// et al.
+///
+/// We expect to expand the different modes of `Cache` operation in the future.
+pub(crate) enum Cache {
+    Fixed {
+        /// The current index into `blocks`
+        idx: usize,
+        /// The store of blocks.
+        blocks: Vec<Block>,
+    },
+    Stream {
+        seed: [u8; 32],
+        total_bytes: usize,
+        block_chunks: Vec<usize>,
+        payload: payload::Config,
+    },
+}
+
+impl Cache {
+    /// Construct a streaming `Cache`.
+    ///
+    /// This constructor makes an internal pool of `Block` instances up to
+    /// `total_bytes`, each of which are roughly the size of one of the
+    /// `block_byte_sizes`. Internally, `Blocks` are replaced as they are spun out.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if `block_byte_sizes` is empty or if a member
+    /// of `block_byte_sizes` is large than `total_bytes`.
+    pub(crate) fn stream(
+        seed: [u8; 32],
+        total_bytes: NonZeroUsize,
+        block_byte_sizes: &[NonZeroUsize],
+        payload: payload::Config,
+    ) -> Result<Self, Error> {
+        let mut rng = StdRng::from_seed(seed);
+
+        let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
+        Ok(Self::Stream {
+            seed,
+            total_bytes: total_bytes.get(),
+            block_chunks,
+            payload,
+        })
+    }
+
+    /// Construct a `Cache` of fixed size.
+    ///
+    /// This constructor makes an internal pool of `Block` instances up to
+    /// `total_bytes`, each of which are roughly the size of one of the
+    /// `block_byte_sizes`. Internally, `Blocks` are looped over in a
+    /// round-robin during peeking, iteration.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if `block_byte_sizes` is empty or if a member
+    /// of `block_byte_sizes` is large than `total_bytes`.
+    pub(crate) fn fixed<R>(
+        mut rng: &mut R,
+        total_bytes: NonZeroUsize,
+        block_byte_sizes: &[NonZeroUsize],
+        payload: &payload::Config,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
+        let blocks = match payload {
+            payload::Config::TraceAgent(enc) => {
+                let ta = match enc {
+                    payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
+                    payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
+                };
+
+                construct_block_cache_inner(&mut rng, &ta, &block_chunks)
+            }
+            payload::Config::Syslog5424 => construct_block_cache_inner(
+                &mut rng,
+                &payload::Syslog5424::default(),
+                &block_chunks,
+            ),
+            payload::Config::DogStatsD(payload::dogstatsd::Config {
+                contexts_minimum,
+                contexts_maximum,
+                name_length_minimum,
+                name_length_maximum,
+                tag_key_length_minimum,
+                tag_key_length_maximum,
+                tag_value_length_minimum,
+                tag_value_length_maximum,
+                tags_per_msg_minimum,
+                tags_per_msg_maximum,
+                // TODO -- Validate user input for multivalue_pack_probability.
+                multivalue_pack_probability,
+                multivalue_count_minimum,
+                multivalue_count_maximum,
+                kind_weights,
+                metric_weights,
+            }) => {
+                let context_range = *contexts_minimum..*contexts_maximum;
+                let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
+                let name_length_range = *name_length_minimum..*name_length_maximum;
+                let tag_key_length_range = *tag_key_length_minimum..*tag_key_length_maximum;
+                let tag_value_length_range = *tag_value_length_minimum..*tag_value_length_maximum;
+                let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
+
+                let serializer = payload::DogStatsD::new(
+                    context_range,
+                    name_length_range,
+                    tag_key_length_range,
+                    tag_value_length_range,
+                    tags_per_msg_range,
+                    multivalue_count_range,
+                    *multivalue_pack_probability,
+                    *kind_weights,
+                    *metric_weights,
+                    &mut rng,
+                );
+
+                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+            }
+            payload::Config::Fluent => {
+                let pyld = payload::Fluent::new(&mut rng);
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+            }
+            payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
+                &mut rng,
+                &payload::SplunkHec::new(*encoding),
+                &block_chunks,
+            ),
+            payload::Config::ApacheCommon => {
+                let pyld = payload::ApacheCommon::new(&mut rng);
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+            }
+            payload::Config::Ascii => {
+                let pyld = payload::Ascii::new(&mut rng);
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+            }
+            payload::Config::DatadogLog => {
+                let serializer = payload::DatadogLog::new(&mut rng);
+                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+            }
+            payload::Config::Json => {
+                construct_block_cache_inner(&mut rng, &payload::Json, &block_chunks)
+            }
+            payload::Config::Static { ref static_path } => construct_block_cache_inner(
+                &mut rng,
+                &payload::Static::new(static_path),
+                &block_chunks,
+            ),
+            payload::Config::OpentelemetryTraces => {
+                let pyld = payload::OpentelemetryTraces::new(&mut rng);
+                construct_block_cache_inner(rng, &pyld, &block_chunks)
+            }
+            payload::Config::OpentelemetryLogs => {
+                let pyld = payload::OpentelemetryLogs::new(&mut rng);
+                construct_block_cache_inner(rng, &pyld, &block_chunks)
+            }
+            payload::Config::OpentelemetryMetrics => {
+                let pyld = payload::OpentelemetryMetrics::new(&mut rng);
+                construct_block_cache_inner(rng, &pyld, &block_chunks)
+            }
+        };
+        Ok(Self::Fixed { idx: 0, blocks })
+    }
+
+    /// Run `Cache` forward on the user-provided mpsc sender.
+    ///
+    /// This is a blocking function that pushes `Block` instances into the
+    /// user-provided mpsc `Sender<Block>`. The user is required to set an
+    /// appropriate size on the channel. This function will never exit.
+    #[allow(clippy::needless_pass_by_value)]
+    pub(crate) fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
+        match self {
+            Self::Fixed { mut idx, blocks } => loop {
+                snd.blocking_send(blocks[idx].clone())?;
+                idx = (idx + 1) % blocks.len();
+            },
+            Cache::Stream {
+                seed,
+                total_bytes,
+                block_chunks,
+                payload,
+            } => stream_inner(seed, total_bytes, &block_chunks, &payload, snd),
+        }
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[inline]
+fn stream_inner(
+    seed: [u8; 32],
+    total_bytes: usize,
+    block_chunks: &[usize],
+    payload: &payload::Config,
+    snd: Sender<Block>,
+) -> Result<(), SpinError> {
+    let mut rng = StdRng::from_seed(seed);
+
+    match payload {
+        payload::Config::TraceAgent(enc) => {
+            let ta = match enc {
+                payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
+                payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
+            };
+
+            stream_block_inner(&mut rng, total_bytes, &ta, block_chunks, &snd)
+        }
+        payload::Config::Syslog5424 => {
+            let pyld = payload::Syslog5424::default();
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::DogStatsD(payload::dogstatsd::Config {
+            contexts_minimum,
+            contexts_maximum,
+            name_length_minimum,
+            name_length_maximum,
+            tag_key_length_minimum,
+            tag_key_length_maximum,
+            tag_value_length_minimum,
+            tag_value_length_maximum,
+            tags_per_msg_minimum,
+            tags_per_msg_maximum,
+            // TODO -- Validate user input for multivalue_pack_probability.
+            multivalue_pack_probability,
+            multivalue_count_minimum,
+            multivalue_count_maximum,
+            kind_weights,
+            metric_weights,
+        }) => {
+            let context_range = *contexts_minimum..*contexts_maximum;
+            let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
+            let name_length_range = *name_length_minimum..*name_length_maximum;
+            let tag_key_length_range = *tag_key_length_minimum..*tag_key_length_maximum;
+            let tag_value_length_range = *tag_value_length_minimum..*tag_value_length_maximum;
+            let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
+
+            let pyld = payload::DogStatsD::new(
+                context_range,
+                name_length_range,
+                tag_key_length_range,
+                tag_value_length_range,
+                tags_per_msg_range,
+                multivalue_count_range,
+                *multivalue_pack_probability,
+                *kind_weights,
+                *metric_weights,
+                &mut rng,
+            );
+
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::Fluent => {
+            let pyld = payload::Fluent::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::SplunkHec { encoding } => {
+            let pyld = payload::SplunkHec::new(*encoding);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::ApacheCommon => {
+            let pyld = payload::ApacheCommon::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::Ascii => {
+            let pyld = payload::Ascii::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::DatadogLog => {
+            let pyld = payload::DatadogLog::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::Json => {
+            let pyld = payload::Json;
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::Static { ref static_path } => {
+            let pyld = payload::Static::new(static_path);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::OpentelemetryTraces => {
+            let pyld = payload::OpentelemetryTraces::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::OpentelemetryLogs => {
+            let pyld = payload::OpentelemetryLogs::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+        payload::Config::OpentelemetryMetrics => {
+            let pyld = payload::OpentelemetryMetrics::new(&mut rng);
+            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
+        }
+    }
 }
 
 /// Construct a vec of block sizes that fit into `total_bytes`.
@@ -45,7 +370,7 @@ pub enum ChunkError {
 ///
 /// Function will return an error if `block_byte_sizes` is empty or if a member
 /// of `block_byte_sizes` is large than `total_bytes`.
-pub(crate) fn chunk_bytes<R>(
+fn chunk_bytes<R>(
     rng: &mut R,
     total_bytes: NonZeroUsize,
     block_byte_sizes: &[NonZeroUsize],
@@ -79,179 +404,6 @@ where
     Ok(chunks)
 }
 
-#[derive(Debug)]
-/// A mechanism for streaming byte blobs, 'blocks'
-///
-/// The `Cache` is a mechanism to allow generators to request 'blocks' without
-/// needing to be aware of the origin or generation mechanism of these
-/// blocks. We support a single mode of operation where all blocks are computed
-/// ahead-of-time and stored in the `Cache`. Callers are responsible for timing
-/// et al.
-///
-/// We expect to expand the different modes of `Cache` operation in the future.
-pub(crate) struct Cache {
-    idx: usize,
-    blocks: Vec<Block>,
-}
-
-impl Cache {
-    /// Construct a `Cache` of fixed size.
-    ///
-    /// This constructor makes an internal pool of `Block` instances up to
-    /// `total_bytes`, each of which are roughly the size of one of the
-    /// `block_byte_sizes`. Internally, `Blocks` are looped over in a
-    /// round-robin during peeking, iteration.
-    ///
-    /// # Errors
-    ///
-    /// Function will return an error if `block_byte_sizes` is empty or if a member
-    /// of `block_byte_sizes` is large than `total_bytes`.
-    pub(crate) fn fixed<R>(
-        mut rng: &mut R,
-        total_bytes: NonZeroUsize,
-        block_byte_sizes: &[NonZeroUsize],
-        payload: &payload::Config,
-        labels: &Vec<(String, String)>,
-    ) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
-        let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
-        let blocks = match payload {
-            payload::Config::TraceAgent(enc) => {
-                let ta = match enc {
-                    payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
-                    payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
-                };
-
-                construct_block_cache_inner(&mut rng, &ta, &block_chunks, labels)
-            }
-            payload::Config::Syslog5424 => construct_block_cache_inner(
-                &mut rng,
-                &payload::Syslog5424::default(),
-                &block_chunks,
-                labels,
-            ),
-            payload::Config::DogStatsD(payload::dogstatsd::Config {
-                contexts_minimum,
-                contexts_maximum,
-                name_length_minimum,
-                name_length_maximum,
-                tag_key_length_minimum,
-                tag_key_length_maximum,
-                tag_value_length_minimum,
-                tag_value_length_maximum,
-                tags_per_msg_minimum,
-                tags_per_msg_maximum,
-                // TODO -- how can I validate user input for multivalue_pack_probability
-                multivalue_pack_probability,
-                multivalue_count_minimum,
-                multivalue_count_maximum,
-                kind_weights,
-                metric_weights,
-            }) => {
-                let context_range = *contexts_minimum..*contexts_maximum;
-                let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
-                let name_length_range = *name_length_minimum..*name_length_maximum;
-                let tag_key_length_range = *tag_key_length_minimum..*tag_key_length_maximum;
-                let tag_value_length_range = *tag_value_length_minimum..*tag_value_length_maximum;
-                let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
-
-                let serializer = payload::DogStatsD::new(
-                    context_range,
-                    name_length_range,
-                    tag_key_length_range,
-                    tag_value_length_range,
-                    tags_per_msg_range,
-                    multivalue_count_range,
-                    *multivalue_pack_probability,
-                    *kind_weights,
-                    *metric_weights,
-                    &mut rng,
-                );
-
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks, labels)
-            }
-            payload::Config::Fluent => {
-                let pyld = payload::Fluent::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, labels)
-            }
-            payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
-                &mut rng,
-                &payload::SplunkHec::new(*encoding),
-                &block_chunks,
-                labels,
-            ),
-            payload::Config::ApacheCommon => {
-                let pyld = payload::ApacheCommon::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, labels)
-            }
-            payload::Config::Ascii => {
-                let pyld = payload::Ascii::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, labels)
-            }
-            payload::Config::DatadogLog => {
-                let serializer = payload::DatadogLog::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks, labels)
-            }
-            payload::Config::Json => {
-                construct_block_cache_inner(&mut rng, &payload::Json, &block_chunks, labels)
-            }
-            payload::Config::Static { ref static_path } => construct_block_cache_inner(
-                &mut rng,
-                &payload::Static::new(static_path),
-                &block_chunks,
-                labels,
-            ),
-            payload::Config::OpentelemetryTraces => {
-                let pyld = payload::OpentelemetryTraces::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks, labels)
-            }
-            payload::Config::OpentelemetryLogs => {
-                let pyld = payload::OpentelemetryLogs::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks, labels)
-            }
-            payload::Config::OpentelemetryMetrics => {
-                let pyld = payload::OpentelemetryMetrics::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks, labels)
-            }
-        };
-        Ok(Self { idx: 0, blocks })
-    }
-
-    /// Return a reference to the next `Block` in the cache without advancing
-    /// the cache. Returns `None` if the cache has no further blocks and will
-    /// not.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn peek(&mut self) -> Option<&Block> {
-        Some(&self.blocks[self.idx])
-    }
-
-    /// Return a reference to the next `Block` in the cache, advancing the
-    /// cache. Returns `None` if the cache has no further blocks and will not.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn next(&mut self) -> Option<&Block> {
-        let res = &self.blocks[self.idx];
-        self.idx = (self.idx + 1) % self.blocks.len();
-        Some(res)
-    }
-
-    /// Return a reference to the next `Block` in the cache at the user-provided
-    /// `idx`. Panics if the `idx` is out of range.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn at_idx(&self, idx: usize) -> &Block {
-        &self.blocks[idx]
-    }
-
-    /// Returns the length of the interior block cache.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn len(&self) -> usize {
-        self.blocks.len()
-    }
-}
-
-#[allow(clippy::ptr_arg)]
-#[allow(clippy::cast_precision_loss)]
 /// Construct a new block cache of form defined by `serializer`.
 ///
 /// A "block cache" is a pre-made vec of serialized arbitrary instances of the
@@ -262,42 +414,105 @@ impl Cache {
 ///
 /// # Panics
 ///
-/// Function will panic if the `serializer` signals an error. In the futures we
+/// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
 fn construct_block_cache_inner<R, S>(
-    mut rng: R,
+    mut rng: &mut R,
     serializer: &S,
     block_chunks: &[usize],
-    labels: &Vec<(String, String)>,
 ) -> Vec<Block>
 where
     S: payload::Serialize,
-    R: Rng,
+    R: Rng + ?Sized,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
-        let mut block: Writer<BytesMut> = BytesMut::with_capacity(*block_size).writer();
-        serializer
-            .to_bytes(&mut rng, *block_size, &mut block)
-            .unwrap();
-        let bytes: Bytes = block.into_inner().freeze();
-        if bytes.is_empty() {
-            // Blocks may be empty, especially when the amount of bytes
-            // requested for the block are relatively low. This is a quirk of
-            // our use of Arbitrary. We do not have the ability to tell that
-            // library that we would like such and such number of bytes
-            // approximately from an instance. This does mean that we sometimes
-            // waste computation because the size of the block given cannot be
-            // serialized into.
-            continue;
+        if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
+            block_cache.push(block);
         }
-        let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap()).unwrap();
-        block_cache.push(Block { total_bytes, bytes });
     }
     assert!(!block_cache.is_empty());
-    gauge!("block_construction_complete", 1.0, labels);
     block_cache
+}
+
+#[inline]
+fn stream_block_inner<R, S>(
+    mut rng: &mut R,
+    total_bytes: usize,
+    serializer: &S,
+    block_chunks: &[usize],
+    snd: &Sender<Block>,
+) -> Result<(), SpinError>
+where
+    S: payload::Serialize,
+    R: Rng + ?Sized,
+{
+    let total_bytes: u64 = total_bytes as u64;
+    let mut accum_bytes: u64 = 0;
+    let mut cache: VecDeque<Block> = VecDeque::new();
+
+    loop {
+        // Attempt to read from the cache first, being sure to subtract the
+        // bytes we send out.
+        if let Some(block) = cache.pop_front() {
+            accum_bytes -= u64::from(block.total_bytes.get());
+            snd.blocking_send(block)?;
+        }
+        // There are no blocks in the cache. In order to minimize latency we
+        // push blocks into the sender until such time as it's full. When that
+        // happens we overflow into the cache until such time as that's full.
+        'refill: loop {
+            let block_size = block_chunks.choose(&mut rng).unwrap();
+            if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
+                match snd.try_reserve() {
+                    Ok(permit) => permit.send(block),
+                    Err(err) => match err {
+                        mpsc::error::TrySendError::Full(_) => {
+                            if accum_bytes < total_bytes {
+                                accum_bytes += u64::from(block.total_bytes.get());
+                                cache.push_back(block);
+                                break 'refill;
+                            }
+                        }
+                        mpsc::error::TrySendError::Closed(_) => return Ok(()),
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// Construct a new block
+///
+/// # Panics
+///
+/// Function will panic if the `serializer` signals an error. In the future we
+/// would like to propagate this error to the caller.
+#[inline]
+fn construct_block<R, S>(mut rng: &mut R, serializer: &S, chunk_size: usize) -> Option<Block>
+where
+    S: payload::Serialize,
+    R: Rng + ?Sized,
+{
+    let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size).writer();
+    serializer
+        .to_bytes(&mut rng, chunk_size, &mut block)
+        .unwrap();
+    let bytes: Bytes = block.into_inner().freeze();
+    if bytes.is_empty() {
+        // Blocks may be empty, especially when the amount of bytes
+        // requested for the block are relatively low. This is a quirk of
+        // our use of randomness. We do not have the ability to tell that
+        // library that we would like such and such number of bytes
+        // approximately from an instance. This does mean that we sometimes
+        // waste computation because the size of the block given cannot be
+        // serialized into.
+        None
+    } else {
+        let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap()).unwrap();
+        Some(Block { total_bytes, bytes })
+    }
 }
 
 #[cfg(test)]

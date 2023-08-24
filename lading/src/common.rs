@@ -1,6 +1,7 @@
 use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 
 use serde::Deserialize;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 /// Defines how sub-process stderr and stdout are handled.
@@ -56,5 +57,35 @@ pub(crate) fn stdio(behavior: &Behavior) -> Stdio {
             let fp = fs::File::create(path).unwrap();
             Stdio::from(fp)
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PeekableReceiver<T> {
+    receiver: mpsc::Receiver<T>,
+    buffer: Option<T>,
+}
+
+impl<T> PeekableReceiver<T> {
+    pub(crate) fn new(receiver: mpsc::Receiver<T>) -> Self {
+        Self {
+            receiver,
+            buffer: None,
+        }
+    }
+
+    #[inline]
+    pub(crate) async fn next(&mut self) -> Option<T> {
+        match self.buffer.take() {
+            Some(t) => Some(t),
+            None => self.receiver.recv().await,
+        }
+    }
+
+    pub(crate) async fn peek(&mut self) -> Option<&T> {
+        if self.buffer.is_none() {
+            self.buffer = self.receiver.recv().await;
+        }
+        self.buffer.as_ref()
     }
 }

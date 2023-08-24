@@ -20,6 +20,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc,
     },
+    thread,
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -31,11 +32,16 @@ use serde::Deserialize;
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
+    sync::mpsc,
     task::{JoinError, JoinHandle},
 };
 use tracing::info;
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -87,6 +93,9 @@ pub struct Config {
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
+    /// Whether to use a fixed or streaming block cache
+    #[serde(default = "crate::block::default_cache_method")]
+    block_cache_method: block::CacheMethod,
     /// Determines whether the file generator mimics log rotation or not. If
     /// true, files will be rotated. If false, it is the responsibility of
     /// tailing software to remove old files.
@@ -154,32 +163,33 @@ impl FileGen {
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).unwrap();
 
-        let labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "file_gen".to_string()),
-        ];
-
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
-        let block_cache = block::Cache::fixed(
-            &mut rng,
-            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-            &config.variant,
-            &labels,
-        )?;
-        let block_cache = Arc::new(block_cache);
 
         for _ in 0..config.duplicates {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
+
+            let total_bytes =
+                NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                    .expect("bytes must be non-zero");
+            let block_cache = match config.block_cache_method {
+                block::CacheMethod::Streaming => block::Cache::stream(
+                    config.seed,
+                    total_bytes,
+                    &block_sizes,
+                    config.variant.clone(),
+                )?,
+                block::CacheMethod::Fixed => {
+                    block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
+                }
+            };
 
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 bytes_per_second,
                 throttle,
-                block_cache: Arc::clone(&block_cache),
+                block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
@@ -222,7 +232,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     bytes_per_second: NonZeroU32,
     throttle: Throttle,
-    block_cache: Arc<block::Cache>,
+    block_cache: block::Cache,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: Shutdown,
@@ -247,21 +257,25 @@ impl Child {
                 .await?,
         );
 
-        let mut idx = 0;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
         let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let bytes_written = register_counter!("bytes_written");
 
         loop {
-            let block = &block_cache.at_idx(idx);
-            let total_bytes = block.total_bytes;
+            let blk = rcv.peek().await.unwrap();
+            let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    idx = (idx + 1) % block_cache.len();
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     let total_bytes = u64::from(total_bytes.get());
 
                     {
-                        fp.write_all(&block.bytes).await?;
+                        fp.write_all(&blk.bytes).await?;
                         bytes_written.increment(total_bytes);
                         total_bytes_written += total_bytes;
                     }

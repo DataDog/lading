@@ -11,7 +11,11 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 use byte_unit::{Byte, ByteUnit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
@@ -20,8 +24,9 @@ use serde::Deserialize;
 use std::{
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
+    thread,
 };
-use tokio::{net, task::JoinError};
+use tokio::{net, sync::mpsc, task::JoinError};
 use tracing::{debug, error, info};
 
 use super::General;
@@ -41,6 +46,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// Whether to use a fixed or streaming block cache
+    #[serde(default = "crate::block::default_cache_method")]
+    pub block_cache_method: block::CacheMethod,
     /// The load throttle configuration
     #[serde(default)]
     pub throttle: lading_throttle::Config,
@@ -120,14 +128,20 @@ impl UnixStream {
             &labels
         );
 
-        let block_cache = block::Cache::fixed(
-            &mut rng,
+        let total_bytes =
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-            &config.variant,
-            &labels,
-        )?;
+                .expect("bytes must be non-zero");
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Streaming => block::Cache::stream(
+                config.seed,
+                total_bytes,
+                &block_sizes,
+                config.variant.clone(),
+            )?,
+            block::CacheMethod::Fixed => {
+                block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
+            }
+        };
 
         Ok(Self {
             path: config.path,
@@ -149,14 +163,20 @@ impl UnixStream {
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
         debug!("UnixStream generator running");
-        let mut block_cache = self.block_cache;
+
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let mut unix_stream = Option::<net::UnixStream>::None;
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = block_cache.peek().unwrap();
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -182,7 +202,7 @@ impl UnixStream {
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
-                    let blk = block_cache.next().unwrap(); // advance to the block that was previously peeked
+                    let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
                     while blk_offset < blk_max {
                         let stream = unix_stream.unwrap();
                         unix_stream = None;

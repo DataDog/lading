@@ -15,6 +15,7 @@
 use std::{
     convert::TryFrom,
     num::{NonZeroU32, NonZeroUsize},
+    thread,
     time::Duration,
 };
 
@@ -25,13 +26,18 @@ use metrics::{counter, gauge, register_counter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::Deserialize;
+use tokio::sync::mpsc;
 use tonic::{
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
     Request, Response, Status,
 };
 use tracing::{debug, info};
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -47,6 +53,9 @@ pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// IO error
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 /// Config for [`Grpc`]
@@ -65,6 +74,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// Whether to use a fixed or streaming block cache
+    #[serde(default = "crate::block::default_cache_method")]
+    pub block_cache_method: block::CacheMethod,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
@@ -183,14 +195,20 @@ impl Grpc {
             &labels
         );
 
-        let block_cache = block::Cache::fixed(
-            &mut rng,
+        let total_bytes =
             NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
-                .expect("bytes must be non-zero"),
-            &block_sizes,
-            &config.variant,
-            &labels,
-        )?;
+                .expect("bytes must be non-zero");
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Streaming => block::Cache::stream(
+                config.seed,
+                total_bytes,
+                &block_sizes,
+                config.variant.clone(),
+            )?,
+            block::CacheMethod::Fixed => {
+                block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
+            }
+        };
 
         let target_uri =
             http::uri::Uri::try_from(config.target_uri.clone()).expect("target_uri must be valid");
@@ -264,7 +282,12 @@ impl Grpc {
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
 
-        let mut block_cache = self.block_cache;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let rpc_path = self.rpc_path;
 
         let requests_sent = register_counter!("requests_sent", &self.metric_labels);
@@ -273,14 +296,14 @@ impl Grpc {
         let response_bytes = register_counter!("response_bytes", &self.metric_labels);
 
         loop {
-            let blk = block_cache.peek().unwrap();
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     requests_sent.increment(1);
-                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),

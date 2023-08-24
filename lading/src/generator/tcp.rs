@@ -14,6 +14,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::{NonZeroU32, NonZeroUsize},
+    thread,
 };
 
 use byte_unit::{Byte, ByteUnit};
@@ -21,10 +22,14 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
 use tracing::{info, trace};
 
-use crate::{block, signals::Shutdown};
+use crate::{
+    block::{self, Block},
+    common::PeekableReceiver,
+    signals::Shutdown,
+};
 
 use super::General;
 
@@ -48,12 +53,15 @@ pub struct Config {
     pub throttle: lading_throttle::Config,
 }
 
-#[derive(thiserror::Error, Debug, Clone, Copy)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Tcp`].
 pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// IO error
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug)]
@@ -121,7 +129,6 @@ impl Tcp {
                 .expect("bytes must be non-zero"),
             &block_sizes,
             &config.variant,
-            &labels,
         )?;
 
         let addr = config
@@ -150,13 +157,18 @@ impl Tcp {
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
         let mut connection = None;
-        let mut block_cache = self.block_cache;
+        // Move the block_cache into an OS thread, exposing a channel between it
+        // and this async context.
+        let block_cache = self.block_cache;
+        let (snd, rcv) = mpsc::channel(1024);
+        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
+        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = block_cache.peek().unwrap();
+            let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -177,7 +189,7 @@ impl Tcp {
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let mut client = connection.unwrap();
-                    let blk = block_cache.next().unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
                     match client.write_all(&blk.bytes).await {
                         Ok(()) => {
                             bytes_written.increment(u64::from(blk.total_bytes.get()));
