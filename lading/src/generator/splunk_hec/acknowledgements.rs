@@ -1,10 +1,11 @@
 use core::slice;
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use futures::Future;
 use http::{header::AUTHORIZATION, Method, Request, StatusCode, Uri};
 use hyper::{client::HttpConnector, Body, Client};
 use metrics::counter;
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -130,7 +131,7 @@ impl AckService {
     /// to check on a particular Splunk channel's ack id statuses. The task
     /// receives new ack ids from [`super::worker::Worker`]
     pub(crate) async fn spin<'a>(self, channel_id: String, mut ack_rx: Receiver<AckId>) {
-        let mut ack_ids: HashMap<AckId, u64> = HashMap::new();
+        let mut ack_ids: FxHashMap<AckId, u64> = FxHashMap::default();
         let mut interval = tokio::time::interval(Duration::from_secs(
             self.ack_settings.ack_query_interval_seconds,
         ));
@@ -182,7 +183,7 @@ async fn ack_request(
     client: Client<HttpConnector>,
     request: Request<Body>,
     channel_id: String,
-    ack_ids: &mut HashMap<AckId, u64>,
+    ack_ids: &mut FxHashMap<AckId, u64>,
 ) {
     match client.request(request).await {
         Ok(response) => {
@@ -229,5 +230,5 @@ async fn ack_request(
 
 #[derive(Deserialize, Debug)]
 struct HecAckStatusResponse {
-    acks: HashMap<AckId, bool>,
+    acks: FxHashMap<AckId, bool>,
 }

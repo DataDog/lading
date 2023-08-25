@@ -16,7 +16,6 @@
 //! watched process terminates early.
 
 use std::{
-    collections::HashMap,
     io,
     num::NonZeroU32,
     path::PathBuf,
@@ -30,6 +29,7 @@ use nix::{
     sys::signal::{kill, SIGTERM},
     unistd::Pid,
 };
+use rustc_hash::FxHashMap;
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -138,7 +138,7 @@ pub struct BinaryConfig {
     /// Environment variables to set for the target sub-process. Lading's own
     /// environment variables are only propagated to the target sub-process if
     /// `inherit_environment` is set.
-    pub environment_variables: HashMap<String, String>,
+    pub environment_variables: FxHashMap<String, String>,
     /// Manages stderr, stdout of the target sub-process.
     pub output: Output,
 }

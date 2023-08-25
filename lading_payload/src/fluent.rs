@@ -2,9 +2,10 @@
 //!
 //! Implements [this
 //! protocol](https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1).
-use std::{collections::HashMap, io::Write};
+use std::io::Write;
 
 use rand::Rng;
+use rustc_hash::FxHashMap;
 use serde_tuple::Serialize_tuple;
 
 use crate::{common::strings, Error, Generator};
@@ -36,7 +37,7 @@ impl<'a> Generator<'a> for Fluent {
     {
         match rng.gen_range(0..2) {
             0 => {
-                let mut rec = HashMap::new();
+                let mut rec = FxHashMap::default();
                 rec.insert("message", record_value(rng, &self.str_pool));
                 for _ in 0..rng.gen_range(0..128) {
                     let key = self.str_pool.of_size_range(rng, 1_u8..16).unwrap();
@@ -52,7 +53,7 @@ impl<'a> Generator<'a> for Fluent {
             1 => {
                 let mut entries = Vec::with_capacity(32);
                 for _ in 0..32 {
-                    let mut rec = HashMap::new();
+                    let mut rec = FxHashMap::default();
                     rec.insert("message", record_value(rng, &self.str_pool));
                     rec.insert("event", record_value(rng, &self.str_pool));
                     for _ in 0..rng.gen_range(0..128) {
@@ -87,7 +88,7 @@ pub(crate) enum Member<'a> {
 pub(crate) struct FluentMessage<'a> {
     tag: &'a str,
     time: u32,
-    record: HashMap<&'a str, RecordValue<'a>>, // always contains 'message' key
+    record: FxHashMap<&'a str, RecordValue<'a>>, // always contains 'message' key
 }
 
 #[derive(Serialize_tuple)]
@@ -100,7 +101,7 @@ pub(crate) struct FluentForward<'a> {
 #[serde(untagged)]
 enum RecordValue<'a> {
     String(&'a str),
-    Object(HashMap<&'a str, u8>),
+    Object(FxHashMap<&'a str, u8>),
 }
 
 fn record_value<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> RecordValue<'a>
@@ -110,7 +111,7 @@ where
     match rng.gen_range(0..2) {
         0 => RecordValue::String(str_pool.of_size_range(rng, 1_u8..16).unwrap()),
         1 => {
-            let mut obj = HashMap::new();
+            let mut obj = FxHashMap::default();
             for _ in 0..rng.gen_range(0..128) {
                 let key = str_pool.of_size_range(rng, 1_u8..16).unwrap();
                 let val = rng.gen();
@@ -126,7 +127,7 @@ where
 #[derive(Serialize_tuple)]
 struct Entry<'a> {
     time: u32,
-    record: HashMap<&'a str, RecordValue<'a>>, // always contains 'message' and 'event' -> object key
+    record: FxHashMap<&'a str, RecordValue<'a>>, // always contains 'message' and 'event' -> object key
 }
 
 impl crate::Serialize for Fluent {

@@ -22,9 +22,10 @@ use rand::{
     rngs::StdRng,
     seq::SliceRandom,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{vec_deque, HashMap, HashSet, VecDeque},
+    collections::{vec_deque, VecDeque},
     env, error, fmt,
     iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
@@ -173,8 +174,8 @@ pub struct GenerateEnvs {
 impl StaticEnvs {
     #[must_use]
     /// return environment variables as a hashmap
-    pub fn to_hash(&self) -> HashMap<String, String> {
-        let mut envs: HashMap<String, String> = HashMap::new();
+    pub fn to_map(&self) -> FxHashMap<String, String> {
+        let mut envs: FxHashMap<String, String> = FxHashMap::default();
         for env in &self.values {
             if let Some(kv) = env.split_once('=') {
                 envs.insert(kv.0.to_string(), kv.1.to_string());
@@ -343,11 +344,11 @@ fn gen_rnd_args(rng: &mut StdRng, len: usize, max: u32) -> Vec<String> {
 }
 
 #[inline]
-fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> HashMap<String, String> {
+fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> FxHashMap<String, String> {
     let key_size = len / 2;
     let value_size = len - key_size;
 
-    let mut envs = HashMap::new();
+    let mut envs = FxHashMap::default();
     for _ in 0..max {
         let key = rnd_str(rng, key_size);
         let value = rnd_str(rng, value_size);
@@ -361,7 +362,7 @@ fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> HashMap<String, Strin
 pub struct Exec {
     executable: String,
     args: Vec<String>,
-    envs: HashMap<String, String>,
+    envs: FxHashMap<String, String>,
 }
 
 impl Exec {
@@ -374,7 +375,7 @@ impl Exec {
         };
 
         let envs = match &exec.envs {
-            Envs::Static(params) => params.to_hash(),
+            Envs::Static(params) => params.to_map(),
             Envs::Generate(params) => gen_rnd_envs(rng, params.length.get(), params.count.get()),
         };
 
@@ -407,7 +408,7 @@ impl Process {
 ///
 pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
     let mut iter = nodes.iter().peekable();
-    let mut pids_to_wait: HashSet<Pid> = HashSet::new();
+    let mut pids_to_wait: FxHashSet<Pid> = FxHashSet::default();
     let mut depth = 0;
 
     loop {
@@ -458,7 +459,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
 }
 
 #[inline]
-fn try_wait_pid(pids: &mut HashSet<Pid>) {
+fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
     let mut exited: Option<Pid> = None;
 
     for pid in pids.iter() {

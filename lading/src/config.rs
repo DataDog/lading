@@ -1,8 +1,9 @@
 //! This module controls configuration parsing from the end user, providing a
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf};
 
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 
 use crate::{blackhole, generator, inspector, observer, target, target_metrics};
@@ -46,7 +47,7 @@ pub enum Telemetry {
         /// Address and port for prometheus exporter
         prometheus_addr: SocketAddr,
         /// Additional labels to include in every metric
-        global_labels: HashMap<String, String>,
+        global_labels: FxHashMap<String, String>,
     },
     /// In log mode lading will emit its internal telemetry to a structured log
     /// file, the "capture" file.
@@ -54,7 +55,7 @@ pub enum Telemetry {
         /// Location on disk to write captures
         path: PathBuf,
         /// Additional labels to include in every metric
-        global_labels: HashMap<String, String>,
+        global_labels: FxHashMap<String, String>,
     },
 }
 
@@ -62,7 +63,7 @@ impl Default for Telemetry {
     fn default() -> Self {
         Self::Prometheus {
             prometheus_addr: "0.0.0.0:9000".parse().unwrap(),
-            global_labels: HashMap::default(),
+            global_labels: FxHashMap::default(),
         }
     }
 }
