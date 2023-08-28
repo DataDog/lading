@@ -4,9 +4,10 @@
 //! software.
 //!
 
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use metrics::{counter, gauge};
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
@@ -107,7 +108,7 @@ impl Prometheus {
                 };
 
                 // remember the type for each metric across lines
-                let mut typemap = HashMap::new();
+                let mut typemap = FxHashMap::default();
 
                 // this deserves a real parser, but this will do for now.
                 // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md

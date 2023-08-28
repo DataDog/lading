@@ -1057,6 +1057,7 @@ version = "0.1.1"
 dependencies = [
  "prost",
  "prost-build",
+ "rustc-hash",
  "serde",
  "serde_json",
  "uuid",
@@ -1073,6 +1074,7 @@ dependencies = [
  "prost",
  "rand",
  "rmp-serde",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_tuple",

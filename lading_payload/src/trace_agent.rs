@@ -1,9 +1,10 @@
 //! Trace-agent payload.
 
-use std::{collections::HashMap, io::Write};
+use std::io::Write;
 
 use rand::{seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
+use rustc_hash::FxHashMap;
 
 use crate::{common::strings, Error, Generator};
 use serde::Serialize;
@@ -92,14 +93,14 @@ pub(crate) struct Span<'a> {
     /// error is 1 if there is an error associated with this span, or 0 if there is not.
     error: i32,
     /// meta is a mapping from tag name to tag value for string-valued tags.
-    meta: HashMap<&'a str, &'a str>,
+    meta: FxHashMap<&'a str, &'a str>,
     /// metrics is a mapping from tag name to tag value for numeric-valued tags.
-    metrics: HashMap<&'a str, f64>,
+    metrics: FxHashMap<&'a str, f64>,
     /// type is the type of the service with which this span is associated.  Example values: web, db, lambda.
     #[serde(alias = "type")]
     kind: &'a str,
     /// meta_struct is a registry of structured "other" data used by, e.g., AppSec.
-    meta_struct: HashMap<&'a str, Vec<u8>>,
+    meta_struct: FxHashMap<&'a str, Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -155,7 +156,7 @@ impl<'a> Generator<'a> for TraceAgent {
         R: rand::Rng + ?Sized,
     {
         let total_metrics = rng.gen_range(0..6);
-        let mut metrics: HashMap<&'static str, f64> = HashMap::new();
+        let mut metrics: FxHashMap<&'static str, f64> = FxHashMap::default();
         for _ in 0..total_metrics {}
         for k in TAG_NAMES.choose_multiple(rng, total_metrics) {
             metrics.insert(*k, rng.gen());
@@ -174,10 +175,10 @@ impl<'a> Generator<'a> for TraceAgent {
             start: rng.gen(),
             duration: rng.gen(),
             error: rng.gen_range(0..=1),
-            meta: HashMap::new(),
+            meta: FxHashMap::default(),
             metrics,
             kind: SERVICE_KIND.choose(rng).unwrap(),
-            meta_struct: HashMap::new(),
+            meta_struct: FxHashMap::default(),
         }
     }
 }

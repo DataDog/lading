@@ -9,7 +9,6 @@
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
     ffi::OsStr,
     io,
     path::PathBuf,
@@ -19,6 +18,7 @@ use std::{
 
 use lading_capture::json;
 use metrics_util::registry::{AtomicStorage, Registry};
+use rustc_hash::FxHashMap;
 use tokio::{
     fs::File,
     io::{AsyncWriteExt, BufWriter},
@@ -46,7 +46,7 @@ pub struct CaptureManager {
     capture_path: PathBuf,
     shutdown: Shutdown,
     inner: Arc<Inner>,
-    global_labels: HashMap<String, String>,
+    global_labels: FxHashMap<String, String>,
 }
 
 impl CaptureManager {
@@ -66,7 +66,7 @@ impl CaptureManager {
             inner: Arc::new(Inner {
                 registry: Registry::atomic(),
             }),
-            global_labels: HashMap::new(),
+            global_labels: FxHashMap::default(),
         }
     }
 

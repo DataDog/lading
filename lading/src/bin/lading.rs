@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     env,
     fmt::{self, Display},
     io::Read,
@@ -13,10 +12,7 @@ use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator::{
-        self,
-        process_tree::{self},
-    },
+    generator::{self, process_tree},
     inspector, observer,
     signals::Shutdown,
     target::{self, Behavior, Output},
@@ -24,6 +20,7 @@ use lading::{
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{rngs::StdRng, SeedableRng};
+use rustc_hash::FxHashMap;
 use tokio::{
     runtime::Builder,
     signal,
@@ -42,7 +39,7 @@ fn default_target_behavior() -> Behavior {
 
 #[derive(Default, Clone)]
 struct CliKeyValues {
-    inner: HashMap<String, String>,
+    inner: FxHashMap<String, String>,
 }
 
 impl Display for CliKeyValues {
@@ -59,7 +56,7 @@ impl FromStr for CliKeyValues {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let pair_err = String::from("pairs must be separated by '='");
-        let mut labels = HashMap::new();
+        let mut labels = FxHashMap::default();
         for kv in input.split(',') {
             if kv.is_empty() {
                 continue;

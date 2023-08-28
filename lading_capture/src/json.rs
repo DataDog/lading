@@ -1,8 +1,9 @@
 //! JSON form of a Lading capture Line, meant to be read line by line from a
 //! file.
 
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -59,7 +60,7 @@ pub struct Line<'a> {
     pub value: LineValue,
     #[serde(flatten)]
     /// The labels associated with this metric.
-    pub labels: HashMap<String, String>,
+    pub labels: FxHashMap<String, String>,
 }
 
 impl<'a> Line<'a> {

@@ -9,7 +9,6 @@
 //! run an appropriate shell script, or take samples of the target's CPU use.
 
 use std::{
-    collections::HashMap,
     io,
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -20,6 +19,7 @@ use nix::{
     sys::signal::{kill, SIGTERM},
     unistd::Pid,
 };
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tokio::process::Command;
 use tracing::{error, info};
@@ -49,7 +49,7 @@ pub struct Config {
     pub arguments: Vec<String>,
     /// Environment variables to set for the inspector sub-process. Lading's own
     /// environment variables are not propagated to the sub-process.
-    pub environment_variables: HashMap<String, String>,
+    pub environment_variables: FxHashMap<String, String>,
     /// Manages stderr, stdout of the inspector sub-process.
     pub output: Output,
 }

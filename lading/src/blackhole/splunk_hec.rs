@@ -7,7 +7,6 @@
 //!
 
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -22,6 +21,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, Server, StatusCode,
 };
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{error, info};
@@ -60,7 +60,7 @@ struct HecAckRequest {
 
 #[derive(Serialize)]
 struct HecAckResponse {
-    acks: HashMap<u64, bool>,
+    acks: FxHashMap<u64, bool>,
 }
 
 impl From<HecAckRequest> for HecAckResponse {
