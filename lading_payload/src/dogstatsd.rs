@@ -531,8 +531,8 @@ mod test {
             contexts_maximum, contexts_minimum, multivalue_count_maximum, multivalue_count_minimum,
             multivalue_pack_probability, name_length_maximum, name_length_minimum,
             tag_key_length_maximum, tag_key_length_minimum, tag_value_length_maximum,
-            tag_value_length_minimum, tags_per_msg_maximum, tags_per_msg_minimum, KindWeights,
-            MetricWeights,
+            tag_value_length_minimum, tags_per_msg_maximum, tags_per_msg_minimum, value_maximum,
+            value_minimum, KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -551,11 +551,14 @@ mod test {
             let tags_per_msg_range = tags_per_msg_minimum()..tags_per_msg_maximum();
             let multivalue_count_range = multivalue_count_minimum()..multivalue_count_maximum();
             let multivalue_pack_probability = multivalue_pack_probability();
+            let num_value_range = value_minimum()..value_maximum();
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(context_range, name_length_range, tag_key_length_range, tag_value_length_range, tags_per_msg_range, multivalue_count_range, multivalue_pack_probability, kind_weights,
-                                           metric_weights, &mut rng);
+            let dogstatsd = DogStatsD::new(context_range, name_length_range, tag_key_length_range,
+                                           tag_value_length_range, tags_per_msg_range,
+                                           multivalue_count_range, multivalue_pack_probability, kind_weights,
+                                           metric_weights, num_value_range, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
