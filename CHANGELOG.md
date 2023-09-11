@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.1-rc1]
+### Added
+- It is now possible for users to configure the range of DogStatsD payloads
+  values. Previously the range was 64-bits wide.
+
 ## [0.18.1-rc0]
 ### Added
 - `lading-payload` crate is now split out from the `lading` crate
