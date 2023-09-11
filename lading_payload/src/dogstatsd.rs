@@ -19,11 +19,11 @@ mod event;
 mod metric;
 mod service_check;
 
-fn contexts_minimum() -> u16 {
+fn contexts_minimum() -> u32 {
     5000
 }
 
-fn contexts_maximum() -> u16 {
+fn contexts_maximum() -> u32 {
     10_000
 }
 
@@ -124,12 +124,12 @@ pub struct Config {
     /// Minimum number of unique metric contexts to generate
     /// A context is a set of unique metric name + tags
     #[serde(default = "contexts_minimum")]
-    pub contexts_minimum: u16,
+    pub contexts_minimum: u32,
 
     /// Maximum number of unique metric contexts to generate
     /// A context is a set of unique metric name + tags
     #[serde(default = "contexts_maximum")]
-    pub contexts_maximum: u16,
+    pub contexts_maximum: u32,
 
     /// Minimum length for a dogstatsd message name
     #[serde(default = "name_length_minimum")]
@@ -263,7 +263,7 @@ struct MemberGenerator {
 impl MemberGenerator {
     #[allow(clippy::too_many_arguments)]
     fn new<R>(
-        context_range: Range<u16>,
+        context_range: Range<u32>,
         name_length_range: Range<u16>,
         tag_key_length_range: Range<u16>,
         tag_value_length_range: Range<u16>,
@@ -445,7 +445,7 @@ impl DogStatsD {
     /// Create a new instance of `DogStatsD`.
     #[allow(clippy::too_many_arguments)]
     pub fn new<R>(
-        context_range: Range<u16>,
+        context_range: Range<u32>,
         name_length_range: Range<u16>,
         tag_key_length_range: Range<u16>,
         tag_value_length_range: Range<u16>,
