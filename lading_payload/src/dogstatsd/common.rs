@@ -1,6 +1,12 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{
+    distributions::{Standard, Uniform},
+    prelude::Distribution,
+    Rng,
+};
+
+use crate::Generator;
 
 pub(crate) mod tags;
 
@@ -10,14 +16,32 @@ pub(crate) enum NumValue {
     Int(i64),
 }
 
-impl Distribution<NumValue> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> NumValue
+#[derive(Clone, Debug)]
+pub(crate) struct NumValueGenerator {
+    float_distr: Uniform<f64>,
+    int_distr: Uniform<i64>,
+}
+
+impl NumValueGenerator {
+    #[allow(clippy::cast_possible_truncation)]
+    pub(crate) fn new(range: Range<f64>) -> Self {
+        Self {
+            float_distr: Uniform::new(range.start, range.end),
+            int_distr: Uniform::new(range.start as i64, range.end as i64),
+        }
+    }
+}
+
+impl<'a> Generator<'a> for NumValueGenerator {
+    type Output = NumValue;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
     {
         match rng.gen_range(0..=1) {
-            0 => NumValue::Float(rng.gen()),
-            1 => NumValue::Int(rng.gen()),
+            0 => NumValue::Float(self.float_distr.sample(rng)),
+            1 => NumValue::Int(self.int_distr.sample(rng)),
             _ => unreachable!(),
         }
     }

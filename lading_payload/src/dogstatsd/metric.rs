@@ -1,7 +1,7 @@
 use std::{fmt, ops::Range};
 
 use rand::{
-    distributions::{OpenClosed01, Standard, WeightedIndex},
+    distributions::{OpenClosed01, WeightedIndex},
     prelude::{Distribution, SliceRandom},
     Rng,
 };
@@ -9,7 +9,10 @@ use rand::{
 use crate::{common::strings, dogstatsd::metric::template::Template, Generator};
 use tracing::debug;
 
-use super::{choose_or_not_ref, common};
+use super::{
+    choose_or_not_ref,
+    common::{self, NumValueGenerator},
+};
 
 mod template;
 
@@ -19,6 +22,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count_range: Range<u16>,
     pub(crate) multivalue_pack_probability: f32,
+    pub(crate) num_value_generator: NumValueGenerator,
 }
 
 impl MetricGenerator {
@@ -32,6 +36,7 @@ impl MetricGenerator {
         container_ids: Vec<String>,
         tagsets: common::tags::Tagsets,
         str_pool: &strings::Pool,
+        num_value_range: Range<f64>,
         mut rng: &mut R,
     ) -> Self
     where
@@ -65,6 +70,7 @@ impl MetricGenerator {
             templates,
             multivalue_count_range,
             multivalue_pack_probability,
+            num_value_generator: NumValueGenerator::new(num_value_range),
         }
     }
 }
@@ -88,14 +94,14 @@ impl<'a> Generator<'a> for MetricGenerator {
         let sample_rate = rng.gen();
 
         let mut values = Vec::with_capacity(self.multivalue_count_range.end as usize);
-        let value: common::NumValue = Standard.sample(&mut rng);
+        let value: common::NumValue = self.num_value_generator.generate(&mut rng);
         values.push(value);
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
         if prob < self.multivalue_pack_probability {
             let num_desired_values = rng.gen_range(self.multivalue_count_range.clone());
             for _ in 1..num_desired_values {
-                values.push(Standard.sample(&mut rng));
+                values.push(self.num_value_generator.generate(&mut rng));
             }
         }
 

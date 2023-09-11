@@ -27,6 +27,14 @@ fn contexts_maximum() -> u16 {
     10_000
 }
 
+fn value_minimum() -> f64 {
+    f64::MIN
+}
+
+fn value_maximum() -> f64 {
+    f64::MAX
+}
+
 // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
 fn name_length_minimum() -> u16 {
     1
@@ -184,9 +192,18 @@ pub struct Config {
     /// payload.
     #[serde(default)]
     pub kind_weights: KindWeights,
+
     /// Defines the relative probability of each kind of DogStatsD metric.
     #[serde(default)]
     pub metric_weights: MetricWeights,
+
+    /// The minimum value to appear in metrics.
+    #[serde(default = "value_minimum")]
+    pub value_minimum: f64,
+
+    /// The maximum value to appear in metrics.
+    #[serde(default = "value_maximum")]
+    pub value_maximum: f64,
 }
 
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
@@ -272,6 +289,7 @@ impl MemberGenerator {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
+        num_value_range: Range<f64>,
         mut rng: &mut R,
     ) -> Self
     where
@@ -343,6 +361,7 @@ impl MemberGenerator {
             small_strings,
             tagsets.clone(),
             pool.as_ref(),
+            num_value_range,
             &mut rng,
         );
 
@@ -425,6 +444,7 @@ impl DogStatsD {
             multivalue_pack_probability(),
             KindWeights::default(),
             MetricWeights::default(),
+            value_minimum()..value_maximum(),
             rng,
         )
     }
@@ -454,6 +474,7 @@ impl DogStatsD {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
+        num_value_range: Range<f64>,
         rng: &mut R,
     ) -> Self
     where
@@ -469,6 +490,7 @@ impl DogStatsD {
             multivalue_pack_probability,
             kind_weights,
             metric_weights,
+            num_value_range,
             rng,
         );
 
