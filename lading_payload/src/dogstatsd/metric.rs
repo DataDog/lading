@@ -36,7 +36,7 @@ impl MetricGenerator {
         container_ids: Vec<String>,
         tagsets: common::tags::Tagsets,
         str_pool: &strings::Pool,
-        num_value_range: Range<f64>,
+        num_value_range: Range<i64>,
         mut rng: &mut R,
     ) -> Self
     where

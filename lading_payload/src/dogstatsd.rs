@@ -27,12 +27,12 @@ fn contexts_maximum() -> u16 {
     10_000
 }
 
-fn value_minimum() -> f64 {
-    -2_f64.powi(63)
+fn value_minimum() -> i64 {
+    i64::MIN
 }
 
-fn value_maximum() -> f64 {
-    2_f64.powi(63)
+fn value_maximum() -> i64 {
+    i64::MAX
 }
 
 // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
@@ -199,11 +199,11 @@ pub struct Config {
 
     /// The minimum value to appear in metrics.
     #[serde(default = "value_minimum")]
-    pub value_minimum: f64,
+    pub value_minimum: i64,
 
     /// The maximum value to appear in metrics.
     #[serde(default = "value_maximum")]
-    pub value_maximum: f64,
+    pub value_maximum: i64,
 }
 
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
@@ -289,7 +289,7 @@ impl MemberGenerator {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        num_value_range: Range<f64>,
+        num_value_range: Range<i64>,
         mut rng: &mut R,
     ) -> Self
     where
@@ -474,7 +474,7 @@ impl DogStatsD {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        num_value_range: Range<f64>,
+        num_value_range: Range<i64>,
         rng: &mut R,
     ) -> Self
     where

@@ -12,22 +12,19 @@ pub(crate) mod tags;
 
 #[derive(Clone, Debug)]
 pub(crate) enum NumValue {
-    Float(f64),
     Int(i64),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct NumValueGenerator {
-    float_distr: Uniform<f64>,
     int_distr: Uniform<i64>,
 }
 
 impl NumValueGenerator {
     #[allow(clippy::cast_possible_truncation)]
-    pub(crate) fn new(range: Range<f64>) -> Self {
+    pub(crate) fn new(range: Range<i64>) -> Self {
         Self {
-            float_distr: Uniform::new(range.start, range.end),
-            int_distr: Uniform::new(range.start as i64, range.end as i64),
+            int_distr: Uniform::new_inclusive(range.start, range.end),
         }
     }
 }
@@ -39,18 +36,13 @@ impl<'a> Generator<'a> for NumValueGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        match rng.gen_range(0..=1) {
-            0 => NumValue::Float(self.float_distr.sample(rng)),
-            1 => NumValue::Int(self.int_distr.sample(rng)),
-            _ => unreachable!(),
-        }
+        NumValue::Int(self.int_distr.sample(rng))
     }
 }
 
 impl fmt::Display for NumValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Float(val) => write!(f, "{val}"),
             Self::Int(val) => write!(f, "{val}"),
         }
     }
