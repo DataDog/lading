@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.18.1-rc1"
+version = "0.18.1-rc2"
 dependencies = [
  "async-pidfd",
  "byte-unit",

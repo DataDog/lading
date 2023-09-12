@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.1-rc2]
+### Fixed
+- DogStatsD value min/max is now 2**63 symmetric. This avoids a range issue in the `rand` crate.
+
 ## [0.18.1-rc1]
 ### Added
 - It is now possible for users to configure the range of DogStatsD payloads
