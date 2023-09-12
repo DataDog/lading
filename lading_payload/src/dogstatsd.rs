@@ -28,11 +28,11 @@ fn contexts_maximum() -> u16 {
 }
 
 fn value_minimum() -> f64 {
-    f64::MIN
+    -2_f64.powi(63)
 }
 
 fn value_maximum() -> f64 {
-    f64::MAX
+    2_f64.powi(63)
 }
 
 // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
