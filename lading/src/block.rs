@@ -155,8 +155,7 @@ impl Cache {
                 multivalue_count_maximum,
                 kind_weights,
                 metric_weights,
-                value_minimum,
-                value_maximum,
+                value,
             }) => {
                 let context_range = *contexts_minimum..*contexts_maximum;
                 let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
@@ -175,7 +174,7 @@ impl Cache {
                     *multivalue_pack_probability,
                     *kind_weights,
                     *metric_weights,
-                    *value_minimum..*value_maximum,
+                    *value,
                     &mut rng,
                 );
 
@@ -289,8 +288,7 @@ fn stream_inner(
             multivalue_count_maximum,
             kind_weights,
             metric_weights,
-            value_minimum,
-            value_maximum,
+            value,
         }) => {
             let context_range = *contexts_minimum..*contexts_maximum;
             let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
@@ -309,7 +307,7 @@ fn stream_inner(
                 *multivalue_pack_probability,
                 *kind_weights,
                 *metric_weights,
-                *value_minimum..*value_maximum,
+                *value,
                 &mut rng,
             );
 

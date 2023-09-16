@@ -27,12 +27,14 @@ fn contexts_maximum() -> u16 {
     10_000
 }
 
-fn value_minimum() -> i64 {
-    i64::MIN
-}
-
-fn value_maximum() -> i64 {
-    i64::MAX
+fn value_config() -> ValueConf {
+    ValueConf {
+        float_weight: 128, // 50%
+        range: ValueRange::Inclusive {
+            min: i64::MIN,
+            max: i64::MAX,
+        },
+    }
 }
 
 // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
@@ -126,6 +128,29 @@ impl Default for MetricWeights {
     }
 }
 
+/// Configuration for the values of a metric.
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+pub struct ValueConf {
+    /// Odds out of 256 that the value will be a float and not an integer.
+    float_weight: u8,
+    range: ValueRange,
+}
+
+/// Configuration for the values range of a metric.
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+pub enum ValueRange {
+    /// Metric values are always constant.
+    Constant(i64),
+    /// Metric values are uniformly distributed between min and max, inclusive
+    /// of max.
+    Inclusive {
+        /// The minimum of the range.
+        min: i64,
+        /// The maximum of the range.
+        max: i64,
+    },
+}
+
 /// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 pub struct Config {
@@ -197,13 +222,9 @@ pub struct Config {
     #[serde(default)]
     pub metric_weights: MetricWeights,
 
-    /// The minimum value to appear in metrics.
-    #[serde(default = "value_minimum")]
-    pub value_minimum: i64,
-
-    /// The maximum value to appear in metrics.
-    #[serde(default = "value_maximum")]
-    pub value_maximum: i64,
+    /// The configuration of values that appear in all metrics.
+    #[serde(default = "value_config")]
+    pub value: ValueConf,
 }
 
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
@@ -289,7 +310,7 @@ impl MemberGenerator {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        num_value_range: Range<i64>,
+        value_conf: ValueConf,
         mut rng: &mut R,
     ) -> Self
     where
@@ -361,7 +382,7 @@ impl MemberGenerator {
             small_strings,
             tagsets.clone(),
             pool.as_ref(),
-            num_value_range,
+            value_conf,
             &mut rng,
         );
 
@@ -444,7 +465,7 @@ impl DogStatsD {
             multivalue_pack_probability(),
             KindWeights::default(),
             MetricWeights::default(),
-            value_minimum()..value_maximum(),
+            value_config(),
             rng,
         )
     }
@@ -474,7 +495,7 @@ impl DogStatsD {
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
-        num_value_range: Range<i64>,
+        value_conf: ValueConf,
         rng: &mut R,
     ) -> Self
     where
@@ -490,7 +511,7 @@ impl DogStatsD {
             multivalue_pack_probability,
             kind_weights,
             metric_weights,
-            num_value_range,
+            value_conf,
             rng,
         );
 
@@ -531,8 +552,8 @@ mod test {
             contexts_maximum, contexts_minimum, multivalue_count_maximum, multivalue_count_minimum,
             multivalue_pack_probability, name_length_maximum, name_length_minimum,
             tag_key_length_maximum, tag_key_length_minimum, tag_value_length_maximum,
-            tag_value_length_minimum, tags_per_msg_maximum, tags_per_msg_minimum, value_maximum,
-            value_minimum, KindWeights, MetricWeights,
+            tag_value_length_minimum, tags_per_msg_maximum, tags_per_msg_minimum, value_config,
+            KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -551,14 +572,14 @@ mod test {
             let tags_per_msg_range = tags_per_msg_minimum()..tags_per_msg_maximum();
             let multivalue_count_range = multivalue_count_minimum()..multivalue_count_maximum();
             let multivalue_pack_probability = multivalue_pack_probability();
-            let num_value_range = value_minimum()..value_maximum();
+            let value_conf = value_config();
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
             let dogstatsd = DogStatsD::new(context_range, name_length_range, tag_key_length_range,
                                            tag_value_length_range, tags_per_msg_range,
                                            multivalue_count_range, multivalue_pack_probability, kind_weights,
-                                           metric_weights, num_value_range, &mut rng);
+                                           metric_weights, value_conf, &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

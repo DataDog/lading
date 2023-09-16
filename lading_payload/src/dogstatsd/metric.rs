@@ -12,6 +12,7 @@ use tracing::debug;
 use super::{
     choose_or_not_ref,
     common::{self, NumValueGenerator},
+    ValueConf,
 };
 
 mod template;
@@ -36,7 +37,7 @@ impl MetricGenerator {
         container_ids: Vec<String>,
         tagsets: common::tags::Tagsets,
         str_pool: &strings::Pool,
-        num_value_range: Range<i64>,
+        value_conf: ValueConf,
         mut rng: &mut R,
     ) -> Self
     where
@@ -70,7 +71,7 @@ impl MetricGenerator {
             templates,
             multivalue_count_range,
             multivalue_pack_probability,
-            num_value_generator: NumValueGenerator::new(num_value_range),
+            num_value_generator: NumValueGenerator::new(value_conf),
         }
     }
 }
