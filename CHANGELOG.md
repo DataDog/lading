@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.1-rc4]
+### Changed
+- The int-only experiment is now reverted.
+- Configuration for numeric values now explicitly allows constant values.
+
 ## [0.18.1-rc3]
 ### Changed
 - DogStatsD NumValue is now int-only for experimental purposes, range is also made inclusive. The inclusivity will remain.
