@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.18.1-rc5]
+### Changed
+- Capitalization is renamed to snake-case in value configuration.
+
 ## [0.18.1-rc4]
 ### Changed
 - The int-only experiment is now reverted.

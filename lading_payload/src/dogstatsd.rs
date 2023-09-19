@@ -138,6 +138,7 @@ pub struct ValueConf {
 
 /// Configuration for the values range of a metric.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[serde(rename_all = "snake_case")]
 pub enum ValueRange {
     /// Metric values are always constant.
     Constant(i64),
