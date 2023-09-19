@@ -1,7 +1,7 @@
 use std::fmt;
 
 use rand::{
-    distributions::{Standard, Uniform},
+    distributions::{OpenClosed01, Standard, Uniform},
     prelude::Distribution,
     Rng,
 };
@@ -21,12 +21,12 @@ pub(crate) enum NumValue {
 #[derive(Clone, Debug)]
 pub(crate) enum NumValueGenerator {
     Constant {
-        float_weight: u8,
+        float_probability: f32,
         int: i64,
         float: f64,
     },
     Uniform {
-        float_weight: u8,
+        float_probability: f32,
         int_distr: Uniform<i64>,
         float_distr: Uniform<f64>,
     },
@@ -37,12 +37,12 @@ impl NumValueGenerator {
     pub(crate) fn new(conf: ValueConf) -> Self {
         match conf.range {
             ValueRange::Constant(c) => Self::Constant {
-                float_weight: conf.float_weight,
+                float_probability: conf.float_probability,
                 int: c,
                 float: c as f64,
             },
             ValueRange::Inclusive { min, max } => Self::Uniform {
-                float_weight: conf.float_weight,
+                float_probability: conf.float_probability,
                 int_distr: Uniform::new_inclusive(min, max),
                 float_distr: Uniform::new_inclusive(min as f64, max as f64),
             },
@@ -57,24 +57,25 @@ impl<'a> Generator<'a> for NumValueGenerator {
     where
         R: rand::Rng + ?Sized,
     {
+        let prob: f32 = OpenClosed01.sample(rng);
         match self {
             Self::Constant {
-                float_weight,
+                float_probability,
                 int,
                 float,
             } => {
-                if rng.gen_ratio(u32::from(*float_weight), 256) {
+                if prob < *float_probability {
                     NumValue::Float(*float)
                 } else {
                     NumValue::Int(*int)
                 }
             }
             Self::Uniform {
-                float_weight,
+                float_probability,
                 int_distr,
                 float_distr,
             } => {
-                if rng.gen_ratio(u32::from(*float_weight), 256) {
+                if prob < *float_probability {
                     NumValue::Float(float_distr.sample(rng))
                 } else {
                     NumValue::Int(int_distr.sample(rng))

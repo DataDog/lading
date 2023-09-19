@@ -29,7 +29,7 @@ fn contexts_maximum() -> u16 {
 
 fn value_config() -> ValueConf {
     ValueConf {
-        float_weight: 128, // 50%
+        float_probability: 0.5, // 50%
         range: ValueRange::Inclusive {
             min: i64::MIN,
             max: i64::MAX,
@@ -132,7 +132,7 @@ impl Default for MetricWeights {
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 pub struct ValueConf {
     /// Odds out of 256 that the value will be a float and not an integer.
-    float_weight: u8,
+    float_probability: f32,
     range: ValueRange,
 }
 
