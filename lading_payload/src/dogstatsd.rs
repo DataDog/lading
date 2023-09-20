@@ -32,13 +32,7 @@ fn contexts() -> ConfRange<u32> {
 }
 
 fn value_config() -> ValueConf {
-    ValueConf {
-        float_probability: 0.5, // 50%
-        range: ConfRange::Inclusive {
-            min: i64::MIN,
-            max: i64::MAX,
-        },
-    }
+    ValueConf::default()
 }
 
 // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
@@ -120,6 +114,17 @@ pub struct ValueConf {
     range: ConfRange<i64>,
 }
 
+impl Default for ValueConf {
+    fn default() -> Self {
+        Self {
+            float_probability: 0.5, // 50%
+            range: ConfRange::Inclusive {
+                min: i64::MIN,
+                max: i64::MAX,
+            },
+        }
+    }
+}
 /// Range expression for configuration
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
