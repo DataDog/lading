@@ -6,35 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.18.1-rc6]
-### Changed
-- The configuration option `float_weight` is changed to `float_probability`.
-
-## [0.18.1-rc5]
-### Changed
-- Capitalization is renamed to snake-case in value configuration.
-
-## [0.18.1-rc4]
-### Changed
-- The int-only experiment is now reverted.
-- Configuration for numeric values now explicitly allows constant values.
-
-## [0.18.1-rc3]
-### Changed
-- DogStatsD NumValue is now int-only for experimental purposes, range is also made inclusive. The inclusivity will remain.
-
-## [0.18.1-rc2]
-### Fixed
-- DogStatsD value min/max is now 2**63 symmetric. This avoids a range issue in the `rand` crate.
-
-## [0.18.1-rc1]
-### Added
-- It is now possible for users to configure the range of DogStatsD payloads
-  values. Previously the range was 64-bits wide.
-
-## [0.18.1-rc0]
+## [0.18.1]
 ### Added
 - `lading-payload` crate is now split out from the `lading` crate
+- It is now possible for users to configure the range of DogStatsD payloads
+  values. Previously the range was 64-bits wide. The range is inclusive or
+  constant. Additionally, users may configure a probability for values being a
+  floating point or not.
 ### Changed
 - The block mechanism is reworked to provide a 'fixed' and 'streaming' model,
   running in a separate OS thread from the tokio runtime.
