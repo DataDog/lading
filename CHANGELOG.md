@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.18.1-rc0]
+## [0.18.1]
 ### Added
 - `lading-payload` crate is now split out from the `lading` crate
+- It is now possible for users to configure the range of DogStatsD payloads
+  values. Previously the range was 64-bits wide. The range is inclusive or
+  constant. Additionally, users may configure a probability for values being a
+  floating point or not.
 ### Changed
 - The block mechanism is reworked to provide a 'fixed' and 'streaming' model,
   running in a separate OS thread from the tokio runtime.
