@@ -136,7 +136,7 @@ impl Prometheus {
                     let name_and_labels = parts.next().unwrap();
                     let value = parts.next().unwrap();
 
-                    if value.contains("#") {
+                    if value.contains('#') {
                         trace!("Unknown format: {value}");
                         continue;
                     }
