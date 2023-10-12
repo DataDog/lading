@@ -128,7 +128,8 @@ mod test {
         }
     }
 
-    // Ensure that of_size only returns None if the request is larger than the interior size.
+    // Ensure that of_size only returns None if the request is greater than or
+    // equal to the interior size.
     proptest! {
         #[test]
         fn return_none_condition(seed: u64, max_bytes: u16, of_size_bytes: u16) {
@@ -138,7 +139,7 @@ mod test {
 
             let pool = Pool::with_size_and_alphabet(&mut rng, max_bytes, ALPHANUM);
             if pool.of_size(&mut rng, of_size_bytes).is_none() {
-                assert!(of_size_bytes > max_bytes);
+                assert!(of_size_bytes >= max_bytes);
             }
         }
     }

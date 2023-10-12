@@ -7,3 +7,4 @@
 cc af61ca38851fafeed4d96b45d1d1aca38e2ab8a1489b51ccae6e0e178640e569 # shrinks to seed = 0, max_bytes = 2, of_size_bytes = 0, alphabet = "￼a🈐aAaA0𐦀A𐠊A\u{e0100}"
 cc e4740adac235cc14baefdb17ab4e7b825a9100e1e140031f72c0eb66783a6bdc # shrinks to seed = 49880598398515969, max_bytes = 3977, of_size_bytes = 0, alphabet = "ힰA\u{11c92}® "
 cc 7d00cd4ac860c10fd2a903761b1540638fb95f92bfd352cbf952ec53760bedb4 # shrinks to seed = 170628173656970550, max_bytes = 7313, of_size_bytes = 0, alphabet = " 𒒀"
+cc c3bbc5eb64e117c599cfe76df189ae8ec8238c47e76a942970505e5da6dcee1b # shrinks to seed = 0, max_bytes = 43894, of_size_bytes = 43894

@@ -4,11 +4,11 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use crate::{common::strings, Generator};
 
-use super::{choose_or_not_fn, choose_or_not_ref, common};
+use super::{choose_or_not_fn, choose_or_not_ref, common, ConfRange};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
-    pub(crate) title_length_range: Range<u16>,
+    pub(crate) title_length: ConfRange<u16>,
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
     pub(crate) str_pool: Rc<strings::Pool>,
@@ -22,10 +22,8 @@ impl<'a> Generator<'a> for EventGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        let title = self
-            .str_pool
-            .of_size_range(&mut rng, self.title_length_range.clone())
-            .unwrap();
+        let title_sz = self.title_length.sample(&mut rng) as usize;
+        let title = self.str_pool.of_size(&mut rng, title_sz).unwrap();
         let text = self
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
