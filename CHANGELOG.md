@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.19.0-rc2]
+### Changed
+- Dogstatsd payload generation now takes range configuration, allows constant settings.
+
 ## [0.18.1]
 ### Added
 - `lading-payload` crate is now split out from the `lading` crate
