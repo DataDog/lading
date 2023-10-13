@@ -171,24 +171,24 @@ impl Http {
         }
 
         let body_bytes = RESPONSE
-        .get_or_init(|| match &config.body_variant {
-            BodyVariant::AwsKinesis => {
-                let response = KinesisPutRecordBatchResponse {
-                    encrypted: None,
-                    failed_put_count: 0,
-                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                        error_code: None,
-                        error_message: None,
-                        record_id: "foobar".to_string(),
-                    }],
-                };
-                serde_json::to_vec(&response).unwrap()
-            }
-            BodyVariant::Nothing => vec![],
-            BodyVariant::RawBytes => config.raw_bytes.clone(),
-            BodyVariant::Static(val) => val.as_bytes().to_vec(),
-        })
-        .clone();
+            .get_or_init(|| match &config.body_variant {
+                BodyVariant::AwsKinesis => {
+                    let response = KinesisPutRecordBatchResponse {
+                        encrypted: None,
+                        failed_put_count: 0,
+                        request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                            error_code: None,
+                            error_message: None,
+                            record_id: "foobar".to_string(),
+                        }],
+                    };
+                    serde_json::to_vec(&response).unwrap()
+                }
+                BodyVariant::Nothing => vec![],
+                BodyVariant::RawBytes => config.raw_bytes.clone(),
+                BodyVariant::Static(val) => val.as_bytes().to_vec(),
+            })
+            .clone();
 
         Ok(Self {
             httpd_addr: config.binding_addr,
