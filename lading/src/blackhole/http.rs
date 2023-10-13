@@ -16,7 +16,6 @@ use hyper::{
     Body, Request, Response, Server, StatusCode,
 };
 use metrics::{register_counter, Counter};
-use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
@@ -24,9 +23,6 @@ use tracing::{debug, error, info};
 use crate::signals::Shutdown;
 
 use super::General;
-
-#[allow(clippy::declare_interior_mutable_const)]
-const RESPONSE: OnceCell<Vec<u8>> = OnceCell::new();
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -159,6 +155,10 @@ impl Http {
     /// # Errors
     ///
     /// Returns an error if the configuration is invalid.
+    ///
+    /// # Panics
+    ///
+    /// None known.
     pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
@@ -170,25 +170,23 @@ impl Http {
             metric_labels.push(("id".to_string(), id));
         }
 
-        let body_bytes = RESPONSE
-            .get_or_init(|| match &config.body_variant {
-                BodyVariant::AwsKinesis => {
-                    let response = KinesisPutRecordBatchResponse {
-                        encrypted: None,
-                        failed_put_count: 0,
-                        request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                            error_code: None,
-                            error_message: None,
-                            record_id: "foobar".to_string(),
-                        }],
-                    };
-                    serde_json::to_vec(&response).unwrap()
-                }
-                BodyVariant::Nothing => vec![],
-                BodyVariant::RawBytes => config.raw_bytes.clone(),
-                BodyVariant::Static(val) => val.as_bytes().to_vec(),
-            })
-            .clone();
+        let body_bytes = match &config.body_variant {
+            BodyVariant::AwsKinesis => {
+                let response = KinesisPutRecordBatchResponse {
+                    encrypted: None,
+                    failed_put_count: 0,
+                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                        error_code: None,
+                        error_message: None,
+                        record_id: "foobar".to_string(),
+                    }],
+                };
+                serde_json::to_vec(&response).unwrap()
+            }
+            BodyVariant::Nothing => vec![],
+            BodyVariant::RawBytes => config.raw_bytes.clone(),
+            BodyVariant::Static(val) => val.as_bytes().to_vec(),
+        };
 
         Ok(Self {
             httpd_addr: config.binding_addr,
@@ -210,10 +208,6 @@ impl Http {
     ///
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
-    ///
-    /// # Panics
-    ///
-    /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
         let bytes_received = register_counter!("bytes_received", &self.metric_labels);
         let requests_received = register_counter!("requests_received", &self.metric_labels);
