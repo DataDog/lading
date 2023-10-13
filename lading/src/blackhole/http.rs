@@ -192,7 +192,7 @@ impl Http {
 
         Ok(Self {
             httpd_addr: config.binding_addr,
-            body_bytes: body_bytes,
+            body_bytes,
             concurrency_limit: config.concurrent_requests_max,
             headers: config.headers.clone(),
             status,
