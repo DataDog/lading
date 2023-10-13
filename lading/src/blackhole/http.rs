@@ -93,7 +93,7 @@ pub struct Config {
     pub status: u16,
     /// raw array of bytes if the raw_bytes body variant is selected
     #[serde(default)]
-    pub raw_bytes: Vec<u8>
+    pub raw_bytes: Vec<u8>,
 }
 
 #[derive(Serialize)]
