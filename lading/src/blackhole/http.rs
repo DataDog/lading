@@ -54,6 +54,8 @@ pub enum BodyVariant {
     Nothing,
     /// All response bodies will mimic AWS Kinesis.
     AwsKinesis,
+    /// Respond with a hardcoded byte slice value
+    RawBytes,
     /// Respond with a hardcoded string value
     Static(String),
 }
@@ -89,6 +91,9 @@ pub struct Config {
     /// the content-type header to respond with, defaults to 200
     #[serde(default = "default_status_code")]
     pub status: u16,
+    /// raw array of bytes if the raw_bytes body variant is selected
+    #[serde(default)]
+    pub raw_bytes: Vec<u8>
 }
 
 #[derive(Serialize)]
@@ -112,7 +117,7 @@ async fn srv(
     status: StatusCode,
     bytes_received: Counter,
     requests_received: Counter,
-    body_variant: BodyVariant,
+    body_bytes: Vec<u8>,
     req: Request<Body>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, hyper::Error> {
@@ -129,27 +134,7 @@ async fn srv(
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
-
             *okay.headers_mut() = headers;
-
-            let body_bytes = RESPONSE
-                .get_or_init(|| match body_variant {
-                    BodyVariant::AwsKinesis => {
-                        let response = KinesisPutRecordBatchResponse {
-                            encrypted: None,
-                            failed_put_count: 0,
-                            request_responses: vec![KinesisPutRecordBatchResponseEntry {
-                                error_code: None,
-                                error_message: None,
-                                record_id: "foobar".to_string(),
-                            }],
-                        };
-                        serde_json::to_vec(&response).unwrap()
-                    }
-                    BodyVariant::Nothing => vec![],
-                    BodyVariant::Static(val) => val.as_bytes().to_vec(),
-                })
-                .clone();
             *okay.body_mut() = Body::from(body_bytes);
             Ok(okay)
         }
@@ -160,7 +145,7 @@ async fn srv(
 /// The HTTP blackhole.
 pub struct Http {
     httpd_addr: SocketAddr,
-    body_variant: BodyVariant,
+    body_bytes: Vec<u8>,
     concurrency_limit: usize,
     shutdown: Shutdown,
     headers: HeaderMap,
@@ -185,9 +170,29 @@ impl Http {
             metric_labels.push(("id".to_string(), id));
         }
 
+        let body_bytes = RESPONSE
+        .get_or_init(|| match &config.body_variant {
+            BodyVariant::AwsKinesis => {
+                let response = KinesisPutRecordBatchResponse {
+                    encrypted: None,
+                    failed_put_count: 0,
+                    request_responses: vec![KinesisPutRecordBatchResponseEntry {
+                        error_code: None,
+                        error_message: None,
+                        record_id: "foobar".to_string(),
+                    }],
+                };
+                serde_json::to_vec(&response).unwrap()
+            }
+            BodyVariant::Nothing => vec![],
+            BodyVariant::RawBytes => config.raw_bytes.clone(),
+            BodyVariant::Static(val) => val.as_bytes().to_vec(),
+        })
+        .clone();
+
         Ok(Self {
             httpd_addr: config.binding_addr,
-            body_variant: config.body_variant.clone(),
+            body_bytes: body_bytes,
             concurrency_limit: config.concurrent_requests_max,
             headers: config.headers.clone(),
             status,
@@ -215,7 +220,7 @@ impl Http {
         let service = make_service_fn(|_: &AddrStream| {
             let bytes_received = bytes_received.clone();
             let requests_received = requests_received.clone();
-            let body_variant = self.body_variant.clone();
+            let body_bytes = self.body_bytes.clone();
             let headers = self.headers.clone();
             async move {
                 Ok::<_, hyper::Error>(service_fn(move |request| {
@@ -224,7 +229,7 @@ impl Http {
                         self.status,
                         bytes_received.clone(),
                         requests_received.clone(),
-                        body_variant.clone(),
+                        body_bytes.clone(),
                         request,
                         headers.clone(),
                     )
