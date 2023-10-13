@@ -122,6 +122,7 @@ pub struct ValueConf {
 
 /// Range expression for configuration
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[serde(rename_all = "snake_case")]
 pub enum ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
