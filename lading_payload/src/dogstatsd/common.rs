@@ -8,7 +8,7 @@ use rand::{
 
 use crate::Generator;
 
-use super::{ValueConf, ValueRange};
+use super::{ConfRange, ValueConf};
 
 pub(crate) mod tags;
 
@@ -36,12 +36,12 @@ impl NumValueGenerator {
     #[allow(clippy::cast_possible_truncation)]
     pub(crate) fn new(conf: ValueConf) -> Self {
         match conf.range {
-            ValueRange::Constant(c) => Self::Constant {
+            ConfRange::Constant(c) => Self::Constant {
                 float_probability: conf.float_probability,
                 int: c,
                 float: c as f64,
             },
-            ValueRange::Inclusive { min, max } => Self::Uniform {
+            ConfRange::Inclusive { min, max } => Self::Uniform {
                 float_probability: conf.float_probability,
                 int_distr: Uniform::new_inclusive(min, max),
                 float_distr: Uniform::new_inclusive(min as f64, max as f64),

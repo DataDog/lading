@@ -139,38 +139,25 @@ impl Cache {
                 &block_chunks,
             ),
             payload::Config::DogStatsD(payload::dogstatsd::Config {
-                contexts_minimum,
-                contexts_maximum,
-                name_length_minimum,
-                name_length_maximum,
-                tag_key_length_minimum,
-                tag_key_length_maximum,
-                tag_value_length_minimum,
-                tag_value_length_maximum,
-                tags_per_msg_minimum,
-                tags_per_msg_maximum,
+                contexts,
+                name_length,
+                tag_key_length,
+                tag_value_length,
+                tags_per_msg,
                 // TODO -- Validate user input for multivalue_pack_probability.
                 multivalue_pack_probability,
-                multivalue_count_minimum,
-                multivalue_count_maximum,
+                multivalue_count,
                 kind_weights,
                 metric_weights,
                 value,
             }) => {
-                let context_range = *contexts_minimum..*contexts_maximum;
-                let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
-                let name_length_range = *name_length_minimum..*name_length_maximum;
-                let tag_key_length_range = *tag_key_length_minimum..*tag_key_length_maximum;
-                let tag_value_length_range = *tag_value_length_minimum..*tag_value_length_maximum;
-                let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
-
                 let serializer = payload::DogStatsD::new(
-                    context_range,
-                    name_length_range,
-                    tag_key_length_range,
-                    tag_value_length_range,
-                    tags_per_msg_range,
-                    multivalue_count_range,
+                    *contexts,
+                    *name_length,
+                    *tag_key_length,
+                    *tag_value_length,
+                    *tags_per_msg,
+                    *multivalue_count,
                     *multivalue_pack_probability,
                     *kind_weights,
                     *metric_weights,
@@ -272,38 +259,25 @@ fn stream_inner(
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
         payload::Config::DogStatsD(payload::dogstatsd::Config {
-            contexts_minimum,
-            contexts_maximum,
-            name_length_minimum,
-            name_length_maximum,
-            tag_key_length_minimum,
-            tag_key_length_maximum,
-            tag_value_length_minimum,
-            tag_value_length_maximum,
-            tags_per_msg_minimum,
-            tags_per_msg_maximum,
+            contexts,
+            name_length,
+            tag_key_length,
+            tag_value_length,
+            tags_per_msg,
             // TODO -- Validate user input for multivalue_pack_probability.
             multivalue_pack_probability,
-            multivalue_count_minimum,
-            multivalue_count_maximum,
+            multivalue_count,
             kind_weights,
             metric_weights,
             value,
         }) => {
-            let context_range = *contexts_minimum..*contexts_maximum;
-            let tags_per_msg_range = *tags_per_msg_minimum..*tags_per_msg_maximum;
-            let name_length_range = *name_length_minimum..*name_length_maximum;
-            let tag_key_length_range = *tag_key_length_minimum..*tag_key_length_maximum;
-            let tag_value_length_range = *tag_value_length_minimum..*tag_value_length_maximum;
-            let multivalue_count_range = *multivalue_count_minimum..*multivalue_count_maximum;
-
             let pyld = payload::DogStatsD::new(
-                context_range,
-                name_length_range,
-                tag_key_length_range,
-                tag_value_length_range,
-                tags_per_msg_range,
-                multivalue_count_range,
+                *contexts,
+                *name_length,
+                *tag_key_length,
+                *tag_value_length,
+                *tags_per_msg,
+                *multivalue_count,
                 *multivalue_pack_probability,
                 *kind_weights,
                 *metric_weights,

@@ -1,4 +1,4 @@
-use std::{fmt, ops::Range};
+use std::fmt;
 
 use rand::{
     distributions::{OpenClosed01, WeightedIndex},
@@ -12,7 +12,7 @@ use tracing::debug;
 use super::{
     choose_or_not_ref,
     common::{self, NumValueGenerator},
-    ValueConf,
+    ConfRange, ValueConf,
 };
 
 mod template;
@@ -21,7 +21,7 @@ mod template;
 pub(crate) struct MetricGenerator {
     pub(crate) container_ids: Vec<String>,
     pub(crate) templates: Vec<template::Template>,
-    pub(crate) multivalue_count_range: Range<u16>,
+    pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
 }
@@ -30,8 +30,8 @@ impl MetricGenerator {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         num_contexts: usize,
-        name_length_range: Range<u16>,
-        multivalue_count_range: Range<u16>,
+        name_length: ConfRange<u16>,
+        multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         metric_weights: &WeightedIndex<u8>,
         container_ids: Vec<String>,
@@ -45,14 +45,11 @@ impl MetricGenerator {
     {
         let mut templates = Vec::with_capacity(num_contexts);
 
-        assert!(tagsets.len() >= num_contexts);
+        assert!(tagsets.len() == num_contexts);
         debug!("Generating metric templates for {} contexts.", num_contexts);
         for tags in tagsets {
-            let name = String::from(
-                str_pool
-                    .of_size_range(&mut rng, name_length_range.clone())
-                    .unwrap(),
-            );
+            let name_sz = name_length.sample(&mut rng) as usize;
+            let name = String::from(str_pool.of_size(&mut rng, name_sz).unwrap());
 
             let res = match metric_weights.sample(rng) {
                 0 => Template::Count(template::Count { name, tags }),
@@ -69,7 +66,7 @@ impl MetricGenerator {
         MetricGenerator {
             container_ids,
             templates,
-            multivalue_count_range,
+            multivalue_count,
             multivalue_pack_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
         }
@@ -94,13 +91,13 @@ impl<'a> Generator<'a> for MetricGenerator {
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
         let sample_rate = rng.gen();
 
-        let mut values = Vec::with_capacity(self.multivalue_count_range.end as usize);
+        let mut values = Vec::with_capacity(self.multivalue_count.end() as usize);
         let value: common::NumValue = self.num_value_generator.generate(&mut rng);
         values.push(value);
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
         if prob < self.multivalue_pack_probability {
-            let num_desired_values = rng.gen_range(self.multivalue_count_range.clone());
+            let num_desired_values = self.multivalue_count.sample(&mut rng) as usize;
             for _ in 1..num_desired_values {
                 values.push(self.num_value_generator.generate(&mut rng));
             }
