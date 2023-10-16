@@ -19,6 +19,7 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
+pub mod idle;
 pub mod process_tree;
 pub mod splunk_hec;
 pub mod tcp;
@@ -59,6 +60,9 @@ pub enum Error {
     /// See [`crate::generator::process_tree::Error`] for details.
     #[error(transparent)]
     ProcessTree(#[from] process_tree::Error),
+    /// See [`crate::generator::idle::Error`] for details.
+    #[error(transparent)]
+    Idle(#[from] idle::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -105,6 +109,8 @@ pub enum Inner {
     UnixDatagram(unix_datagram::Config),
     /// See [`crate::generator::process_tree::Config`] for details.
     ProcessTree(process_tree::Config),
+    /// See [`crate::generator::idle::Config`] for details.
+    Idle(idle::Config),
 }
 
 #[derive(Debug)]
@@ -133,6 +139,8 @@ pub enum Server {
     UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::generator::process_tree::ProcessTree`] for details.
     ProcessTree(process_tree::ProcessTree),
+    /// See [`crate::generator::idle::Idle`] for details.
+    Idle(idle::Idle),
 }
 
 impl Server {
@@ -171,6 +179,7 @@ impl Server {
             Inner::ProcessTree(conf) => {
                 Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
             }
+            Inner::Idle(conf) => Self::Idle(idle::Idle::new(&conf, shutdown)?),
         };
         Ok(srv)
     }
@@ -202,6 +211,7 @@ impl Server {
             Server::UnixStream(inner) => inner.spin().await?,
             Server::UnixDatagram(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,
+            Server::Idle(inner) => inner.spin().await?,
         };
 
         Ok(())
