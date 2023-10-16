@@ -258,3 +258,51 @@ impl Http {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn config_deserializes_variant_nothing() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+body_variant: "nothing"
+"#;
+        let config: Config = serde_yaml::from_str(contents).unwrap();
+        assert_eq!(
+            config,
+            Config {
+                concurrent_requests_max: default_concurrent_requests_max(),
+                binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                body_variant: BodyVariant::Nothing,
+                headers: default_headers(),
+                status: default_status_code(),
+                raw_bytes: vec![],
+            },
+        );
+    }
+
+    #[test]
+    fn config_deserializes_raw_bytes() {
+        let contents = r#"
+binding_addr: "127.0.0.1:1000"
+body_variant: "raw_bytes"
+raw_bytes: [0x01, 0x02, 0x10]
+"#;
+        let config: Config = serde_yaml::from_str(contents).unwrap();
+        assert_eq!(
+            config,
+            Config {
+                concurrent_requests_max: default_concurrent_requests_max(),
+                binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                body_variant: BodyVariant::RawBytes,
+                headers: default_headers(),
+                status: default_status_code(),
+                raw_bytes: vec![0x01, 0x02, 0x10],
+            },
+        );
+    }
+}
