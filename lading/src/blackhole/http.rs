@@ -117,7 +117,7 @@ async fn srv(
     req: Request<Body>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, hyper::Error> {
-    bytes_received.increment(1);
+    requests_received.increment(1);
 
     let (parts, body) = req.into_parts();
 
@@ -126,7 +126,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            requests_received.increment(body.len() as u64);
+            bytes_received.increment(body.len() as u64);
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
