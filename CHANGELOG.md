@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Correct metrics emitted by http blackhole
+
 ## [0.19.0]
 ### Changed
 - HTTP blackhole can respond with arbitrary data.
