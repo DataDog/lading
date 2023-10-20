@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- Existing file generator is renamed 'traditional', requiring a configuration
+  change.
+
 ## [0.19.1]
 ### Fixed
 - Report scraped Prometheus counters correctly
