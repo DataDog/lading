@@ -1,5 +1,6 @@
 target
-Dockerfile
+amd64.Dockerfile
+arm64.Dockerfile
 .dockerignore
 .git
 .gitignore

@@ -102,6 +102,23 @@ Logs about lading's operation can be controlled using the standard `RUST_LOG`
 environment variable. eg `RUST_LOG=debug ./lading` will emit logs at `debug`
 and above (ie, `info`, `warn`, `error`).
 
+## How to get a build (besides building from source)
+
+### Binary Releases
+https://github.com/DataDog/lading/releases
+
+### Docker
+
+For arm (replace platform if needed):
+```
+docker build -f arm64.Dockerfile . --tag [TAG NAME] --platform linux/arm64
+```
+
+For x86_64:
+```
+docker build -f amd64.Dockerfile . --tag [TAG NAME] --platform linux/amd64
+```
+
 ## Contributing
 
 See [Contributing][contributing].
