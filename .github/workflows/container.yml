@@ -46,6 +46,7 @@ jobs:
       - name: Build and push Docker image (${{ matrix.platform }})
         uses: docker/build-push-action@v2
         with:
+          file: amd64.Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           push: true
           platforms: ${{ matrix.platform }}
