@@ -12,6 +12,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
+pub mod logrotate;
 pub mod traditional;
 
 use std::str;
