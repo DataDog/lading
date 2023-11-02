@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.0-rc1]
+### Added
+- A new 'logrotate' file generator is introduced.
+
 ### Changed
 - Existing file generator is renamed 'traditional', requiring a configuration
   change.
