@@ -237,7 +237,8 @@ impl Child {
         throttle: Throttle,
         shutdown: Shutdown,
     ) -> Self {
-        let mut names = Vec::with_capacity(total_rotations as usize);
+        let mut names = Vec::with_capacity((total_rotations + 1).into());
+        names.push(PathBuf::from(basename));
         for i in 0..total_rotations {
             let name = format!(
                 "{orig}.{i}",
@@ -265,9 +266,10 @@ impl Child {
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
 
         let total_names = self.names.len();
-        let last_name = &self.names[total_names];
+        // SAFETY: By construction there is guaranteed to be at least one name.
+        let last_name = &self.names.last().unwrap();
 
-        // SAFETY: By construction the name is guranteed to have a parent.
+        // SAFETY: By construction the name is guaranteed to have a parent.
         fs::create_dir_all(&self.names[0].parent().unwrap()).await?;
         let mut fp = BufWriter::with_capacity(
             bytes_per_second,
@@ -288,6 +290,8 @@ impl Child {
         let bytes_written = register_counter!("bytes_written");
 
         loop {
+            // SAFETY: By construction the block cache will never be empty
+            // except in the event of a catastrophic failure.
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 

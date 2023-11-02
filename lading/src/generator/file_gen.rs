@@ -29,6 +29,9 @@ pub enum Error {
     /// Wrapper around [`traditional::Error`].
     #[error(transparent)]
     Traditional(#[from] traditional::Error),
+    /// Wrapper around [`logrotate::Error`].
+    #[error(transparent)]
+    Logrotate(#[from] logrotate::Error),
 }
 
 /// Configuration of [`FileGen`]
@@ -37,6 +40,8 @@ pub enum Error {
 pub enum Config {
     /// See [`traditional::Config`].
     Traditional(traditional::Config),
+    /// See [`logrotate::Config`].
+    Logrotate(logrotate::Config),
 }
 
 #[derive(Debug)]
@@ -47,6 +52,8 @@ pub enum Config {
 pub enum FileGen {
     /// See [`traditional::Server`] for details.
     Traditional(traditional::Server),
+    /// See [`logrotate::Server`] for details.
+    Logrotate(logrotate::Server),
 }
 
 impl FileGen {
@@ -66,6 +73,7 @@ impl FileGen {
             Config::Traditional(c) => {
                 Self::Traditional(traditional::Server::new(general, c, shutdown)?)
             }
+            Config::Logrotate(c) => Self::Logrotate(logrotate::Server::new(general, c, shutdown)?),
         };
         Ok(srv)
     }
@@ -85,6 +93,7 @@ impl FileGen {
     pub async fn spin(self) -> Result<(), Error> {
         match self {
             Self::Traditional(inner) => inner.spin().await?,
+            Self::Logrotate(inner) => inner.spin().await?,
         };
 
         Ok(())
