@@ -16,7 +16,7 @@
 //!
 use std::{
     num::{NonZeroU32, NonZeroUsize},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str, thread,
 };
 
@@ -175,7 +175,7 @@ impl Server {
             basename.set_extension("log");
 
             let child = Child::new(
-                basename,
+                &basename,
                 config.total_rotations,
                 bytes_per_second,
                 maximum_bytes_per_file,
@@ -229,7 +229,7 @@ struct Child {
 
 impl Child {
     fn new(
-        basename: PathBuf,
+        basename: &Path,
         total_rotations: u8,
         bytes_per_second: NonZeroU32,
         maximum_bytes_per_log: NonZeroU32,
@@ -241,13 +241,10 @@ impl Child {
         for i in 0..total_rotations {
             let name = format!(
                 "{orig}.{i}",
-                orig = basename
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
+                orig = basename.file_name().unwrap_or_default().to_string_lossy()
             );
-            let mut pth = basename.clone();
+            let mut pth = PathBuf::new();
+            pth.push(basename);
             pth.set_file_name(name);
             names.push(pth);
         }
