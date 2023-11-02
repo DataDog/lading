@@ -1,6 +1,6 @@
 //! The lading 'logrotate' file generator.
 //!
-//! The logrotate file generator does not "connect" however losely to the target
+//! The logrotate file generator does not "connect" however loosely to the target
 //! but instead, without coordination, merely writes files on disk. We mimic the
 //! fashion in which logrotate operates. All log files are written up to some
 //! maximum amount, with a fixed number of 'rotations' happening per file. Once
