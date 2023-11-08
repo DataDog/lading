@@ -196,7 +196,7 @@ mod verification {
         );
     }
 
-    /// If a request is made on the throttle such that capacity > request <
+    /// If a request is made on the throttle such that capacity < request <=
     /// max_capacity and ticks_elapsed <= INTERVAL_TICKS then the request should
     /// return with non-zero slop and the internal capacity of the valve should
     /// not be reduced.
@@ -208,11 +208,11 @@ mod verification {
 
         let original_capacity = valve.capacity;
         let request: u32 =
-            kani::any_where(|r: &u32| *r <= maximum_capacity && *r > original_capacity);
+            kani::any_where(|r: &u32| original_capacity < *r && *r <= maximum_capacity);
         let ticks_elapsed: u64 = kani::any_where(|t: &u64| *t <= INTERVAL_TICKS);
 
         let slop = valve.request(ticks_elapsed, request).unwrap();
-        kani::assert(slop != 0, "Should be forced to wait.");
+        kani::assert(slop > 0, "Should be forced to wait.");
         kani::assert(
             valve.capacity == original_capacity,
             "Capacity should not be reduced.",
