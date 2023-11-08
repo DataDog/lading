@@ -5,10 +5,10 @@
 
 use std::time::Duration;
 
-use metrics::{gauge, register_histogram};
+use metrics::gauge;
 use serde::Deserialize;
 use serde_json::Value;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 
 use crate::signals::Shutdown;
 
@@ -64,9 +64,6 @@ impl Expvar {
 
         let mut timer = tokio::time::interval(Duration::from_secs(1));
 
-        let content_length =
-            register_histogram!("target_metrics_content_length", "source" => "expvar");
-
         loop {
             tokio::select! {
                 _ = timer.tick() => {
@@ -75,7 +72,9 @@ impl Expvar {
                         continue;
                     };
                     if let Some(cl) = resp.content_length() {
-                        content_length.record(cl as f64);
+                        info!("expvar content length: {cl}");
+                    } else {
+                        debug!("no content length in expvar response");
                     }
 
                     let Ok(json) = resp.json::<Value>().await else {

@@ -7,12 +7,12 @@
 use std::{str::FromStr, time::Duration};
 
 use futures::TryStreamExt;
-use metrics::{absolute_counter, gauge, register_histogram};
+use metrics::{absolute_counter, gauge};
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::signals::Shutdown;
 
@@ -109,9 +109,6 @@ impl Prometheus {
 
         let mut timer = tokio::time::interval(Duration::from_secs(1));
 
-        let content_length =
-            register_histogram!("target_metrics_content_length", "source" => "prometheus");
-
         loop {
             tokio::select! {
                 _ = timer.tick() => {
@@ -120,7 +117,9 @@ impl Prometheus {
                         continue;
                     };
                     if let Some(cl) = resp.content_length() {
-                    content_length.record(cl as f64);
+                        info!("expvar content length: {cl}");
+                    } else {
+                        debug!("no content length in expvar response");
                     }
 
                     let reader = StreamReader::new(resp.bytes_stream().map_err(convert_err));
