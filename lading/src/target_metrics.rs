@@ -11,11 +11,13 @@ use crate::signals::Shutdown;
 pub mod expvar;
 pub mod prometheus;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, thiserror::Error)]
 /// Errors produced by [`Server`]
 pub enum Error {
+    #[error(transparent)]
     /// See [`crate::target_metrics::expvar::Error`] for details.
     Expvar(expvar::Error),
+    #[error(transparent)]
     /// See [`crate::target_metrics::prometheus::Error`] for details.
     Prometheus(prometheus::Error),
 }
