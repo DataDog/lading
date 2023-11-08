@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.0-rc2]
+### Changed
+- Target metrics now stream where possible, instrument content length from target.
+
 ## [0.20.0-rc1]
 ### Added
 - A new 'logrotate' file generator is introduced.
