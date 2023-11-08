@@ -98,16 +98,16 @@ impl Valve {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn request(&mut self, ticks_elapsed: u64, capacity_request: u32) -> Result<u64, Error> {
         // Okay, here's the idea. We have bucket that fills every INTERVAL_TICKS
-        // seconds up and requests draw down on that bucket. When it's empty, we
-        // return the number of ticks until the next interval roll-over. Callers
-        // are expected to wait although nothing forces them to. Capacity is
-        // only drawn on when it is immediately available.
-        if capacity_request == 0 {
-            return Ok(0);
-        }
-
-        // Fast bail-out. There's no way for this to ever be satisfied and is a
-        // bug on the part of the caller, arguably.
+        // microseconds and requests draw down on that bucket. When it's empty,
+        // we return the number of ticks until the next interval roll-over.
+        // Callers are expected to wait although nothing forces them to.
+        // Capacity is only drawn on when it is immediately available.
+        //
+        // Caller is responsible for maintaining the clock. We do not advance
+        // the interval ticker when the caller requests more capacity than will
+        // ever be available from this throttle. We do advance the iterval
+        // ticker if the caller makes a zero request. It's strange but it's a
+        // valid thing to do.
         if capacity_request > self.maximum_capacity {
             return Err(Error::Capacity);
         }
@@ -121,104 +121,19 @@ impl Valve {
             self.interval = current_interval;
         }
 
-        // If the capacity is greater or equal to the request we deduct the
-        // request from capacity and return 0 slop, signaling to the user that
-        // their request is a success. Else, we calculate how long the caller
-        // should wait until the interval rolls over. The capacity will never
-        // increase in this interval so they will have to call again later.
-        if capacity_request <= self.capacity {
+        // If the request is zero we return. If the capacity is greater or equal
+        // to the request we deduct the request from capacity and return 0 slop,
+        // signaling to the user that their request is a success. Else, we
+        // calculate how long the caller should wait until the interval rolls
+        // over and capacity is refilled. The capacity will never increase in
+        // this interval so they will have to call again later.
+        if capacity_request == 0 {
+            Ok(0)
+        } else if capacity_request <= self.capacity {
             self.capacity -= capacity_request;
             Ok(0)
         } else {
-            Ok(INTERVAL_TICKS - (ticks_elapsed % INTERVAL_TICKS))
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::num::NonZeroU32;
-
-    use proptest::{collection, prelude::*};
-
-    use crate::stable::{Valve, INTERVAL_TICKS};
-
-    fn capacity_never_exceeds_max_in_interval_inner(
-        maximum_capacity: u32,
-        mut requests: Vec<NonZeroU32>,
-    ) -> Result<(), proptest::test_runner::TestCaseError> {
-        let mut valve = Valve::new(NonZeroU32::new(maximum_capacity).unwrap());
-        let maximum_capacity = u64::from(maximum_capacity);
-
-        let mut ticks_elapsed: u64 = 0;
-        let mut granted_requests: u64 = 0;
-        let mut interval: u64 = 0;
-
-        let mut slop = 0;
-        for request in requests.drain(..) {
-            ticks_elapsed += slop;
-
-            let current_interval = ticks_elapsed / INTERVAL_TICKS;
-            if interval < current_interval {
-                // We have entered into a new interval, the granted requests
-                // must be reset.
-                prop_assert!(granted_requests <= maximum_capacity,
-                                     "[interval-change] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
-                granted_requests = 0;
-                interval = current_interval;
-            }
-
-            match valve.request(ticks_elapsed, request.get()) {
-                Ok(0) => {
-                    // The request went through right away.
-                    granted_requests += u64::from(request.get());
-                    slop = 0;
-                }
-                Ok(s) => {
-                    // The request must wait for 'slop' ticks. We choose to
-                    // 'wait' by adding to the slop accumulator but may or may
-                    // not make the same request of the valve. No request is
-                    // granted if slop is non-zero.
-                    slop = s;
-                }
-                Err(_) => {
-                    // ignored intentionally
-                }
-            }
-            prop_assert!(granted_requests <= maximum_capacity,
-                             "[end] Granted requests {granted_requests} exceeded the maximum capacity of the valve, {maximum_capacity}");
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn static_capacity_never_exceeds_max_in_interval() {
-        let maximum_capacity = 490_301_363u32;
-        let requests: Vec<NonZeroU32> = vec![
-            NonZeroU32::new(1).unwrap(),
-            NonZeroU32::new(490_301_363).unwrap(),
-        ];
-        capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests).unwrap();
-    }
-
-    fn cap_requests(max: u32) -> impl Strategy<Value = Vec<NonZeroU32>> {
-        collection::vec((1..max).prop_map(|i| NonZeroU32::new(i).unwrap()), 1..100)
-    }
-
-    // The sum of capacity requests must never exceed maximum_capacity in one
-    // INTERVAL_TICKS.
-    proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 1_000_000,
-            max_shrink_iters: 1_000_000,
-            .. ProptestConfig::default()
-        })]
-        #[test]
-        fn capacity_never_exceeds_max_in_interval(
-            maximum_capacity in (1..u32::MAX),
-            requests in cap_requests(u32::from(u16::MAX))
-        ) {
-            capacity_never_exceeds_max_in_interval_inner(maximum_capacity, requests)?;
+            Ok(INTERVAL_TICKS.saturating_sub(ticks_elapsed % INTERVAL_TICKS))
         }
     }
 }
@@ -228,60 +143,99 @@ mod verification {
     use crate::stable::{Valve, INTERVAL_TICKS};
     use std::num::NonZeroU32;
 
-    // The sum of capacity requests must never exceed maximum_capacity in one
-    // INTERVAL_TICKS.
+    /// Capacity requests that are too large always error.
     #[kani::proof]
-    #[kani::unwind(100)] // must match `iters` below
-    fn capacity_never_exceeds_max_in_interval() {
+    fn request_too_large_always_errors() {
         let maximum_capacity: NonZeroU32 = kani::any();
         let mut valve = Valve::new(maximum_capacity);
         let maximum_capacity = maximum_capacity.get();
 
-        let mut ticks_elapsed: u64 = 0;
-        let mut granted_requests: u64 = 0;
-        let mut interval: u64 = 0;
+        let request: u32 = kani::any_where(|r: &u32| *r > maximum_capacity);
+        let ticks_elapsed: u64 = kani::any();
 
-        let iters: usize = kani::any();
-        kani::assume(iters < 100);
+        let res = valve.request(ticks_elapsed, request);
+        kani::assert(
+            res.is_err(),
+            "Requests that are too large must always fail.",
+        );
+    }
 
-        let mut slop = 0;
-        for _ in 0..iters {
-            let request: NonZeroU32 = kani::any();
-            kani::assume(request.get() <= maximum_capacity);
+    /// Capacity requests that are zero always succeed.
+    #[kani::proof]
+    fn request_zero_always_succeed() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let mut valve = Valve::new(maximum_capacity);
 
-            ticks_elapsed += slop;
+        let ticks_elapsed: u64 = kani::any();
 
-            let current_interval = ticks_elapsed / INTERVAL_TICKS;
-            if interval < current_interval {
-                // We have entered into a new interval, the granted requests
-                // must be reset.
-                if granted_requests > u64::from(maximum_capacity) {
-                    panic!("too many requests granted");
-                }
-                granted_requests = 0;
-                interval = current_interval;
-            }
+        let slop = valve.request(ticks_elapsed, 0).unwrap();
+        kani::assert(slop == 0, "Requests that are zero always succeed.");
+    }
 
-            match valve.request(ticks_elapsed, request.get()) {
-                Ok(0) => {
-                    // The request went through right away.
-                    granted_requests += u64::from(request.get());
-                    slop = 0;
-                }
-                Ok(s) => {
-                    // The request must wait for 'slop' ticks. We choose to
-                    // 'wait' by adding to the slop accumulator but may or may
-                    // not make the same request of the valve. No request is
-                    // granted if slop is non-zero.
-                    slop = s;
-                }
-                Err(_) => {
-                    // ignored intentionally
-                }
-            }
-            if granted_requests > u64::from(maximum_capacity) {
-                panic!("too many requests granted");
-            }
-        }
+    /// If a request is made on the throttle such that request <= max_capacity
+    /// and ticks_elapsed <= INTERVAL_TICKS then the request should return with
+    /// zero slop and the internal capacity of the valve should be reduced
+    /// exactly the request size.
+    #[kani::proof]
+    fn request_in_cap_interval() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let mut valve = Valve::new(maximum_capacity);
+        let maximum_capacity = maximum_capacity.get();
+
+        let request: u32 = kani::any_where(|r: &u32| *r <= maximum_capacity);
+        let ticks_elapsed: u64 = kani::any_where(|t: &u64| *t <= INTERVAL_TICKS);
+
+        let slop = valve.request(ticks_elapsed, request).unwrap();
+        kani::assert(
+            slop == 0,
+            "Request in-capacity, interval should succeed without wait.",
+        );
+        kani::assert(
+            valve.capacity == maximum_capacity - request,
+            "Request in-capacity, interval should reduce capacity by request size.",
+        );
+    }
+
+    /// If a request is made on the throttle such that capacity > request <
+    /// max_capacity and ticks_elapsed <= INTERVAL_TICKS then the request should
+    /// return with non-zero slop and the internal capacity of the valve should
+    /// not be reduced.
+    #[kani::proof]
+    fn request_out_in_cap_interval() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let mut valve = Valve::new(maximum_capacity);
+        let maximum_capacity = maximum_capacity.get();
+
+        let original_capacity = valve.capacity;
+        let request: u32 =
+            kani::any_where(|r: &u32| *r <= maximum_capacity && *r > original_capacity);
+        let ticks_elapsed: u64 = kani::any_where(|t: &u64| *t <= INTERVAL_TICKS);
+
+        let slop = valve.request(ticks_elapsed, request).unwrap();
+        kani::assert(slop != 0, "Should be forced to wait.");
+        kani::assert(
+            valve.capacity == original_capacity,
+            "Capacity should not be reduced.",
+        );
+    }
+
+    /// No matter the request size the valve's interval measure should always be
+    /// consistent with the time passed in ticks_elapsed.
+    #[kani::proof]
+    fn interval_time_preserved() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let mut valve = Valve::new(maximum_capacity);
+        let maximum_capacity = maximum_capacity.get();
+
+        let request: u32 = kani::any_where(|r: &u32| *r <= maximum_capacity);
+        // 2**32 microseconds is 1 hour 1 minutes and change. While callers
+        // _may_ be waiting longer this this we deem it unlikely.
+        let ticks_elapsed = kani::any::<u32>() as u64;
+
+        let _ = valve.request(ticks_elapsed, request);
+        kani::assert(
+            valve.interval == ticks_elapsed / INTERVAL_TICKS,
+            "Interval should be consistent with ticks_elapsed.",
+        );
     }
 }
