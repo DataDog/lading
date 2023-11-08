@@ -85,6 +85,22 @@ jobs:
       - run: cargo test -p sheepdog
         timeout-minutes: 30
 
+
+  kani:
+    name: Kani Proofs
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [lading_throttle]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
+      - name: Install kani
+        run: cargo install kani-verifier
+      - run: cargo kani --solver cadical
+        working-directory: ${{ matrix.crate }}
+        timeout-minutes: 30
+
   buf:
     runs-on: ubuntu-latest
     steps:
