@@ -91,10 +91,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [lading_throttle]
+        crate: [lading_throttle, lading_payload]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
+      - name: Install protobuf (Apt)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install kani
         run: cargo install kani-verifier
       - run: cargo kani --solver cadical

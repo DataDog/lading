@@ -11,10 +11,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{
-    num::{NonZeroU32, NonZeroUsize},
-    thread,
-};
+use std::{num::NonZeroU32, thread};
 
 use byte_unit::{Byte, ByteUnit};
 use hyper::{
@@ -124,7 +121,7 @@ impl Http {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroUsize> = config
+        let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
@@ -137,7 +134,7 @@ impl Http {
                 ]
             })
             .iter()
-            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -161,7 +158,7 @@ impl Http {
                 block_cache_method,
             } => {
                 let total_bytes =
-                    NonZeroUsize::new(maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                    NonZeroU32::new(maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                         .expect("bytes must be non-zero");
                 let block_cache = match block_cache_method {
                     block::CacheMethod::Streaming => block::Cache::stream(

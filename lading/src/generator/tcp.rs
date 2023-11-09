@@ -13,7 +13,7 @@
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    num::{NonZeroU32, NonZeroUsize},
+    num::NonZeroU32,
     thread,
 };
 
@@ -87,7 +87,7 @@ impl Tcp {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroUsize> = config
+        let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .clone()
             .unwrap_or_else(|| {
@@ -103,7 +103,7 @@ impl Tcp {
                 ]
             })
             .iter()
-            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -122,7 +122,7 @@ impl Tcp {
 
         let block_cache = block::Cache::fixed(
             &mut rng,
-            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .expect("bytes must be non-zero"),
             &block_sizes,
             &config.variant,

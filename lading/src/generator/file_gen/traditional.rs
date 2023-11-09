@@ -14,9 +14,8 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 use std::{
-    num::{NonZeroU32, NonZeroUsize},
+    num::NonZeroU32,
     path::PathBuf,
-    str,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
@@ -131,7 +130,7 @@ impl Server {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroUsize> = config
+        let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
@@ -144,7 +143,7 @@ impl Server {
                 ]
             })
             .iter()
-            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -171,7 +170,7 @@ impl Server {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
             let total_bytes =
-                NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("bytes must be non-zero");
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Streaming => block::Cache::stream(

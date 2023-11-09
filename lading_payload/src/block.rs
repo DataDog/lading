@@ -5,10 +5,7 @@
 //! from that, decoupling the create/send operations. This module is the
 //! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
 //! -- are created.
-use std::{
-    collections::VecDeque,
-    num::{NonZeroU32, NonZeroUsize},
-};
+use std::{collections::VecDeque, num::NonZeroU32};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
@@ -91,9 +88,9 @@ pub enum Cache {
         /// The seed used to construct the `Cache`.
         seed: [u8; 32],
         /// The total number of bytes that will be generated.
-        total_bytes: usize,
+        total_bytes: u32,
         /// The sizes of the blocks that will be generated.
-        block_chunks: Vec<usize>,
+        block_chunks: Vec<u32>,
         /// The payload that will be generated.
         payload: crate::Config,
     },
@@ -112,13 +109,11 @@ impl Cache {
     /// of `block_byte_sizes` is large than `total_bytes`.
     pub fn stream(
         seed: [u8; 32],
-        total_bytes: NonZeroUsize,
-        block_byte_sizes: &[NonZeroUsize],
+        total_bytes: NonZeroU32,
+        block_byte_sizes: &[NonZeroU32],
         payload: crate::Config,
     ) -> Result<Self, Error> {
-        let mut rng = StdRng::from_seed(seed);
-
-        let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
+        let block_chunks = chunk_bytes(total_bytes, block_byte_sizes)?;
         Ok(Self::Stream {
             seed,
             total_bytes: total_bytes.get(),
@@ -140,14 +135,14 @@ impl Cache {
     /// of `block_byte_sizes` is large than `total_bytes`.
     pub fn fixed<R>(
         mut rng: &mut R,
-        total_bytes: NonZeroUsize,
-        block_byte_sizes: &[NonZeroUsize],
+        total_bytes: NonZeroU32,
+        block_byte_sizes: &[NonZeroU32],
         payload: &crate::Config,
     ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
-        let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
+        let block_chunks = chunk_bytes(total_bytes, block_byte_sizes)?;
         let blocks = match payload {
             crate::Config::TraceAgent(enc) => {
                 let ta = match enc {
@@ -265,8 +260,8 @@ impl Cache {
 #[inline]
 fn stream_inner(
     seed: [u8; 32],
-    total_bytes: usize,
-    block_chunks: &[usize],
+    total_bytes: u32,
+    block_chunks: &[u32],
     payload: &crate::Config,
     snd: Sender<Block>,
 ) -> Result<(), SpinError> {
@@ -359,30 +354,18 @@ fn stream_inner(
 
 /// Construct a vec of block sizes that fit into `total_bytes`.
 ///
-/// When calling [`construct_block_cache`] it's necessary to supply a
-/// `block_chunks` argument, defining the block sizes that will be used when
-/// serializing. Callers _generally_ will want to hit a certain total bytes
-/// number of blocks and getting `total_bytes` parceled
-/// up correctly is not necessarily straightforward. This utility method does
-/// the computation in cases where it would otherwise be annoying. From the
-/// allowable block sizes -- defined by `block_byte_sizes` -- a random member is
-/// chosen and is deducted from the total bytes remaining. This process
-/// continues until the total bytes remaining falls below the smallest block
-/// size. It's possible that a user could supply just the right parameters to
-/// make this loop infinitely. A more clever algorithm would be great.
+/// We partition `total_bytes` by `block_byte_sizes` via a round-robin method.
+/// Our goal is to terminate, more or less partition the space and do so without
+/// biasing toward any given byte size.
 ///
 /// # Errors
 ///
 /// Function will return an error if `block_byte_sizes` is empty or if a member
 /// of `block_byte_sizes` is large than `total_bytes`.
-fn chunk_bytes<R>(
-    rng: &mut R,
-    total_bytes: NonZeroUsize,
-    block_byte_sizes: &[NonZeroUsize],
-) -> Result<Vec<usize>, Error>
-where
-    R: Rng + Sized,
-{
+fn chunk_bytes(
+    total_bytes: NonZeroU32,
+    block_byte_sizes: &[NonZeroU32],
+) -> Result<Vec<u32>, Error> {
     if block_byte_sizes.is_empty() {
         return Err(ChunkError::EmptyBlockBytes.into());
     }
@@ -394,18 +377,38 @@ where
 
     let mut chunks = Vec::new();
     let mut bytes_remaining = total_bytes.get();
-    let minimum = block_byte_sizes.iter().min().unwrap().get();
-    let maximum = block_byte_sizes.iter().max().unwrap().get();
 
-    while bytes_remaining > minimum {
-        let bytes_max = std::cmp::min(maximum, bytes_remaining);
-        let block_bytes = block_byte_sizes.choose(rng).unwrap().get();
-        if block_bytes > bytes_max {
-            continue;
+    let mut iter = block_byte_sizes.iter().cycle();
+    while bytes_remaining > 0 {
+        // SAFETY: By construction, the iterator will never terminate.
+        let block_size = iter.next().unwrap().get();
+
+        // Determine if the block_size fits in the remaining bytes. If it does,
+        // great. If not, we break out of the round-robin.
+        if block_size <= bytes_remaining {
+            chunks.push(block_size);
+            bytes_remaining -= block_size;
+        } else {
+            break;
         }
-        chunks.push(block_bytes);
-        bytes_remaining = bytes_remaining.saturating_sub(block_bytes);
     }
+    // It's possible at this point that there are still bytes remaining. If
+    // there are, we loop over the block byte sizes one last time just in case
+    // there's space left we can occupy.
+    //
+    // This could theoretically be packed a little tighter if we sorted
+    // `block_byte_sizes` into descending order. I want to avoid additional
+    // allocation in this function and so this is not done.
+    if bytes_remaining > 0 {
+        for block_size in block_byte_sizes {
+            let block_size = block_size.get();
+            if block_size <= bytes_remaining {
+                chunks.push(block_size);
+                bytes_remaining -= block_size;
+            }
+        }
+    }
+
     Ok(chunks)
 }
 
@@ -425,7 +428,7 @@ where
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
-    block_chunks: &[usize],
+    block_chunks: &[u32],
 ) -> Vec<Block>
 where
     S: crate::Serialize,
@@ -444,16 +447,16 @@ where
 #[inline]
 fn stream_block_inner<R, S>(
     mut rng: &mut R,
-    total_bytes: usize,
+    total_bytes: u32,
     serializer: &S,
-    block_chunks: &[usize],
+    block_chunks: &[u32],
     snd: &Sender<Block>,
 ) -> Result<(), SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let total_bytes: u64 = total_bytes as u64;
+    let total_bytes: u64 = u64::from(total_bytes);
     let mut accum_bytes: u64 = 0;
     let mut cache: VecDeque<Block> = VecDeque::new();
 
@@ -495,14 +498,14 @@ where
 /// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
-fn construct_block<R, S>(mut rng: &mut R, serializer: &S, chunk_size: usize) -> Option<Block>
+fn construct_block<R, S>(mut rng: &mut R, serializer: &S, chunk_size: u32) -> Option<Block>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size).writer();
+    let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
     serializer
-        .to_bytes(&mut rng, chunk_size, &mut block)
+        .to_bytes(&mut rng, chunk_size as usize, &mut block)
         .unwrap();
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
@@ -520,62 +523,106 @@ where
     }
 }
 
-#[cfg(test)]
-mod test {
-    use std::num::NonZeroUsize;
+#[cfg(kani)]
+mod verification {
+    use crate::block::chunk_bytes;
+    use std::num::NonZeroU32;
 
-    use proptest::{collection, prelude::*};
-    use rand::{rngs::SmallRng, SeedableRng};
+    /// Function `chunk_bytes` will always fail with an error if the passed
+    /// `block_byte_sizes` is empty.
+    #[kani::proof]
+    fn chunk_bytes_empty_sizes_error() {
+        let total_bytes: NonZeroU32 = kani::any();
+        let block_byte_sizes = [];
 
-    use crate::block::{chunk_bytes, ChunkError, Error};
-
-    /// Construct our `block_bytes_sizes` vector and the `total_bytes` value. We are
-    /// careful to never generate an empty vector nor a `total_bytes` that is less
-    /// than any value in `block_bytes_sizes`.
-    fn total_bytes_and_block_bytes() -> impl Strategy<Value = (NonZeroUsize, Vec<NonZeroUsize>)> {
-        (1..usize::MAX).prop_flat_map(|total_bytes| {
-            (
-                Just(NonZeroUsize::new(total_bytes).unwrap()),
-                collection::vec(
-                    (1..total_bytes).prop_map(|i| NonZeroUsize::new(i).unwrap()),
-                    1..1_000,
-                ),
-            )
-        })
+        let res = chunk_bytes(total_bytes, &block_byte_sizes);
+        kani::assert(
+            res.is_err(),
+            "chunk_bytes must always fail if block_byte_sizes is empty.",
+        );
     }
 
-    // No chunk is a returned set of chunks should ever be 0.
-    proptest! {
-        #[test]
-        fn chunk_never_size_zero(seed: u64, (total_bytes, block_bytes_sizes) in total_bytes_and_block_bytes()) {
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let chunks = chunk_bytes(&mut rng, total_bytes, &block_bytes_sizes).unwrap();
+    /// Function `chunk_bytes` should not fail if no member of block sizes is
+    /// large than `total_bytes`.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn chunk_bytes_sizes_under_under_check() {
+        let total_bytes: NonZeroU32 = kani::any_where(|x: &NonZeroU32| x.get() < 64);
 
-            for chunk in chunks {
-                prop_assert!(chunk > 0);
-            }
+        let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
+
+        kani::assert(
+            chunk_bytes(total_bytes, &[under, under]).is_ok(),
+            "chunk_bytes should not fail when all sizes are under limit",
+        );
+    }
+
+    /// Function `chunk_bytes` should not fail if no member of block sizes is
+    /// large than `total_bytes`.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn chunk_bytes_sizes_under_equal_check() {
+        let total_bytes: NonZeroU32 = kani::any();
+
+        let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
+        let equal = total_bytes;
+
+        kani::assert(
+            chunk_bytes(total_bytes, &[under, equal]).is_ok(),
+            "chunk_bytes should not fail when all sizes are under or equal to limit",
+        );
+    }
+
+    /// Function `chunk_bytes` will fail if any member of `block_byte_sizes` is
+    /// larger than `total_bytes`.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn chunk_bytes_sizes_under_equal_over_check() {
+        let total_bytes: NonZeroU32 = kani::any();
+
+        let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
+        let equal = total_bytes;
+        let over: NonZeroU32 = kani::any_where(|x| *x > total_bytes);
+
+        kani::assert(
+            chunk_bytes(total_bytes, &[under, equal, over]).is_err(),
+            "chunk_bytes should fail when all sizes not all under the limit",
+        );
+    }
+
+    /// Function `chunk_bytes` does not return a zero-sized chunk.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn chunk_bytes_never_zero_chunk() {
+        let total_bytes: NonZeroU32 = kani::any();
+        let byte_sizes = kani::vec::any_vec::<NonZeroU32, 10>();
+        for bs in &byte_sizes {
+            kani::assume(*bs <= total_bytes);
+        }
+
+        let chunks = chunk_bytes(total_bytes, &byte_sizes).unwrap();
+        for chunk in chunks {
+            kani::assert(
+                chunk > 0,
+                "chunk_bytes should never return a zero-sized chunk",
+            );
         }
     }
 
-    // The vec of chunks must not be empty.
-    proptest! {
-        #[test]
-        fn chunks_never_empty(seed: u64, (total_bytes, block_bytes_sizes) in total_bytes_and_block_bytes()) {
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let chunks = chunk_bytes(&mut rng, total_bytes, &block_bytes_sizes).unwrap();
-            prop_assert!(!chunks.is_empty());
+    /// Function `chunk_bytes` does not an empty vec of chunks.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn chunk_bytes_never_chunk_empty() {
+        let total_bytes: NonZeroU32 = kani::any();
+        let byte_sizes = kani::vec::any_vec::<NonZeroU32, 10>();
+        for bs in &byte_sizes {
+            kani::assume(*bs <= total_bytes);
         }
-    }
 
-    // Passing an empty block_byte_sizes always triggers an error condition.
-    proptest! {
-        #[test]
-        fn chunks_empty_trigger_error(seed: u64, total_bytes in (1..usize::MAX).prop_map(|i| NonZeroUsize::new(i).unwrap())) {
-            let mut rng = SmallRng::seed_from_u64(seed);
-            match chunk_bytes(&mut rng, total_bytes, &[]) {
-                Err(Error::Chunk(ChunkError::EmptyBlockBytes)) => assert!(true),
-                _ => assert!(false),
-            }
-        }
+        let chunks = chunk_bytes(total_bytes, &byte_sizes).unwrap();
+        kani::assert(
+            !chunks.is_empty(),
+            "chunk_bytes should never return an empty vec of chunks",
+        );
     }
 }
