@@ -1,26 +1,37 @@
+//! Construct byte blocks for use in generators.
+//!
+//! The method that lading uses to maintain speed over its target is to avoid
+//! runtime generation where possible _or_ to generate into a queue and consume
+//! from that, decoupling the create/send operations. This module is the
+//! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
+//! -- are created.
 use std::{
     collections::VecDeque,
     num::{NonZeroU32, NonZeroUsize},
 };
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
-use lading_payload as payload;
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 
+/// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum SpinError {
+pub enum SpinError {
+    /// See [`SendError`]
     #[error(transparent)]
     Send(#[from] SendError<Block>),
 }
 
+/// Error for [`Cache`]
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum Error {
+    /// See [`ChunkError`]
     #[error("Chunk error: {0}")]
     Chunk(#[from] ChunkError),
 }
 
+/// Errors for the construction of chunks
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ChunkError {
     /// The slice of byte sizes given to [`chunk_bytes`] was empty.
@@ -31,10 +42,13 @@ pub enum ChunkError {
     InsufficientTotalBytes,
 }
 
+/// The fixed-size byte blob
 #[derive(Debug, Clone)]
-pub(crate) struct Block {
-    pub(crate) total_bytes: NonZeroU32,
-    pub(crate) bytes: Bytes,
+pub struct Block {
+    /// The total number of bytes in this block.
+    pub total_bytes: NonZeroU32,
+    /// The bytes of this block.
+    pub bytes: Bytes,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -46,7 +60,9 @@ pub enum CacheMethod {
     Streaming,
 }
 
-pub(crate) fn default_cache_method() -> CacheMethod {
+/// The default cache method.
+#[must_use]
+pub fn default_cache_method() -> CacheMethod {
     CacheMethod::Fixed
 }
 
@@ -60,18 +76,26 @@ pub(crate) fn default_cache_method() -> CacheMethod {
 /// et al.
 ///
 /// We expect to expand the different modes of `Cache` operation in the future.
-pub(crate) enum Cache {
+pub enum Cache {
+    /// A fixed size cache of blocks. Blocks are looped over in a round-robin
+    /// fashion.
     Fixed {
         /// The current index into `blocks`
         idx: usize,
         /// The store of blocks.
         blocks: Vec<Block>,
     },
+    /// A streaming cache of blocks. Blocks are generated on the fly and
+    /// streamed through a queue.
     Stream {
+        /// The seed used to construct the `Cache`.
         seed: [u8; 32],
+        /// The total number of bytes that will be generated.
         total_bytes: usize,
+        /// The sizes of the blocks that will be generated.
         block_chunks: Vec<usize>,
-        payload: payload::Config,
+        /// The payload that will be generated.
+        payload: crate::Config,
     },
 }
 
@@ -86,11 +110,11 @@ impl Cache {
     ///
     /// Function will return an error if `block_byte_sizes` is empty or if a member
     /// of `block_byte_sizes` is large than `total_bytes`.
-    pub(crate) fn stream(
+    pub fn stream(
         seed: [u8; 32],
         total_bytes: NonZeroUsize,
         block_byte_sizes: &[NonZeroUsize],
-        payload: payload::Config,
+        payload: crate::Config,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(seed);
 
@@ -114,31 +138,29 @@ impl Cache {
     ///
     /// Function will return an error if `block_byte_sizes` is empty or if a member
     /// of `block_byte_sizes` is large than `total_bytes`.
-    pub(crate) fn fixed<R>(
+    pub fn fixed<R>(
         mut rng: &mut R,
         total_bytes: NonZeroUsize,
         block_byte_sizes: &[NonZeroUsize],
-        payload: &payload::Config,
+        payload: &crate::Config,
     ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
         let block_chunks = chunk_bytes(&mut rng, total_bytes, block_byte_sizes)?;
         let blocks = match payload {
-            payload::Config::TraceAgent(enc) => {
+            crate::Config::TraceAgent(enc) => {
                 let ta = match enc {
-                    payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
-                    payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
+                    crate::Encoding::Json => crate::TraceAgent::json(&mut rng),
+                    crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
                 };
 
                 construct_block_cache_inner(&mut rng, &ta, &block_chunks)
             }
-            payload::Config::Syslog5424 => construct_block_cache_inner(
-                &mut rng,
-                &payload::Syslog5424::default(),
-                &block_chunks,
-            ),
-            payload::Config::DogStatsD(payload::dogstatsd::Config {
+            crate::Config::Syslog5424 => {
+                construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)
+            }
+            crate::Config::DogStatsD(crate::dogstatsd::Config {
                 contexts,
                 name_length,
                 tag_key_length,
@@ -151,7 +173,7 @@ impl Cache {
                 metric_weights,
                 value,
             }) => {
-                let serializer = payload::DogStatsD::new(
+                let serializer = crate::DogStatsD::new(
                     *contexts,
                     *name_length,
                     *tag_key_length,
@@ -167,45 +189,45 @@ impl Cache {
 
                 construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
             }
-            payload::Config::Fluent => {
-                let pyld = payload::Fluent::new(&mut rng);
+            crate::Config::Fluent => {
+                let pyld = crate::Fluent::new(&mut rng);
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
             }
-            payload::Config::SplunkHec { encoding } => construct_block_cache_inner(
+            crate::Config::SplunkHec { encoding } => construct_block_cache_inner(
                 &mut rng,
-                &payload::SplunkHec::new(*encoding),
+                &crate::SplunkHec::new(*encoding),
                 &block_chunks,
             ),
-            payload::Config::ApacheCommon => {
-                let pyld = payload::ApacheCommon::new(&mut rng);
+            crate::Config::ApacheCommon => {
+                let pyld = crate::ApacheCommon::new(&mut rng);
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
             }
-            payload::Config::Ascii => {
-                let pyld = payload::Ascii::new(&mut rng);
+            crate::Config::Ascii => {
+                let pyld = crate::Ascii::new(&mut rng);
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
             }
-            payload::Config::DatadogLog => {
-                let serializer = payload::DatadogLog::new(&mut rng);
+            crate::Config::DatadogLog => {
+                let serializer = crate::DatadogLog::new(&mut rng);
                 construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
             }
-            payload::Config::Json => {
-                construct_block_cache_inner(&mut rng, &payload::Json, &block_chunks)
+            crate::Config::Json => {
+                construct_block_cache_inner(&mut rng, &crate::Json, &block_chunks)
             }
-            payload::Config::Static { ref static_path } => construct_block_cache_inner(
+            crate::Config::Static { ref static_path } => construct_block_cache_inner(
                 &mut rng,
-                &payload::Static::new(static_path),
+                &crate::Static::new(static_path),
                 &block_chunks,
             ),
-            payload::Config::OpentelemetryTraces => {
-                let pyld = payload::OpentelemetryTraces::new(&mut rng);
+            crate::Config::OpentelemetryTraces => {
+                let pyld = crate::OpentelemetryTraces::new(&mut rng);
                 construct_block_cache_inner(rng, &pyld, &block_chunks)
             }
-            payload::Config::OpentelemetryLogs => {
-                let pyld = payload::OpentelemetryLogs::new(&mut rng);
+            crate::Config::OpentelemetryLogs => {
+                let pyld = crate::OpentelemetryLogs::new(&mut rng);
                 construct_block_cache_inner(rng, &pyld, &block_chunks)
             }
-            payload::Config::OpentelemetryMetrics => {
-                let pyld = payload::OpentelemetryMetrics::new(&mut rng);
+            crate::Config::OpentelemetryMetrics => {
+                let pyld = crate::OpentelemetryMetrics::new(&mut rng);
                 construct_block_cache_inner(rng, &pyld, &block_chunks)
             }
         };
@@ -217,8 +239,13 @@ impl Cache {
     /// This is a blocking function that pushes `Block` instances into the
     /// user-provided mpsc `Sender<Block>`. The user is required to set an
     /// appropriate size on the channel. This function will never exit.
+    ///
+    /// # Errors
+    ///
+    /// Function will return an error if the user-provided mpsc `Sender<Block>`
+    /// is closed.
     #[allow(clippy::needless_pass_by_value)]
-    pub(crate) fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
+    pub fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
         match self {
             Self::Fixed { mut idx, blocks } => loop {
                 snd.blocking_send(blocks[idx].clone())?;
@@ -240,25 +267,25 @@ fn stream_inner(
     seed: [u8; 32],
     total_bytes: usize,
     block_chunks: &[usize],
-    payload: &payload::Config,
+    payload: &crate::Config,
     snd: Sender<Block>,
 ) -> Result<(), SpinError> {
     let mut rng = StdRng::from_seed(seed);
 
     match payload {
-        payload::Config::TraceAgent(enc) => {
+        crate::Config::TraceAgent(enc) => {
             let ta = match enc {
-                payload::Encoding::Json => payload::TraceAgent::json(&mut rng),
-                payload::Encoding::MsgPack => payload::TraceAgent::msg_pack(&mut rng),
+                crate::Encoding::Json => crate::TraceAgent::json(&mut rng),
+                crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
             };
 
             stream_block_inner(&mut rng, total_bytes, &ta, block_chunks, &snd)
         }
-        payload::Config::Syslog5424 => {
-            let pyld = payload::Syslog5424::default();
+        crate::Config::Syslog5424 => {
+            let pyld = crate::Syslog5424::default();
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::DogStatsD(payload::dogstatsd::Config {
+        crate::Config::DogStatsD(crate::dogstatsd::Config {
             contexts,
             name_length,
             tag_key_length,
@@ -271,7 +298,7 @@ fn stream_inner(
             metric_weights,
             value,
         }) => {
-            let pyld = payload::DogStatsD::new(
+            let pyld = crate::DogStatsD::new(
                 *contexts,
                 *name_length,
                 *tag_key_length,
@@ -287,44 +314,44 @@ fn stream_inner(
 
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::Fluent => {
-            let pyld = payload::Fluent::new(&mut rng);
+        crate::Config::Fluent => {
+            let pyld = crate::Fluent::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::SplunkHec { encoding } => {
-            let pyld = payload::SplunkHec::new(*encoding);
+        crate::Config::SplunkHec { encoding } => {
+            let pyld = crate::SplunkHec::new(*encoding);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::ApacheCommon => {
-            let pyld = payload::ApacheCommon::new(&mut rng);
+        crate::Config::ApacheCommon => {
+            let pyld = crate::ApacheCommon::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::Ascii => {
-            let pyld = payload::Ascii::new(&mut rng);
+        crate::Config::Ascii => {
+            let pyld = crate::Ascii::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::DatadogLog => {
-            let pyld = payload::DatadogLog::new(&mut rng);
+        crate::Config::DatadogLog => {
+            let pyld = crate::DatadogLog::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::Json => {
-            let pyld = payload::Json;
+        crate::Config::Json => {
+            let pyld = crate::Json;
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::Static { ref static_path } => {
-            let pyld = payload::Static::new(static_path);
+        crate::Config::Static { ref static_path } => {
+            let pyld = crate::Static::new(static_path);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::OpentelemetryTraces => {
-            let pyld = payload::OpentelemetryTraces::new(&mut rng);
+        crate::Config::OpentelemetryTraces => {
+            let pyld = crate::OpentelemetryTraces::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::OpentelemetryLogs => {
-            let pyld = payload::OpentelemetryLogs::new(&mut rng);
+        crate::Config::OpentelemetryLogs => {
+            let pyld = crate::OpentelemetryLogs::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        payload::Config::OpentelemetryMetrics => {
-            let pyld = payload::OpentelemetryMetrics::new(&mut rng);
+        crate::Config::OpentelemetryMetrics => {
+            let pyld = crate::OpentelemetryMetrics::new(&mut rng);
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
     }
@@ -401,7 +428,7 @@ fn construct_block_cache_inner<R, S>(
     block_chunks: &[usize],
 ) -> Vec<Block>
 where
-    S: payload::Serialize,
+    S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
@@ -423,7 +450,7 @@ fn stream_block_inner<R, S>(
     snd: &Sender<Block>,
 ) -> Result<(), SpinError>
 where
-    S: payload::Serialize,
+    S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let total_bytes: u64 = total_bytes as u64;
@@ -470,7 +497,7 @@ where
 #[inline]
 fn construct_block<R, S>(mut rng: &mut R, serializer: &S, chunk_size: usize) -> Option<Block>
 where
-    S: payload::Serialize,
+    S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size).writer();

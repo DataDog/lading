@@ -74,7 +74,7 @@ mod tests {
 
     use http::HeaderMap;
 
-    use crate::block;
+    use lading_payload::block;
 
     use super::*;
 

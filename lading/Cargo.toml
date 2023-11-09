@@ -15,7 +15,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 
 byte-unit = { version = "4.0", features = ["serde"] }
-bytes = { version = "1.4.0", default-features = false, features = ["std"] }
+bytes = { workspace = true, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
 futures = "0.3.28"

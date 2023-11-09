@@ -26,11 +26,8 @@ use serde::Deserialize;
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, info, trace};
 
-use crate::{
-    block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
-};
+use crate::{common::PeekableReceiver, signals::Shutdown};
+use lading_payload::block::{self, Block};
 
 use super::General;
 
