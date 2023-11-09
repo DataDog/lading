@@ -12,6 +12,8 @@ use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 
+const MAX_CHUNKS: usize = 4096;
+
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
 pub enum SpinError {
@@ -113,11 +115,12 @@ impl Cache {
         block_byte_sizes: &[NonZeroU32],
         payload: crate::Config,
     ) -> Result<Self, Error> {
-        let block_chunks = chunk_bytes(total_bytes, block_byte_sizes)?;
+        let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+        let total_chunks = chunk_bytes(total_bytes, block_byte_sizes, &mut block_chunks)?;
         Ok(Self::Stream {
             seed,
             total_bytes: total_bytes.get(),
-            block_chunks,
+            block_chunks: block_chunks[..total_chunks].to_vec(),
             payload,
         })
     }
@@ -142,7 +145,9 @@ impl Cache {
     where
         R: Rng + ?Sized,
     {
-        let block_chunks = chunk_bytes(total_bytes, block_byte_sizes)?;
+        let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+        let total_chunks = chunk_bytes(total_bytes, block_byte_sizes, &mut block_chunks)?;
+        let block_chunks = block_chunks[..total_chunks].to_vec();
         let blocks = match payload {
             crate::Config::TraceAgent(enc) => {
                 let ta = match enc {
@@ -362,10 +367,11 @@ fn stream_inner(
 ///
 /// Function will return an error if `block_byte_sizes` is empty or if a member
 /// of `block_byte_sizes` is large than `total_bytes`.
-fn chunk_bytes(
+fn chunk_bytes<const N: usize>(
     total_bytes: NonZeroU32,
     block_byte_sizes: &[NonZeroU32],
-) -> Result<Vec<u32>, Error> {
+    chunks: &mut [u32; N],
+) -> Result<usize, Error> {
     if block_byte_sizes.is_empty() {
         return Err(ChunkError::EmptyBlockBytes.into());
     }
@@ -375,18 +381,22 @@ fn chunk_bytes(
         }
     }
 
-    let mut chunks = Vec::new();
+    let mut total_chunks = 0;
     let mut bytes_remaining = total_bytes.get();
 
     let mut iter = block_byte_sizes.iter().cycle();
     while bytes_remaining > 0 {
+        if total_chunks >= N {
+            break;
+        }
         // SAFETY: By construction, the iterator will never terminate.
         let block_size = iter.next().unwrap().get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.
         if block_size <= bytes_remaining {
-            chunks.push(block_size);
+            chunks[total_chunks] = block_size;
+            total_chunks += 1;
             bytes_remaining -= block_size;
         } else {
             break;
@@ -401,15 +411,19 @@ fn chunk_bytes(
     // allocation in this function and so this is not done.
     if bytes_remaining > 0 {
         for block_size in block_byte_sizes {
+            if total_chunks >= N {
+                break;
+            }
             let block_size = block_size.get();
             if block_size <= bytes_remaining {
-                chunks.push(block_size);
+                chunks[total_chunks] = block_size;
+                total_chunks += 1;
                 bytes_remaining -= block_size;
             }
         }
     }
 
-    Ok(chunks)
+    Ok(total_chunks)
 }
 
 /// Construct a new block cache of form defined by `serializer`.
@@ -534,8 +548,9 @@ mod verification {
     fn chunk_bytes_empty_sizes_error() {
         let total_bytes: NonZeroU32 = kani::any();
         let block_byte_sizes = [];
+        let mut block_chunks: [u32; 10] = [0; 10];
 
-        let res = chunk_bytes(total_bytes, &block_byte_sizes);
+        let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks);
         kani::assert(
             res.is_err(),
             "chunk_bytes must always fail if block_byte_sizes is empty.",
@@ -545,14 +560,14 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
-    #[kani::unwind(10)]
     fn chunk_bytes_sizes_under_under_check() {
         let total_bytes: NonZeroU32 = kani::any_where(|x: &NonZeroU32| x.get() < 64);
+        let mut block_chunks: [u32; 10] = [0; 10];
 
         let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
 
         kani::assert(
-            chunk_bytes(total_bytes, &[under, under]).is_ok(),
+            chunk_bytes(total_bytes, &[under, under], &mut block_chunks).is_ok(),
             "chunk_bytes should not fail when all sizes are under limit",
         );
     }
@@ -560,15 +575,15 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
-    #[kani::unwind(10)]
     fn chunk_bytes_sizes_under_equal_check() {
         let total_bytes: NonZeroU32 = kani::any();
+        let mut block_chunks: [u32; 10] = [0; 10];
 
         let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
         let equal = total_bytes;
 
         kani::assert(
-            chunk_bytes(total_bytes, &[under, equal]).is_ok(),
+            chunk_bytes(total_bytes, &[under, equal], &mut block_chunks).is_ok(),
             "chunk_bytes should not fail when all sizes are under or equal to limit",
         );
     }
@@ -576,53 +591,61 @@ mod verification {
     /// Function `chunk_bytes` will fail if any member of `block_byte_sizes` is
     /// larger than `total_bytes`.
     #[kani::proof]
-    #[kani::unwind(10)]
     fn chunk_bytes_sizes_under_equal_over_check() {
         let total_bytes: NonZeroU32 = kani::any();
+        let mut block_chunks: [u32; 10] = [0; 10];
 
         let under: NonZeroU32 = kani::any_where(|x| *x < total_bytes);
         let equal = total_bytes;
         let over: NonZeroU32 = kani::any_where(|x| *x > total_bytes);
 
         kani::assert(
-            chunk_bytes(total_bytes, &[under, equal, over]).is_err(),
+            chunk_bytes(total_bytes, &[under, equal, over], &mut block_chunks).is_err(),
             "chunk_bytes should fail when all sizes not all under the limit",
         );
     }
 
-    /// Function `chunk_bytes` does not return a zero-sized chunk.
+    /// Function `chunk_bytes` does not fail to return some chunks.
     #[kani::proof]
-    #[kani::unwind(10)]
-    fn chunk_bytes_never_zero_chunk() {
-        let total_bytes: NonZeroU32 = kani::any();
-        let byte_sizes = kani::vec::any_vec::<NonZeroU32, 10>();
-        for bs in &byte_sizes {
-            kani::assume(*bs <= total_bytes);
-        }
-
-        let chunks = chunk_bytes(total_bytes, &byte_sizes).unwrap();
-        for chunk in chunks {
-            kani::assert(
-                chunk > 0,
-                "chunk_bytes should never return a zero-sized chunk",
-            );
-        }
-    }
-
-    /// Function `chunk_bytes` does not an empty vec of chunks.
-    #[kani::proof]
-    #[kani::unwind(10)]
     fn chunk_bytes_never_chunk_empty() {
         let total_bytes: NonZeroU32 = kani::any();
-        let byte_sizes = kani::vec::any_vec::<NonZeroU32, 10>();
-        for bs in &byte_sizes {
-            kani::assume(*bs <= total_bytes);
-        }
+        let byte_sizes: [NonZeroU32; 5] = [
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+        ];
+        let mut block_chunks: [u32; 10] = [0; 10];
 
-        let chunks = chunk_bytes(total_bytes, &byte_sizes).unwrap();
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
         kani::assert(
-            !chunks.is_empty(),
+            chunks > 0,
             "chunk_bytes should never return an empty vec of chunks",
         );
+    }
+
+    /// Function `chunk_bytes` does not return a chunk that is not present in
+    /// the byte sizes.
+    #[kani::proof]
+    #[kani::unwind(15)]
+    fn chunk_bytes_always_present() {
+        let total_bytes: NonZeroU32 = kani::any();
+        let byte_sizes: [NonZeroU32; 5] = [
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+        ];
+        let mut block_chunks: [u32; 10] = [0; 10];
+
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
+        for chunk in &block_chunks[0..chunks] {
+            kani::assert(
+                byte_sizes.contains(&NonZeroU32::new(*chunk).unwrap()),
+                "chunk_bytes should never return a chunk that is not present in the byte sizes",
+            );
+        }
     }
 }
