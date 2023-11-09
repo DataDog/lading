@@ -33,11 +33,8 @@ use tonic::{
 };
 use tracing::{debug, info};
 
-use crate::{
-    block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
-};
+use crate::{common::PeekableReceiver, signals::Shutdown};
+use lading_payload::block::{self, Block};
 
 use super::General;
 
@@ -75,7 +72,7 @@ pub struct Config {
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
-    #[serde(default = "crate::block::default_cache_method")]
+    #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,

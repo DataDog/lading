@@ -38,10 +38,10 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
+use crate::{common::PeekableReceiver, signals::Shutdown};
+use lading_payload::{
+    self,
     block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
 };
 
 use super::General;
@@ -95,7 +95,7 @@ pub struct Config {
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
     /// Whether to use a fixed or streaming block cache
-    #[serde(default = "crate::block::default_cache_method")]
+    #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
     /// Determines whether the file generator mimics log rotation or not. If
     /// true, files will be rotated. If false, it is the responsibility of

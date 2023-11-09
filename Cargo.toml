@@ -10,6 +10,7 @@ members = [
 ]
 
 [workspace.dependencies]
+bytes = { version = "1.4.0", default-features = false, features = ["std"] }
 metrics = { version = "0.21" }
 rand = { version = "0.8", default-features = false }
 serde = { version = "1.0", features = ["std", "derive"] }

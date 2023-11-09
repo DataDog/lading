@@ -11,13 +11,10 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{
-    block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
-};
+use crate::{common::PeekableReceiver, signals::Shutdown};
 use byte_unit::{Byte, ByteUnit};
 use futures::future::join_all;
+use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
@@ -56,7 +53,7 @@ pub struct Config {
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
-    #[serde(default = "crate::block::default_cache_method")]
+    #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
     /// The total number of parallel connections to maintain
     #[serde(default = "default_parallel_connections")]

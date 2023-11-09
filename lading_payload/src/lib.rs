@@ -27,6 +27,8 @@ use std::{
 use rand::Rng;
 use serde::Deserialize;
 
+pub mod block;
+
 pub use apache_common::ApacheCommon;
 pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;

@@ -34,11 +34,8 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
-    block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
-};
+use crate::{common::PeekableReceiver, signals::Shutdown};
+use lading_payload::block::{self, Block};
 
 use super::General;
 
@@ -82,7 +79,7 @@ pub struct Config {
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
     /// Whether to use a fixed or streaming block cache
-    #[serde(default = "crate::block::default_cache_method")]
+    #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
     /// The load throttle configuration
     #[serde(default)]

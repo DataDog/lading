@@ -25,11 +25,8 @@ use serde::Deserialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
 use tracing::{info, trace};
 
-use crate::{
-    block::{self, Block},
-    common::PeekableReceiver,
-    signals::Shutdown,
-};
+use crate::{common::PeekableReceiver, signals::Shutdown};
+use lading_payload::block::{self, Block};
 
 use super::General;
 

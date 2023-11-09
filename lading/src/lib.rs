@@ -23,7 +23,6 @@
 #![allow(clippy::multiple_crate_versions)]
 
 pub mod blackhole;
-pub(crate) mod block;
 pub mod captures;
 pub(crate) mod codec;
 mod common;

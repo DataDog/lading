@@ -1083,6 +1083,7 @@ dependencies = [
 name = "lading-payload"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "criterion",
  "opentelemetry-proto",
  "proptest",
@@ -1096,6 +1097,7 @@ dependencies = [
  "serde_tuple",
  "thiserror",
  "time",
+ "tokio",
  "tracing",
 ]
 
