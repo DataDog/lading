@@ -12,12 +12,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{
-    convert::TryFrom,
-    num::{NonZeroU32, NonZeroUsize},
-    thread,
-    time::Duration,
-};
+use std::{convert::TryFrom, num::NonZeroU32, thread, time::Duration};
 
 use bytes::{Buf, BufMut, Bytes};
 use http::{uri::PathAndQuery, Uri};
@@ -159,7 +154,7 @@ impl Grpc {
         use byte_unit::{Byte, ByteUnit};
 
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroUsize> = config
+        let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .clone()
             .unwrap_or_else(|| {
@@ -175,7 +170,7 @@ impl Grpc {
                 ]
             })
             .iter()
-            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -193,7 +188,7 @@ impl Grpc {
         );
 
         let total_bytes =
-            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .expect("bytes must be non-zero");
         let block_cache = match config.block_cache_method {
             block::CacheMethod::Streaming => block::Cache::stream(

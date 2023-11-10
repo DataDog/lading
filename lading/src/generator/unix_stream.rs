@@ -18,11 +18,7 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{
-    num::{NonZeroU32, NonZeroUsize},
-    path::PathBuf,
-    thread,
-};
+use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{net, sync::mpsc, task::JoinError};
 use tracing::{debug, error, info};
 
@@ -92,7 +88,7 @@ impl UnixStream {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroUsize> = config
+        let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .clone()
             .unwrap_or_else(|| {
@@ -108,7 +104,7 @@ impl UnixStream {
                 ]
             })
             .iter()
-            .map(|sz| NonZeroUsize::new(sz.get_bytes() as usize).expect("bytes must be non-zero"))
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -126,7 +122,7 @@ impl UnixStream {
         );
 
         let total_bytes =
-            NonZeroUsize::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as usize)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .expect("bytes must be non-zero");
         let block_cache = match config.block_cache_method {
             block::CacheMethod::Streaming => block::Cache::stream(
