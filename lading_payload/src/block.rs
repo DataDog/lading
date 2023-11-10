@@ -54,9 +54,7 @@ pub struct Block {
 impl<'a> arbitrary::Arbitrary<'a> for Block {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let total_bytes = u32::arbitrary(u)?;
-        let bytes = u
-            .bytes(total_bytes as usize)
-            .map(|b| Bytes::copy_from_slice(b))?;
+        let bytes = u.bytes(total_bytes as usize).map(Bytes::copy_from_slice)?;
         Ok(Self {
             total_bytes: NonZeroU32::new(total_bytes).unwrap(),
             bytes,
