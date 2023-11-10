@@ -65,6 +65,8 @@ fn multivalue_pack_probability() -> f32 {
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct KindWeights {
     metric: u8,
     event: u8,
@@ -84,6 +86,8 @@ impl Default for KindWeights {
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct MetricWeights {
     count: u8,
     gauge: u8,
@@ -108,6 +112,8 @@ impl Default for MetricWeights {
 
 /// Configuration for the values of a metric.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct ValueConf {
     /// Odds out of 256 that the value will be a float and not an integer.
     float_probability: f32,
@@ -128,6 +134,8 @@ impl Default for ValueConf {
 /// Range expression for configuration
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub enum ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
@@ -172,6 +180,7 @@ where
 
 /// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Config {
     /// The unique metric contexts to generate A context is a set of unique
     /// metric name + tags

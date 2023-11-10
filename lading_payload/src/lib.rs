@@ -89,6 +89,7 @@ pub trait Serialize {
 /// Sub-configuration for `TraceAgent` format
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Encoding {
     /// Use JSON format
     Json,
@@ -100,6 +101,7 @@ pub enum Encoding {
 /// Configuration for `Payload`
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Config {
     /// Generates Fluent messages
     Fluent,

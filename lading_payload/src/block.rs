@@ -50,6 +50,20 @@ pub struct Block {
     pub bytes: Bytes,
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Block {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let total_bytes = u32::arbitrary(u)?;
+        let bytes = u
+            .bytes(total_bytes as usize)
+            .map(|b| Bytes::copy_from_slice(b))?;
+        Ok(Self {
+            total_bytes: NonZeroU32::new(total_bytes).unwrap(),
+            bytes,
+        })
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
 /// The method for which caching will be configure
 pub enum CacheMethod {
@@ -66,6 +80,7 @@ pub fn default_cache_method() -> CacheMethod {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// A mechanism for streaming byte blobs, 'blocks'
 ///
 /// The `Cache` is a mechanism to allow generators to request 'blocks' without
