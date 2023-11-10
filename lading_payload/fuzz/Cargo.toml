@@ -1,0 +1,30 @@
+[package]
+name = "lading-payload-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng" ]}
+
+[dependencies.lading-payload]
+path = ".."
+features = ["fuzz"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fixed_cache_creation"
+path = "fuzz_targets/fixed_cache_creation.rs"
+test = false
+doc = false
