@@ -601,7 +601,7 @@ mod verification {
 
         kani::assert(
             chunk_bytes(total_bytes, &[under, equal, over], &mut block_chunks).is_err(),
-            "chunk_bytes should fail when all sizes not all under the limit",
+            "chunk_bytes should fail when not all sizes are under the limit",
         );
     }
 
@@ -645,6 +645,30 @@ mod verification {
             kani::assert(
                 byte_sizes.contains(&NonZeroU32::new(*chunk).unwrap()),
                 "chunk_bytes should never return a chunk that is not present in the byte sizes",
+            );
+        }
+    }
+
+    /// Function `chunk_bytes` does not populate values above the returned
+    /// index, that is, they all remain zero.
+    #[kani::proof]
+    #[kani::unwind(15)]
+    fn chunk_bytes_never_populate_above_index() {
+        let total_bytes: NonZeroU32 = kani::any();
+        let byte_sizes: [NonZeroU32; 5] = [
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+            kani::any_where(|x| *x < total_bytes),
+        ];
+        let mut block_chunks: [u32; 10] = [0; 10];
+
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
+        for chunk in &block_chunks[chunks..] {
+            kani::assert(
+                *chunk == 0,
+                "chunk_bytes should never populate values above the returned index",
             );
         }
     }
