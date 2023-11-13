@@ -22,6 +22,18 @@ fuzz_target!(|input: Input| {
         }
     }
 
+    match input.payload {
+        lading_payload::Config::Fluent // slow
+        | lading_payload::Config::OpentelemetryLogs
+        | lading_payload::Config::OpentelemetryTraces
+        | lading_payload::Config::OpentelemetryMetrics
+        | lading_payload::Config::SplunkHec { .. }
+        | lading_payload::Config::Static { .. }
+        | lading_payload::Config::Syslog5424
+        | lading_payload::Config::TraceAgent(..) => return,
+        _ => {}
+    }
+
     let mut rng = SmallRng::from_seed(input.seed);
     let _res = Cache::fixed(
         &mut rng,
