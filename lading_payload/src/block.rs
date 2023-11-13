@@ -12,6 +12,8 @@ use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 
+use crate::dogstatsd;
+
 const MAX_CHUNKS: usize = 4096;
 
 /// Error for `Cache::spin`
@@ -20,6 +22,12 @@ pub enum SpinError {
     /// See [`SendError`]
     #[error(transparent)]
     Send(#[from] SendError<Block>),
+    /// Provided configuration had validation errors
+    #[error("Provided configuration was not valid.")]
+    InvalidConfig,
+    /// DogStatsD creation error
+    #[error(transparent)]
+    DogStatsD(#[from] dogstatsd::Error),
 }
 
 /// Error for [`Cache`]
@@ -34,6 +42,9 @@ pub enum Error {
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid.")]
     InvalidConfig,
+    /// DogStatsD creation error
+    #[error(transparent)]
+    DogStatsD(#[from] dogstatsd::Error),
 }
 
 /// Errors for the construction of chunks
@@ -200,6 +211,7 @@ impl Cache {
                     kind_weights,
                     metric_weights,
                     value,
+                    service_check_names,
                 },
             ) => {
                 if !conf.valid() {
@@ -207,6 +219,7 @@ impl Cache {
                 }
                 let serializer = crate::DogStatsD::new(
                     *contexts,
+                    *service_check_names,
                     *name_length,
                     *tag_key_length,
                     *tag_value_length,
@@ -217,7 +230,7 @@ impl Cache {
                     *metric_weights,
                     *value,
                     &mut rng,
-                );
+                )?;
 
                 construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
             }
@@ -317,21 +330,28 @@ fn stream_inner(
             let pyld = crate::Syslog5424::default();
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        crate::Config::DogStatsD(crate::dogstatsd::Config {
-            contexts,
-            name_length,
-            tag_key_length,
-            tag_value_length,
-            tags_per_msg,
-            // TODO -- Validate user input for multivalue_pack_probability.
-            multivalue_pack_probability,
-            multivalue_count,
-            kind_weights,
-            metric_weights,
-            value,
-        }) => {
+        crate::Config::DogStatsD(
+            conf @ crate::dogstatsd::Config {
+                contexts,
+                service_check_names,
+                name_length,
+                tag_key_length,
+                tag_value_length,
+                tags_per_msg,
+                // TODO -- Validate user input for multivalue_pack_probability.
+                multivalue_pack_probability,
+                multivalue_count,
+                kind_weights,
+                metric_weights,
+                value,
+            },
+        ) => {
+            if !conf.valid() {
+                return Err(SpinError::InvalidConfig);
+            }
             let pyld = crate::DogStatsD::new(
                 *contexts,
+                *service_check_names,
                 *name_length,
                 *tag_key_length,
                 *tag_value_length,
@@ -342,7 +362,7 @@ fn stream_inner(
                 *metric_weights,
                 *value,
                 &mut rng,
-            );
+            )?;
 
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }

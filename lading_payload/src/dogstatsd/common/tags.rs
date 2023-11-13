@@ -10,9 +10,9 @@ pub(crate) type Tagsets = Vec<Tagset>;
 
 pub(crate) struct Generator {
     pub(crate) num_tagsets: usize,
-    pub(crate) tags_per_msg: ConfRange<u16>,
-    pub(crate) tag_key_length: ConfRange<u16>,
-    pub(crate) tag_value_length: ConfRange<u16>,
+    pub(crate) tags_per_msg: ConfRange<u8>,
+    pub(crate) tag_key_length: ConfRange<u8>,
+    pub(crate) tag_value_length: ConfRange<u8>,
     pub(crate) str_pool: Rc<strings::Pool>,
 }
 
