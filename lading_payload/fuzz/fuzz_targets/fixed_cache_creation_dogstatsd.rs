@@ -12,6 +12,7 @@ struct Input {
     seed: [u8; 32],
     total_bytes: NonZeroU32,
     block_bytes_sizes: [NonZeroU32; 32],
+    config: lading_payload::dogstatsd::Config,
 }
 
 fuzz_target!(|input: Input| {
@@ -26,6 +27,6 @@ fuzz_target!(|input: Input| {
         &mut rng,
         input.total_bytes,
         &input.block_bytes_sizes,
-        &lading_payload::Config::Fluent,
+        &lading_payload::Config::DogStatsD(input.config),
     );
 });

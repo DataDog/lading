@@ -120,6 +120,12 @@ pub struct ValueConf {
     range: ConfRange<i64>,
 }
 
+impl ValueConf {
+    fn valid(&self) -> bool {
+        self.range.valid()
+    }
+}
+
 impl Default for ValueConf {
     fn default() -> Self {
         Self {
@@ -155,6 +161,15 @@ impl<T> ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
 {
+    /// Returns true if the range provided by the user is valid, false
+    /// otherwise.
+    fn valid(&self) -> bool {
+        match self {
+            Self::Constant(_) => true,
+            Self::Inclusive { min, max } => min < max,
+        }
+    }
+
     fn end(&self) -> T {
         match self {
             ConfRange::Constant(c) => *c,
@@ -226,6 +241,19 @@ pub struct Config {
     /// The configuration of values that appear in all metrics.
     #[serde(default = "value_config")]
     pub value: ValueConf,
+}
+
+impl Config {
+    /// Determine whether the passed configuration obeys validation criteria
+    pub(crate) fn valid(&self) -> bool {
+        self.contexts.valid()
+            && self.name_length.valid()
+            && self.tag_key_length.valid()
+            && self.tag_value_length.valid()
+            && self.tags_per_msg.valid()
+            && self.multivalue_count.valid()
+            && self.value.valid()
+    }
 }
 
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
@@ -331,6 +359,7 @@ impl MemberGenerator {
             str_pool: Rc::clone(&pool),
         };
 
+        // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
         let service_event_titles = random_strings_with_length_range(
             pool.as_ref(),
             num_contexts as usize,

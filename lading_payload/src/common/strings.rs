@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use rand::{distributions::uniform::SampleUniform, seq::SliceRandom};
+use rand::distributions::uniform::SampleUniform;
 
 const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -35,7 +35,8 @@ impl Pool {
     /// size `bytes`.
     ///
     /// User should supply an alphabet of ASCII characters.
-    pub(crate) fn with_size_and_alphabet<R>(rng: &mut R, bytes: usize, alphabet: &[u8]) -> Self
+    #[inline]
+    fn with_size_and_alphabet<R>(rng: &mut R, bytes: usize, alphabet: &[u8]) -> Self
     where
         R: rand::Rng + ?Sized,
     {

@@ -2,7 +2,7 @@
 
 use arbitrary;
 use libfuzzer_sys::fuzz_target;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{rngs::SmallRng, SeedableRng};
 use std::num::NonZeroU32;
 
 use lading_payload::block::Cache;
@@ -22,12 +22,11 @@ fuzz_target!(|input: Input| {
         }
     }
 
-    let mut rng = StdRng::from_seed(input.seed);
-    let res = Cache::fixed(
+    let mut rng = SmallRng::from_seed(input.seed);
+    let _res = Cache::fixed(
         &mut rng,
         input.total_bytes,
         &input.block_bytes_sizes,
         &input.payload,
     );
-    res.unwrap();
 });

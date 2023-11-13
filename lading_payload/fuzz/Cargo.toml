@@ -34,3 +34,21 @@ name = "fixed_cache_creation_fluent"
 path = "fuzz_targets/fixed_cache_creation_fluent.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fixed_cache_creation_apache_common"
+path = "fuzz_targets/fixed_cache_creation_apache_common.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_ascii"
+path = "fuzz_targets/fixed_cache_creation_ascii.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_dogstatsd"
+path = "fuzz_targets/fixed_cache_creation_dogstatsd.rs"
+test = false
+doc = false

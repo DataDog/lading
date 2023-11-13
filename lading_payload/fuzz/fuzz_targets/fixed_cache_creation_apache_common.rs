@@ -26,6 +26,6 @@ fuzz_target!(|input: Input| {
         &mut rng,
         input.total_bytes,
         &input.block_bytes_sizes,
-        &lading_payload::Config::Fluent,
+        &lading_payload::Config::ApacheCommon,
     );
 });

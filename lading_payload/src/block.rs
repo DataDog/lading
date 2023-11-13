@@ -28,6 +28,12 @@ pub enum Error {
     /// See [`ChunkError`]
     #[error("Chunk error: {0}")]
     Chunk(#[from] ChunkError),
+    /// See [`ConstructBlockCacheError`]
+    #[error(transparent)]
+    Construct(#[from] ConstructBlockCacheError),
+    /// Provided configuration had validation errors
+    #[error("Provided configuration was not valid.")]
+    InvalidConfig,
 }
 
 /// Errors for the construction of chunks
@@ -48,6 +54,14 @@ pub struct Block {
     pub total_bytes: NonZeroU32,
     /// The bytes of this block.
     pub bytes: Bytes,
+}
+
+/// Errors the construction of the block cache
+#[derive(Debug, thiserror::Error, Clone, Copy)]
+pub enum ConstructBlockCacheError {
+    /// All blocks sizes were insufficient
+    #[error("Insufficient block sizes.")]
+    InsufficientBlockSizes,
 }
 
 #[cfg(feature = "arbitrary")]
@@ -168,24 +182,29 @@ impl Cache {
                     crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
                 };
 
-                construct_block_cache_inner(&mut rng, &ta, &block_chunks)
+                construct_block_cache_inner(&mut rng, &ta, &block_chunks)?
             }
             crate::Config::Syslog5424 => {
-                construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)
+                construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)?
             }
-            crate::Config::DogStatsD(crate::dogstatsd::Config {
-                contexts,
-                name_length,
-                tag_key_length,
-                tag_value_length,
-                tags_per_msg,
-                // TODO -- Validate user input for multivalue_pack_probability.
-                multivalue_pack_probability,
-                multivalue_count,
-                kind_weights,
-                metric_weights,
-                value,
-            }) => {
+            crate::Config::DogStatsD(
+                conf @ crate::dogstatsd::Config {
+                    contexts,
+                    name_length,
+                    tag_key_length,
+                    tag_value_length,
+                    tags_per_msg,
+                    // TODO -- Validate user input for multivalue_pack_probability.
+                    multivalue_pack_probability,
+                    multivalue_count,
+                    kind_weights,
+                    metric_weights,
+                    value,
+                },
+            ) => {
+                if !conf.valid() {
+                    return Err(Error::InvalidConfig);
+                }
                 let serializer = crate::DogStatsD::new(
                     *contexts,
                     *name_length,
@@ -200,48 +219,48 @@ impl Cache {
                     &mut rng,
                 );
 
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
             }
             crate::Config::Fluent => {
                 let pyld = crate::Fluent::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
             crate::Config::SplunkHec { encoding } => construct_block_cache_inner(
                 &mut rng,
                 &crate::SplunkHec::new(*encoding),
                 &block_chunks,
-            ),
+            )?,
             crate::Config::ApacheCommon => {
                 let pyld = crate::ApacheCommon::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
             crate::Config::Ascii => {
                 let pyld = crate::Ascii::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
             crate::Config::DatadogLog => {
                 let serializer = crate::DatadogLog::new(&mut rng);
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
             }
             crate::Config::Json => {
-                construct_block_cache_inner(&mut rng, &crate::Json, &block_chunks)
+                construct_block_cache_inner(&mut rng, &crate::Json, &block_chunks)?
             }
             crate::Config::Static { ref static_path } => construct_block_cache_inner(
                 &mut rng,
                 &crate::Static::new(static_path),
                 &block_chunks,
-            ),
+            )?,
             crate::Config::OpentelemetryTraces => {
                 let pyld = crate::OpentelemetryTraces::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks)
+                construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
             crate::Config::OpentelemetryLogs => {
                 let pyld = crate::OpentelemetryLogs::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks)
+                construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
             crate::Config::OpentelemetryMetrics => {
                 let pyld = crate::OpentelemetryMetrics::new(&mut rng);
-                construct_block_cache_inner(rng, &pyld, &block_chunks)
+                construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
         };
         Ok(Self::Fixed { idx: 0, blocks })
@@ -456,7 +475,7 @@ fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
     block_chunks: &[u32],
-) -> Vec<Block>
+) -> Result<Vec<Block>, ConstructBlockCacheError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
@@ -467,8 +486,11 @@ where
             block_cache.push(block);
         }
     }
-    assert!(!block_cache.is_empty());
-    block_cache
+    if block_cache.is_empty() {
+        Err(ConstructBlockCacheError::InsufficientBlockSizes)
+    } else {
+        Ok(block_cache)
+    }
 }
 
 #[inline]
