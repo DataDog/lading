@@ -41,14 +41,19 @@ impl Pool {
     {
         let mut inner = String::new();
 
+        let mut idx: usize = rng.gen();
+        let cap = alphabet.len();
+
         if !alphabet.is_empty() {
             inner.reserve(bytes);
             for _ in 0..bytes {
                 inner.push(unsafe {
+                    let c = alphabet[idx % cap];
+                    idx = idx.wrapping_add(rng.gen());
                     // Safety: `chars` is not empty so choose will never return
                     // None and the values passed in `alphabet` will always be
                     // valid.
-                    char::from_u32_unchecked(u32::from(*alphabet.choose(rng).unwrap()))
+                    char::from_u32_unchecked(u32::from(c))
                 });
             }
         }

@@ -28,3 +28,9 @@ name = "fixed_cache_creation"
 path = "fuzz_targets/fixed_cache_creation.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fixed_cache_creation_fluent"
+path = "fuzz_targets/fixed_cache_creation_fluent.rs"
+test = false
+doc = false
