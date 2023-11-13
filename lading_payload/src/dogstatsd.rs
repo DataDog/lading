@@ -277,6 +277,7 @@ impl Config {
     pub(crate) fn valid(&self) -> bool {
         // TODO these constraints need to become part of the type system or parsing runtime errors.
         self.contexts.valid()
+            && self.contexts.start() > 0
             && self.contexts.end() <= MAX_CONTEXTS
             && self.service_check_names.valid()
             && self.service_check_names.start() > 0
