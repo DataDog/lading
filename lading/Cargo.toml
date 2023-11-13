@@ -50,7 +50,7 @@ procfs = { version = "0.15", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-proptest = "1.2"
+proptest = "1.4"
 proptest-derive = "0.3.0"
 
 [features]
