@@ -401,6 +401,8 @@ impl MemberGenerator {
             tag_value_length,
             str_pool: Rc::clone(&pool),
         };
+        let tagsets = tags_generator.generate(&mut rng);
+        drop(tags_generator); // now unused, clear up its allocations
 
         // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
         let service_event_titles = random_strings_with_length_range(
@@ -409,8 +411,6 @@ impl MemberGenerator {
             name_length,
             &mut rng,
         );
-        let tagsets = tags_generator.generate(&mut rng);
-        drop(tags_generator); // now unused, clear up its allocations
 
         let texts_or_messages = random_strings_with_length(pool.as_ref(), 4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(pool.as_ref(), 16..1024, 8, &mut rng);
@@ -419,12 +419,12 @@ impl MemberGenerator {
         // change it here you MUST also change it in `Generator<Metric> for
         // MetricGenerator`.
         let metric_choices = [
-            metric_weights.count as u16,
-            metric_weights.gauge as u16,
-            metric_weights.timer as u16,
-            metric_weights.distribution as u16,
-            metric_weights.set as u16,
-            metric_weights.histogram as u16,
+            u16::from(metric_weights.count),
+            u16::from(metric_weights.gauge),
+            u16::from(metric_weights.timer),
+            u16::from(metric_weights.distribution),
+            u16::from(metric_weights.set),
+            u16::from(metric_weights.histogram),
         ];
 
         let event_generator = EventGenerator {
@@ -459,9 +459,9 @@ impl MemberGenerator {
         // change it here you MUST also change it in `Generator<Member> for
         // MemberGenerator`.
         let member_choices = [
-            kind_weights.metric as u16,
-            kind_weights.event as u16,
-            kind_weights.service_check as u16,
+            u16::from(kind_weights.metric),
+            u16::from(kind_weights.event),
+            u16::from(kind_weights.service_check),
         ];
         Ok(MemberGenerator {
             kind_weights: WeightedIndex::new(member_choices)?,
@@ -520,6 +520,10 @@ pub struct DogStatsD {
 
 impl DogStatsD {
     /// Create a new default instance of `DogStatsD` with reasonable settings.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if the default constructor is buggy.
     pub fn default<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
@@ -542,6 +546,10 @@ impl DogStatsD {
     }
 
     /// Create a new instance of `DogStatsD`.
+    ///
+    /// # Errors
+    ///
+    /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
     pub fn new<R>(
         contexts: ConfRange<u32>,
