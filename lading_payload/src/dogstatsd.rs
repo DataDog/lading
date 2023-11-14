@@ -622,8 +622,9 @@ mod test {
 
     use crate::{
         dogstatsd::{
-            contexts, multivalue_count, multivalue_pack_probability, name_length, tag_key_length,
-            tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
+            contexts, multivalue_count, multivalue_pack_probability, name_length,
+            service_check_names, tag_key_length, tag_value_length, tags_per_msg, value_config,
+            KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -640,10 +641,11 @@ mod test {
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(contexts(), name_length(), tag_key_length(),
+            let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
+                                           name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, kind_weights,
-                                           metric_weights, value_conf, &mut rng);
+                                           metric_weights, value_conf, &mut rng).unwrap();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

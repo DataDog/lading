@@ -66,7 +66,7 @@ mod test {
 
             let generator = tags::Generator {
                 num_tagsets,
-                tags_per_msg: ConfRange::Inclusive{min: 0, max: 1_000},
+                tags_per_msg: ConfRange::Inclusive{min: 0, max: 255 },
                 tag_key_length: ConfRange::Inclusive{min: 1, max: 64 },
                 tag_value_length: ConfRange::Inclusive{min: 1, max: 64 },
                 str_pool: pool,
