@@ -191,7 +191,7 @@ where
     fn start(&self) -> T {
         match self {
             ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { max, .. } => *max,
+            ConfRange::Inclusive { min, .. } => *max,
         }
     }
 
