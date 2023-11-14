@@ -16,11 +16,6 @@ struct Input {
 }
 
 fuzz_target!(|input: Input| {
-    // TEMPORARY
-    if input.total_bytes.get() > 10_000_000 {
-        return;
-    }
-
     for byte_size in &input.block_bytes_sizes {
         if byte_size > &input.total_bytes || byte_size.get() > 10_000_000 {
             return;
