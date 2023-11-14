@@ -67,7 +67,7 @@ pub struct Block {
     pub bytes: Bytes,
 }
 
-/// Errors the construction of the block cache
+/// Errors for the construction of the block cache
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ConstructBlockCacheError {
     /// All blocks sizes were insufficient
