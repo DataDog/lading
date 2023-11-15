@@ -28,10 +28,13 @@ pub enum SpinError {
     /// DogStatsD creation error
     #[error(transparent)]
     DogStatsD(#[from] dogstatsd::Error),
+    /// Static payload creation error
+    #[error(transparent)]
+    Static(#[from] crate::statik::Error),
 }
 
 /// Error for [`Cache`]
-#[derive(Debug, thiserror::Error, Clone, Copy)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// See [`ChunkError`]
     #[error("Chunk error: {0}")]
@@ -45,6 +48,9 @@ pub enum Error {
     /// DogStatsD creation error
     #[error(transparent)]
     DogStatsD(#[from] dogstatsd::Error),
+    /// Static payload creation error
+    #[error(transparent)]
+    Static(#[from] crate::statik::Error),
 }
 
 /// Errors for the construction of chunks
@@ -260,7 +266,7 @@ impl Cache {
             }
             crate::Config::Static { ref static_path } => construct_block_cache_inner(
                 &mut rng,
-                &crate::Static::new(static_path),
+                &crate::Static::new(static_path)?,
                 &block_chunks,
             )?,
             crate::Config::OpentelemetryTraces => {
@@ -391,7 +397,7 @@ fn stream_inner(
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
         crate::Config::Static { ref static_path } => {
-            let pyld = crate::Static::new(static_path);
+            let pyld = crate::Static::new(static_path)?;
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
         crate::Config::OpentelemetryTraces => {

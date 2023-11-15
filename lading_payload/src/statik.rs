@@ -9,8 +9,6 @@ use std::{
 use rand::{prelude::IteratorRandom, Rng};
 use tracing::debug;
 
-use crate::Error;
-
 #[derive(Debug)]
 struct Source {
     byte_size: u64,
@@ -23,18 +21,25 @@ pub struct Static {
     sources: Vec<Source>,
 }
 
+#[derive(thiserror::Error, Debug)]
+/// Errors produced by [`Static`].
+pub enum Error {
+    /// IO error
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
 impl Static {
-    #[must_use]
     /// Create a new instance of `Static`
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Will panic if `path` is not a valid directory or file.
-    pub fn new(path: &Path) -> Self {
+    /// See documentation for [`Error`]
+    pub fn new(path: &Path) -> Result<Self, Error> {
         let mut sources = Vec::with_capacity(16);
 
         // Attempt to open the path, if this fails we assume that it is a directory.
-        let metadata = fs::metadata(path).unwrap();
+        let metadata = fs::metadata(path)?;
         if metadata.is_file() {
             debug!("Static path {} is a file.", path.display());
             let byte_size = metadata.len();
@@ -44,12 +49,12 @@ impl Static {
             });
         } else if metadata.is_dir() {
             debug!("Static path {} is a directory.", path.display());
-            for entry in fs::read_dir(path).expect("could not read directory") {
-                let entry = entry.unwrap();
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
                 let entry_pth = entry.path();
                 debug!("Attempting to open {} as file.", entry_pth.display());
                 if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
-                    let byte_size = file.metadata().expect("could not read file metadata").len();
+                    let byte_size = file.metadata()?.len();
                     sources.push(Source {
                         byte_size,
                         path: entry_pth.clone(),
@@ -58,12 +63,17 @@ impl Static {
             }
         }
 
-        Self { sources }
+        Ok(Self { sources })
     }
 }
 
 impl crate::Serialize for Static {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<(), crate::Error>
     where
         R: Rng + Sized,
         W: Write,
