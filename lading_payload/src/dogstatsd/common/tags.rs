@@ -1,48 +1,91 @@
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+use rand::{rngs::SmallRng, SeedableRng};
 
 use crate::{common::strings, dogstatsd::ConfRange};
 
 // This represents a list of tags that will be present on a single
 // dogstatsd message.
 pub(crate) type Tagset = Vec<String>;
-// Multiple tagsets. Useful to generate as a batch (is it??)
-pub(crate) type Tagsets = Vec<Tagset>;
 
+/// Generator for tags
+///
+/// This is an unusual generator. Unlike our others this maintains its own RNG
+/// and will reseed it when counter reaches `num_tagsets`. The goal is to
+/// produce only a limited, deterministic set of tags while avoiding needing to
+/// allocate them all in one shot.
+#[derive(Debug, Clone)]
 pub(crate) struct Generator {
-    pub(crate) num_tagsets: usize,
-    pub(crate) tags_per_msg: ConfRange<u8>,
-    pub(crate) tag_key_length: ConfRange<u8>,
-    pub(crate) tag_value_length: ConfRange<u8>,
-    pub(crate) str_pool: Rc<strings::Pool>,
+    seed: Cell<u64>,
+    internal_rng: RefCell<SmallRng>,
+    tagsets_produced: Cell<usize>,
+    num_tagsets: usize,
+    tags_per_msg: ConfRange<u8>,
+    tag_key_length: ConfRange<u8>,
+    tag_value_length: ConfRange<u8>,
+    str_pool: Rc<strings::Pool>,
+}
+
+impl Generator {
+    pub(crate) fn new(
+        seed: u64,
+        tags_per_msg: ConfRange<u8>,
+        tag_key_length: ConfRange<u8>,
+        tag_value_length: ConfRange<u8>,
+        str_pool: Rc<strings::Pool>,
+        num_tagsets: usize,
+    ) -> Self {
+        Generator {
+            seed: Cell::new(seed),
+            internal_rng: RefCell::new(SmallRng::seed_from_u64(seed)),
+            tags_per_msg,
+            tag_key_length,
+            tag_value_length,
+            str_pool,
+            tagsets_produced: Cell::new(0),
+            num_tagsets,
+        }
+    }
 }
 
 // https://docs.datadoghq.com/getting_started/tagging/#define-tags
 impl<'a> crate::Generator<'a> for Generator {
-    type Output = Tagsets;
+    type Output = Tagset;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, _rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
     {
-        let mut tagsets: Vec<Tagset> = Vec::with_capacity(self.num_tagsets);
-        for _ in 0..self.num_tagsets {
-            let num_tags_for_this_msg = self.tags_per_msg.sample(rng) as usize;
-            let mut tagset = Vec::with_capacity(num_tags_for_this_msg);
-            for _ in 0..num_tags_for_this_msg {
-                let mut tag = String::new();
-                tag.reserve(512); // a guess, big-ish but not too big
-                let key_sz = self.tag_key_length.sample(&mut rng) as usize;
-                let key = self.str_pool.of_size(&mut rng, key_sz).unwrap();
-                let value_sz = self.tag_value_length.sample(&mut rng) as usize;
-                let value = self.str_pool.of_size(&mut rng, value_sz).unwrap();
-                tag.push_str(key);
-                tag.push(':');
-                tag.push_str(value);
-                tagset.push(tag);
+        let mut tagset = Vec::new();
+
+        let tags_count = self
+            .tags_per_msg
+            .sample(&mut *self.internal_rng.borrow_mut()) as usize;
+        for _ in 0..tags_count {
+            if self.tagsets_produced.get() >= self.num_tagsets {
+                // Reseed internal RNG with initial seed
+                self.internal_rng
+                    .replace(SmallRng::seed_from_u64(self.seed.get()));
+                self.tagsets_produced.set(0);
             }
-            tagsets.push(tagset);
+
+            let mut rng = self.internal_rng.borrow_mut();
+            let key_sz = self.tag_key_length.sample(&mut *rng) as usize;
+            let key = self.str_pool.of_size(&mut *rng, key_sz).unwrap_or_default();
+            let value_sz = self.tag_value_length.sample(&mut *rng) as usize;
+            let value = self
+                .str_pool
+                .of_size(&mut *rng, value_sz)
+                .unwrap_or_default();
+
+            self.tagsets_produced.set(self.tagsets_produced.get() + 1);
+            tagset.push(format!("{key}:{value}"));
         }
-        tagsets
+
+        tagset
     }
 }
 
@@ -55,8 +98,6 @@ mod test {
     use crate::Generator;
     use std::rc::Rc;
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
     proptest! {
         #[test]
         fn generator_not_exceed_tagset_max(seed: u64, num_tagsets in 0..1_000) {
@@ -64,15 +105,17 @@ mod test {
             let num_tagsets = num_tagsets as usize;
             let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
-            let generator = tags::Generator {
+            let tags_per_msg_max = 255;
+            let generator = tags::Generator::new(
+                seed,
+                ConfRange::Inclusive{min: 0, max: tags_per_msg_max},
+                ConfRange::Inclusive{min: 1, max: 64},
+                ConfRange::Inclusive{min: 1, max: 64},
+                pool.clone(),
                 num_tagsets,
-                tags_per_msg: ConfRange::Inclusive{min: 0, max: 255 },
-                tag_key_length: ConfRange::Inclusive{min: 1, max: 64 },
-                tag_value_length: ConfRange::Inclusive{min: 1, max: 64 },
-                str_pool: pool,
-            };
-            let tagsets = generator.generate(&mut rng);
-            assert!(tagsets.len() == num_tagsets);
+            );
+            let tagset = generator.generate(&mut rng);
+            assert!(tagset.len() <= tags_per_msg_max as usize);
         }
     }
 }

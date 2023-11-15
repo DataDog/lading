@@ -35,7 +35,7 @@ impl MetricGenerator {
         multivalue_pack_probability: f32,
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
-        tagsets: common::tags::Tagsets,
+        tags_generator: &mut common::tags::Generator,
         str_pool: &strings::Pool,
         value_conf: ValueConf,
         mut rng: &mut R,
@@ -45,9 +45,9 @@ impl MetricGenerator {
     {
         let mut templates = Vec::with_capacity(num_contexts);
 
-        assert!(tagsets.len() == num_contexts);
         debug!("Generating metric templates for {} contexts.", num_contexts);
-        for tags in tagsets {
+        for _ in 0..num_contexts {
+            let tags = tags_generator.generate(&mut rng);
             let name_sz = name_length.sample(&mut rng) as usize;
             let name = String::from(str_pool.of_size(&mut rng, name_sz).unwrap());
 

@@ -394,15 +394,14 @@ impl MemberGenerator {
 
         let num_contexts = contexts.sample(rng);
 
-        let tags_generator = tags::Generator {
-            num_tagsets: num_contexts as usize,
+        let mut tags_generator = tags::Generator::new(
+            rng.gen(),
             tags_per_msg,
             tag_key_length,
             tag_value_length,
-            str_pool: Rc::clone(&pool),
-        };
-        let tagsets = tags_generator.generate(&mut rng);
-        drop(tags_generator); // now unused, clear up its allocations
+            Rc::clone(&pool),
+            num_contexts as usize,
+        );
 
         // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
         let service_event_titles = random_strings_with_length_range(
@@ -432,14 +431,14 @@ impl MemberGenerator {
             title_length: name_length,
             texts_or_messages_length_range: 1..1024,
             small_strings_length_range: 1..8,
-            tagsets: tagsets.clone(),
+            tags_generator: tags_generator.clone(),
         };
 
         let service_check_generator = ServiceCheckGenerator {
             names: service_event_titles.clone(),
             small_strings: small_strings.clone(),
             texts_or_messages,
-            tagsets: tagsets.clone(),
+            tags_generator: tags_generator.clone(),
         };
 
         let metric_generator = MetricGenerator::new(
@@ -449,7 +448,7 @@ impl MemberGenerator {
             multivalue_pack_probability,
             &WeightedIndex::new(metric_choices)?,
             small_strings,
-            tagsets.clone(),
+            &mut tags_generator,
             pool.as_ref(),
             value_conf,
             &mut rng,

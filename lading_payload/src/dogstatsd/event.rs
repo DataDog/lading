@@ -4,7 +4,7 @@ use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 use crate::{common::strings, Generator};
 
-use super::{choose_or_not_fn, choose_or_not_ref, common, ConfRange};
+use super::{choose_or_not_fn, common, ConfRange};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
@@ -12,7 +12,7 @@ pub(crate) struct EventGenerator {
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
     pub(crate) str_pool: Rc<strings::Pool>,
-    pub(crate) tagsets: common::tags::Tagsets,
+    pub(crate) tags_generator: common::tags::Generator,
 }
 
 impl<'a> Generator<'a> for EventGenerator {
@@ -28,7 +28,11 @@ impl<'a> Generator<'a> for EventGenerator {
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .unwrap();
-        let tags = choose_or_not_ref(&mut rng, &self.tagsets);
+        let tags = if rng.gen() {
+            Some(self.tags_generator.generate(&mut rng))
+        } else {
+            None
+        };
 
         Event {
             title_utf8_length: title.len(),
@@ -68,7 +72,7 @@ pub struct Event<'a> {
     priority: Option<Priority>,
     source_type_name: Option<&'a str>,
     alert_type: Option<Alert>,
-    tags: Option<&'a common::tags::Tagset>,
+    tags: Option<common::tags::Tagset>,
 }
 
 impl<'a> fmt::Display for Event<'a> {
@@ -100,7 +104,7 @@ impl<'a> fmt::Display for Event<'a> {
         if let Some(source_type_name) = self.source_type_name {
             write!(f, "|s:{source_type_name}")?;
         }
-        if let Some(tags) = self.tags {
+        if let Some(tags) = &self.tags {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
