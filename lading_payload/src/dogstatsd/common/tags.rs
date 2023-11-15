@@ -98,8 +98,6 @@ mod test {
     use crate::Generator;
     use std::rc::Rc;
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
     proptest! {
         #[test]
         fn generator_not_exceed_tagset_max(seed: u64, num_tagsets in 0..1_000) {
@@ -107,16 +105,17 @@ mod test {
             let num_tagsets = num_tagsets as usize;
             let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
+            let tags_per_msg_max = 255;
             let generator = tags::Generator::new(
                 seed,
-                ConfRange::Inclusive{min: 0, max: 255},
+                ConfRange::Inclusive{min: 0, max: tags_per_msg_max},
                 ConfRange::Inclusive{min: 1, max: 64},
                 ConfRange::Inclusive{min: 1, max: 64},
                 pool.clone(),
                 num_tagsets,
             );
-            let tagsets = generator.generate(&mut rng);
-            assert!(tagsets.len() == num_tagsets);
+            let tagset = generator.generate(&mut rng);
+            assert!(tagset.len() <= tags_per_msg_max as usize);
         }
     }
 }
