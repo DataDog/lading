@@ -10,9 +10,9 @@ pub(crate) type Tagsets = Vec<Tagset>;
 
 pub(crate) struct Generator {
     pub(crate) num_tagsets: usize,
-    pub(crate) tags_per_msg: ConfRange<u16>,
-    pub(crate) tag_key_length: ConfRange<u16>,
-    pub(crate) tag_value_length: ConfRange<u16>,
+    pub(crate) tags_per_msg: ConfRange<u8>,
+    pub(crate) tag_key_length: ConfRange<u8>,
+    pub(crate) tag_value_length: ConfRange<u8>,
     pub(crate) str_pool: Rc<strings::Pool>,
 }
 
@@ -66,7 +66,7 @@ mod test {
 
             let generator = tags::Generator {
                 num_tagsets,
-                tags_per_msg: ConfRange::Inclusive{min: 0, max: 1_000},
+                tags_per_msg: ConfRange::Inclusive{min: 0, max: 255 },
                 tag_key_length: ConfRange::Inclusive{min: 1, max: 64 },
                 tag_value_length: ConfRange::Inclusive{min: 1, max: 64 },
                 str_pool: pool,

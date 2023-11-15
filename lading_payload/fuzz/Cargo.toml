@@ -1,0 +1,66 @@
+[package]
+name = "lading-payload-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+rand = { version = "0.8", default-features = false, features = ["small_rng", "std", "std_rng" ]}
+
+[dependencies.lading-payload]
+path = ".."
+features = ["fuzz"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fixed_cache_creation"
+path = "fuzz_targets/fixed_cache_creation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_fluent"
+path = "fuzz_targets/fixed_cache_creation_fluent.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_apache_common"
+path = "fuzz_targets/fixed_cache_creation_apache_common.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_ascii"
+path = "fuzz_targets/fixed_cache_creation_ascii.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_dogstatsd"
+path = "fuzz_targets/fixed_cache_creation_dogstatsd.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_datadog_log"
+path = "fuzz_targets/fixed_cache_creation_datadog_log.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fixed_cache_creation_json"
+path = "fuzz_targets/fixed_cache_creation_json.rs"
+test = false
+doc = false

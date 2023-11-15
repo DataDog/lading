@@ -3,14 +3,14 @@
 use std::{cmp, fmt, io::Write, ops::Range, rc::Rc};
 
 use rand::{
-    distributions::{uniform::SampleUniform, WeightedIndex},
+    distributions::{uniform::SampleUniform, WeightedError, WeightedIndex},
     prelude::Distribution,
     seq::SliceRandom,
     Rng,
 };
 use serde::Deserialize;
 
-use crate::{common::strings, Error, Serialize};
+use crate::{common::strings, Serialize};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -24,9 +24,27 @@ mod event;
 mod metric;
 mod service_check;
 
+/// Error for [`MemberGenerator`]
+#[derive(Debug, thiserror::Error, Clone, Copy)]
+pub enum Error {
+    /// See [`WeightedError`]
+    #[error(transparent)]
+    Weights(#[from] WeightedError),
+}
+
+const MAX_CONTEXTS: u32 = 100_000;
+const MAX_NAME_LENGTH: u16 = 4_096;
+
 fn contexts() -> ConfRange<u32> {
     ConfRange::Inclusive {
         min: 5_000,
+        max: 10_000,
+    }
+}
+
+fn service_check_names() -> ConfRange<u16> {
+    ConfRange::Inclusive {
+        min: 1,
         max: 10_000,
     }
 }
@@ -40,15 +58,15 @@ fn name_length() -> ConfRange<u16> {
     ConfRange::Inclusive { min: 1, max: 200 }
 }
 
-fn tag_key_length() -> ConfRange<u16> {
+fn tag_key_length() -> ConfRange<u8> {
     ConfRange::Inclusive { min: 1, max: 100 }
 }
 
-fn tag_value_length() -> ConfRange<u16> {
+fn tag_value_length() -> ConfRange<u8> {
     ConfRange::Inclusive { min: 1, max: 100 }
 }
 
-fn tags_per_msg() -> ConfRange<u16> {
+fn tags_per_msg() -> ConfRange<u8> {
     ConfRange::Inclusive { min: 2, max: 50 }
 }
 
@@ -65,6 +83,8 @@ fn multivalue_pack_probability() -> f32 {
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct KindWeights {
     metric: u8,
     event: u8,
@@ -84,6 +104,8 @@ impl Default for KindWeights {
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct MetricWeights {
     count: u8,
     gauge: u8,
@@ -108,10 +130,18 @@ impl Default for MetricWeights {
 
 /// Configuration for the values of a metric.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub struct ValueConf {
     /// Odds out of 256 that the value will be a float and not an integer.
     float_probability: f32,
     range: ConfRange<i64>,
+}
+
+impl ValueConf {
+    fn valid(&self) -> bool {
+        self.range.valid()
+    }
 }
 
 impl Default for ValueConf {
@@ -128,6 +158,8 @@ impl Default for ValueConf {
 /// Range expression for configuration
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+
 pub enum ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
@@ -147,6 +179,22 @@ impl<T> ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
 {
+    /// Returns true if the range provided by the user is valid, false
+    /// otherwise.
+    fn valid(&self) -> bool {
+        match self {
+            Self::Constant(_) => true,
+            Self::Inclusive { min, max } => min < max,
+        }
+    }
+
+    fn start(&self) -> T {
+        match self {
+            ConfRange::Constant(c) => *c,
+            ConfRange::Inclusive { min, .. } => *min,
+        }
+    }
+
     fn end(&self) -> T {
         match self {
             ConfRange::Constant(c) => *c,
@@ -172,11 +220,16 @@ where
 
 /// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Config {
-    /// The unique metric contexts to generate A context is a set of unique
+    /// The unique metric contexts to generate. A context is a set of unique
     /// metric name + tags
     #[serde(default = "contexts")]
     pub contexts: ConfRange<u32>,
+
+    /// The range of unique service check names.
+    #[serde(default = "service_check_names")]
+    pub service_check_names: ConfRange<u16>,
 
     /// Length for a dogstatsd message name
     #[serde(default = "name_length")]
@@ -184,16 +237,16 @@ pub struct Config {
 
     /// Length for the 'key' part of a dogstatsd tag
     #[serde(default = "tag_key_length")]
-    pub tag_key_length: ConfRange<u16>,
+    pub tag_key_length: ConfRange<u8>,
 
     /// Length for the 'value' part of a dogstatsd tag
     #[serde(default = "tag_value_length")]
-    pub tag_value_length: ConfRange<u16>,
+    pub tag_value_length: ConfRange<u8>,
 
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
     #[serde(default = "tags_per_msg")]
-    pub tags_per_msg: ConfRange<u16>,
+    pub tags_per_msg: ConfRange<u8>,
 
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
@@ -217,6 +270,30 @@ pub struct Config {
     /// The configuration of values that appear in all metrics.
     #[serde(default = "value_config")]
     pub value: ValueConf,
+}
+
+impl Config {
+    /// Determine whether the passed configuration obeys validation criteria
+    pub(crate) fn valid(&self) -> bool {
+        // TODO these constraints need to become part of the type system or parsing runtime errors.
+        self.contexts.valid()
+            && self.contexts.start() > 0
+            && self.contexts.end() <= MAX_CONTEXTS
+            && self.service_check_names.valid()
+            && self.service_check_names.start() > 0
+            && self.service_check_names.end() > 0
+            && self.tag_key_length.start() > 0
+            && self.tag_key_length.end() > 0
+            && self.tag_value_length.start() > 0
+            && self.tag_value_length.end() > 0
+            && self.name_length.valid()
+            && self.name_length.end() <= MAX_NAME_LENGTH
+            && self.tag_key_length.valid()
+            && self.tag_value_length.valid()
+            && self.tags_per_msg.valid()
+            && self.multivalue_count.valid()
+            && self.value.valid()
+    }
 }
 
 fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
@@ -286,7 +363,7 @@ where
 
 #[derive(Debug, Clone)]
 struct MemberGenerator {
-    kind_weights: WeightedIndex<u8>,
+    kind_weights: WeightedIndex<u16>,
     event_generator: EventGenerator,
     service_check_generator: ServiceCheckGenerator,
     metric_generator: MetricGenerator,
@@ -296,20 +373,23 @@ impl MemberGenerator {
     #[allow(clippy::too_many_arguments)]
     fn new<R>(
         contexts: ConfRange<u32>,
+        service_check_names: ConfRange<u16>,
         name_length: ConfRange<u16>,
-        tag_key_length: ConfRange<u16>,
-        tag_value_length: ConfRange<u16>,
-        tags_per_msg: ConfRange<u16>,
+        tag_key_length: ConfRange<u8>,
+        tag_value_length: ConfRange<u8>,
+        tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         mut rng: &mut R,
-    ) -> Self
+    ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
+        // TODO only create the Generators if they're needed per the kind weights
+
         let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
         let num_contexts = contexts.sample(rng);
@@ -321,15 +401,16 @@ impl MemberGenerator {
             tag_value_length,
             str_pool: Rc::clone(&pool),
         };
+        let tagsets = tags_generator.generate(&mut rng);
+        drop(tags_generator); // now unused, clear up its allocations
 
+        // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
         let service_event_titles = random_strings_with_length_range(
             pool.as_ref(),
-            num_contexts as usize,
+            service_check_names.sample(rng) as usize,
             name_length,
             &mut rng,
         );
-        let tagsets = tags_generator.generate(&mut rng);
-        drop(tags_generator); // now unused, clear up its allocation s
 
         let texts_or_messages = random_strings_with_length(pool.as_ref(), 4..128, 1024, &mut rng);
         let small_strings = random_strings_with_length(pool.as_ref(), 16..1024, 8, &mut rng);
@@ -338,12 +419,12 @@ impl MemberGenerator {
         // change it here you MUST also change it in `Generator<Metric> for
         // MetricGenerator`.
         let metric_choices = [
-            metric_weights.count,
-            metric_weights.gauge,
-            metric_weights.timer,
-            metric_weights.distribution,
-            metric_weights.set,
-            metric_weights.histogram,
+            u16::from(metric_weights.count),
+            u16::from(metric_weights.gauge),
+            u16::from(metric_weights.timer),
+            u16::from(metric_weights.distribution),
+            u16::from(metric_weights.set),
+            u16::from(metric_weights.histogram),
         ];
 
         let event_generator = EventGenerator {
@@ -366,7 +447,7 @@ impl MemberGenerator {
             name_length,
             multivalue_count,
             multivalue_pack_probability,
-            &WeightedIndex::new(metric_choices).unwrap(),
+            &WeightedIndex::new(metric_choices)?,
             small_strings,
             tagsets.clone(),
             pool.as_ref(),
@@ -378,16 +459,16 @@ impl MemberGenerator {
         // change it here you MUST also change it in `Generator<Member> for
         // MemberGenerator`.
         let member_choices = [
-            kind_weights.metric,
-            kind_weights.event,
-            kind_weights.service_check,
+            u16::from(kind_weights.metric),
+            u16::from(kind_weights.event),
+            u16::from(kind_weights.service_check),
         ];
-        MemberGenerator {
-            kind_weights: WeightedIndex::new(member_choices).unwrap(),
+        Ok(MemberGenerator {
+            kind_weights: WeightedIndex::new(member_choices)?,
             event_generator,
             service_check_generator,
             metric_generator,
-        }
+        })
     }
 }
 
@@ -439,12 +520,17 @@ pub struct DogStatsD {
 
 impl DogStatsD {
     /// Create a new default instance of `DogStatsD` with reasonable settings.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if the default constructor is buggy.
     pub fn default<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
     {
         Self::new(
             contexts(),
+            service_check_names(),
             name_length(),
             tag_key_length(),
             tag_value_length(),
@@ -456,41 +542,35 @@ impl DogStatsD {
             value_config(),
             rng,
         )
-    }
-
-    #[cfg(feature = "dogstatsd_perf")]
-    /// Call the internal member generator and count the in-memory byte
-    /// size. This is not useful except in a loop to track how quickly we can do
-    /// this operation. It's meant to be a proxy by which we can determine how
-    /// quickly members are able to be generated and then serialized. An
-    /// approximation.
-    pub fn generate<R>(&self, rng: &mut R) -> Member
-    where
-        R: rand::Rng + ?Sized,
-    {
-        self.member_generator.generate(rng)
+        .unwrap()
     }
 
     /// Create a new instance of `DogStatsD`.
+    ///
+    /// # Errors
+    ///
+    /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
     pub fn new<R>(
         contexts: ConfRange<u32>,
+        service_check_names: ConfRange<u16>,
         name_length: ConfRange<u16>,
-        tag_key_length: ConfRange<u16>,
-        tag_value_length: ConfRange<u16>,
-        tags_per_msg: ConfRange<u16>,
+        tag_key_length: ConfRange<u8>,
+        tag_value_length: ConfRange<u8>,
+        tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         rng: &mut R,
-    ) -> Self
+    ) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
         let member_generator = MemberGenerator::new(
             contexts,
+            service_check_names,
             name_length,
             tag_key_length,
             tag_value_length,
@@ -501,14 +581,19 @@ impl DogStatsD {
             metric_weights,
             value_conf,
             rng,
-        );
+        )?;
 
-        Self { member_generator }
+        Ok(Self { member_generator })
     }
 }
 
 impl Serialize for DogStatsD {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<(), crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -537,8 +622,9 @@ mod test {
 
     use crate::{
         dogstatsd::{
-            contexts, multivalue_count, multivalue_pack_probability, name_length, tag_key_length,
-            tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
+            contexts, multivalue_count, multivalue_pack_probability, name_length,
+            service_check_names, tag_key_length, tag_value_length, tags_per_msg, value_config,
+            KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -555,10 +641,11 @@ mod test {
 
             let kind_weights = KindWeights::default();
             let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(contexts(), name_length(), tag_key_length(),
+            let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
+                                           name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, kind_weights,
-                                           metric_weights, value_conf, &mut rng);
+                                           metric_weights, value_conf, &mut rng).unwrap();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();

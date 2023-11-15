@@ -33,7 +33,7 @@ impl MetricGenerator {
         name_length: ConfRange<u16>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
-        metric_weights: &WeightedIndex<u8>,
+        metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
         tagsets: common::tags::Tagsets,
         str_pool: &strings::Pool,
