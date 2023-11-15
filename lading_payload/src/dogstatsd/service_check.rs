@@ -4,14 +4,17 @@ use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng
 
 use crate::Generator;
 
-use super::{choose_or_not_ref, common};
+use super::{
+    choose_or_not_ref,
+    common::{self, tags::Tagset},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) tagsets: common::tags::Tagsets,
+    pub(crate) tags_generator: common::tags::Generator,
 }
 
 impl<'a> Generator<'a> for ServiceCheckGenerator {
@@ -24,7 +27,11 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
         let name = self.names.choose(&mut rng).unwrap();
         let hostname = choose_or_not_ref(&mut rng, &self.small_strings).map(String::as_str);
         let message = choose_or_not_ref(&mut rng, &self.texts_or_messages).map(String::as_str);
-        let tags = choose_or_not_ref(&mut rng, &self.tagsets);
+        let tags = if rng.gen() {
+            Some(self.tags_generator.generate(&mut rng))
+        } else {
+            None
+        };
 
         ServiceCheck {
             name,
@@ -44,7 +51,7 @@ pub struct ServiceCheck<'a> {
     status: Status,
     timestamp_second: Option<u32>,
     hostname: Option<&'a str>,
-    tags: Option<&'a Vec<String>>,
+    tags: Option<Tagset>,
     message: Option<&'a str>,
 }
 
@@ -63,7 +70,7 @@ impl<'a> fmt::Display for ServiceCheck<'a> {
         if let Some(hostname) = self.hostname {
             write!(f, "|h:{hostname}")?;
         }
-        if let Some(tags) = self.tags {
+        if let Some(tags) = &self.tags {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
