@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Sampling and sampling probability configuration parameters added for
+  dogstatsd payloads.
+
 ## [0.20.0-rc4]
 ### Fixed
 - Memory consumption stability issues in Dogstatsd payload generator

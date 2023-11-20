@@ -100,6 +100,27 @@ pub(crate) enum ZeroToOne {
     Frac(u32),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ZeroToOneError {
+    OutOfRange,
+}
+
+impl TryFrom<f32> for ZeroToOne {
+    type Error = ZeroToOneError;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        if (value - 1.0).abs() < f32::EPSILON {
+            Ok(Self::One)
+        } else if !(0.0..=1.0).contains(&value) {
+            Err(ZeroToOneError::OutOfRange)
+        } else {
+            #[allow(clippy::cast_sign_loss)]
+            #[allow(clippy::cast_possible_truncation)]
+            Ok(Self::Frac((1.0 / value) as u32))
+        }
+    }
+}
+
 impl Distribution<ZeroToOne> for Standard {
     fn sample<R>(&self, rng: &mut R) -> ZeroToOne
     where

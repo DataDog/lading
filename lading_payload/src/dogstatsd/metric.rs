@@ -23,6 +23,8 @@ pub(crate) struct MetricGenerator {
     pub(crate) templates: Vec<template::Template>,
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
+    pub(crate) sampling: ConfRange<f32>,
+    pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
 }
 
@@ -33,6 +35,8 @@ impl MetricGenerator {
         name_length: ConfRange<u16>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
+        sampling: ConfRange<f32>,
+        sampling_probability: f32,
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
         tags_generator: &mut common::tags::Generator,
@@ -68,6 +72,8 @@ impl MetricGenerator {
             templates,
             multivalue_count,
             multivalue_pack_probability,
+            sampling,
+            sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
         }
     }
@@ -85,11 +91,15 @@ impl<'a> Generator<'a> for MetricGenerator {
         let template: &Template = self.templates.choose(&mut rng).unwrap();
 
         let container_id = choose_or_not_ref(&mut rng, &self.container_ids).map(String::as_str);
-        // TODO sample_rate should be option and have a probability that determines if its present
-        // Mostly inconsequential for the Agent, for certain metric types the Agent
-        // applies some correction based on this value. Affects count and histogram computation.
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
-        let sample_rate = rng.gen();
+        let prob: f32 = OpenClosed01.sample(&mut rng);
+        let sample_rate = if prob < self.sampling_probability {
+            let sample_rate = self.sampling.sample(&mut rng).clamp(0.0, 1.0);
+            let sample_rate = common::ZeroToOne::try_from(sample_rate).unwrap();
+            Some(sample_rate)
+        } else {
+            None
+        };
 
         let mut values = Vec::with_capacity(self.multivalue_count.end() as usize);
         let value: common::NumValue = self.num_value_generator.generate(&mut rng);
