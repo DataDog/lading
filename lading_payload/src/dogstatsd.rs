@@ -91,6 +91,17 @@ pub struct KindWeights {
     service_check: u8,
 }
 
+impl KindWeights {
+    /// Create a new instance of `KindWeights` according to the args
+    pub fn new(metric: u8, event: u8, service_check: u8) -> Self {
+        Self {
+            metric,
+            event,
+            service_check,
+        }
+    }
+}
+
 impl Default for KindWeights {
     fn default() -> Self {
         KindWeights {
@@ -113,6 +124,20 @@ pub struct MetricWeights {
     distribution: u8,
     set: u8,
     histogram: u8,
+}
+
+impl MetricWeights {
+    /// Create a new instance of `MetricWeights` according to the args
+    pub fn new(count: u8, gauge: u8, timer: u8, distribution: u8, set: u8, histogram: u8) -> Self {
+        Self {
+            count,
+            gauge,
+            timer,
+            distribution,
+            set,
+            histogram,
+        }
+    }
 }
 
 impl Default for MetricWeights {
