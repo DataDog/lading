@@ -571,6 +571,16 @@ impl DogStatsD {
         .unwrap()
     }
 
+    /// Generate a single `Member`.
+    /// Prefer using the Serialize implementation for `DogStatsD` which
+    /// generates a stream of `Member`s according to some constraints.
+    pub fn generate<R>(&self, rng: &mut R) -> Member
+    where
+        R: rand::Rng + ?Sized,
+    {
+        self.member_generator.generate(rng)
+    }
+
     /// Create a new instance of `DogStatsD`.
     ///
     /// # Errors
