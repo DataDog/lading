@@ -51,7 +51,7 @@ async-pidfd = "0.1"
 
 [dev-dependencies]
 proptest = "1.4"
-proptest-derive = "0.3.0"
+proptest-derive = "0.4.0"
 
 [features]
 default = []
