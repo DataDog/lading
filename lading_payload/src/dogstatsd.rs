@@ -93,6 +93,7 @@ pub struct KindWeights {
 
 impl KindWeights {
     /// Create a new instance of `KindWeights` according to the args
+    #[must_use]
     pub fn new(metric: u8, event: u8, service_check: u8) -> Self {
         Self {
             metric,
@@ -128,6 +129,7 @@ pub struct MetricWeights {
 
 impl MetricWeights {
     /// Create a new instance of `MetricWeights` according to the args
+    #[must_use]
     pub fn new(count: u8, gauge: u8, timer: u8, distribution: u8, set: u8, histogram: u8) -> Self {
         Self {
             count,
