@@ -226,8 +226,8 @@ fn log_unexpected_keys(specified_config: &String, resolved_config: &String) {
                     } else {
                         let resolved_value = &resolved_sequence[i];
                         descend_and_log_unexpected_keys(v, resolved_value, path);
-                        path.pop();
                     }
+                    path.pop();
                 }
             }
             (serde_yaml::Value::Sequence(_), res) => {
@@ -248,8 +248,8 @@ fn log_unexpected_keys(specified_config: &String, resolved_config: &String) {
                     } else {
                         let resolved_value = resolved_mapping.get(k).unwrap();
                         descend_and_log_unexpected_keys(v, resolved_value, path);
-                        path.pop();
                     }
+                    path.pop();
                 }
             }
             (serde_yaml::Value::Mapping(_), _) => todo!(),
