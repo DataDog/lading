@@ -11,7 +11,7 @@
 use std::{io, sync::atomic::AtomicU64};
 
 use crate::target::TargetPidReceiver;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Shutdown;
 
@@ -38,7 +38,7 @@ pub enum Error {
     Linux(#[from] linux::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub struct Config {}

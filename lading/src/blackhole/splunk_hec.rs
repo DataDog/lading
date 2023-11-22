@@ -43,7 +43,7 @@ pub enum Error {
     Hyper(hyper::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Serialize)]
 /// Configuration for [`SplunkHec`].
 pub struct Config {
     /// number of concurrent HTTP connections to allow

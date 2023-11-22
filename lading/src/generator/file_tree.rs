@@ -25,7 +25,7 @@ use std::{
 };
 
 use rand::{prelude::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
@@ -75,7 +75,7 @@ fn default_rename_per_name() -> NonZeroU32 {
     NonZeroU32::new(1).unwrap()
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Serialize)]
 /// Configuration of [`FileTree`]
 pub struct Config {
     /// The seed for random operations against this target

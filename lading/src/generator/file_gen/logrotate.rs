@@ -25,7 +25,7 @@ use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{gauge, register_counter};
 use rand::{prelude::StdRng, Rng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
@@ -53,7 +53,7 @@ pub enum Error {
     Child(#[from] JoinError),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 /// Configuration of [`FileGen`]
 pub struct Config {
     /// The seed for random operations against this target

@@ -159,6 +159,111 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
+fn log_unexpected_keys(specified_config: &String, resolved_config: &String) {
+    // Parse both configs as generic yaml objects and descend through them
+    // logging out a warning for any keys that are present in `specified_config`
+    // but not present in `resolved_config`
+    let specified_config: serde_yaml::Value = serde_yaml::from_str(specified_config).unwrap();
+    let resolved_config: serde_yaml::Value = serde_yaml::from_str(resolved_config).unwrap();
+    let specified_mapping = specified_config
+        .as_mapping()
+        .expect("Specified config was not a key-value mapping");
+    let resolved_mapping = resolved_config
+        .as_mapping()
+        .expect("Resolved config was not a key-value mapping");
+
+    // Now we have two generic yaml objects, we can descend through them and
+    // compare keys.
+    fn descend_and_log_unexpected_keys(
+        specified_value: &serde_yaml::Value,
+        resolved_value: &serde_yaml::Value,
+        path: &mut Vec<String>,
+    ) {
+        match (specified_value, resolved_value) {
+            (serde_yaml::Value::Null, serde_yaml::Value::Null) => { /* OK */ }
+            (serde_yaml::Value::Null, resolved_value) => {
+                warn!(
+                    "At path: {}, specified was null, but resolved was {:?}",
+                    path.join(""),
+                    resolved_value
+                );
+            }
+            (serde_yaml::Value::Bool(_), serde_yaml::Value::Bool(_)) => { /* OK */ }
+            (serde_yaml::Value::Bool(_), resolved_value) => {
+                warn!(
+                    "At path: {}, specified was bool, but resolved was {:?}",
+                    path.join(""),
+                    resolved_value
+                );
+            }
+            (serde_yaml::Value::Number(_), serde_yaml::Value::Number(_)) => { /* OK */ }
+            (serde_yaml::Value::Number(_), resolved_value) => {
+                warn!(
+                    "At path: {}, specified was number, but resolved was {:?}",
+                    path.join(""),
+                    resolved_value
+                );
+            }
+            (serde_yaml::Value::String(_), serde_yaml::Value::String(_)) => { /* OK */ }
+            (serde_yaml::Value::String(_), serde_yaml::Value::Number(_)) => { /* probably OK, common for byte amounts to come in as str */
+            }
+            (serde_yaml::Value::String(specified_str), resolved) => {
+                warn!(
+                    "At path: {}, specified was str ({}), but resolved was {:?}",
+                    path.join(""),
+                    specified_str,
+                    resolved
+                );
+            }
+            (
+                serde_yaml::Value::Sequence(specified_sequence),
+                serde_yaml::Value::Sequence(resolved_sequence),
+            ) => {
+                for (i, v) in specified_sequence.iter().enumerate() {
+                    path.push(format!("[{}]", i));
+                    if i >= resolved_sequence.len() {
+                        warn!("Unknown key specified: {}", path.join(""));
+                    } else {
+                        let resolved_value = &resolved_sequence[i];
+                        descend_and_log_unexpected_keys(v, resolved_value, path);
+                        path.pop();
+                    }
+                }
+            }
+            (serde_yaml::Value::Sequence(_), res) => {
+                warn!(
+                    "At path {}, specified was sequence, but resolved was {:?}",
+                    path.join(""),
+                    res
+                );
+            }
+            (
+                serde_yaml::Value::Mapping(specified_mapping),
+                serde_yaml::Value::Mapping(resolved_mapping),
+            ) => {
+                for (k, v) in specified_mapping {
+                    path.push(format!(".{}", k.as_str().unwrap_or_default()));
+                    if !resolved_mapping.contains_key(k) {
+                        warn!("Unknown key specified: {}", path.join(""));
+                    } else {
+                        let resolved_value = resolved_mapping.get(k).unwrap();
+                        descend_and_log_unexpected_keys(v, resolved_value, path);
+                        path.pop();
+                    }
+                }
+            }
+            (serde_yaml::Value::Mapping(_), _) => todo!(),
+            (serde_yaml::Value::Tagged(_), _) => todo!(),
+        }
+    }
+    let mut path = Vec::<String>::new();
+    for (k, v) in specified_mapping {
+        path.push(format!("{:}", k.as_str().unwrap_or_default()));
+        descend_and_log_unexpected_keys(v, resolved_mapping.get(k).unwrap(), &mut path);
+        path.pop();
+    }
+}
+
 fn get_config(ops: &Opts) -> Config {
     let contents = if let Ok(env_var_value) = env::var("LADING_CONFIG") {
         debug!("Using config from env var 'LADING_CONFIG'");
@@ -181,6 +286,9 @@ fn get_config(ops: &Opts) -> Config {
     };
 
     let mut config: Config = serde_yaml::from_str(&contents).unwrap();
+    let reserialized_config = serde_yaml::to_string(&config).unwrap();
+    log_unexpected_keys(&contents, &reserialized_config);
+    debug!("Effective Config for this run:\n {}", reserialized_config);
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit).unwrap();

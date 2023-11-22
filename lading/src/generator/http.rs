@@ -23,7 +23,7 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Semaphore};
 use tracing::info;
 
@@ -35,7 +35,7 @@ use super::General;
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
 /// The HTTP method to be used in requests
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Method {
     /// Make HTTP Post requests
@@ -50,7 +50,7 @@ pub enum Method {
     },
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target

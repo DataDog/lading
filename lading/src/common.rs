@@ -1,9 +1,9 @@
 use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 /// Defines how sub-process stderr and stdout are handled.
 pub struct Output {
     #[serde(default)]
@@ -14,7 +14,7 @@ pub struct Output {
     pub stdout: Behavior,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 /// Defines the [`Output`] behavior for stderr and stdout.
 pub enum Behavior {

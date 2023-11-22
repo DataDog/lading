@@ -10,7 +10,7 @@
 //! indefinitely, paying higher memory and longer startup for better
 //! experimental control.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::{signals::Shutdown, target::TargetPidReceiver};
@@ -61,7 +61,7 @@ pub enum Error {
     ProcessTree(#[from] process_tree::Error),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub struct Config {
@@ -73,7 +73,7 @@ pub struct Config {
     pub inner: Inner,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configurations common to all [`Server`] variants
 pub struct General {
@@ -81,7 +81,7 @@ pub struct General {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Inner {

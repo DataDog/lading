@@ -9,7 +9,7 @@
 use std::{io, net::SocketAddr};
 
 use metrics::register_counter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tracing::info;
 
@@ -24,7 +24,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Serialize)]
 /// Configuration for [`Udp`].
 pub struct Config {
     /// address -- IP plus port -- to bind to

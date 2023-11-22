@@ -43,7 +43,7 @@ pub enum Error {
 }
 
 /// Body variant supported by this blackhole.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BodyVariant {
     /// All response bodies will be empty.
@@ -70,7 +70,7 @@ fn default_headers() -> HeaderMap {
     map
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Serialize)]
 /// Configuration for [`Http`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow

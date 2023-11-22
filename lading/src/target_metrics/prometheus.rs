@@ -8,7 +8,7 @@ use std::{str::FromStr, time::Duration};
 
 use metrics::{absolute_counter, gauge};
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, trace, warn};
 
 use crate::signals::Shutdown;
@@ -21,7 +21,7 @@ pub enum Error {
     EarlyShutdown,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for collecting Prometheus based target metrics
 pub struct Config {

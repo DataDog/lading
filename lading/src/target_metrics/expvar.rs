@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use metrics::gauge;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{error, info, trace};
 
@@ -20,7 +20,7 @@ pub enum Error {
     EarlyShutdown,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for collecting Go Expvar based target metrics
 pub struct Config {

@@ -4,12 +4,12 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 
 /// Main configuration struct for this program
-#[derive(Debug, Default, Deserialize, PartialEq)]
+#[derive(Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// The method by which to express telemetry
     #[serde(default)]
@@ -22,7 +22,7 @@ pub struct Config {
     #[serde(skip_deserializing)]
     pub observer: observer::Config,
     /// The program being targetted by this rig
-    #[serde(skip_deserializing)]
+    #[serde(skip_deserializing, skip_serializing)]
     pub target: Option<target::Config>,
     /// The blackhole to supply for the target
     #[serde(default)]
@@ -36,7 +36,7 @@ pub struct Config {
     pub inspector: Option<inspector::Config>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(untagged)]
 /// Defines the manner of lading's telemetry.

@@ -10,6 +10,7 @@ use std::{collections::VecDeque, num::NonZeroU32};
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
+use serde::Serialize as SerdeSerialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 
 use crate::dogstatsd;
@@ -93,7 +94,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[derive(Debug, Deserialize, PartialEq, Clone, Copy, SerdeSerialize)]
 /// The method for which caching will be configure
 pub enum CacheMethod {
     /// Create a single fixed size block cache and rotate through it

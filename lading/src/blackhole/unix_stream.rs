@@ -11,7 +11,7 @@ use std::{io, path::PathBuf};
 
 use futures::StreamExt;
 use metrics::register_counter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net;
 use tokio_util::io::ReaderStream;
 use tracing::info;
@@ -27,7 +27,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Serialize)]
 /// Configuration for [`UnixStream`].
 pub struct Config {
     /// The path of the socket to read from.

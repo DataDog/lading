@@ -9,6 +9,7 @@ use rand::{
     Rng,
 };
 use serde::Deserialize;
+use serde::Serialize as SerdeSerialize;
 
 use crate::{common::strings, Serialize};
 
@@ -81,7 +82,7 @@ fn multivalue_pack_probability() -> f32 {
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, SerdeSerialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -114,7 +115,7 @@ impl Default for KindWeights {
 }
 
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, SerdeSerialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -156,7 +157,7 @@ impl Default for MetricWeights {
 }
 
 /// Configuration for the values of a metric.
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy, SerdeSerialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
 pub struct ValueConf {
@@ -183,10 +184,9 @@ impl Default for ValueConf {
     }
 }
 /// Range expression for configuration
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy, SerdeSerialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub enum ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
@@ -246,7 +246,7 @@ where
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy, SerdeSerialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Config {
     /// The unique metric contexts to generate. A context is a set of unique

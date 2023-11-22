@@ -4,7 +4,7 @@
 //! include them in the captures file.
 //!
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Shutdown;
 
@@ -20,7 +20,7 @@ pub enum Error {
     Prometheus(prometheus::Error),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub enum Config {

@@ -20,7 +20,7 @@ use nix::{
     unistd::Pid,
 };
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -39,7 +39,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for [`Server`]
 pub struct Config {

@@ -17,7 +17,7 @@ pub mod traditional;
 
 use std::str;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Shutdown;
 
@@ -35,7 +35,7 @@ pub enum Error {
 }
 
 /// Configuration of [`FileGen`]
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Config {
     /// See [`traditional::Config`].
