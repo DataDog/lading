@@ -159,7 +159,7 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
-fn log_unexpected_keys(specified_config: &String, resolved_config: &String) {
+fn log_unexpected_keys(specified_config: &str, resolved_config: &str) {
     // Parse both configs as generic yaml objects and descend through them
     // logging out a warning for any keys that are present in `specified_config`
     // but not present in `resolved_config`
@@ -258,7 +258,7 @@ fn log_unexpected_keys(specified_config: &String, resolved_config: &String) {
     }
     let mut path = Vec::<String>::new();
     for (k, v) in specified_mapping {
-        path.push(format!("{:}", k.as_str().unwrap_or_default()));
+        path.push(k.as_str().unwrap_or_default().to_string());
         descend_and_log_unexpected_keys(v, resolved_mapping.get(k).unwrap(), &mut path);
         path.pop();
     }
