@@ -278,16 +278,23 @@ enum SpeculationIndirectBranch {
     Unknown,
 }
 
-/// Models `/proc/{pid}/status` and `/proc/{pid}/stat` as of Linux 4.19.
+/// Models `/proc/{pid}/status`.
 ///
 /// See the [Linux kernel `/proc` filesystem
 /// documentation](https://docs.kernel.org/filesystems/proc.html), Table 1-2.
 ///
-/// TODO(geoffrey.oxberry@datadoghq.com): Add remaining fields from Table 1-2
-/// and figure out which fields are optional and which are not.
+/// This struct needs to be consistent with the information in
+/// `/proc/[pid]/stat`. In many cases, the information in this struct has an
+/// obvious analogue to the information in `/proc/{pid}/stat` (e.g., process pid
+/// is the same, process name is printed without escapes, task state is
+/// displayed as a single letter instead of a letter plus description). In other
+/// cases, consistency is *not* as simple as "output a possibly different format
+/// isomorphic to the format displayed by `status`". Examples include the
+/// process's `task_struct` `flags`, which influence the `Kthread` field of
+/// `status` and the `/proc/{pid}/comm` file.
 #[derive(Debug)]
 struct Status {
-    /// Filename of executable
+    /// Filename of executable (with escapes, limited to 64 bytes)
     name: String,
     /// File mode creation mask
     umask: Option<::nix::sys::stat::Mode>,
