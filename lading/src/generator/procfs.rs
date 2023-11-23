@@ -402,13 +402,26 @@ struct Status {
     // if CONFIG_SECCOMP_FILTER set
     seccomp_filters: i32,
     // end if CONFIG_SECCOMP_FILTER set
+    /// Mask of CPUs on which this process may run; isomorphic to
+    /// `cpus_allowed_list`
     cpus_allowed: Vec<MaskEntry>,
+    /// List of CPUs on which this process may run; isomorphic to `cpus_allowed`.
     cpus_allowed_list: Vec<ListEntry>,
-    mems_allowed: MaskEntry,
+    /// Mask of memory nodes allowed to this process; isomorphic to
+    /// `mems_allowed_list`.
+    mems_allowed: Vec<MaskEntry>,
+    /// List of memory nodes allowed to this process; isomorphic to
+    /// `mems_allowed`.
     mems_allowed_list: Vec<ListEntry>,
+    /// Indicates whether process may or may not be vulnerable to a Speculative
+    /// Store Bypass attack (CVE-2018-3639)
     speculation_store_bypass: SpeculationStoreBypass,
+    /// Indicates whether process may or may not be vulnerable to branch target
+    /// injection attacks (Spectre variant 2)
     speculation_indirect_branch: SpeculationIndirectBranch,
+    /// Number of times process has been context-switched voluntarily
     voluntary_ctxt_switches: u64,
+    /// Number of times process has been context-switched involuntarily
     nonvoluntary_ctxt_switches: u64,
 }
 
