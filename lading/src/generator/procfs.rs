@@ -13,7 +13,7 @@ use ::serde::{Deserialize, Serialize};
 /// is 2^22. The value for a 32-bit system is at most 2^15 (32,768). Can be set
 /// to a lower value by writing to `/proc/sys/kernel/pid_max`, but may not
 /// exceed 2^22.
-const PID_MAX_LIMIT: u32 = 4_194_304;
+const PID_MAX_LIMIT: i32 = 4_194_304;
 
 /// Maximum length of a process's `comm` value (in `/proc/{pid}/comm`)/
 const TASK_COMM_LEN: usize = 16;
@@ -159,6 +159,125 @@ mod task {
     }
 }
 
+/// Models a process ID number, which is an `int` type in C.
+///
+/// This data is modeled by the `pid_t` type in the Linux kernel.
+#[derive(Debug)]
+struct Pid(i32);
+
+/// Models a user ID number, which is an `unsigned int` type in C.
+///
+/// This data is modeled by the `uid_t` type in the Linux kernel.
+#[derive(Debug)]
+struct Uid(u32);
+
+/// Models a group ID number, which is an `unsigned int` type in C.
+///
+/// This data is modeled by the `gid_t` type in the Linux kernel.
+#[derive(Debug)]
+struct Gid(u32);
+
+/// Models SigQ field of `/proc/{pid}/status`.
+#[derive(Debug)]
+struct SigQ {
+    signals_queued: u32,
+    max_number_for_queue: u64,
+}
+
+/// Models signal mask fields in `/proc/{pid}/status`.
+///
+/// This mask is architecture-dependent and is modeled by the `sigset_t` type in
+/// the Linux kernel. On x86 64-bit platforms and arm64 platforms, this type is
+/// an `unsigned long [1]` in C. Since these two platforms are the platforms we
+/// are most likely to support, this type is hardcoded to a Rust equivalent of
+/// that representation. On most other platforms, this type can be punned to an
+/// unsigned 64-bit integer (e.g., on 32-bit architectures, this type is an
+/// `unsigned long[2]` in C), so hardcoding this type to a `u64` doesn't cost us
+/// much in portability. One notable exception to this 64-bit representation is
+/// MIPS, which uses a type punnable to `u128`, but supporting that architecture
+/// seems unlikely.
+#[derive(Debug)]
+struct SignalMask(u64);
+
+/// Models capability mask fields in `/proc/{pid}/status`.
+///
+/// This mask is a `u64` in the Linux kernel on all supported architectures; see
+/// the definition of the `kernel_cap_t` type in the kernel source code for
+/// details.
+#[derive(Debug)]
+struct CapabilityMask(u64);
+
+/// Models entries of `{Cpus,Mems}_allowed_list` in `/proc/{pid}/status`.
+///
+/// Models entries of the `Cpus_allowed_list` and `Mems_allowed_list` fields in
+/// `/proc/{pid}status`. The list format is a comma-separated list of CPU (node)
+/// or memory-node numbers and ranges of numbers in ASCII decimal. Examples
+/// include:
+///
+/// ```text
+/// 0-6,14         # bits 0, 1, 2, 3, 4, 5, 6, and 14 set
+/// 0-3,6,9-12     # bits 0, 1, 2, 3, 6, 9, 10, 11, and 12 set
+/// ```
+///
+/// See `proc(5)` and `cpuset(7)` `man` pages for details on the "list format".
+#[derive(Debug)]
+enum ListEntry {
+    Single(u64),
+    RangeInclusive {
+        /// First element of range.
+        first: u64,
+        /// Last element of range. Must be greater than `first`.
+        last: u64,
+    },
+}
+
+/// Models `Seccomp` field of `/proc/{pid}/status`, if it exists.
+///
+/// The `Seccomp` field of `/proc/{pid}/status`, if it exists (if
+/// `CONFIG_SECCOMP` is set), stores the Seccomp mode of the process (since
+/// Linux 3.8). This field can take one of three values: 0
+/// (`SECCOMP_MODE_DISABLED`), 1 (`SECCOMP_MODE_STRICT`), or 2
+/// (`SECCOMP_MODE_FILTER`), even though the underlying data itself is a C
+/// `int`.
+#[derive(Debug)]
+enum SeccompMode {
+    Disabled = 0,
+    Strict = 1,
+    Filter = 2,
+}
+
+/// Models entries of `{Cpus,Mems}_allowed` fields in `/proc/{pid}/status`.
+///
+/// Models entries of the `Cpus_allowed` and `Mems_allowed` fields in
+/// `/proc/{pid}/status`. Both of these fields are collections of 32-bit words.
+#[derive(Debug)]
+struct MaskEntry(u32);
+
+/// Models `Speculation_Store_Bypass` field of `/proc/{pid}/status`
+#[derive(Debug)]
+enum SpeculationStoreBypass {
+    Unknown,
+    NotVulnerable,
+    ThreadForceMitigated,
+    ThreadMitigated,
+    ThreadVulnerable,
+    GloballyMitigated,
+    Vulnerable,
+}
+
+/// Models `SpeculationIndirectBranch` field of `/proc/{pid}/status`
+#[derive(Debug)]
+enum SpeculationIndirectBranch {
+    Unsupported,
+    NotAffected,
+    ConditionalForceDisabled,
+    ConditionalDisabled,
+    ConditionalEnabled,
+    AlwaysEnabled,
+    AlwaysDisabled,
+    Unknown,
+}
+
 /// Models `/proc/{pid}/status` and `/proc/{pid}/stat` as of Linux 4.19.
 ///
 /// See the [Linux kernel `/proc` filesystem
@@ -175,56 +294,115 @@ struct Status {
     /// State of process
     state: task::State,
     /// Thread group ID
-    tgid: u32,
+    tgid: Pid,
     /// NUMA group ID
-    ngid: u32,
+    ngid: Pid,
     /// Process ID
-    pid: u32,
+    pid: Pid,
     /// Process ID of parent process
-    ppid: u32,
+    ppid: Pid,
     /// PID of process tracing this process (0 if not, or the trace is outside
     /// of the current pid namespace)
-    tracer_pid: u32,
+    tracer_pid: Pid,
     /// Real, effective, saved set, and file system UIDs
-    uid: [u32; 4],
+    uid: [Uid; 4],
     /// Real, effective, saved set, and file system GIDs
-    gid: [u32; 4],
+    gid: [Gid; 4],
     /// Number of file descriptor slots currently allocated
     fd_size: u64,
     /// Supplementary group list
-    groups: Vec<u32>,
+    groups: Vec<Gid>,
+    // if kernel compiled with CONFIG_PID_NS
     /// Descendant namespace thread group ID hierarchy
-    ns_tgid: Vec<u32>,
+    ns_tgid: Vec<Pid>,
     /// Descendant namespace process ID hierarchy
-    ns_pid: Vec<u32>,
+    ns_pid: Vec<Pid>,
     /// Descendant namespace process group ID hierarchy
-    ns_pgid: Vec<u32>,
+    ns_pgid: Vec<Pid>,
     /// Descendant namespace session ID hierarchy
-    ns_sid: Vec<u32>,
-    /// Kernel thread flag (true/false should be serialized as 1/0)
-    kthread: Option<bool>,
+    ns_sid: Vec<Pid>,
+    // endif
+    /// Whether the process thread is a kernel thread
+    kthread: bool,
     /// Peak virtual memory size (in bytes)
     vm_peak: u64,
     /// Total program size (in bytes)
     vm_size: u64,
+    /// Locked memory size (in bytes)
     vm_lck: u64,
+    /// Pinned memory size (in bytes)
     vm_pin: u64,
+    /// Peak resident set size (in bytes)
     vm_hwm: u64,
+    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem
     vm_rss: u64,
+    /// Resident anonymous memory size (in bytes)
     rss_anon: u64,
+    /// Resident file mappings size (in bytes)
     rss_file: u64,
+    /// Resident shmem memory size (in bytes; includes SysV shm, tmpfs mapping,
+    /// shared anonymous mappings)
     rss_shmem: u64,
+    /// Size of private data segments (in bytes)
     vm_data: u64,
+    /// Size of stack segments (in bytes)
     vm_stk: u64,
+    /// Size of text segment (in bytes)
     vm_exe: u64,
+    /// Size of shared library code (in bytes)
     vm_lib: u64,
+    /// Size of page table entries (in bytes)
     vm_pte: u64,
+    /// Size of swap used by anonymous private data (in bytes; does not include
+    /// shmem swap)
     vm_swap: u64,
+    /// Size of huge translation lookaside buffer (in bytes)
     huge_tlb_pages: u64,
+    /// Process's memory is currently being dumped ()
     core_dumping: bool,
+    /// Process is allowed to use transparent hugepage support
     thp_enabled: bool,
-    threads: u32,
-    sig_q: [u8; 8],
+    /// Number of threads used by process
+    threads: i32,
+    /// Number of signals queued / max number for queue
+    sigq: SigQ,
+    /// Bitmap of pending signals for the thread
+    sig_pnd: SignalMask,
+    /// Bitmap of shared pending signals for the thread
+    shd_pnd: SignalMask,
+    /// Bitmap of blocked signals
+    sig_blk: SignalMask,
+    /// Bitmap of ignored signals
+    sig_ign: SignalMask,
+    /// Bitmap of caught signals
+    sig_cgt: SignalMask,
+    /// Bitmap of inheritable capabilities
+    cap_inh: CapabilityMask,
+    /// Bitmap of permitted capabilities
+    cap_prm: CapabilityMask,
+    /// Bitmap of effective capabilities
+    cap_eff: CapabilityMask,
+    /// Bitmap of capabilities bounding set
+    cap_bnd: CapabilityMask,
+    /// Value of the process's `no_new_privs` bit. If set to 1, the `execve`
+    /// syscall promises not to grant the process any additional privileges to
+    /// do anything that could not have been done without that syscall.
+    no_new_privs: bool,
+    // if CONFIG_SECCOMP set
+    /// Seccomp mode of the process.
+    seccomp: SeccompMode,
+    // endif CONFIG_SECCOMP set
+    // if CONFIG_SECCOMP_FILTER set
+    seccomp_filters: i32,
+    // end if CONFIG_SECCOMP_FILTER set
+    cpus_allowed: Vec<MaskEntry>,
+    cpus_allowed_list: Vec<ListEntry>,
+    mems_allowed: MaskEntry,
+    mems_allowed_list: Vec<ListEntry>,
+    speculation_store_bypass: SpeculationStoreBypass,
+    speculation_indirect_branch: SpeculationIndirectBranch,
+    voluntary_ctxt_switches: u64,
+    nonvoluntary_ctxt_switches: u64,
 }
 
 /// Models data associated with a process ID (pid).
