@@ -31,6 +31,7 @@ use lading_payload::block::{self, Block};
 use super::General;
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target

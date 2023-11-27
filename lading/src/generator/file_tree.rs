@@ -76,6 +76,7 @@ fn default_rename_per_name() -> NonZeroU32 {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`FileTree`]
 pub struct Config {
     /// The seed for random operations against this target

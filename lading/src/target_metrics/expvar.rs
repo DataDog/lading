@@ -21,6 +21,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for collecting Go Expvar based target metrics
 pub struct Config {

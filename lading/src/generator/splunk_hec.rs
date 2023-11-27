@@ -51,6 +51,7 @@ const SPLUNK_HEC_CHANNEL_HEADER: &str = "x-splunk-request-channel";
 
 /// Optional Splunk HEC indexer acknowledgements configuration
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AckSettings {
     /// The time in seconds between queries to /services/collector/ack
     pub ack_query_interval_seconds: u64,
@@ -61,6 +62,7 @@ pub struct AckSettings {
 
 /// Configuration for [`SplunkHec`]
 #[derive(Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
@@ -356,6 +358,7 @@ async fn send_hec_request(
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct HecAckResponse {
     #[allow(dead_code)]
     text: String,

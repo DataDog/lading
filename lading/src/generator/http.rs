@@ -37,6 +37,7 @@ static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 /// The HTTP method to be used in requests
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum Method {
     /// Make HTTP Post requests
     Post {
@@ -51,6 +52,7 @@ pub enum Method {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target

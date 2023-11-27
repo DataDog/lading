@@ -40,6 +40,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub struct Config {}
 

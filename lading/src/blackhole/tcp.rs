@@ -28,6 +28,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Tcp`]
 pub struct Config {
     /// address -- IP plus port -- to bind to

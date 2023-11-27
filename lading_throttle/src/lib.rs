@@ -34,6 +34,7 @@ use tokio::time::{self, Duration, Instant};
 pub mod stable;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 #[serde(rename_all = "snake_case")]
 pub enum Config {

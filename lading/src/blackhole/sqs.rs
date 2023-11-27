@@ -37,6 +37,7 @@ fn default_concurrent_requests_max() -> usize {
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Sqs`]
 pub struct Config {
     /// number of concurrent HTTP connections to allow
@@ -130,12 +131,14 @@ impl Sqs {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "PascalCase")]
 struct Action {
     action: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "PascalCase")]
 struct ReceiveMessage {
     #[allow(dead_code)]
@@ -148,6 +151,7 @@ struct ReceiveMessage {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "PascalCase")]
 struct DeleteMessageBatch {
     #[allow(dead_code)]

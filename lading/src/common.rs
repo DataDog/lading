@@ -4,6 +4,7 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 /// Defines how sub-process stderr and stdout are handled.
 pub struct Output {
     #[serde(default)]
@@ -15,6 +16,7 @@ pub struct Output {
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 #[serde(untagged)]
 /// Defines the [`Output`] behavior for stderr and stdout.
 pub enum Behavior {

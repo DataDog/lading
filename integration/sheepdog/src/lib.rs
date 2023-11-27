@@ -284,7 +284,6 @@ generator:
   - http:
         seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-        headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/logs"
         bytes_per_second: "100 Mb"
         block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
@@ -293,8 +292,8 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_logs"
-            headers:
-                Content-Type: "application/x-protobuf"
+        headers:
+            Content-Type: "application/x-protobuf"
         "#,
         )?;
 
@@ -321,7 +320,6 @@ generator:
   - http:
         seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-        headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/traces"
         bytes_per_second: "100 Mb"
         block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
@@ -330,8 +328,8 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_traces"
-            headers:
-                Content-Type: "application/x-protobuf"
+        headers:
+            Content-Type: "application/x-protobuf"
         "#,
         )?;
 
@@ -358,7 +356,6 @@ generator:
   - http:
         seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-        headers: {}
         target_uri: "http://localhost:{{port_number}}/v1/metrics"
         bytes_per_second: "100 Mb"
         block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
@@ -367,8 +364,8 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_metrics"
-            headers:
-                Content-Type: "application/x-protobuf"
+        headers:
+            Content-Type: "application/x-protobuf"
         "#,
         )?;
 
