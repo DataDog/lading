@@ -63,6 +63,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub struct Config {
     /// Common generator configs
@@ -75,6 +76,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configurations common to all [`Server`] variants
 pub struct General {
     /// The ID assigned to this generator
@@ -83,6 +85,7 @@ pub struct General {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub enum Inner {
     /// See [`crate::generator::tcp::Config`] for details.

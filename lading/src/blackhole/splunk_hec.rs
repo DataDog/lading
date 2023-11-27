@@ -44,6 +44,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`SplunkHec`].
 pub struct Config {
     /// number of concurrent HTTP connections to allow

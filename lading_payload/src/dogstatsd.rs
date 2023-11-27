@@ -82,6 +82,7 @@ fn multivalue_pack_probability() -> f32 {
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -115,6 +116,7 @@ impl Default for KindWeights {
 
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -157,6 +159,7 @@ impl Default for MetricWeights {
 
 /// Configuration for the values of a metric.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
 pub struct ValueConf {
@@ -184,6 +187,7 @@ impl Default for ValueConf {
 }
 /// Range expression for configuration
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -248,6 +252,7 @@ where
 /// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// The unique metric contexts to generate. A context is a set of unique
     /// metric name + tags

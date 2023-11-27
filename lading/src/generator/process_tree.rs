@@ -116,6 +116,7 @@ fn default_envs_count() -> NonZeroU32 {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum Args {
@@ -126,6 +127,7 @@ pub enum Args {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct StaticArgs {
     /// Argumments used with the `static` mode
@@ -133,6 +135,7 @@ pub struct StaticArgs {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct GenerateArgs {
     /// The maximum number argument per Process. Used by the `generate` mode
@@ -144,6 +147,7 @@ pub struct GenerateArgs {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum Envs {
@@ -154,6 +158,7 @@ pub enum Envs {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct StaticEnvs {
     /// Environment variables used with the `static` mode
@@ -161,6 +166,7 @@ pub struct StaticEnvs {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct GenerateEnvs {
     /// The maximum number environment variable per Process. Used by the `generate` mode
@@ -188,6 +194,7 @@ impl StaticEnvs {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct Executable {
     /// Path of the executable
@@ -199,6 +206,7 @@ pub struct Executable {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`ProcessTree`]
 pub struct Config {
     /// The seed for random operations against this target

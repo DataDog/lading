@@ -109,6 +109,7 @@ impl Distribution<Member> for Standard {
 
 ///
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

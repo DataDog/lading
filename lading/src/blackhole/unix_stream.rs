@@ -28,6 +28,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`UnixStream`].
 pub struct Config {
     /// The path of the socket to read from.

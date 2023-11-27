@@ -10,6 +10,7 @@ use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 
 /// Main configuration struct for this program
 #[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// The method by which to express telemetry
     #[serde(default)]
@@ -38,6 +39,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 #[serde(untagged)]
 /// Defines the manner of lading's telemetry.
 pub enum Telemetry {

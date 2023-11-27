@@ -22,6 +22,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub enum Config {
     /// See [`crate::target_metrics::expvar::Config`] for details.

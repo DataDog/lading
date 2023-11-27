@@ -64,6 +64,7 @@ fn default_rotation() -> bool {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
 pub struct Config {
     /// The seed for random operations against this target

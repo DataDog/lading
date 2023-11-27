@@ -38,6 +38,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub struct Config {
     /// Common blackhole configs
@@ -50,6 +51,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configurations common to all [`Server`] variants
 pub struct General {
     /// The ID assigned to this blackhole
@@ -58,6 +60,7 @@ pub struct General {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub enum Inner {
     /// See [`crate::blackhole::tcp::Config`] for details.

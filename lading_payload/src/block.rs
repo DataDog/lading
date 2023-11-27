@@ -94,6 +94,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[serde(deny_unknown_fields)]
 /// The method for which caching will be configure
 pub enum CacheMethod {
     /// Create a single fixed size block cache and rotate through it

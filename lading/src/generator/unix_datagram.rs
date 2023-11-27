@@ -34,6 +34,7 @@ fn default_parallel_connections() -> u16 {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {
     /// The seed for random operations against this target
