@@ -610,8 +610,7 @@ struct Statm {
 
 /// Models data associated with a process ID (pid).
 ///
-/// TODO(geoffrey.oxberry@datadoghq.com): `process-agent` currently only tests
-/// the following files in `/proc/{pid}`:
+/// `process-agent` currently only reads the following files in `/proc/{pid}`:
 ///
 /// - cmdline (string containing command lin)
 /// - comm (string of `TASK_COMM_LEN` characters or less; currently,
@@ -621,22 +620,25 @@ struct Statm {
 /// - statm
 /// - status
 ///
-/// One or two test cases also use `/proc/{pid}/cwd` (a symlink).
-///
-/// The `process-agent` system probe also reads from `/proc/{pid}`:
-///
-/// - `exe` (a symlink to the executable referred to in cmdline)
-/// - `fd` (a directory containing all file descriptors)
+/// so this struct reflects that behavior.
 #[derive(Debug)]
 struct Process {
-    /// Process ID number (`pid`)
-    id: NonZeroU32,
+    /// Process ID number (`pid`).
+    id: Pid,
     /// Command line for process (unless a zombie); corresponds to
-    /// `/proc/{pid}/cmdline`
+    /// `/proc/{pid}/cmdline`.
     cmdline: String,
     /// Command name associated with process. Truncated to `TASK_COMM_LEN`
     /// bytes.
     comm: String,
+    /// Corresponds to `/proc/{pid}/io`.
+    io: task::Io,
+    /// Corresponds to `/proc/{pid}/stat`.
+    stat: Stat,
+    /// Corresponds to `/proc/{pid}/statm`.
+    statm: Statm,
+    /// Corresponds to `/proc/{pid}/status`.
+    status: Status,
 }
 
 // The procfs generator.
