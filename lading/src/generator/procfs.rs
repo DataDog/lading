@@ -586,6 +586,28 @@ struct Stat {
     exit_code: i32,
 }
 
+/// Models data associated with `/proc/{pid}/statm`.
+///
+/// Provides information about memory usage, measured in pages.
+#[derive(Debug)]
+struct Statm {
+    /// Total program size (same as VmSize in `/proc/{pid}/status`).
+    size: u64,
+    /// Resident set size (inaccurate; same as VmRss in `/proc/{pid}/status`).
+    resident: u64,
+    /// Number of resident shared pages (i.e., backed by a file) (inaccurate;
+    /// same as RssFile+RssShmem in `/proc/{pid}/status`).
+    shared: u64,
+    /// Text (code).
+    text: u64,
+    /// Library (unused since Linux 2.6; always 0).
+    lib: u64,
+    /// Data + stack.
+    data: u64,
+    /// Dirty pages (unused since Linux 2.6; always 0).
+    dt: u64,
+}
+
 /// Models data associated with a process ID (pid).
 ///
 /// TODO(geoffrey.oxberry@datadoghq.com): `process-agent` currently only tests
