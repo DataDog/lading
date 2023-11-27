@@ -3,6 +3,9 @@
 //! The procfs generator does not "connect" directly with the target, and
 //! emulates a `/proc` filesystem, though it is not mounted at `/proc` in the
 //! target container so as to avoid interfering in the container's OS.
+//!
+//! Data types for fields generally assume a 64-bit architecture, rather than
+//! use Rust's C-compatible data types.
 
 use ::std::{num::NonZeroU32, path::PathBuf};
 
@@ -292,12 +295,15 @@ enum SpeculationIndirectBranch {
 /// isomorphic to the format displayed by `status`". Examples include the
 /// process's `task_struct` `flags`, which influence the `Kthread` field of
 /// `status` and the `/proc/{pid}/comm` file.
+///
+/// It's also worth noting here that the `proc(5)` man page documentation for
+/// this file is slightly out-of-date.
 #[derive(Debug)]
 struct Status {
     /// Filename of executable (with escapes, limited to 64 bytes)
     name: String,
-    /// File mode creation mask
-    umask: Option<::nix::sys::stat::Mode>,
+    /// File mode creation mask (only printed if not zero)
+    umask: ::nix::sys::stat::Mode,
     /// State of process
     state: task::State,
     /// Thread group ID
@@ -369,6 +375,9 @@ struct Status {
     core_dumping: bool,
     /// Process is allowed to use transparent hugepage support
     thp_enabled: bool,
+    /// Mask for linear address masking (LAM) to support storing metadata
+    /// in pointer addresses
+    untag_mask: u64,
     /// Number of threads used by process
     threads: i32,
     /// Number of signals queued / max number for queue
@@ -423,6 +432,158 @@ struct Status {
     voluntary_ctxt_switches: u64,
     /// Number of times process has been context-switched involuntarily
     nonvoluntary_ctxt_switches: u64,
+}
+
+/// Models `/proc/{pid}/stat`.
+///
+/// All information in this struct taken from `proc(5)` man page; this
+/// documentation appears to be up to date for `/proc/{pid}/stat`.
+#[derive(Debug)]
+struct Stat {
+    /// The process ID.
+    pid: Pid,
+    /// File name of executable, in parentheses. Limited to `TASK_COMM_LEN`
+    /// bytes.
+    comm: String,
+    /// Indicates process state.
+    state: task::State,
+    /// The PID of the parent of this process.
+    ppid: Pid,
+    /// The process group ID of the process.
+    pgrp: Pid,
+    /// The session ID of the process.
+    session: Pid,
+    /// The controlling terminal of the process.
+    tty_nr: i32,
+    /// The ID of the foreground process group of the controlling terminal of
+    /// the process.
+    tpgid: Pid,
+    /// The kernel flags word of the prcoess. For bit meaninges, set the `PF_*`
+    /// defines in the Linux kernel source file `include/linux/sched.h`.
+    flags: u32,
+    /// The number of minor faults the process has made that have not required
+    /// loading a memory page from disk.
+    minflt: u64,
+    /// The number of minor faults that the process's waited-for children have
+    /// made.
+    cminflt: u64,
+    /// The number of major faults the process has made that have required
+    /// loading a memory page from disk.
+    majflt: u64,
+    /// The number of major faults that the process' waited-for children have
+    /// made.
+    cmajflt: u64,
+    /// Amount of time that this process has been scheduled in user mode,
+    /// measured in clock ticks.
+    utime: u64,
+    /// Amount of time that this process has been scheduled in kernel mode,
+    /// measured in clock ticks.
+    stime: u64,
+    /// Amount of time that this process's waited-for children have been
+    /// scheduled in user mode, measured in clock ticks.
+    cutime: i64,
+    /// Amount of time that this process's waited-for children have been
+    /// scheduled in kernel mode, measured in clock ticks.
+    cstime: i64,
+    /// Scheduling priority. For processes running a real-time scheduling
+    /// policy, this is the negated scheduling priority, minus on; that is, a
+    /// number in the range -2 to -100, corresponding to real-time priorities 1
+    /// to 99. For processes running under a non-real-time scheduling policy,
+    /// this is the raw nice value as represented in the kernel. The kernel
+    /// stores nice values as numbers in the range 0 (high) to 39 (low),
+    /// corresponding to the user-visible nice range of -20 (high) to 19 (low).
+    priority: i64,
+    /// The nice value, a value in the range 19 (low priority) to -20 (high
+    /// priority).
+    nice: i64,
+    /// Number of threads in this process.
+    num_threads: i64,
+    /// The time in jiffies before the next `SIGALRM` is sent to the process due
+    /// to an interval timer. Since Linux 2.6.17, this field is no longer
+    /// maintained, and is hard coded as 0.
+    itrealvalue: i64,
+    /// The time the process started after system boot, expressed in clock ticks.
+    starttime: u128,
+    /// Virtual memory size in bytes.
+    vsize: u64,
+    /// Resident set size: number of pages the process has in real memory. This
+    /// value is inaccurate; see `/proc/{pid}/statm` for details.
+    rss: i64,
+    /// Current soft limit in bytes on the RSS of the process; see the
+    /// description of `RLIMIT_RSS` in `getrlimit(2)`.
+    rsslim: u64,
+    /// The address above which program text can run.
+    startcode: u64,
+    /// The address below which program text can run.
+    endcode: u64,
+    /// The address of the start (i.e., bottom) of the stack.
+    startstack: u64,
+    /// The current value of ESP (stack pointer), as found in the kernel stack
+    /// pages for the process.
+    kstkesp: u64,
+    /// The current EIP (instruction pointer).
+    kstkeip: u64,
+    /// The bitmap of pending signals, displayed as a decimal number. Obsolete,
+    /// because it does not provide information on real-time signals; use
+    /// `/proc/{pid}/status` instead.
+    signal: u64,
+    /// The bitmap of blocked signals, displayed as a decimal number. Obsolete,
+    /// because it does not provide information on real-time signals; use
+    /// `/proc/{pid}/status` instead.
+    blocked: u64,
+    /// The bitmap of ignored signals, displayed as a decimal number. Obsolete,
+    /// because it does not provide information on real-time signals; use
+    /// `/proc/{pid}/status` instead.
+    sigignore: u64,
+    /// The bitmap of caught signals, displayed as a decimal number. Obsolete,
+    /// because it does not provide information on real-time signals; use
+    /// `/proc/{pid}/status` instead.
+    sigcatch: u64,
+    /// This is the "channel" in which the process is waiting. It is the address
+    /// of a location in the kernel where the process is sleeping. The
+    /// corresponding symbolic name can be found in `/proc/{pid}/wchan`.
+    wchan: u64,
+    /// Number of pages swapped (not maintained). Hard coded as 0.
+    nswap: u64,
+    /// Cumulative `nswap` for child processes (not maintained). Hard coded as
+    /// 0.
+    cnswap: u64,
+    /// Signal to be sent to parent when process dies.
+    exit_signal: i32,
+    /// CPU number last executed on.
+    processor: i32,
+    /// Real-time scheduling priority, a number in the range 1 to 99 for
+    /// processes scheduled under a real-time policy, or 0, for non-real-time
+    /// processes.
+    rt_priority: u32,
+    /// Scheduling policy. Decode using the `SCHED_*` constants in
+    /// `linux/sched.h`.
+    policy: u32,
+    /// Aggregated block I/O delays, measured in clock ticks.
+    delayacct_blkio_ticks: u128,
+    /// Guest time of the process (time spend running a virtual CPU for a guest
+    /// operating system), measured in clock ticks.
+    guest_time: u128,
+    /// Guest time of the process's children, measured in clock ticks.
+    cguest_time: u128,
+    /// Address above which program initialized and uninitialized (BSS) data are
+    /// placed.
+    start_data: u64,
+    /// Address below which program initialized and uninitialized (BSS) data are
+    /// placed.
+    end_data: u64,
+    /// Address above which program heap can be expanded with `brk(2)`.
+    start_brk: u64,
+    /// Address above which program command-line arguments (`argv`) are placed.
+    arg_start: u64,
+    /// Address below which program command-line arguments (`argv`) are placed.
+    arg_end: u64,
+    /// Address above which program environment is placed.
+    env_start: u64,
+    /// Address below which program environment is placed.
+    env_end: u64,
+    /// The thread's exit status in the form reported by `waitpid(2)`.
+    exit_code: i32,
 }
 
 /// Models data associated with a process ID (pid).
