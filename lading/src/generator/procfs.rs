@@ -325,94 +325,95 @@ struct Status {
     fd_size: u64,
     /// Supplementary group list
     groups: Vec<Gid>,
-    // if kernel compiled with CONFIG_PID_NS
-    /// Descendant namespace thread group ID hierarchy
+    /// Descendant namespace thread group ID hierarchy. Present only if kernel
+    /// compiled with `CONFIG_PID_NS`.
     ns_tgid: Vec<Pid>,
-    /// Descendant namespace process ID hierarchy
+    /// Descendant namespace process ID hierarchy. Present only if kernel
+    /// compiled with `CONFIG_PID_NS`.
     ns_pid: Vec<Pid>,
-    /// Descendant namespace process group ID hierarchy
+    /// Descendant namespace process group ID hierarchy. Present only if kernel
+    /// compiled with `CONFIG_PID_NS`.
     ns_pgid: Vec<Pid>,
-    /// Descendant namespace session ID hierarchy
+    /// Descendant namespace session ID hierarchy. Present only if kernel
+    /// compiled with `CONFIG_PID_NS`.
     ns_sid: Vec<Pid>,
-    // endif
-    /// Whether the process thread is a kernel thread
+    /// Whether the process thread is a kernel thread.
     kthread: bool,
-    /// Peak virtual memory size (in bytes)
+    /// Peak virtual memory size (in bytes).
     vm_peak: u64,
-    /// Total program size (in bytes)
+    /// Total program size (in bytes).
     vm_size: u64,
-    /// Locked memory size (in bytes)
+    /// Locked memory size (in bytes).
     vm_lck: u64,
-    /// Pinned memory size (in bytes)
+    /// Pinned memory size (in bytes).
     vm_pin: u64,
-    /// Peak resident set size (in bytes)
+    /// Peak resident set size (in bytes).
     vm_hwm: u64,
-    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem
+    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem.
     vm_rss: u64,
-    /// Resident anonymous memory size (in bytes)
+    /// Resident anonymous memory size (in bytes).
     rss_anon: u64,
-    /// Resident file mappings size (in bytes)
+    /// Resident file mappings size (in bytes).
     rss_file: u64,
     /// Resident shmem memory size (in bytes; includes SysV shm, tmpfs mapping,
-    /// shared anonymous mappings)
+    /// shared anonymous mappings).
     rss_shmem: u64,
-    /// Size of private data segments (in bytes)
+    /// Size of private data segments (in bytes).
     vm_data: u64,
-    /// Size of stack segments (in bytes)
+    /// Size of stack segments (in bytes).
     vm_stk: u64,
-    /// Size of text segment (in bytes)
+    /// Size of text segment (in bytes).
     vm_exe: u64,
-    /// Size of shared library code (in bytes)
+    /// Size of shared library code (in bytes).
     vm_lib: u64,
-    /// Size of page table entries (in bytes)
+    /// Size of page table entries (in bytes).
     vm_pte: u64,
     /// Size of swap used by anonymous private data (in bytes; does not include
-    /// shmem swap)
+    /// shmem swap).
     vm_swap: u64,
-    /// Size of huge translation lookaside buffer (in bytes)
+    /// Size of huge translation lookaside buffer (in bytes).
     huge_tlb_pages: u64,
-    /// Process's memory is currently being dumped ()
+    /// Process's memory is currently being dumped ().
     core_dumping: bool,
-    /// Process is allowed to use transparent hugepage support
+    /// Process is allowed to use transparent hugepage support.
     thp_enabled: bool,
     /// Mask for linear address masking (LAM) to support storing metadata
-    /// in pointer addresses
+    /// in pointer addresses.
     untag_mask: u64,
-    /// Number of threads used by process
+    /// Number of threads used by process.
     threads: i32,
-    /// Number of signals queued / max number for queue
+    /// Number of signals queued / max number for queue.
     sigq: SigQ,
-    /// Bitmap of pending signals for the thread
+    /// Bitmap of pending signals for the thread.
     sig_pnd: SignalMask,
-    /// Bitmap of shared pending signals for the thread
+    /// Bitmap of shared pending signals for the thread.
     shd_pnd: SignalMask,
-    /// Bitmap of blocked signals
+    /// Bitmap of blocked signals.
     sig_blk: SignalMask,
-    /// Bitmap of ignored signals
+    /// Bitmap of ignored signals.
     sig_ign: SignalMask,
-    /// Bitmap of caught signals
+    /// Bitmap of caught signals.
     sig_cgt: SignalMask,
-    /// Bitmap of inheritable capabilities
+    /// Bitmap of inheritable capabilities.
     cap_inh: CapabilityMask,
-    /// Bitmap of permitted capabilities
+    /// Bitmap of permitted capabilities.
     cap_prm: CapabilityMask,
-    /// Bitmap of effective capabilities
+    /// Bitmap of effective capabilities.
     cap_eff: CapabilityMask,
-    /// Bitmap of capabilities bounding set
+    /// Bitmap of capabilities bounding set.
     cap_bnd: CapabilityMask,
     /// Value of the process's `no_new_privs` bit. If set to 1, the `execve`
     /// syscall promises not to grant the process any additional privileges to
     /// do anything that could not have been done without that syscall.
     no_new_privs: bool,
-    // if CONFIG_SECCOMP set
-    /// Seccomp mode of the process.
+    /// Seccomp mode of the process. Present only if kernel configured with
+    /// `CONFIG_SECCOMP`.
     seccomp: SeccompMode,
-    // endif CONFIG_SECCOMP set
-    // if CONFIG_SECCOMP_FILTER set
+    /// Number of Seccomp filters used by process. Present only if kernel
+    /// configured with `CONFIG_SECCOMP_FILTER`.
     seccomp_filters: i32,
-    // end if CONFIG_SECCOMP_FILTER set
     /// Mask of CPUs on which this process may run; isomorphic to
-    /// `cpus_allowed_list`
+    /// `cpus_allowed_list`.
     cpus_allowed: Vec<MaskEntry>,
     /// List of CPUs on which this process may run; isomorphic to `cpus_allowed`.
     cpus_allowed_list: Vec<ListEntry>,
@@ -423,7 +424,7 @@ struct Status {
     /// `mems_allowed`.
     mems_allowed_list: Vec<ListEntry>,
     /// Indicates whether process may or may not be vulnerable to a Speculative
-    /// Store Bypass attack (CVE-2018-3639)
+    /// Store Bypass attack (CVE-2018-3639).
     speculation_store_bypass: SpeculationStoreBypass,
     /// Indicates whether process may or may not be vulnerable to branch target
     /// injection attacks (Spectre variant 2)
