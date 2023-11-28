@@ -6,22 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.20.0-rc5]
+## [0.20.0]
 ### Added
 - Sampling and sampling probability configuration parameters added for
   dogstatsd payloads.
-
-## [0.20.0-rc4]
+- A new 'logrotate' file generator is introduced.
 ### Fixed
 - Memory consumption stability issues in Dogstatsd payload generator
-
-## [0.20.0-rc1]
-### Added
-- A new 'logrotate' file generator is introduced.
-
 ### Changed
 - Existing file generator is renamed 'traditional', requiring a configuration
   change.
+- Unknown/old configuration keys are now rejected
 
 ## [0.19.1]
 ### Fixed
