@@ -78,6 +78,14 @@ fn multivalue_pack_probability() -> f32 {
     0.08
 }
 
+fn sampling_range() -> ConfRange<f32> {
+    ConfRange::Inclusive { min: 0.1, max: 1.0 }
+}
+
+fn sampling_probability() -> f32 {
+    0.5
+}
+
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
@@ -290,6 +298,15 @@ pub struct Config {
     #[serde(default = "multivalue_count")]
     pub multivalue_count: ConfRange<u16>,
 
+    /// Range of possible values for the sampling rate sent in dogstatsd messages
+    #[serde(default = "sampling_range")]
+    pub sampling_range: ConfRange<f32>,
+
+    /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
+    /// The sampling rate is chosen from `sampling_range`
+    #[serde(default = "sampling_probability")]
+    pub sampling_probability: f32,
+
     /// Defines the relative probability of each kind of DogStatsD kinds of
     /// payload.
     #[serde(default)]
@@ -412,6 +429,8 @@ impl MemberGenerator {
         tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
+        sampling: ConfRange<f32>,
+        sampling_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
@@ -478,6 +497,8 @@ impl MemberGenerator {
             name_length,
             multivalue_count,
             multivalue_pack_probability,
+            sampling,
+            sampling_probability,
             &WeightedIndex::new(metric_choices)?,
             small_strings,
             &mut tags_generator,
@@ -568,6 +589,8 @@ impl DogStatsD {
             tags_per_msg(),
             multivalue_count(),
             multivalue_pack_probability(),
+            sampling_range(),
+            sampling_probability(),
             KindWeights::default(),
             MetricWeights::default(),
             value_config(),
@@ -601,6 +624,8 @@ impl DogStatsD {
         tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
+        sampling: ConfRange<f32>,
+        sampling_probability: f32,
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
@@ -618,6 +643,8 @@ impl DogStatsD {
             tags_per_msg,
             multivalue_count,
             multivalue_pack_probability,
+            sampling,
+            sampling_probability,
             kind_weights,
             metric_weights,
             value_conf,
@@ -664,8 +691,8 @@ mod test {
     use crate::{
         dogstatsd::{
             contexts, multivalue_count, multivalue_pack_probability, name_length,
-            service_check_names, tag_key_length, tag_value_length, tags_per_msg, value_config,
-            KindWeights, MetricWeights,
+            sampling_probability, sampling_range, service_check_names, tag_key_length,
+            tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -685,7 +712,7 @@ mod test {
             let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
-                                           multivalue_count(), multivalue_pack_probability, kind_weights,
+                                           multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
                                            metric_weights, value_conf, &mut rng).unwrap();
 
             let mut bytes = Vec::with_capacity(max_bytes);
