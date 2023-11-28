@@ -266,7 +266,7 @@ pub struct Config {
     #[serde(default = "multivalue_count")]
     pub multivalue_count: ConfRange<u16>,
 
-    /// Sampling rate to report for metrics
+    /// Range of possible values for the sampling rate sent in dogstatsd messages
     #[serde(default = "sampling")]
     pub sampling: ConfRange<f32>,
 
