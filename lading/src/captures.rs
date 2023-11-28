@@ -17,7 +17,10 @@ use std::{
 };
 
 use lading_capture::json;
-use metrics_util::registry::{AtomicStorage, Registry};
+use metrics_util::{
+    registry::{GenerationalAtomicStorage, Recency, Registry},
+    MetricKindMask,
+};
 use rustc_hash::FxHashMap;
 use tokio::{
     fs::File,
@@ -30,7 +33,8 @@ use uuid::Uuid;
 use crate::signals::Shutdown;
 
 struct Inner {
-    registry: Registry<metrics::Key, AtomicStorage>,
+    recency: Recency<metrics::Key>,
+    registry: Registry<metrics::Key, GenerationalAtomicStorage>,
 }
 
 #[allow(missing_debug_implementations)]
@@ -64,7 +68,12 @@ impl CaptureManager {
             capture_path,
             shutdown,
             inner: Arc::new(Inner {
-                registry: Registry::atomic(),
+                recency: Recency::new(
+                    quanta::Clock::new(),
+                    MetricKindMask::COUNTER | MetricKindMask::GAUGE,
+                    Some(Duration::from_secs(10)),
+                ),
+                registry: Registry::new(GenerationalAtomicStorage::atomic()),
             }),
             global_labels: FxHashMap::default(),
         }
@@ -100,41 +109,55 @@ impl CaptureManager {
         self.inner
             .registry
             .visit_counters(|key: &metrics::Key, counter| {
-                let mut labels = self.global_labels.clone();
-                for lbl in key.labels() {
-                    // TODO we're allocating the same small strings over and over most likely
-                    labels.insert(lbl.key().into(), lbl.value().into());
+                let gen = counter.get_generation();
+                if self
+                    .inner
+                    .recency
+                    .should_store_counter(key, gen, &self.inner.registry)
+                {
+                    let mut labels = self.global_labels.clone();
+                    for lbl in key.labels() {
+                        // TODO we're allocating the same small strings over and over most likely
+                        labels.insert(lbl.key().into(), lbl.value().into());
+                    }
+                    let line = json::Line {
+                        run_id: Cow::Borrowed(&self.run_id),
+                        time: now_ms,
+                        fetch_index: self.fetch_index,
+                        metric_name: key.name().into(),
+                        metric_kind: json::MetricKind::Counter,
+                        value: json::LineValue::Int(counter.get_inner().load(Ordering::Relaxed)),
+                        labels,
+                    };
+                    lines.push(line);
                 }
-                let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
-                    time: now_ms,
-                    fetch_index: self.fetch_index,
-                    metric_name: key.name().into(),
-                    metric_kind: json::MetricKind::Counter,
-                    value: json::LineValue::Int(counter.load(Ordering::Relaxed)),
-                    labels,
-                };
-                lines.push(line);
             });
         self.inner
             .registry
             .visit_gauges(|key: &metrics::Key, gauge| {
-                let mut labels = self.global_labels.clone();
-                for lbl in key.labels() {
-                    // TODO we're allocating the same small strings over and over most likely
-                    labels.insert(lbl.key().into(), lbl.value().into());
+                let gen = gauge.get_generation();
+                if self
+                    .inner
+                    .recency
+                    .should_store_gauge(key, gen, &self.inner.registry)
+                {
+                    let mut labels = self.global_labels.clone();
+                    for lbl in key.labels() {
+                        // TODO we're allocating the same small strings over and over most likely
+                        labels.insert(lbl.key().into(), lbl.value().into());
+                    }
+                    let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
+                    let line = json::Line {
+                        run_id: Cow::Borrowed(&self.run_id),
+                        time: now_ms,
+                        fetch_index: self.fetch_index,
+                        metric_name: key.name().into(),
+                        metric_kind: json::MetricKind::Gauge,
+                        value: json::LineValue::Float(value),
+                        labels,
+                    };
+                    lines.push(line);
                 }
-                let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
-                let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
-                    time: now_ms,
-                    fetch_index: self.fetch_index,
-                    metric_name: key.name().into(),
-                    metric_kind: json::MetricKind::Gauge,
-                    value: json::LineValue::Float(value),
-                    labels,
-                };
-                lines.push(line);
             });
         debug!(
             "Recording {} captures to {}",
