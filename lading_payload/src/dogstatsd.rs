@@ -272,7 +272,6 @@ pub struct Config {
 
     /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
-    /// will be reported as a sampled value.
     #[serde(default = "sampling_probability")]
     pub sampling_probability: f32,
 
