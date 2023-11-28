@@ -78,7 +78,7 @@ fn multivalue_pack_probability() -> f32 {
     0.08
 }
 
-fn sampling() -> ConfRange<f32> {
+fn sampling_range() -> ConfRange<f32> {
     ConfRange::Inclusive { min: 0.1, max: 1.0 }
 }
 
@@ -267,8 +267,8 @@ pub struct Config {
     pub multivalue_count: ConfRange<u16>,
 
     /// Range of possible values for the sampling rate sent in dogstatsd messages
-    #[serde(default = "sampling")]
-    pub sampling: ConfRange<f32>,
+    #[serde(default = "sampling_range")]
+    pub sampling_range: ConfRange<f32>,
 
     /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
@@ -557,7 +557,7 @@ impl DogStatsD {
             tags_per_msg(),
             multivalue_count(),
             multivalue_pack_probability(),
-            sampling(),
+            sampling_range(),
             sampling_probability(),
             KindWeights::default(),
             MetricWeights::default(),
@@ -648,9 +648,9 @@ mod test {
 
     use crate::{
         dogstatsd::{
-            contexts, multivalue_count, multivalue_pack_probability, name_length, sampling,
-            sampling_probability, service_check_names, tag_key_length, tag_value_length,
-            tags_per_msg, value_config, KindWeights, MetricWeights,
+            contexts, multivalue_count, multivalue_pack_probability, name_length,
+            sampling_probability, sampling_range, service_check_names, tag_key_length,
+            tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
         },
         DogStatsD, Serialize,
     };
@@ -670,7 +670,7 @@ mod test {
             let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
-                                           multivalue_count(), multivalue_pack_probability, sampling(), sampling_probability(), kind_weights,
+                                           multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
                                            metric_weights, value_conf, &mut rng).unwrap();
 
             let mut bytes = Vec::with_capacity(max_bytes);

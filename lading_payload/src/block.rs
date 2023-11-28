@@ -214,7 +214,7 @@ impl Cache {
                     // TODO -- Validate user input for multivalue_pack_probability.
                     multivalue_pack_probability,
                     multivalue_count,
-                    sampling,
+                    sampling_range,
                     sampling_probability,
                     kind_weights,
                     metric_weights,
@@ -234,7 +234,7 @@ impl Cache {
                     *tags_per_msg,
                     *multivalue_count,
                     *multivalue_pack_probability,
-                    *sampling,
+                    *sampling_range,
                     *sampling_probability,
                     *kind_weights,
                     *metric_weights,
@@ -351,7 +351,7 @@ fn stream_inner(
                 // TODO -- Validate user input for multivalue_pack_probability.
                 multivalue_pack_probability,
                 multivalue_count,
-                sampling,
+                sampling_range: sampling,
                 sampling_probability,
                 kind_weights,
                 metric_weights,
