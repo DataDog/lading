@@ -339,46 +339,65 @@ struct Status {
     ns_sid: Vec<Pid>,
     /// Whether the process thread is a kernel thread.
     kthread: bool,
-    /// Peak virtual memory size (in bytes).
+    /// Peak virtual memory size (in bytes). Present only if task has non-null
+    /// memory management pointer.
     vm_peak: u64,
-    /// Total program size (in bytes).
+    /// Total program size (in bytes). Present only if task has non-null memory
+    /// management pointer.
     vm_size: u64,
-    /// Locked memory size (in bytes).
+    /// Locked memory size (in bytes). Present only if task has non-null memory
+    /// management pointer.
     vm_lck: u64,
-    /// Pinned memory size (in bytes).
+    /// Pinned memory size (in bytes). Present only if task has non-null memory
+    /// management pointer.
     vm_pin: u64,
-    /// Peak resident set size (in bytes).
+    /// Peak resident set size (in bytes). Present only if task has non-null
+    /// memory management pointer.
     vm_hwm: u64,
-    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem.
+    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem. Present
+    /// only if task has non-null memory management pointer.
     vm_rss: u64,
-    /// Resident anonymous memory size (in bytes).
+    /// Resident anonymous memory size (in bytes). Present only if task has
+    /// non-null memory management pointer.
     rss_anon: u64,
-    /// Resident file mappings size (in bytes).
+    /// Resident file mappings size (in bytes). Present only if task has
+    /// non-null memory management pointer.
     rss_file: u64,
     /// Resident shmem memory size (in bytes; includes SysV shm, tmpfs mapping,
-    /// shared anonymous mappings).
+    /// shared anonymous mappings). Present only if task has non-null memory
+    /// management pointer.
     rss_shmem: u64,
-    /// Size of private data segments (in bytes).
+    /// Size of private data segments (in bytes). Present only if task has
+    /// non-null memory management pointer.
     vm_data: u64,
-    /// Size of stack segments (in bytes).
+    /// Size of stack segments (in bytes). Present only if task has non-null
+    /// memory management pointer.
     vm_stk: u64,
-    /// Size of text segment (in bytes).
+    /// Size of text segment (in bytes). Present only if task has non-null
+    /// memory management pointer.
     vm_exe: u64,
-    /// Size of shared library code (in bytes).
+    /// Size of shared library code (in bytes). Present only if task has
+    /// non-null memory management pointer.
     vm_lib: u64,
-    /// Size of page table entries (in bytes).
+    /// Size of page table entries (in bytes). Present only if task has non-null
+    /// memory management pointer.
     vm_pte: u64,
     /// Size of swap used by anonymous private data (in bytes; does not include
-    /// shmem swap).
+    /// shmem swap). Present only if task has non-null memory management
+    /// pointer.
     vm_swap: u64,
-    /// Size of huge translation lookaside buffer (in bytes).
+    /// Size of huge translation lookaside buffer (in bytes). Present only if
+    /// task has non-null memory management pointer.
     huge_tlb_pages: u64,
-    /// Process's memory is currently being dumped ().
+    /// Process's memory is currently being dumped. Present only if task has
+    /// non-null memory management pointer.
     core_dumping: bool,
-    /// Process is allowed to use transparent hugepage support.
+    /// Process is allowed to use transparent hugepage support. Present only if
+    /// task has non-null memory management pointer.
     thp_enabled: bool,
-    /// Mask for linear address masking (LAM) to support storing metadata
-    /// in pointer addresses.
+    /// Mask for linear address masking (LAM) to support storing metadata in
+    /// pointer addresses. Present only if task has non-null memory management
+    /// pointer.
     untag_mask: u64,
     /// Number of threads used by process.
     threads: i32,
