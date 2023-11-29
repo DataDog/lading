@@ -9,7 +9,15 @@
 
 use ::std::{num::NonZeroU32, path::PathBuf};
 
+use ::rand::distributions::DistString;
+use ::rand::SeedableRng;
+use ::rand::{distributions, rngs};
 use ::serde::{Deserialize, Serialize};
+
+use super::General;
+use crate::signals::Shutdown;
+use lading_payload::block;
+use lading_throttle::Throttle;
 
 /// Maximum `pid` value, defined in the Linux kernel via a macro of the same
 /// name in `include/linux/threads.h`. Assumes a 64-bit system; the value below
@@ -18,8 +26,13 @@ use ::serde::{Deserialize, Serialize};
 /// exceed 2^22.
 const PID_MAX_LIMIT: i32 = 4_194_304;
 
-/// Maximum length of a process's `comm` value (in `/proc/{pid}/comm`)/
+/// Maximum length (in bytes) of a process's `comm` value (in
+/// `/proc/{pid}/comm`)
 const TASK_COMM_LEN: usize = 16;
+
+/// Maximum length (in bytes) of process or task name. See `proc_task_name`
+/// function in the Linux kernel for details.
+const TASK_NAME_LEN: usize = 64;
 
 #[derive(::thiserror::Error, Debug)]
 /// Errors emitted by ['ProcfsGen']
@@ -38,6 +51,11 @@ pub struct Config {
     pub root: PathBuf,
     /// Upper bound on processes created
     pub max_processes: NonZeroU32,
+    /// Upper bound on number of command-line arguments used by any generated
+    /// fake process. Must not be greater than sysconf's `ARG_MAX`. Could be a
+    /// larger unsigned data type; `u8` was chosen here to set up a minimal
+    /// version more quickly.
+    pub max_args: u8,
 }
 
 mod task {
@@ -142,20 +160,25 @@ mod task {
     /// that table.
     #[derive(Debug)]
     pub(super) struct Statm {
-        /// Total program size (pages). Same as VmSize in `/proc/{pid}/status`.
+        /// Total program size (pages; in bytes). Same as VmSize in
+        /// `/proc/{pid}/status`.
         size: u64,
-        /// Size of memory portions (pages). Same as VmRSS in `/proc/{pid}/status`.
+        /// Size of memory portions (pages; in bytes). Same as VmRSS in
+        /// `/proc/{pid}/status`.
         resident: u64,
         /// Number of pages that are shared (i.e., backed by a file, same as
-        /// RssFile+RssShmem in `/proc/{pid}/status`).
+        /// `RssFile` + `RssShmem`` in `/proc/{pid}/status`).
         shared: u64,
-        /// Number of pages that are 'code' (not including libs; broken, includes
-        /// data segment).
+        /// Number of pages that are 'code' (not including libs; broken,
+        /// includes data segment). Looks to be the same as `VmExe` + `VmLib` in
+        /// `/proc/{pid}/status` if `CONFIG_MMU` is set. (It is by default on
+        /// `x86` and `arm64`.)
         trs: u64,
         /// Number of pages of library; always 0 as of Linux 2.6.
         lrs: u64,
-        /// Number of pages of data/stack (includes libs; broken, includes library
-        /// text)
+        /// Number of pages of data/stack (includes libs; broken, includes
+        /// library text). Looks to be the same as `VmData` + `VmStk` in
+        /// `/proc/{pid}/status` if `CONFIG_MMU` is set.
         drs: u64,
         /// Number of dirty pages; always 0 as of Linux 2.6
         dt: u64,
@@ -321,7 +344,9 @@ struct Status {
     uid: [Uid; 4],
     /// Real, effective, saved set, and file system GIDs
     gid: [Gid; 4],
-    /// Number of file descriptor slots currently allocated
+    /// Number of file descriptor slots currently allocated. Cannot exceed the
+    /// value stored in `/proc/sys/fs/file-max`. A unprivileged user process may
+    /// not exceed the output of `ulimit -n -H`.
     fd_size: u64,
     /// Supplementary group list
     groups: Vec<Gid>,
@@ -643,8 +668,6 @@ struct Statm {
 /// so this struct reflects that behavior.
 #[derive(Debug)]
 struct Process {
-    /// Process ID number (`pid`).
-    id: Pid,
     /// Command line for process (unless a zombie); corresponds to
     /// `/proc/{pid}/cmdline`.
     cmdline: String,
@@ -661,6 +684,137 @@ struct Process {
     status: Status,
 }
 
-// The procfs generator.
-//
-// Generates a fake procfs filesystem.
+#[inline]
+fn rnd_str(rng: &mut rngs::StdRng, len: usize) -> String {
+    distributions::Alphanumeric.sample_string(rng, len)
+}
+
+#[inline]
+fn gen_rnd_args(rng: &mut rngs::StdRng, len: usize, max: u32) -> Vec<String> {
+    let mut args = Vec::new();
+    for _ in 0..max {
+        args.push(rnd_str(rng, len));
+    }
+    args
+}
+
+impl Process {
+    /// Create a new [`Process`] modeling `/proc/{pid}` files.
+    ///
+    /// Very much a work-in-progress because some common setup work should be
+    /// factored out into a separate type.
+    fn new(rng: &mut rngs::StdRng, config: &Config) -> Self {
+        // Generate length of executable name (could be length 0).
+
+        // Generate executable name
+
+        // Generate number of arguments (if executable name has positive length)
+
+        // Generate each argument
+
+        // Assemble into a command line, which will be assigned to the
+        // `cmdline` field of `Self`.
+
+        // Generate 7 random `u64` elements for `task::Io `struct.
+
+        // --- start generating Status struct --- //
+
+        // Generate task name (up to 64 bytes). This name is related to
+        // cmdline, but could be different. I don't think this string can be
+        // empty.
+
+        // TODO(geoffrey.oxberry@datadoghq.com): Add remaining fields.
+        //
+        // The following fields should be pretty straightforward:
+        //
+        // - umask: choose any legel variant of that `enum` type
+        // - state: choose any variant of `task::State`
+        // - tgid, ngid, pid, ppid, tracer_pid: choose an i32.
+        // - fd_size: may need to check `/proc/sys/fs/file-max` or `ulimit`
+        //   before deciding on a `u64` range to use
+        // - kthread: choose a random bool
+        // - vm_, rss_*, huge_tlb_pages: pick `u64` values; the display value
+        //   will need to be in kibibytes (but printed as "kB").
+        // - core_dumping, thp_enabled: choose a random bool
+        // - untag_mask: IIRC, could be 0xffffffffffffffff on architectures that
+        //   don't support masking, and on those that do, need to know if
+        //   addresses are 48 bits or 57 bits. In practice, maybe it could be a
+        //   random `u64`; not sure it's important.
+        //
+        // The following fields are fields I need to look into:
+        //
+        // - uid: much of the time, real, effective, saved set, and filesystem
+        //   UIDs should be the same, but not always.
+        // - gid: much of the time, real, effective, saved set, and filesystem
+        //   GIDs could be the same, but not always.
+        // - ns_tgid: ?
+        // - ns_pid: ?
+        // - ns_sid: ?
+
+        // --- end generating Status struct --- //
+
+        // Statm struct is basically a view of the Status struct, assuming we're
+        // running on a kernel configured with an MMU. (For our main cases of
+        // interest, x86_64 and arm64 machines, this assumption is true.) How
+        // this view should be constructed is discussed in the comments for the
+        // `Statm` struct.
+
+        // Truncate task name to 16 bytes & store in `comm` field of `Self`.
+    }
+}
+
+/// The procfs generator.
+///
+/// Generates a fake procfs filesystem.
+#[derive(Debug)]
+pub struct Procfs {
+    config: Config,
+    shutdown: Shutdown,
+}
+
+impl Procfs {
+    /// Create a new [`Procfs`] generator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be serialized.
+    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+        // TODO(geoffrey.oxberry@datadoghq.com): A more feature-ful version of a
+        // procfs generator should check whether the maximum number of arguments
+        // setting doesn't violate `sysconf` settings, e.g., `ARG_MAX`.
+        let mut rng = ::rand::rngs::StdRng::from_seed(config.seed);
+
+        let mut labels = vec![
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "procfs".to_string()),
+        ];
+        if let Some(id) = general.id {
+            labels.push(("id".to_string(), id));
+        }
+
+        Ok(Self { config, shutdown })
+    }
+
+    /// Run [`Procfs`] generator to completion or until a shutdown signal is
+    /// received.
+    ///
+    /// This function will generate a fake `/proc` filesystem (i.e., a `procfs`)
+    /// rooted at `self.root`.
+    ///
+    /// # Errors
+    ///
+    /// This function will terminate with an error if files cannot be written to
+    /// the directory tree rooted at `self.root`. Any error from
+    /// `std::io::Error` is possible.
+    pub async fn spin(mut self) -> Result<(), Error> {
+        loop {
+            tokio::select! {
+                _ = self.shutdown.recv() => {
+                    tracing::info!("shutdown signal recevied");
+                    break
+                },
+            }
+        }
+        Ok(())
+    }
+}
