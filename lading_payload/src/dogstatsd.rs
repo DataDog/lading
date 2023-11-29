@@ -86,6 +86,10 @@ fn sampling_probability() -> f32 {
     0.5
 }
 
+fn default_tags() -> Vec<String> {
+    Vec::new()
+}
+
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
@@ -258,7 +262,7 @@ where
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -287,6 +291,11 @@ pub struct Config {
     /// separated by a :
     #[serde(default = "tags_per_msg")]
     pub tags_per_msg: ConfRange<u8>,
+
+    /// Selection of tag pairs to always prepend to tagsets. Assumed to be
+    /// valid, do not count toward `tags_per_msg`.
+    #[serde(default = "default_tags")]
+    pub default_tags: Vec<String>,
 
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
@@ -427,6 +436,7 @@ impl MemberGenerator {
         tag_key_length: ConfRange<u8>,
         tag_value_length: ConfRange<u8>,
         tags_per_msg: ConfRange<u8>,
+        default_tags: Vec<String>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         sampling: ConfRange<f32>,
@@ -448,6 +458,7 @@ impl MemberGenerator {
         let mut tags_generator = tags::Generator::new(
             rng.gen(),
             tags_per_msg,
+            default_tags,
             tag_key_length,
             tag_value_length,
             Rc::clone(&pool),
@@ -587,6 +598,7 @@ impl DogStatsD {
             tag_key_length(),
             tag_value_length(),
             tags_per_msg(),
+            default_tags(),
             multivalue_count(),
             multivalue_pack_probability(),
             sampling_range(),
@@ -622,6 +634,7 @@ impl DogStatsD {
         tag_key_length: ConfRange<u8>,
         tag_value_length: ConfRange<u8>,
         tags_per_msg: ConfRange<u8>,
+        default_tags: Vec<String>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
         sampling: ConfRange<f32>,
@@ -641,6 +654,7 @@ impl DogStatsD {
             tag_key_length,
             tag_value_length,
             tags_per_msg,
+            default_tags,
             multivalue_count,
             multivalue_pack_probability,
             sampling,

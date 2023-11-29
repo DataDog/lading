@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 
 use crate::{common::strings, dogstatsd::ConfRange};
 
@@ -23,6 +23,7 @@ pub(crate) struct Generator {
     internal_rng: RefCell<SmallRng>,
     tagsets_produced: Cell<usize>,
     num_tagsets: usize,
+    default_tags: Vec<String>,
     tags_per_msg: ConfRange<u8>,
     tag_key_length: ConfRange<u8>,
     tag_value_length: ConfRange<u8>,
@@ -33,6 +34,7 @@ impl Generator {
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
+        default_tags: Vec<String>,
         tag_key_length: ConfRange<u8>,
         tag_value_length: ConfRange<u8>,
         str_pool: Rc<strings::Pool>,
@@ -41,6 +43,7 @@ impl Generator {
         Generator {
             seed: Cell::new(seed),
             internal_rng: RefCell::new(SmallRng::seed_from_u64(seed)),
+            default_tags,
             tags_per_msg,
             tag_key_length,
             tag_value_length,
@@ -60,6 +63,19 @@ impl<'a> crate::Generator<'a> for Generator {
         R: rand::Rng + ?Sized,
     {
         let mut tagset = Vec::new();
+
+        if let Some(default_tag) = self
+            .default_tags
+            .choose(&mut *self.internal_rng.borrow_mut())
+        {
+            // The user is allowed to pass an empty string in as a default
+            // tagset. Save ourselves a little allocation and avoid putting ""
+            // in tagset. This also means we don't have to cope with empty
+            // strings when it comes time to serialize to text.
+            if !default_tag.is_empty() {
+                tagset.push(default_tag.clone());
+            }
+        }
 
         let tags_count = self
             .tags_per_msg

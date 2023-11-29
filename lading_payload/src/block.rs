@@ -221,6 +221,7 @@ impl Cache {
                     metric_weights,
                     value,
                     service_check_names,
+                    default_tags,
                 },
             ) => {
                 if !conf.valid() {
@@ -233,6 +234,7 @@ impl Cache {
                     *tag_key_length,
                     *tag_value_length,
                     *tags_per_msg,
+                    default_tags.clone(),
                     *multivalue_count,
                     *multivalue_pack_probability,
                     *sampling_range,
@@ -357,6 +359,7 @@ fn stream_inner(
                 kind_weights,
                 metric_weights,
                 value,
+                default_tags,
             },
         ) => {
             if !conf.valid() {
@@ -369,6 +372,7 @@ fn stream_inner(
                 *tag_key_length,
                 *tag_value_length,
                 *tags_per_msg,
+                default_tags.clone(),
                 *multivalue_count,
                 *multivalue_pack_probability,
                 *sampling,
