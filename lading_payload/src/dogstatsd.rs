@@ -704,7 +704,7 @@ mod test {
 
     use crate::{
         dogstatsd::{
-            contexts, multivalue_count, multivalue_pack_probability, name_length,
+            contexts, default_tags, multivalue_count, multivalue_pack_probability, name_length,
             sampling_probability, sampling_range, service_check_names, tag_key_length,
             tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
         },
@@ -725,7 +725,7 @@ mod test {
             let metric_weights = MetricWeights::default();
             let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
                                            name_length(), tag_key_length(),
-                                           tag_value_length(), tags_per_msg(),
+                                           tag_value_length(), tags_per_msg(), default_tags(),
                                            multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
                                            metric_weights, value_conf, &mut rng).unwrap();
 

@@ -125,6 +125,7 @@ mod test {
             let generator = tags::Generator::new(
                 seed,
                 ConfRange::Inclusive{min: 0, max: tags_per_msg_max},
+                Vec::new(),
                 ConfRange::Inclusive{min: 1, max: 64},
                 ConfRange::Inclusive{min: 1, max: 64},
                 pool.clone(),
