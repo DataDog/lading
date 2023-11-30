@@ -9,6 +9,7 @@ use std::{
 use crate::{common::strings, Error, Generator};
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use serde::Deserialize;
 
 /// Maximum `pid` value, defined in the Linux kernel via a macro of the same
 /// name in `include/linux/threads.h`. Assumes a 64-bit system; the value below
@@ -30,31 +31,55 @@ const TASK_NAME_LEN: usize = 64;
 /// is 2^12 so we can use this value in a non-inclusive range.
 const UMASK_MAX: u16 = 4096;
 
+/// Maximum number of supplemental groups a process can belong to. Corresponds
+/// to macro of the same name in `include/uapi/linux/limits.h`
+const NGROUPS_MAX: usize = 65536;
+
+/// Maximum number of bytes in a path name, including a null byte. Rust does not
+/// automatically terminate strings with a null byte, so we subtract one from the
+/// macro of the same name in `include/uapi/linux/limits.h`.
+const PATH_MAX: usize = 4095;
+
+fn num_numa_nodes() -> NonZeroU8 {
+    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
+    NonZeroU8::new(32).unwrap()
+}
+
+fn num_cpus() -> NonZeroU8 {
+    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
+    NonZeroU8::new(8).unwrap()
+}
+
+fn max_groups() -> NonZeroU8 {
+    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
+    NonZeroU8::new(10).unwrap()
+}
+
+fn max_pid_namespaces() -> NonZeroU8 {
+    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
+    NonZeroU8::new(1).unwrap()
+}
+
 /// Configure the `Procfs` payload.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Config {
     /// Number of NUMA nodes exposed to processes. Sizes the `Mems_allowed` field
     /// in `/proc/{pid}/status`.
+    #[serde(default = "num_numa_nodes")]
     pub num_numa_nodes: NonZeroU8,
     /// Number of CPUs exposed to processes. Sizes the `Cpus_allowed` field in
     /// `/proc/{pid}/status`.
+    #[serde(default = "num_cpus")]
     pub num_cpus: NonZeroU8,
     /// Maximum number of groups to which a process can belong. Sizes the
     /// `Groups` field in `/proc/{pid}/status`.
+    #[serde(default = "max_groups")]
     pub max_groups: NonZeroU8,
     /// Maximum number of process namespaces in process ID hierarchies. Sizes
     /// the `NStgid`, `NSpid`, `NSpgid`, and `NSsid` fields in
     /// `/proc/{pid}/status`.
+    #[serde(default = "max_pid_namespaces")]
     pub max_pid_namespaces: NonZeroU8,
-    /// Upper bound on number of command-line arguments used by any generated
-    /// fake process. Must not be greater than sysconf's `ARG_MAX`. Could be a
-    /// larger unsigned data type; `u8` was chosen here to set up a minimal
-    /// version more quickly. Needed to size `/proc/{pid}/cmdline`.
-    pub max_args: u8,
-    /// Maximum number of signals in that can be in the signal queue
-    pub max_sigq: NonZeroU64,
-    // NOTE(geoffrey.oxberry@datadoghq.com): maybe page size? could also get
-    // that from procfs crate.
 }
 
 mod proc {
@@ -161,6 +186,10 @@ mod proc {
 ///
 /// This type could probably be replaced by the `procfs::process:StatM` type;
 /// compared to that type, this type has slightly more documentation.
+///
+/// Although in principle, `/proc/{pid}/statm` should be consistent with
+/// `/proc/{pid}/stat` and `/proc/{pid}/status`, these consistency relationships
+/// are ignored for ease of implementation.
 #[derive(Debug, Clone, Copy)]
 struct Statm {
     /// Total program size (pages). Same as VmSize in
@@ -187,10 +216,31 @@ struct Statm {
     dt: u64,
 }
 
+impl Distribution<Statm> for Standard {
+    /// Generates "uniformly random" instance of [`Statm`].
+    ///
+    /// Exists because our model of `/proc/{pid}/statm` currently ignores
+    /// consistency with `/proc/{pid}/stat` and `/proc/{pid}/status`.
+    fn sample<R>(&self, rng: &mut R) -> Statm
+    where
+        R: Rng + ?Sized,
+    {
+        Statm {
+            size: rng.gen(),
+            resident: rng.gen(),
+            shared: rng.gen(),
+            trs: rng.gen(),
+            lrs: 0,
+            drs: rng.gen(),
+            dt: 0,
+        }
+    }
+}
+
 /// Models a process ID number, which is an `int` type in C.
 ///
 /// This data is modeled by the `pid_t` type in the Linux kernel.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Pid(i32);
 
 impl Distribution<Pid> for Standard {
@@ -239,6 +289,24 @@ struct SigQ {
     max_number_for_queue: u64,
 }
 
+impl Distribution<SigQ> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> SigQ
+    where
+        R: Rng + ?Sized,
+    {
+        // In theory, `SigQ` for a "real" process would be constrained such that
+        //
+        // - `signals_queued` is less than or equal to `max_number_for_queue`
+        // - `max_number_for_queue` is equal to the value returned by `ulimit -i`.
+        //
+        // In practice, we ignore these constraints for simplicity.
+        SigQ {
+            signals_queued: rng.gen(),
+            max_number_for_queue: rng.gen(),
+        }
+    }
+}
+
 /// Models signal mask fields in `/proc/{pid}/status`.
 ///
 /// This mask is architecture-dependent and is modeled by the `sigset_t` type in
@@ -254,6 +322,15 @@ struct SigQ {
 #[derive(Debug)]
 struct SignalMask(u64);
 
+impl Distribution<SignalMask> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> SignalMask
+    where
+        R: Rng + ?Sized,
+    {
+        SignalMask(rng.gen())
+    }
+}
+
 /// Models capability mask fields in `/proc/{pid}/status`.
 ///
 /// This mask is a `u64` in the Linux kernel on all supported architectures; see
@@ -261,6 +338,31 @@ struct SignalMask(u64);
 /// details.
 #[derive(Debug)]
 struct CapabilityMask(u64);
+
+impl Distribution<CapabilityMask> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> CapabilityMask
+    where
+        R: Rng + ?Sized,
+    {
+        CapabilityMask(rng.gen())
+    }
+}
+
+/// Models entries of `{Cpus,Mems}_allowed` fields in `/proc/{pid}/status`.
+///
+/// Models entries of the `Cpus_allowed` and `Mems_allowed` fields in
+/// `/proc/{pid}/status`. Both of these fields are collections of 32-bit words.
+#[derive(Debug)]
+struct MaskEntry(u32);
+
+impl Distribution<MaskEntry> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> MaskEntry
+    where
+        R: Rng + ?Sized,
+    {
+        MaskEntry(rng.gen())
+    }
+}
 
 /// Models entries of `{Cpus,Mems}_allowed_list` in `/proc/{pid}/status`.
 ///
@@ -314,13 +416,6 @@ impl Distribution<SeccompMode> for Standard {
         }
     }
 }
-
-/// Models entries of `{Cpus,Mems}_allowed` fields in `/proc/{pid}/status`.
-///
-/// Models entries of the `Cpus_allowed` and `Mems_allowed` fields in
-/// `/proc/{pid}/status`. Both of these fields are collections of 32-bit words.
-#[derive(Debug)]
-struct MaskEntry(u32);
 
 /// Models `Speculation_Store_Bypass` field of `/proc/{pid}/status`
 #[derive(Debug)]
@@ -477,7 +572,7 @@ struct Status {
     /// compiled with `CONFIG_PID_NS`.
     ns_sid: Vec<Pid>,
     /// Whether the process thread is a kernel thread.
-    kthread: bool,
+    kthread: Option<bool>,
     /// Peak virtual memory size (in bytes). Present only if task has non-null
     /// memory management pointer.
     vm_peak: u64,
@@ -593,6 +688,59 @@ struct Status {
     nonvoluntary_ctxt_switches: u64,
 }
 
+/// Models scheduling policies used by the kernel.
+///
+/// Used in the `policy` field of `/proc/{pid}/stat`. Policy names can be found
+/// in `man 2 sched_setscheduler`; their values may be found in
+/// `include/uapi/linux/sched.h` in the Linux kernel.
+///
+/// These values are printed as `u32` (`std::ffi::c_uint`) values in
+/// `/proc/{pid}/stat`.
+///
+/// These values have implications for the `priority` and `nice` fields of
+/// `/proc/{pid}/stat` (see `man 7 sched`). That said, these implications are
+/// largely ignored by hard-coding the policy to a non-real-time policy.
+#[derive(Debug)]
+enum SchedulingPolicy {
+    /// `SCHED_OTHER` policy in POSIX, also called `SCHED_NORMAL` in kernel (see
+    /// `man 7 sched`). Not a real-time policy. This policy is the "standard
+    /// round-robin time-sharing policy" (see `man 2 sched_setscheduler`).
+    Normal = 0,
+    /// `SCHED_FIFO` policy: first-in, first-out. A real-time, POSIX-compliant
+    /// policy.
+    Fifo = 1,
+    /// `SCHED_RR` policy: a round-robin policy. A real-time, POSIX-compliant
+    /// policy, which is the main distinction between this policy and the
+    /// `Normal` policy.
+    RoundRobin = 2,
+    /// `SCHED_BATCH` policy for "batch" style execution of processes. Not a
+    /// real-time policy.
+    Batch = 3,
+    // A value for 4 is intentionally omitted; it is reserved in the kernel for
+    // `SCHED_ISO`, but that policy has not yet been implemented.
+    //
+    /// `SCHED_IDLE` policy for running *very* low priority jobs. Not a
+    /// real-time policy.
+    Idle = 5,
+    /// `SCHED_DEADLINE` policy based on Earliest Deadline First and Constant
+    /// Bandwidth Server algorithms. A real-time policy.
+    Deadline = 6,
+}
+
+impl fmt::Display for SchedulingPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s: u32 = match self {
+            SchedulingPolicy::Normal => 0,
+            SchedulingPolicy::Fifo => 1,
+            SchedulingPolicy::RoundRobin => 2,
+            SchedulingPolicy::Batch => 3,
+            SchedulingPolicy::Idle => 5,
+            SchedulingPolicy::Deadline => 6,
+        };
+        write!(f, "{s}")
+    }
+}
+
 /// Models `/proc/{pid}/stat`.
 ///
 /// All information in this struct taken from `proc(5)` man page; this
@@ -601,53 +749,53 @@ struct Status {
 /// We can't use the `procfs::process::Stat` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Stat {
-    /// The process ID.
+struct Stat<'a> {
+    /// (1) The process ID.
     pid: Pid,
-    /// File name of executable, in parentheses. Limited to `TASK_COMM_LEN`
+    /// (2) File name of executable, in parentheses. Limited to `TASK_COMM_LEN`
     /// bytes.
-    comm: String,
-    /// Indicates process state.
+    comm: &'a str,
+    /// (3) Indicates process state.
     state: proc::State,
-    /// The PID of the parent of this process.
+    /// (4) The PID of the parent of this process.
     ppid: Pid,
-    /// The process group ID of the process.
+    /// (5) The process group ID of the process.
     pgrp: Pid,
-    /// The session ID of the process.
+    /// (6) The session ID of the process.
     session: Pid,
-    /// The controlling terminal of the process.
+    /// (7) The controlling terminal of the process.
     tty_nr: i32,
-    /// The ID of the foreground process group of the controlling terminal of
+    /// (8) The ID of the foreground process group of the controlling terminal of
     /// the process.
     tpgid: Pid,
-    /// The kernel flags word of the prcoess. For bit meanings, set the `PF_*`
+    /// (9) The kernel flags word of the prcoess. For bit meanings, set the `PF_*`
     /// defines in the Linux kernel source file `include/linux/sched.h`.
     flags: u32,
-    /// The number of minor faults the process has made that have not required
+    /// (10) The number of minor faults the process has made that have not required
     /// loading a memory page from disk.
     minflt: u64,
-    /// The number of minor faults that the process's waited-for children have
+    /// (11) The number of minor faults that the process's waited-for children have
     /// made.
     cminflt: u64,
-    /// The number of major faults the process has made that have required
+    /// (12) The number of major faults the process has made that have required
     /// loading a memory page from disk.
     majflt: u64,
-    /// The number of major faults that the process' waited-for children have
+    /// (13) The number of major faults that the process' waited-for children have
     /// made.
     cmajflt: u64,
-    /// Amount of time that this process has been scheduled in user mode,
+    /// (14) Amount of time that this process has been scheduled in user mode,
     /// measured in clock ticks.
     utime: u64,
-    /// Amount of time that this process has been scheduled in kernel mode,
+    /// (15) Amount of time that this process has been scheduled in kernel mode,
     /// measured in clock ticks.
     stime: u64,
-    /// Amount of time that this process's waited-for children have been
+    /// (16) Amount of time that this process's waited-for children have been
     /// scheduled in user mode, measured in clock ticks.
     cutime: i64,
-    /// Amount of time that this process's waited-for children have been
+    /// (17) Amount of time that this process's waited-for children have been
     /// scheduled in kernel mode, measured in clock ticks.
     cstime: i64,
-    /// Scheduling priority. For processes running a real-time scheduling
+    /// (18) Scheduling priority. For processes running a real-time scheduling
     /// policy, this is the negated scheduling priority, minus on; that is, a
     /// number in the range -2 to -100, corresponding to real-time priorities 1
     /// to 99. For processes running under a non-real-time scheduling policy,
@@ -655,97 +803,233 @@ struct Stat {
     /// stores nice values as numbers in the range 0 (high) to 39 (low),
     /// corresponding to the user-visible nice range of -20 (high) to 19 (low).
     priority: i64,
-    /// The nice value, a value in the range 19 (low priority) to -20 (high
+    /// (19) The nice value, a value in the range 19 (low priority) to -20 (high
     /// priority).
     nice: i64,
-    /// Number of threads in this process.
+    /// (20) Number of threads in this process.
     num_threads: i64,
-    /// The time in jiffies before the next `SIGALRM` is sent to the process due
+    /// (21) The time in jiffies before the next `SIGALRM` is sent to the process due
     /// to an interval timer. Since Linux 2.6.17, this field is no longer
     /// maintained, and is hard coded as 0.
     itrealvalue: i64,
-    /// The time the process started after system boot, expressed in clock ticks.
-    starttime: u128,
-    /// Virtual memory size in bytes.
+    /// (22) The time the process started after system boot, expressed in clock ticks.
+    starttime: u64,
+    /// (23) Virtual memory size in bytes.
     vsize: u64,
-    /// Resident set size: number of pages the process has in real memory. This
+    /// (24) Resident set size: number of pages the process has in real memory. This
     /// value is inaccurate; see `/proc/{pid}/statm` for details.
     rss: i64,
-    /// Current soft limit in bytes on the RSS of the process; see the
+    /// (25) Current soft limit in bytes on the RSS of the process; see the
     /// description of `RLIMIT_RSS` in `getrlimit(2)`.
     rsslim: u64,
-    /// The address above which program text can run.
+    /// (26) The address above which program text can run.
     startcode: u64,
-    /// The address below which program text can run.
+    /// (27) The address below which program text can run.
     endcode: u64,
-    /// The address of the start (i.e., bottom) of the stack.
+    /// (28) The address of the start (i.e., bottom) of the stack.
     startstack: u64,
-    /// The current value of ESP (stack pointer), as found in the kernel stack
+    /// (29) The current value of ESP (stack pointer), as found in the kernel stack
     /// pages for the process.
     kstkesp: u64,
-    /// The current EIP (instruction pointer).
+    /// (30) The current EIP (instruction pointer).
     kstkeip: u64,
-    /// The bitmap of pending signals, displayed as a decimal number. Obsolete,
+    /// (31) The bitmap of pending signals, displayed as a decimal number. Obsolete,
     /// because it does not provide information on real-time signals; use
     /// `/proc/{pid}/status` instead.
     signal: u64,
-    /// The bitmap of blocked signals, displayed as a decimal number. Obsolete,
+    /// (32) The bitmap of blocked signals, displayed as a decimal number. Obsolete,
     /// because it does not provide information on real-time signals; use
     /// `/proc/{pid}/status` instead.
     blocked: u64,
-    /// The bitmap of ignored signals, displayed as a decimal number. Obsolete,
+    /// (33) The bitmap of ignored signals, displayed as a decimal number. Obsolete,
     /// because it does not provide information on real-time signals; use
     /// `/proc/{pid}/status` instead.
     sigignore: u64,
-    /// The bitmap of caught signals, displayed as a decimal number. Obsolete,
+    /// (34) The bitmap of caught signals, displayed as a decimal number. Obsolete,
     /// because it does not provide information on real-time signals; use
     /// `/proc/{pid}/status` instead.
     sigcatch: u64,
-    /// This is the "channel" in which the process is waiting. It is the address
+    /// (35) This is the "channel" in which the process is waiting. It is the address
     /// of a location in the kernel where the process is sleeping. The
     /// corresponding symbolic name can be found in `/proc/{pid}/wchan`.
     wchan: u64,
-    /// Number of pages swapped (not maintained). Hard coded as 0.
+    /// (36) Number of pages swapped (not maintained). Hard coded as 0.
     nswap: u64,
-    /// Cumulative `nswap` for child processes (not maintained). Hard coded as
+    /// (37) Cumulative `nswap` for child processes (not maintained). Hard coded as
     /// 0.
     cnswap: u64,
-    /// Signal to be sent to parent when process dies.
+    /// (38) Signal to be sent to parent when process dies.
     exit_signal: i32,
-    /// CPU number last executed on.
+    /// (39) CPU number last executed on.
     processor: i32,
-    /// Real-time scheduling priority, a number in the range 1 to 99 for
+    /// (40) Real-time scheduling priority, a number in the range 1 to 99 for
     /// processes scheduled under a real-time policy, or 0, for non-real-time
     /// processes.
     rt_priority: u32,
-    /// Scheduling policy. Decode using the `SCHED_*` constants in
+    /// (41) Scheduling policy. Decode using the `SCHED_*` constants in
     /// `linux/sched.h`.
-    policy: u32,
-    /// Aggregated block I/O delays, measured in clock ticks.
-    delayacct_blkio_ticks: u128,
-    /// Guest time of the process (time spend running a virtual CPU for a guest
+    policy: SchedulingPolicy,
+    /// (42) Aggregated block I/O delays, measured in clock ticks.
+    delayacct_blkio_ticks: u64,
+    /// (43) Guest time of the process (time spend running a virtual CPU for a guest
     /// operating system), measured in clock ticks.
-    guest_time: u128,
-    /// Guest time of the process's children, measured in clock ticks.
-    cguest_time: u128,
-    /// Address above which program initialized and uninitialized (BSS) data are
+    guest_time: u64,
+    /// (44) Guest time of the process's children, measured in clock ticks.
+    cguest_time: u64,
+    /// (45) Address above which program initialized and uninitialized (BSS) data are
     /// placed.
     start_data: u64,
-    /// Address below which program initialized and uninitialized (BSS) data are
+    /// (46) Address below which program initialized and uninitialized (BSS) data are
     /// placed.
     end_data: u64,
-    /// Address above which program heap can be expanded with `brk(2)`.
+    /// (47) Address above which program heap can be expanded with `brk(2)`.
     start_brk: u64,
-    /// Address above which program command-line arguments (`argv`) are placed.
+    /// (48) Address above which program command-line arguments (`argv`) are placed.
     arg_start: u64,
-    /// Address below which program command-line arguments (`argv`) are placed.
+    /// (49) Address below which program command-line arguments (`argv`) are placed.
     arg_end: u64,
-    /// Address above which program environment is placed.
+    /// (50) Address above which program environment is placed.
     env_start: u64,
-    /// Address below which program environment is placed.
+    /// (51) Address below which program environment is placed.
     env_end: u64,
-    /// The thread's exit status in the form reported by `waitpid(2)`.
+    /// (52) The thread's exit status in the form reported by `waitpid(2)`.
     exit_code: i32,
+}
+
+/// Generates [`Stat`].
+struct StatGenerator {
+    /// The process ID to assign to the `/proc/{pid}/stat` file.
+    ///
+    /// This datum is a field so that we can foce `/proc/{pid}/stat` and
+    /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
+    pid: Pid,
+    /// Pool used to generate strings for task's `comm` name.
+    pool: strings::Pool,
+}
+
+impl StatGenerator {
+    /// Construct new instance of [`StatGenerator`].
+    fn new<R>(pid: Pid, rng: &mut R) -> Self
+    where
+        R: Rng + ?Sized,
+    {
+        Self {
+            pid,
+            pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+}
+
+impl<'a> Generator<'a> for StatGenerator {
+    type Output = Stat<'a>;
+
+    /// Generates a [`Stat`] instance (modeling `/proc/{pid}/stat`) under the
+    /// following assumptions:
+    ///
+    /// - `pid == pgrp == session`
+    /// - `policy == SCHED_OTHER == 0` (which is not a real-time scheduling
+    ///   policy)
+    /// - process has at most 32 threads (`1 <= num_threads <= 32`)
+    /// - process is assigned to processor index between 0 and 7 inclusive (so
+    ///   machine is assumed to have 8 processors; `0 <= processor < 8`).
+    /// - `rss` is strictly positive
+    /// - `rss <= rsslim` may *not* be true
+    /// - `startcode <= endcode` may *not* be true
+    /// - `start_data <= end_data` may *not* be true
+    /// - `arg_start <= arg_end` may *not* be true
+    /// - `env_start <= env_end` may *not* be true
+    /// - The ranges `startcode..endcode`, `start_data..end_data`,
+    ///   `arg_start..arg_end`, `env_start..env_end` may *not* have pairwise
+    ///   empty intersections.
+    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    where
+        R: Rng + ?Sized,
+    {
+        let pid: Pid = self.pid;
+
+        // Assume task scheduling policy is `SCHED_OTHER` (i.e., not a real-time
+        // scheduling policy)
+        let priority = rng.gen_range(0..39);
+        let nice = priority - 20;
+
+        Stat {
+            pid,
+            comm: self.pool.of_size_range(&mut rng, 1..TASK_COMM_LEN).unwrap(),
+            state: rng.gen(),
+            ppid: rng.gen(),
+            // Assume process group ID group and session ID are eqaul to PID
+            // because this situation seems to be common.
+            pgrp: pid,
+            session: pid,
+            tty_nr: rng.gen(),
+            tpgid: rng.gen(),
+            flags: rng.gen(),
+            minflt: rng.gen(),
+            cminflt: rng.gen(),
+            majflt: rng.gen(),
+            cmajflt: rng.gen(),
+            utime: rng.gen(),
+            stime: rng.gen(),
+            cutime: rng.gen(),
+            cstime: rng.gen(),
+            priority,
+            nice,
+            // Assume up to 32 threads per process, arbitrarily.
+            num_threads: rng.gen_range(1..=32),
+            itrealvalue: rng.gen(),
+            starttime: rng.gen(),
+            vsize: rng.gen(),
+            rss: rng.gen_range(1..i64::MAX),
+            // For now, ignore that rss <= rsslim should hold
+            rsslim: rng.gen(),
+            startcode: rng.gen(),
+            // For now, ignore that startcode <= endcode should hold
+            endcode: rng.gen(),
+            startstack: rng.gen(),
+            // Assume `kstkesp` & `kstkeip` are both 0 because this property
+            // seems to hold across a variety of processes
+            kstkesp: 0,
+            kstkeip: 0,
+            signal: rng.gen(),
+            blocked: rng.gen(),
+            sigignore: rng.gen(),
+            sigcatch: rng.gen(),
+            wchan: rng.gen(),
+            nswap: 0,
+            cnswap: 0,
+            exit_signal: rng.gen(),
+            // Assume machine has 8 cores for now
+            processor: rng.gen_range(0..8),
+            // Due to asumptions above, this value must be 0; the process is
+            // assumed not to be a real-time process. If this value is modified,
+            // then `priority`, `nice`, and `policy` must also be modified.
+            rt_priority: 0,
+            // Hardcoded to a non-real-time scheduling policy; may be relaxed
+            // later.
+            policy: SchedulingPolicy::Normal,
+            delayacct_blkio_ticks: rng.gen(),
+            guest_time: rng.gen(),
+            cguest_time: rng.gen(),
+            start_data: rng.gen(),
+            // Although end_data should probably satisfy the property
+            // end_data >= start_data, this implementation ignores that
+            // property for simplicity.
+            end_data: rng.gen(),
+            start_brk: rng.gen(),
+            arg_start: rng.gen(),
+            // Although arg_end should probably satisfy the property
+            // arg_end >= arg_start, this implementation ignores that property
+            // for simplicity.
+            arg_end: rng.gen(),
+            env_start: rng.gen(),
+            // Although env_end should probably satisfy the property
+            // env_end >= env_start, this implementation ignores that property
+            // for simplicity.
+            env_end: rng.gen(),
+            // Exit code is assigned arbitrarily, for simplicity.
+            exit_code: rng.gen(),
+        }
+    }
 }
 
 /// Models data associated with a process ID (pid).
@@ -762,7 +1046,7 @@ struct Stat {
 ///
 /// so this struct reflects that behavior.
 #[derive(Debug)]
-struct Process {
+struct Process<'a> {
     /// Command line for process (unless a zombie); corresponds to
     /// `/proc/{pid}/cmdline`.
     cmdline: String,
@@ -772,7 +1056,7 @@ struct Process {
     /// Corresponds to `/proc/{pid}/io`.
     io: proc::Io,
     /// Corresponds to `/proc/{pid}/stat`.
-    stat: Stat,
+    stat: Stat<'a>,
     /// Corresponds to `/proc/{pid}/statm`.
     statm: Statm,
     /// Corresponds to `/proc/{pid}/status`.
