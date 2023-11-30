@@ -53,6 +53,7 @@ pub mod json;
 pub mod opentelemetry_log;
 pub mod opentelemetry_metric;
 pub mod opentelemetry_trace;
+pub mod procfs;
 pub mod splunk_hec;
 pub mod statik;
 pub mod syslog;
