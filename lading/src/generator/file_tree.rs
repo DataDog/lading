@@ -189,7 +189,7 @@ impl FileTree {
                         rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     break;
                 },

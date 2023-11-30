@@ -317,7 +317,7 @@ impl Grpc {
                         }
                     }
                 },
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     break;
                 },

@@ -108,7 +108,7 @@ impl<'a> fmt::Display for Event<'a> {
             if !tags.is_empty() {
                 write!(f, "|#")?;
                 let mut commas_remaining = tags.len() - 1;
-                for tag in tags.iter() {
+                for tag in tags {
                     write!(f, "{tag}")?;
                     if commas_remaining != 0 {
                         write!(f, ",")?;

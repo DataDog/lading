@@ -92,7 +92,7 @@ impl Expvar {
                 error!("server shutdown unexpectedly");
                  Err(Error::EarlyShutdown)
             }
-            _ = self.shutdown.recv() => {
+            () = self.shutdown.recv() => {
                 info!("shutdown signal received");
                  Ok(())
             }

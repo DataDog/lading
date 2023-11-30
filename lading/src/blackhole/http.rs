@@ -246,16 +246,14 @@ impl Http {
             .map_err(Error::Hyper)?;
 
         let server = Server::builder(addr).serve(svc);
-        loop {
-            tokio::select! {
-                res = server => {
-                    error!("server shutdown unexpectedly");
-                    return res.map_err(Error::Hyper);
-                }
-                _ = self.shutdown.recv() => {
-                    info!("shutdown signal received");
-                    return Ok(())
-                }
+        tokio::select! {
+            res = server => {
+                error!("server shutdown unexpectedly");
+                 res.map_err(Error::Hyper)
+            }
+            () = self.shutdown.recv() => {
+                info!("shutdown signal received");
+                Ok(())
             }
         }
     }

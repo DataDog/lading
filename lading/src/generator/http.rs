@@ -265,7 +265,7 @@ impl Http {
                         drop(permit);
                     });
                 },
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.

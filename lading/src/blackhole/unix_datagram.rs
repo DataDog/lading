@@ -86,7 +86,7 @@ impl UnixDatagram {
                     let n: usize = res.map_err(Error::Io)?;
                     bytes_received.increment(n as u64);
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(())
                 }
