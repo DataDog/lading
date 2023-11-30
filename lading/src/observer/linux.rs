@@ -152,7 +152,7 @@ impl Sampler {
             // Calculate process uptime. We have two pieces of information from
             // the kernel: computer uptime and process starttime relative to
             // power-on of the computer.
-            let uptime: u64 = uptime_ticks - stats.starttime; // ticks
+            let uptime: u64 = uptime_ticks.saturating_sub(stats.starttime); // ticks
 
             // The times that the process and the processes' waited for children
             // have been scheduled in kernel and user space. We exclude cstime,
