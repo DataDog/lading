@@ -246,7 +246,6 @@ fn get_config(ops: &Opts) -> Config {
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
-    max_shutdown_delay: Duration,
     disable_inspector: bool,
     config: Config,
 ) {
@@ -383,7 +382,7 @@ async fn inner_main(
             shutdown.signal().unwrap();
         },
         _ = experiment_sleep => {
-            info!("experiment duration exceeded");
+            info!("experiment duration exceeded, signaling for shutdown");
             shutdown.signal().unwrap();
         }
         res = tsrv => {
@@ -399,11 +398,7 @@ async fn inner_main(
             }
         }
     }
-    info!(
-        "Waiting for {} seconds for tasks to shutdown.",
-        max_shutdown_delay.as_secs(),
-    );
-    shutdown.wait(max_shutdown_delay).await;
+    drop(shutdown);
 }
 
 fn run_process_tree(opts: ProcessTreeGen) {
@@ -466,7 +461,7 @@ fn main() {
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
-    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into()) / 2;
+    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into());
     let disable_inspector = opts.disable_inspector;
 
     let runtime = Builder::new_multi_thread()
@@ -477,7 +472,6 @@ fn main() {
     runtime.block_on(inner_main(
         experiment_duration,
         warmup_duration,
-        max_shutdown_delay,
         disable_inspector,
         config,
     ));
