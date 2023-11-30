@@ -7,26 +7,26 @@ generator:
         dogstatsd:
           contexts_minimum: 1000
           contexts_maximum: 8000
-          tags_per_msg_minimum: 50
-          tags_per_msg_maximum: 71
-          multivalue_pack_probability: 1108
+          tags_per_msg_minimum: 20
+          tags_per_msg_maximum: 31
+          multivalue_pack_probability: 0.08
           multivalue_count_minimum: 2
-          multivalue_count_maximum: 40
+          multivalue_count_maximum: 10
           kind_weights:
             metric: 80
             event: 10
             service_check: 10
           metric_weights:
-            count: 100
-            gauge: 100
-            timer: 20
-            distribution: 100
-            set: 20
-            histogram: 20
+            count: 10
+            gauge: 10
+            timer: 2
+            distribution: 5
+            set: 2
+            histogram: 2
       bytes_per_second: "150 Mb"
       parallel_connections: 1
       block_sizes: ["1Kb", "2Kb", "3Kb"]
-      maximum_prebuild_cache_size_bytes: "50 Mb"
+      maximum_prebuild_cache_size_bytes: "500 Mb"
 
 blackhole:
   - http:
