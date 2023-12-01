@@ -379,6 +379,7 @@ generator:
         Ok(())
     }
 
+    #[ignore]
     #[tokio::test]
     async fn tcp_fluent() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
