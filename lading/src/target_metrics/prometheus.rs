@@ -98,7 +98,12 @@ impl Prometheus {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
 
-                let Ok(resp) = client.get(&self.config.uri).timeout(Duration::from_secs(1)).send().await else {
+                let Ok(resp) = client
+                    .get(&self.config.uri)
+                    .timeout(Duration::from_secs(1))
+                    .send()
+                    .await
+                else {
                     info!("failed to get Prometheus uri");
                     continue;
                 };
@@ -217,7 +222,7 @@ impl Prometheus {
                 error!("server shutdown unexpectedly");
                  Err(Error::EarlyShutdown)
             }
-            _ = self.shutdown.recv() => {
+            () = self.shutdown.recv() => {
                 info!("shutdown signal received");
                  Ok(())
             }

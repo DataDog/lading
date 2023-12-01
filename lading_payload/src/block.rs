@@ -560,14 +560,14 @@ where
                 match snd.try_reserve() {
                     Ok(permit) => permit.send(block),
                     Err(err) => match err {
-                        mpsc::error::TrySendError::Full(_) => {
+                        mpsc::error::TrySendError::Full(()) => {
                             if accum_bytes < total_bytes {
                                 accum_bytes += u64::from(block.total_bytes.get());
                                 cache.push_back(block);
                                 break 'refill;
                             }
                         }
-                        mpsc::error::TrySendError::Closed(_) => return Ok(()),
+                        mpsc::error::TrySendError::Closed(()) => return Ok(()),
                     },
                 }
             }

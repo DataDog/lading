@@ -88,7 +88,7 @@ impl Udp {
                     packet_received.increment(1);
                     bytes_received.increment(bytes as u64);
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(())
                 }

@@ -305,7 +305,7 @@ impl Child {
                         total_bytes_written = 0;
                     }
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     fp.flush().await?;
                     info!("shutdown signal received");
                     return Ok(());

@@ -196,7 +196,7 @@ impl CaptureManager {
                     self.record_captures().await;
                     self.fetch_index += 1;
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     self.record_captures().await;
                     info!("shutdown signal received");
                     return Ok(())

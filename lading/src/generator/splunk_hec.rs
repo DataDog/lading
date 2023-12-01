@@ -292,7 +292,7 @@ impl SplunkHec {
                     let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
                     tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.clone()));
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     // When we shut down we may leave dangling, active
                     // requests. This is acceptable. As we do not today
@@ -352,7 +352,7 @@ async fn send_hec_request(
                 }
             }
         }
-        _ = shutdown.recv() => {},
+        () = shutdown.recv() => {},
     }
     drop(permit);
 }

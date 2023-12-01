@@ -238,7 +238,7 @@ impl UnixStream {
                         unix_stream = Some(stream);
                     }
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

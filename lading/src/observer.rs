@@ -118,7 +118,7 @@ impl Server {
                 _ = sample_delay.tick() => {
                     sampler.sample()?;
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     tracing::info!("shutdown signal received");
                     return Ok(());
                 }

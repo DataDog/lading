@@ -286,7 +286,7 @@ impl Server {
                     Err(Error::TargetExited(None))
                 }
             },
-            _ = shutdown.recv() => {
+            () = shutdown.recv() => {
                 info!("shutdown signal received");
                 Ok(())
             }
@@ -332,7 +332,7 @@ impl Server {
                     },
                 }
             },
-            _ = shutdown.recv() => {
+            () = shutdown.recv() => {
                 info!("shutdown signal received");
                 // Note that `Child::kill` sends SIGKILL which is not what we
                 // want. We instead send SIGTERM so that the child has a chance

@@ -204,7 +204,7 @@ impl Tcp {
                         }
                     }
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

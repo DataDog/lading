@@ -104,7 +104,7 @@ impl Tcp {
                         Self::handle_connection(socket, labels)
                     );
                 }
-                _ = self.shutdown.recv() => {
+                () = self.shutdown.recv() => {
                     info!("shutdown signal received");
                     return Ok(())
                 }
