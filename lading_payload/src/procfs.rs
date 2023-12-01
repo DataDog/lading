@@ -29,7 +29,7 @@ const TASK_NAME_LEN: usize = 64;
 /// Maximum decimal value of a `umask`. A `umask` consists of four octal digits,
 /// so its maximum value can be at most 8^4 - 1 = 2^12 - 1 = 4095. The value below
 /// is 2^12 so we can use this value in a non-inclusive range.
-const UMASK_MAX: u16 = 4096;
+const UMASK_MAX: u32 = 4096;
 
 /// Maximum number of supplemental groups a process can belong to. Corresponds
 /// to macro of the same name in `include/uapi/linux/limits.h`
@@ -237,7 +237,30 @@ impl Distribution<Statm> for Standard {
     }
 }
 
-/// Models a process ID number, which is an `int` type in C.
+/// Models a `umask`, equivalent to [`std::ffi::c_uint`].
+#[derive(Debug)]
+struct Umask(u32);
+
+impl Distribution<Umask> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> Umask
+    where
+        R: Rng + ?Sized,
+    {
+        Umask(rng.gen_range(0..UMASK_MAX))
+    }
+}
+
+impl fmt::Display for Umask {
+    /// Capability masks are displayed in [`fmt::Octal`] format by default.
+    ///
+    /// The format is left-zero-padded to four octal digits. There is no leading
+    /// `0o` in the display representation.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{mask:04o}", mask = self.0)
+    }
+}
+
+/// Models a process ID number, equivalent to [`std::ffi::c_int`].
 ///
 /// This data is modeled by the `pid_t` type in the Linux kernel.
 #[derive(Debug, Clone, Copy)]
@@ -556,32 +579,32 @@ impl fmt::Display for SpeculationIndirectBranch {
 /// non-exhaustive.
 #[derive(Debug)]
 struct Status {
-    /// Filename of executable (with escapes, limited to 64 bytes)
+    /// Filename of executable (with escapes, limited to 64 bytes).
     name: String,
-    /// File mode creation mask (only printed if not zero)
-    umask: u32,
-    /// State of process
+    /// File mode creation mask.
+    umask: Umask,
+    /// State of process.
     state: proc::State,
-    /// Thread group ID
+    /// Thread group ID.
     tgid: Pid,
-    /// NUMA group ID
+    /// NUMA group ID.
     ngid: Pid,
-    /// Process ID
+    /// Process ID.
     pid: Pid,
-    /// Process ID of parent process
+    /// Process ID of parent process.
     ppid: Pid,
     /// PID of process tracing this process (0 if not, or the trace is outside
-    /// of the current pid namespace)
+    /// of the current pid namespace).
     tracer_pid: Pid,
-    /// Real, effective, saved set, and file system UIDs
+    /// Real, effective, saved set, and file system UIDs.
     uid: [Uid; 4],
-    /// Real, effective, saved set, and file system GIDs
+    /// Real, effective, saved set, and file system GIDs.
     gid: [Gid; 4],
     /// Number of file descriptor slots currently allocated. Cannot exceed the
     /// value stored in `/proc/sys/fs/file-max`. A unprivileged user process may
     /// not exceed the output of `ulimit -n -H`.
     fd_size: u64,
-    /// Supplementary group list
+    /// Supplementary group list.
     groups: Vec<Gid>,
     /// Descendant namespace thread group ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
