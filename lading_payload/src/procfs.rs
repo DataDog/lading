@@ -1138,10 +1138,10 @@ impl<'a> Generator<'a> for StatGenerator {
 struct Process<'a> {
     /// Command line for process (unless a zombie); corresponds to
     /// `/proc/{pid}/cmdline`.
-    cmdline: String,
+    cmdline: &'a str,
     /// Command name associated with process. Truncated to `TASK_COMM_LEN`
     /// bytes.
-    comm: String,
+    comm: &'a str,
     /// Corresponds to `/proc/{pid}/io`.
     io: proc::Io,
     /// Corresponds to `/proc/{pid}/stat`.
