@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.1-rc2]
+### Changed
+- Adjusted logging in block cache construction.
+
 ## [0.20.1-rc0]
 ### Changed
 - Internal shutdown sequence is now changed to an advisory signal. There is no

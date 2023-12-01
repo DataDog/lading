@@ -28,6 +28,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, warn};
+use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -444,7 +445,10 @@ fn run_extra_cmds(cmds: ExtraCommands) {
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::FULL)
+        .finish()
+        .init();
 
     info!("Starting lading run.");
     let opts: Opts = Opts::parse();
