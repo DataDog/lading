@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.1-rc0]
+### Changed
+- Internal shutdown sequence is now changed to an advisory signal. There is no
+  user-facing change.
+
 ## [0.20.0]
 ### Added
 - Sampling and sampling probability configuration parameters added for
