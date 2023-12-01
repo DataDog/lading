@@ -615,7 +615,6 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    info!("Creating new block cache.");
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
         if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
@@ -626,7 +625,7 @@ where
         error!("Empty block cache, unable to construct blocks!");
         Err(ConstructBlockCacheError::InsufficientBlockSizes)
     } else {
-        info!("DONE");
+        info!(size = block_cache.len(), "Block cache constructed.");
         Ok(block_cache)
     }
 }
