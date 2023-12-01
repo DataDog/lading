@@ -617,9 +617,9 @@ impl fmt::Display for SpeculationIndirectBranch {
 /// We can't use the `procfs::Process::Status` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Status {
+struct Status<'a> {
     /// Filename of executable (with escapes, limited to 64 bytes).
-    name: String,
+    name: &'a str,
     /// File mode creation mask.
     umask: Umask,
     /// State of process.
@@ -1149,7 +1149,7 @@ struct Process<'a> {
     /// Corresponds to `/proc/{pid}/statm`.
     statm: Statm,
     /// Corresponds to `/proc/{pid}/status`.
-    status: Status,
+    status: Status<'a>,
 }
 
 /*
