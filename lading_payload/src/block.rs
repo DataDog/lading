@@ -11,6 +11,7 @@ use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
+use tracing::{error, info, span, Level};
 
 use crate::dogstatsd;
 
@@ -200,9 +201,25 @@ impl Cache {
                     crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
                 };
 
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "trace-agent"
+                );
+                let _guard = span.enter();
+
                 construct_block_cache_inner(&mut rng, &ta, &block_chunks)?
             }
             crate::Config::Syslog5424 => {
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "syslog5424"
+                );
+                let _guard = span.enter();
+
                 construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)?
             }
             crate::Config::DogStatsD(
@@ -243,47 +260,129 @@ impl Cache {
                     &mut rng,
                 )?;
 
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "dogstatsd"
+                );
+                let _guard = span.enter();
+
                 construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
             }
             crate::Config::Fluent => {
                 let pyld = crate::Fluent::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "fluent"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
-            crate::Config::SplunkHec { encoding } => construct_block_cache_inner(
-                &mut rng,
-                &crate::SplunkHec::new(*encoding),
-                &block_chunks,
-            )?,
+            crate::Config::SplunkHec { encoding } => {
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "splunkHec"
+                );
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &crate::SplunkHec::new(*encoding),
+                    &block_chunks,
+                )?
+            }
             crate::Config::ApacheCommon => {
                 let pyld = crate::ApacheCommon::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "apache-common"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
             crate::Config::Ascii => {
                 let pyld = crate::Ascii::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "ascii"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
             }
             crate::Config::DatadogLog => {
                 let serializer = crate::DatadogLog::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "datadog-log"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
             }
             crate::Config::Json => {
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "json"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(&mut rng, &crate::Json, &block_chunks)?
             }
-            crate::Config::Static { ref static_path } => construct_block_cache_inner(
-                &mut rng,
-                &crate::Static::new(static_path)?,
-                &block_chunks,
-            )?,
+            crate::Config::Static { ref static_path } => {
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "static"
+                );
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &crate::Static::new(static_path)?,
+                    &block_chunks,
+                )?
+            }
             crate::Config::OpentelemetryTraces => {
                 let pyld = crate::OpentelemetryTraces::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "otel-traces"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
             crate::Config::OpentelemetryLogs => {
                 let pyld = crate::OpentelemetryLogs::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "otel-logs"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
             crate::Config::OpentelemetryMetrics => {
                 let pyld = crate::OpentelemetryMetrics::new(&mut rng);
+                let span = span!(
+                    Level::INFO,
+                    "fixed",
+                    max_chunks = total_chunks,
+                    payload = "otel-metrics"
+                );
+                let _guard = span.enter();
                 construct_block_cache_inner(rng, &pyld, &block_chunks)?
             }
         };
@@ -506,6 +605,7 @@ fn chunk_bytes<const N: usize>(
 /// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
+#[tracing::instrument(skip(rng, serializer, block_chunks))]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
@@ -515,6 +615,7 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
+    info!("Creating new block cache.");
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
         if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
@@ -522,8 +623,10 @@ where
         }
     }
     if block_cache.is_empty() {
+        error!("Empty block cache, unable to construct blocks!");
         Err(ConstructBlockCacheError::InsufficientBlockSizes)
     } else {
+        info!("DONE");
         Ok(block_cache)
     }
 }
