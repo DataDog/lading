@@ -248,7 +248,7 @@ impl Distribution<Pid> for Standard {
     where
         R: Rng + ?Sized,
     {
-        Pid(rng.gen())
+        Pid(rng.gen_range(1..PID_MAX_LIMIT))
     }
 }
 
