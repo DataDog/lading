@@ -252,7 +252,7 @@ impl Distribution<Pid> for Standard {
     }
 }
 
-/// Models a user ID number, which is an `unsigned int` type in C.
+/// Models a user ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `uid_t` type in the Linux kernel.
 #[derive(Debug)]
@@ -267,7 +267,7 @@ impl Distribution<Uid> for Standard {
     }
 }
 
-/// Models a group ID number, which is an `unsigned int` type in C.
+/// Models a group ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `gid_t` type in the Linux kernel.
 #[derive(Debug)]
@@ -283,6 +283,8 @@ impl Distribution<Gid> for Standard {
 }
 
 /// Models SigQ field of `/proc/{pid}/status`.
+///
+/// Equivalent to `(std::ffi::c_uint, std::ffi::c_ulong)`.
 #[derive(Debug)]
 struct SigQ {
     signals_queued: u32,
@@ -331,6 +333,17 @@ impl Distribution<SignalMask> for Standard {
     }
 }
 
+impl fmt::Display for SignalMask {
+    /// Signal masks are displayed in [`fmt::LowerHex`] format by default.
+    ///
+    /// In particular, a leading `0x` is used in the display representation, and
+    /// the output is left-zero-padded to exactly 8 digits (excluding the
+    /// leading `0x`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{mask:#08x}", mask = self.0)
+    }
+}
+
 /// Models capability mask fields in `/proc/{pid}/status`.
 ///
 /// This mask is a `u64` in the Linux kernel on all supported architectures; see
@@ -345,6 +358,17 @@ impl Distribution<CapabilityMask> for Standard {
         R: Rng + ?Sized,
     {
         CapabilityMask(rng.gen())
+    }
+}
+
+impl fmt::Display for CapabilityMask {
+    /// Capability masks are displayed in [`fmt::LowerHex`] format by default.
+    ///
+    /// In particular, a leading `0x` is used in the display representation, and
+    /// the output is left-zero-padded to exactly 8 digits (excluding the
+    /// leading `0x`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{mask:#08x}", mask = self.0)
     }
 }
 
