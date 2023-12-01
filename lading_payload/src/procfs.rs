@@ -774,6 +774,41 @@ struct Status<'a> {
     nonvoluntary_ctxt_switches: u64,
 }
 
+/// Generates [`Status`].
+struct StatusGenerator {
+    /// The process ID to assign to the `/proc/{pid}/status` file.
+    ///
+    /// Its purpose is to enable clients to force `/proc/{pid}/stat` and
+    /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
+    pid: Pid,
+    /// Pool used to generate strings for task's (longer) `comm` name.
+    pool: strings::Pool,
+}
+
+impl StatusGenerator {
+    /// Construct new instance of [`StatusGenerator`].
+    fn new<R>(pid: Pid, rng: &mut R) -> Self
+    where
+        R: Rng + ?Sized,
+    {
+        Self {
+            pid,
+            pool: strings::Pool::with_size(rng, 1_000_000),
+        }
+    }
+}
+
+impl<'a> Generator<'a> for StatusGenerator {
+    type Output = Status<'a>;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    where
+        R: rand::Rng + ?Sized,
+    {
+        todo!("Need to write this on 2023-12-01");
+    }
+}
+
 /// Models scheduling policies used by the kernel.
 ///
 /// Used in the `policy` field of `/proc/{pid}/stat`. Policy names can be found
@@ -989,7 +1024,7 @@ struct Stat<'a> {
 struct StatGenerator {
     /// The process ID to assign to the `/proc/{pid}/stat` file.
     ///
-    /// This datum is a field so that we can foce `/proc/{pid}/stat` and
+    /// Its purpose is to enable clients to force `/proc/{pid}/stat` and
     /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
     pid: Pid,
     /// Pool used to generate strings for task's `comm` name.
