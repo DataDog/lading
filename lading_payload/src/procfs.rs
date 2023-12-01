@@ -260,6 +260,45 @@ impl fmt::Display for Umask {
     }
 }
 
+/// Models a device bit field, equivalent to [`std::ffi::c_int`].
+///
+/// This data is modeled by the `dev_t` type in the kernel, which is a
+/// [`std::ffi::c_uint`] that is cast to a [`std::ffi::c_int`] and encodes a
+/// bit field. The minor device number is contained in the combination of bits 31 to 20
+/// and 7 to 0. The major device number is in bits 15 to 8. (Bits 16 to 19
+/// are ignored.)
+#[derive(Debug)]
+struct DeviceMask(i32);
+
+impl Distribution<DeviceMask> for Standard {
+    /// Generates a valid [`DeviceMask`] bit field with uniform probability.
+    fn sample<R>(&self, rng: &mut R) -> DeviceMask
+    where
+        R: Rng + ?Sized,
+    {
+        let bits_0_to_7: u8 = rng.gen();
+        let bits_8_to_15: u8 = rng.gen();
+
+        // SAFETY: Shifting any `u8` in the range 0..16 yields a
+        // `u8` less than or equal to 255, which is `u8::MAX`. Treats
+        // representation as little-endian. This operation yields
+        // a little-endian u8 such that the lowest-order 4 bits are zero,
+        // and thus will ensure bits 16 to 19 (inclusive) are zero.
+        let mut bits_16_to_23: u8 = rng.gen_range(0..16);
+        bits_16_to_23 = bits_16_to_23.checked_shl(4).unwrap();
+        let bits_24_to_31: u8 = rng.gen();
+
+        let mask = i32::from_le_bytes([bits_24_to_31, bits_16_to_23, bits_8_to_15, bits_0_to_7]);
+        DeviceMask(mask)
+    }
+}
+
+impl fmt::Display for DeviceMask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{mask}", mask = self.0)
+    }
+}
+
 /// Models a process ID number, equivalent to [`std::ffi::c_int`].
 ///
 /// This data is modeled by the `pid_t` type in the Linux kernel.
@@ -810,8 +849,11 @@ struct Stat<'a> {
     pgrp: Pid,
     /// (6) The session ID of the process.
     session: Pid,
-    /// (7) The controlling terminal of the process.
-    tty_nr: i32,
+    /// (7) The controlling terminal of the process. This number is a bit field.
+    /// The minor device number is contained in the combination of bits 31 to 20
+    /// and 7 to 0. The major device number is in bits 15 to 8. (Bits 16 to 19
+    /// are zeros.)
+    tty_nr: DeviceMask,
     /// (8) The ID of the foreground process group of the controlling terminal of
     /// the process.
     tpgid: Pid,
