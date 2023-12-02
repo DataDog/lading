@@ -447,6 +447,7 @@ fn run_extra_cmds(cmds: ExtraCommands) {
 fn main() {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)
+        .with_ansi(false)
         .finish()
         .init();
 

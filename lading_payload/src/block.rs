@@ -182,6 +182,7 @@ impl Cache {
     ///
     /// Function will return an error if `block_byte_sizes` is empty or if a member
     /// of `block_byte_sizes` is large than `total_bytes`.
+    #[allow(clippy::too_many_lines)]
     pub fn fixed<R>(
         mut rng: &mut R,
         total_bytes: NonZeroU32,
