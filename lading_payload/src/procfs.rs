@@ -32,7 +32,7 @@ const TASK_NAME_LEN: usize = 64;
 const UMASK_MAX: u32 = 4096;
 
 /// Maximum number of supplemental groups a process can belong to. Corresponds
-/// to macro of the same name in `include/uapi/linux/limits.h`
+/// to macro of the same name in `include/uapi/linux/limits.h`.
 const NGROUPS_MAX: usize = 65536;
 
 /// Maximum number of bytes in a path name, including a null byte. Rust does not
@@ -40,47 +40,31 @@ const NGROUPS_MAX: usize = 65536;
 /// macro of the same name in `include/uapi/linux/limits.h`.
 const PATH_MAX: usize = 4095;
 
-fn num_numa_nodes() -> NonZeroU8 {
-    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
-    NonZeroU8::new(32).unwrap()
-}
+/// Maximum number of Seccomp filters that can be attached to a given thread.
+/// This number is calculated from information in `man 2 seccomp`. The maximum
+/// number of such instructions that can be attached to a thread cannot exceed
+/// `MAX_INSNS_PER_PATH` (32768). In computing this number, each filter program
+/// incurs an overhead of 4 instructions, and filter programs must contain at
+/// least one instruction (or an error code is returned). Consequently, the
+/// maximum number of filters that can be attached to a given thread is
+/// floor(32768 / 5) = 6553. In actual practice, the number of filters attached
+/// to a process is likely considerably less.
+const SECCOMP_FILTER_MAX: i32 = 6553;
 
-fn num_cpus() -> NonZeroU8 {
-    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
-    NonZeroU8::new(8).unwrap()
-}
+/// Assumed number of processors, for simplicity. This number was chosen
+/// arbitrarily to mimic a small server.
+const ASSUMED_NPROC: i32 = 8;
 
-fn max_groups() -> NonZeroU8 {
-    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
-    NonZeroU8::new(10).unwrap()
-}
+/// Assumed number of max threads, for simplicity. This number was chosen
+/// arbitrarily.
+const ASSUMED_THREAD_MAX: i32 = 32;
 
-fn max_pid_namespaces() -> NonZeroU8 {
-    // SAFETY: Input to `NonZeroU8::new` is hardcoded to nonzero value.
-    NonZeroU8::new(1).unwrap()
-}
-
-/// Configure the `Procfs` payload.
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Config {
-    /// Number of NUMA nodes exposed to processes. Sizes the `Mems_allowed` field
-    /// in `/proc/{pid}/status`.
-    #[serde(default = "num_numa_nodes")]
-    pub num_numa_nodes: NonZeroU8,
-    /// Number of CPUs exposed to processes. Sizes the `Cpus_allowed` field in
-    /// `/proc/{pid}/status`.
-    #[serde(default = "num_cpus")]
-    pub num_cpus: NonZeroU8,
-    /// Maximum number of groups to which a process can belong. Sizes the
-    /// `Groups` field in `/proc/{pid}/status`.
-    #[serde(default = "max_groups")]
-    pub max_groups: NonZeroU8,
-    /// Maximum number of process namespaces in process ID hierarchies. Sizes
-    /// the `NStgid`, `NSpid`, `NSpgid`, and `NSsid` fields in
-    /// `/proc/{pid}/status`.
-    #[serde(default = "max_pid_namespaces")]
-    pub max_pid_namespaces: NonZeroU8,
-}
+/// Assumed maximum number of groups associated with a process, which must be
+/// less than `NGROUPS_MAX`. This number was chosen arbitrarily, on the grounds
+/// that most background processes on a developer box belong to at most a dozen
+/// or so groups, allowing for systems that may have more groups due to more
+/// service users.
+const ASSUMED_NGROUPS_MAX: usize = 32;
 
 mod proc {
     use rand::{distributions::Standard, prelude::Distribution, Rng};
@@ -317,7 +301,7 @@ impl Distribution<Pid> for Standard {
 /// Models a user ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `uid_t` type in the Linux kernel.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Uid(u32);
 
 impl Distribution<Uid> for Standard {
@@ -332,7 +316,7 @@ impl Distribution<Uid> for Standard {
 /// Models a group ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `gid_t` type in the Linux kernel.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Gid(u32);
 
 impl Distribution<Gid> for Standard {
@@ -450,6 +434,12 @@ impl Distribution<MaskEntry> for Standard {
     }
 }
 
+impl fmt::Display for MaskEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{mask:x}", mask = self.0)
+    }
+}
+
 /// Models entries of `{Cpus,Mems}_allowed_list` in `/proc/{pid}/status`.
 ///
 /// Models entries of the `Cpus_allowed_list` and `Mems_allowed_list` fields in
@@ -472,6 +462,15 @@ enum ListEntry {
         /// Last element of range. Must be greater than `first`.
         last: u64,
     },
+}
+
+impl fmt::Display for ListEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ListEntry::Single(entry) => write!(f, "{entry}"),
+            ListEntry::RangeInclusive { first, last } => write!(f, "{first}-{last}"),
+        }
+    }
 }
 
 /// Models `Seccomp` field of `/proc/{pid}/status`, if it exists.
@@ -805,7 +804,113 @@ impl<'a> Generator<'a> for StatusGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        todo!("Need to write this on 2023-12-01");
+        let pid = self.pid;
+        let uid: Uid = rng.gen();
+        let gid = Gid(uid.0);
+        let seccomp: SeccompMode = rng.gen();
+
+        // Seccomp_filters is 0 unless the Seccomp mode is SECCOMP_MODE_FILTER.
+        let seccomp_filters = match &seccomp {
+            // If Seccomp mode is SECCOMP_MODE_FILTER, then Seccomp_filter is at
+            // least 1.
+            SeccompMode::Filter => rng.gen_range(1..SECCOMP_FILTER_MAX),
+            SeccompMode::Disabled | SeccompMode::Strict => 0,
+        };
+
+        // For simplicity, assume each process uses all available CPUs.
+        let mut cpu_mask = 0_u32;
+        for i in 0..ASSUMED_NPROC {
+            cpu_mask |= (1 << i);
+        }
+        let cpus_allowed = vec![MaskEntry(cpu_mask)];
+        let cpus_allowed_list = vec![ListEntry::RangeInclusive {
+            first: 0,
+            last: (ASSUMED_NPROC - 1) as u64,
+        }];
+
+        // Sanity check the assumed number of groups a process may belong to here,
+        // because this location is the only place where that data is used.
+        assert!(ASSUMED_NGROUPS_MAX <= NGROUPS_MAX);
+
+        // The `Groups` field of `/proc/{pid}/status` is allowed to be *empty*.
+        let ngroups = rng.gen_range(0..=ASSUMED_NGROUPS_MAX);
+        let mut groups = Vec::with_capacity(ngroups);
+        for _ in 0..ngroups {
+            groups.push(Gid(rng.gen()));
+        }
+
+        Status {
+            name: self.pool.of_size_range(rng, 1..TASK_NAME_LEN).unwrap(),
+            umask: rng.gen(),
+            state: rng.gen(),
+            tgid: pid,
+            ngid: pid,
+            pid,
+            ppid: rng.gen(),
+            // For simplicity, we assume arbitrarily that our generated
+            // processes are not being traced, which corresponds to setting
+            // tracer_pid to 0.
+            tracer_pid: Pid(0),
+            uid: [uid, uid, uid, uid],
+            gid: [gid, gid, gid, gid],
+            fd_size: rng.gen(),
+            groups,
+            ns_tgid: vec![pid],
+            ns_pid: vec![pid],
+            ns_pgid: vec![pid],
+            ns_sid: vec![pid],
+            kthread: None,
+            vm_peak: rng.gen(),
+            vm_size: rng.gen(),
+            vm_lck: rng.gen(),
+            vm_pin: rng.gen(),
+            vm_hwm: rng.gen(),
+            vm_rss: rng.gen(),
+            rss_anon: rng.gen(),
+            rss_file: rng.gen(),
+            rss_shmem: rng.gen(),
+            vm_data: rng.gen(),
+            vm_stk: rng.gen(),
+            vm_exe: rng.gen(),
+            vm_lib: rng.gen(),
+            vm_pte: rng.gen(),
+            vm_swap: rng.gen(),
+            huge_tlb_pages: rng.gen(),
+            core_dumping: rng.gen(),
+            thp_enabled: rng.gen(),
+            untag_mask: rng.gen(),
+            threads: rng.gen_range(1..=ASSUMED_THREAD_MAX),
+            sigq: SigQ {
+                signals_queued: rng.gen(),
+                max_number_for_queue: rng.gen(),
+            },
+            sig_pnd: rng.gen(),
+            shd_pnd: rng.gen(),
+            sig_blk: rng.gen(),
+            sig_ign: rng.gen(),
+            sig_cgt: rng.gen(),
+            cap_inh: rng.gen(),
+            cap_prm: rng.gen(),
+            cap_eff: rng.gen(),
+            cap_bnd: rng.gen(),
+            no_new_privs: rng.gen(),
+            seccomp,
+            seccomp_filters,
+            // Mask entries are displayed in hexadecimal, hence the use of
+            // hexadecimal literals. For simplicity, assume each process uses
+            // all available CPUs.
+            cpus_allowed,
+            cpus_allowed_list,
+            // Assume a single NUMA node is available due to a lack of
+            // real-world examples of processes that are allowed to allocate
+            // memory on a NUMA node other than node 0
+            mems_allowed: vec![MaskEntry(0x0)],
+            mems_allowed_list: vec![ListEntry::Single(0)],
+            speculation_store_bypass: rng.gen(),
+            speculation_indirect_branch: rng.gen(),
+            voluntary_ctxt_switches: rng.gen(),
+            nonvoluntary_ctxt_switches: rng.gen(),
+        }
     }
 }
 
@@ -1072,9 +1177,16 @@ impl<'a> Generator<'a> for StatGenerator {
         let pid: Pid = self.pid;
 
         // Assume task scheduling policy is `SCHED_OTHER` (i.e., not a real-time
-        // scheduling policy)
-        let priority = rng.gen_range(0..39);
+        // scheduling policy). The range of task priorities in the kernel in this
+        // scenario is 0 (high) to 39 (low), inclusive. (See `man 5 proc`.)
+        let policy = SchedulingPolicy::Normal;
+        let priority = rng.gen_range(0..40);
         let nice = priority - 20;
+
+        // Due to asumptions above, this value must be 0; the process is
+        // assumed not to be a real-time process. If this value is modified,
+        // then `priority`, `nice`, and `policy` must also be modified.
+        let rt_priority = 0;
 
         Stat {
             pid,
@@ -1099,15 +1211,15 @@ impl<'a> Generator<'a> for StatGenerator {
             priority,
             nice,
             // Assume up to 32 threads per process, arbitrarily.
-            num_threads: rng.gen_range(1..=32),
-            itrealvalue: rng.gen(),
+            num_threads: rng.gen_range(1..=(ASSUMED_THREAD_MAX as i64)),
+            itrealvalue: 0,
             starttime: rng.gen(),
             vsize: rng.gen(),
             rss: rng.gen_range(1..i64::MAX),
-            // For now, ignore that rss <= rsslim should hold
+            // For now, ignore that rss <= rsslim should hold.
             rsslim: rng.gen(),
             startcode: rng.gen(),
-            // For now, ignore that startcode <= endcode should hold
+            // For now, ignore that startcode <= endcode should hold.
             endcode: rng.gen(),
             startstack: rng.gen(),
             // Assume `kstkesp` & `kstkeip` are both 0 because this property
@@ -1123,14 +1235,9 @@ impl<'a> Generator<'a> for StatGenerator {
             cnswap: 0,
             exit_signal: rng.gen(),
             // Assume machine has 8 cores for now
-            processor: rng.gen_range(0..8),
-            // Due to asumptions above, this value must be 0; the process is
-            // assumed not to be a real-time process. If this value is modified,
-            // then `priority`, `nice`, and `policy` must also be modified.
-            rt_priority: 0,
-            // Hardcoded to a non-real-time scheduling policy; may be relaxed
-            // later.
-            policy: SchedulingPolicy::Normal,
+            processor: rng.gen_range(0..ASSUMED_NPROC),
+            rt_priority,
+            policy,
             delayacct_blkio_ticks: rng.gen(),
             guest_time: rng.gen(),
             cguest_time: rng.gen(),
