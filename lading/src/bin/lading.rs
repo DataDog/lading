@@ -295,19 +295,15 @@ async fn inner_main(
 
     let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
-    let mut gsrv_handles: Vec<tokio::task::JoinHandle<Result<(), generator::Error>>> = Vec::new();
+    let mut gsrv_joinset = tokio::task::JoinSet::new();
     //
     // GENERATOR
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
         let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
-        let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
-        gsrv_handles.push(_gsrv);
+        gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
-    // select_all will yield the first resolved future in the given iterator
-    // It will continue to yield new futures as they resolve.
-    let gsrv_waitable = futures::future::select_all(gsrv_handles);
 
     //
     // INSPECTOR
@@ -390,11 +386,16 @@ async fn inner_main(
             info!("experiment duration exceeded, signaling for shutdown");
             shutdown.signal().unwrap();
         }
-        (item_resolved, ready_future_index, _remaining_futures) = gsrv_waitable => {
-            match item_resolved {
-                Ok(Ok(())) => debug!("generator {ready_future_index} shut down successfully"),
-                Ok(Err(err)) => error!("generator failed with err:\n{}", err),
-                Err(join_err) => error!("generator failed with unknown join err:\n{}", join_err),
+        res = gsrv_joinset.join_next() => {
+            match res {
+                Some(join_result) => match join_result {
+                    Ok(generator_result) => match generator_result {
+                        Ok(()) => { /* Generator shut down successfully */ }
+                        Err(err) => error!("Generator shut down unexpectedly: {}", err),
+                    }
+                    Err(err) => error!("Could not join the spawned generator task: {}", err),
+                },
+                None => { /* Indicates all spawned generators have resolved */ }
             }
         }
         res = tsrv => {
