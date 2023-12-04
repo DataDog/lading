@@ -104,6 +104,31 @@ mod proc {
         }
     }
 
+    impl ::std::fmt::Display for self::Io {
+        /// Formats [`Io`] as it would be seen in `/proc/{pid}/io`.
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            write!(
+                f,
+                concat!(
+                    "rchar: {rchar}\n",
+                    "wchar: {wchar}\n",
+                    "syscr: {syscr}\n",
+                    "syscw: {syscw}\n",
+                    "read_bytes: {read_bytes}\n",
+                    "write_bytes: {write_bytes}\n",
+                    "cancelled_write_bytes: {cancelled_write_bytes}"
+                ),
+                rchar = self.rchar,
+                wchar = self.wchar,
+                syscr = self.syscr,
+                syscw = self.syscw,
+                read_bytes = self.read_bytes,
+                write_bytes = self.write_bytes,
+                cancelled_write_bytes = self.cancelled_write_bytes
+            )
+        }
+    }
+
     /// Corresponds to task states from Linux kernel `task_state_array`.
     ///
     /// See `linux/fs/array.c` for details. Assumes kernel version 4.14 or
