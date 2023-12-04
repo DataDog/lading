@@ -244,6 +244,23 @@ impl Distribution<Statm> for Standard {
     }
 }
 
+impl fmt::Display for Statm {
+    /// Outputs [`Statm`] as formatted for `/proc/{pid}/statm`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{size} {resident} {shared} {trs} {lrs} {drs} {dt}",
+            size = self.size,
+            resident = self.resident,
+            shared = self.shared,
+            trs = self.trs,
+            lrs = self.lrs,
+            drs = self.drs,
+            dt = self.dt
+        )
+    }
+}
+
 /// Models a `umask`, equivalent to [`std::ffi::c_uint`].
 #[derive(Debug)]
 struct Umask(u32);
