@@ -1326,7 +1326,18 @@ impl<'a> Generator<'a> for ProcessGenerator {
     ///
     /// - The `/proc/{pid}/stat`, `/proc/{pid}/status`, and `/proc/{pid}/statm`
     ///   files aren't necessarily consistent with each other, nor are any of
-    ///   these files necessarily internally consistent.
+    ///   these files necessarily internally consistent. Notably, none of the
+    ///   virtual memory fields will be consistent among these files; there may
+    ///   be other inconsistencies.
+    /// - The `/proc/{pid}/cmdline` file will consist of a single string of
+    ///   length at most [`NAME_MAX`] bytes, which is the maximum length of a
+    ///   single path element in Linux. For simplicity, this string models a
+    ///   command with no arguments.
+    /// - The `/proc/{pid}/comm` file, corresponding to the process's command
+    ///   name, is the leading substring of at most [`TASK_COMM_LEN`] bytes from
+    ///   `/proc/{pid}/cmdline`. If `/proc/{pid}/cmdline` is shorter than
+    ///   [`TASK_COMM_LEN`] bytes, then `/proc/{pid}/comm` and
+    ///   `/proc/{pid}/cmdline` are identical.
     fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
         R: rand::Rng + ?Sized,
