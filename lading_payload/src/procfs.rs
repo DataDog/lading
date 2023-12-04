@@ -784,10 +784,22 @@ struct Status {
     /// PID of process tracing this process (0 if not, or the trace is outside
     /// of the current pid namespace).
     tracer_pid: Pid,
-    /// Real, effective, saved set, and file system UIDs.
-    uid: [Uid; 4],
-    /// Real, effective, saved set, and file system GIDs.
-    gid: [Gid; 4],
+    /// Real UID.
+    ruid: Uid,
+    /// Effective UID.
+    euid: Uid,
+    /// Saved set UID.
+    suid: Uid,
+    /// Filesystem UID.
+    fuid: Uid,
+    /// Real GID.
+    rgid: Gid,
+    /// Effective GID.
+    egid: Gid,
+    /// Saved set GID.
+    sgid: Gid,
+    /// Filesystem GID.
+    fgid: Gid,
     /// Number of file descriptor slots currently allocated. Cannot exceed the
     /// value stored in `/proc/sys/fs/file-max`. A unprivileged user process may
     /// not exceed the output of `ulimit -n -H`.
@@ -1000,8 +1012,14 @@ impl<'a> Generator<'a> for StatusGenerator {
             // processes are not being traced, which corresponds to setting
             // tracer_pid to 0.
             tracer_pid: Pid(0),
-            uid: [uid, uid, uid, uid],
-            gid: [gid, gid, gid, gid],
+            ruid: uid,
+            euid: uid,
+            suid: uid,
+            fuid: uid,
+            rgid: gid,
+            egid: gid,
+            sgid: gid,
+            fgid: gid,
             fd_size: rng.gen(),
             groups,
             ns_tgid: vec![pid],
