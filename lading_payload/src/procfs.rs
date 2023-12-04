@@ -260,19 +260,20 @@ impl Distribution<DeviceMask> for Standard {
     where
         R: Rng + ?Sized,
     {
-        let bits_0_to_7: u8 = rng.gen();
-        let bits_8_to_15: u8 = rng.gen();
-
-        // SAFETY: Shifting any `u8` in the range 0..16 yields a
-        // `u8` less than or equal to 255, which is `u8::MAX`. Treats
-        // representation as little-endian. This operation yields
-        // a little-endian u8 such that the lowest-order 4 bits are zero,
-        // and thus will ensure bits 16 to 19 (inclusive) are zero.
-        let mut bits_16_to_23: u8 = rng.gen_range(0..16);
-        bits_16_to_23 = bits_16_to_23.checked_shl(4).unwrap();
-        let bits_24_to_31: u8 = rng.gen();
-
-        let mask = i32::from_le_bytes([bits_24_to_31, bits_16_to_23, bits_8_to_15, bits_0_to_7]);
+        // This operation could likely be done more efficiently by unrolling
+        // both loops, generating the low-order 16 bits all at once, then
+        // generating the 12 high-order bits all at once. Even though this code
+        // is performance-sensitive, the simple approach is used here to land a
+        // simple implementation before later performance optimizations.
+        let mut mask: i32 = 0;
+        for index in 0..16 {
+            let bit: i32 = rng.gen_range(0..=1);
+            mask |= bit << index;
+        }
+        for index in 20..32 {
+            let bit: i32 = rng.gen_range(0..=1);
+            mask |= bit << index;
+        }
         DeviceMask(mask)
     }
 }
