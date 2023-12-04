@@ -616,9 +616,8 @@ impl fmt::Display for SpeculationIndirectBranch {
 /// non-exhaustive.
 #[derive(Debug)]
 struct Status {
-    /// Filename of executable (with escapes, limited to 64 bytes). Must encode
-    /// a valid UTF-8 string.
-    name: [u8; TASK_NAME_LEN],
+    /// Filename of executable (with escapes, limited to [`TASK_NAME_LEN`] bytes).
+    name: String,
     /// File mode creation mask.
     umask: Umask,
     /// State of process.
@@ -780,21 +779,20 @@ struct StatusGenerator {
     /// Its purpose is to enable clients to force `/proc/{pid}/stat` and
     /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
     pid: Pid,
-    /// Task's longer `comm` name; has length at most 64 bytes. Used to avoid
-    /// the need for multiple string pools. The name of this field is a snake
-    /// case version of the corresponding `Name` field in `/proc/{pid}/status`.
-    /// Must encode a valid UTF-8 string.
-    name: [u8; TASK_NAME_LEN],
+    /// Task's longer `comm` name; has length at most [`TASK_NAME_LEN`] bytes.
+    /// Used to avoid the need for multiple string pools. The name of this field
+    /// is a snake case version of the corresponding `Name` field in
+    /// `/proc/{pid}/status`.
+    name: String,
 }
 
 impl StatusGenerator {
     /// Construct new instance of [`StatusGenerator`].
-    ///
-    /// `name` must encode a valid UTF-8 string.
-    fn new<R>(pid: Pid, name: [u8; TASK_NAME_LEN], rng: &mut R) -> Self
+    fn new<R>(pid: Pid, name: String, rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
+        assert!(name.len() <= TASK_NAME_LEN);
         Self { pid, name }
     }
 }
@@ -980,9 +978,9 @@ impl fmt::Display for SchedulingPolicy {
 struct Stat {
     /// (1) The process ID.
     pid: Pid,
-    /// (2) File name of executable, in parentheses. Limited to `TASK_COMM_LEN`
-    /// bytes. Must encode a valid UTF-8 string.
-    comm: [u8; TASK_COMM_LEN],
+    /// (2) File name of executable, in parentheses. Limited to [`TASK_COMM_LEN`]
+    /// bytes.
+    comm: String,
     /// (3) Indicates process state.
     state: proc::State,
     /// (4) The PID of the parent of this process.
@@ -1136,18 +1134,17 @@ struct StatGenerator {
     pid: Pid,
     /// String for task's `comm` name. Used to avoid having multiple string
     /// pools, particularly because this string slice should be at most 16
-    /// bytes. Must encode a valid UTF-8 string.
-    comm: [u8; TASK_COMM_LEN],
+    /// bytes.
+    comm: String,
 }
 
 impl StatGenerator {
     /// Construct new instance of [`StatGenerator`].
-    ///
-    /// `comm` must encode a valid UTF-8 string.
-    fn new<R>(pid: Pid, comm: [u8; TASK_COMM_LEN], rng: &mut R) -> Self
+    fn new<R>(pid: Pid, comm: String, rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
+        assert!(comm.len() <= TASK_COMM_LEN);
         Self { pid, comm }
     }
 }
@@ -1271,8 +1268,7 @@ impl<'a> Generator<'a> for StatGenerator {
 /// `process-agent` currently only reads the following files in `/proc/{pid}`:
 ///
 /// - cmdline (string containing command lin)
-/// - comm (string of `TASK_COMM_LEN` characters or less; currently,
-///   `TASK_COMM_LEN` is 16).
+/// - comm (string of [`TASK_COMM_LEN`] characters or less).
 /// - io
 /// - stat
 /// - statm
@@ -1283,10 +1279,10 @@ impl<'a> Generator<'a> for StatGenerator {
 pub struct Process {
     /// Command line for process (unless a zombie); corresponds to
     /// `/proc/{pid}/cmdline`.
-    cmdline: [u8; NAME_MAX],
-    /// Command name associated with process. Truncated to `TASK_COMM_LEN`
+    cmdline: String,
+    /// Command name associated with process. Truncated to [`TASK_COMM_LEN`]
     /// bytes.
-    comm: [u8; TASK_COMM_LEN],
+    comm: String,
     /// Corresponds to `/proc/{pid}/io`.
     io: proc::Io,
     /// Corresponds to `/proc/{pid}/stat`.
@@ -1335,22 +1331,18 @@ impl<'a> Generator<'a> for ProcessGenerator {
 
         // SAFETY: If this call fails, then execution should panic because an
         // inability to generate process command lines is a serious bug.
-        let cmdline_str = self.str_pool.of_size(rng, cmdline_size).unwrap();
-        let mut cmdline = [u8::default(); NAME_MAX];
-        cmdline[..cmdline_str.len()].copy_from_slice(cmdline_str.as_bytes());
+        let cmdline = String::from(self.str_pool.of_size(rng, cmdline_size).unwrap());
 
         // Assume the comm name and task name are derived from `cmdline`. Note
         // from `man 5 proc` that a thread may modify its `comm` (command name)
         // and/or its `cmdline` from what is executed in the terminal, so
         // there's nothing that forces the command name or task name to be a
         // subset of the command line.
-        let comm_size = std::cmp::min(TASK_COMM_LEN, cmdline_str.len());
-        let mut comm = [u8::default(); TASK_COMM_LEN];
-        comm[..comm_size].copy_from_slice(cmdline_str[..comm_size].as_bytes());
+        let comm_size = std::cmp::min(TASK_COMM_LEN, cmdline.len());
+        let comm = String::from(&cmdline[..comm_size]);
 
-        let name_size = std::cmp::min(TASK_NAME_LEN, cmdline_size);
-        let mut name = [u8::default(); TASK_NAME_LEN];
-        name[..name_size].copy_from_slice(cmdline_str[..name_size].as_bytes());
+        let name_size = std::cmp::min(TASK_NAME_LEN, cmdline.len());
+        let name = String::from(&cmdline[..name_size]);
 
         let io: proc::Io = rng.gen();
         let statm: Statm = rng.gen();
