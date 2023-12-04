@@ -1245,6 +1245,84 @@ struct Stat {
     exit_code: i32,
 }
 
+impl fmt::Display for Stat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The concat macro is used here in an attempt to avoid excessively long
+        // lines of string literals. Literals are deliberately grouped into rows
+        // of five for readability (except for the last line), but
+        // `/proc/{pid}/stat` displays all of the corresponding fields on one
+        // line.
+        write!(
+            f,
+            concat!(
+                "{pid} {comm} {state} {ppid} {pgrp} ",
+                "{session} {tty_nr} {tpgid} {flags} {minflt} ",
+                "{cminflt} {majflt} {cmajflt} {utime} {stime} ",
+                "{cutime} {cstime} {priority} {nice} {num_threads} ",
+                "{itrealvalue} {starttime} {vsize} {rss} {rsslim} ",
+                "{startcode} {endcode} {startstack} {kstkesp} {kstkeip} ",
+                "{signal} {blocked} {sigignore} {sigcatch} {wchan} ",
+                "{nswap} {cnswap} {exit_signal} {processor} {rt_priority} ",
+                "{policy} {delayacct_blkio_ticks} {guest_time} {cguest_time} {start_data}",
+                "{end_data} {start_brk} {arg_start} {arg_end} {env_start} ",
+                "{env_end} {exit_code}"
+            ),
+            pid = self.pid,
+            comm = self.comm,
+            state = self.state.as_stat_code(),
+            ppid = self.ppid,
+            pgrp = self.pgrp,
+            session = self.session,
+            tty_nr = self.tty_nr,
+            tpgid = self.tpgid,
+            flags = self.flags,
+            minflt = self.minflt,
+            cminflt = self.cminflt,
+            majflt = self.majflt,
+            cmajflt = self.cmajflt,
+            utime = self.utime,
+            stime = self.stime,
+            cutime = self.cutime,
+            cstime = self.cstime,
+            priority = self.priority,
+            nice = self.nice,
+            num_threads = self.num_threads,
+            itrealvalue = self.itrealvalue,
+            starttime = self.starttime,
+            vsize = self.vsize,
+            rss = self.rss,
+            rsslim = self.rsslim,
+            startcode = self.startcode,
+            endcode = self.endcode,
+            startstack = self.startstack,
+            kstkesp = self.kstkesp,
+            kstkeip = self.kstkeip,
+            signal = self.signal,
+            blocked = self.blocked,
+            sigignore = self.sigignore,
+            sigcatch = self.sigcatch,
+            wchan = self.wchan,
+            nswap = self.nswap,
+            cnswap = self.cnswap,
+            exit_signal = self.exit_signal,
+            processor = self.processor,
+            rt_priority = self.rt_priority,
+            policy = self.policy,
+            delayacct_blkio_ticks = self.delayacct_blkio_ticks,
+            guest_time = self.guest_time,
+            cguest_time = self.cguest_time,
+            start_data = self.start_data,
+            end_data = self.end_data,
+            start_brk = self.start_brk,
+            arg_start = self.arg_start,
+            arg_end = self.arg_end,
+            env_start = self.env_start,
+            env_end = self.env_end,
+            exit_code = self.exit_code
+        )
+    }
+}
+
 /// Generates [`Stat`].
 struct StatGenerator {
     /// The process ID to assign to the `/proc/{pid}/stat` file.
