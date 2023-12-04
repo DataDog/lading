@@ -339,6 +339,12 @@ impl Distribution<Pid> for Standard {
     }
 }
 
+impl fmt::Display for Pid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Models a user ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `uid_t` type in the Linux kernel.
@@ -354,6 +360,12 @@ impl Distribution<Uid> for Standard {
     }
 }
 
+impl fmt::Display for Uid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Models a group ID number, equivalent to [`std::ffi::c_uint`].
 ///
 /// This data is modeled by the `gid_t` type in the Linux kernel.
@@ -366,6 +378,12 @@ impl Distribution<Gid> for Standard {
         R: Rng + ?Sized,
     {
         Gid(rng.gen())
+    }
+}
+
+impl fmt::Display for Gid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
