@@ -598,6 +598,7 @@ impl fmt::Display for SpeculationIndirectBranch {
 ///
 /// See the [Linux kernel `/proc` filesystem
 /// documentation](https://docs.kernel.org/filesystems/proc.html), Table 1-2.
+/// The `Kthread` field is omitted for the time being.
 ///
 /// This struct needs to be consistent with the information in
 /// `/proc/[pid]/stat`. In many cases, the information in this struct has an
@@ -655,8 +656,6 @@ struct Status {
     /// Descendant namespace session ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
     ns_sid: Vec<Pid>,
-    /// Whether the process thread is a kernel thread.
-    kthread: Option<bool>,
     /// Peak virtual memory size (in bytes). Present only if task has non-null
     /// memory management pointer.
     vm_peak: u64,
@@ -859,7 +858,6 @@ impl<'a> Generator<'a> for StatusGenerator {
             ns_pid: vec![pid],
             ns_pgid: vec![pid],
             ns_sid: vec![pid],
-            kthread: None,
             vm_peak: rng.gen(),
             vm_size: rng.gen(),
             vm_lck: rng.gen(),
