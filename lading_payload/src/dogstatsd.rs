@@ -444,9 +444,12 @@ impl MemberGenerator {
         let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
         let num_contexts = contexts.sample(rng);
+        // TODO propogate this up the chain so its configurable
+        let common_tag_pool_size = ConfRange::Constant(100);
 
         let mut tags_generator = tags::Generator::new(
             rng.gen(),
+            common_tag_pool_size,
             tags_per_msg,
             tag_key_length,
             tag_value_length,
