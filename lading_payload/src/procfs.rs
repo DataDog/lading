@@ -161,6 +161,40 @@ mod proc {
         Idle,
     }
 
+    impl State {
+        /// Formats [`State`] as displayed in `/proc/{pid}/status`.
+        pub(super) fn as_status_code(&self) -> &str {
+            match self {
+                State::Running => "R (running)",
+                State::Sleeping => "S (sleeping)",
+                State::DiskSleep => "D (disk sleep)",
+                State::Stopped => "T (stopped)",
+                State::TracingStop => "t (tracing stop)",
+                State::Dead => "X (dead)",
+                State::Zombie => "Z (zombie)",
+                State::Parked => "P (parked)",
+                State::Idle => "I (idle)",
+                _ => unreachable!(),
+            }
+        }
+
+        /// Formats [`State`] as displayed in `/proc/{pid}/stat`.
+        pub(super) fn as_stat_code(&self) -> &str {
+            match self {
+                State::Running => "R",
+                State::Sleeping => "S",
+                State::DiskSleep => "D",
+                State::Stopped => "T",
+                State::TracingStop => "t",
+                State::Dead => "X",
+                State::Zombie => "Z",
+                State::Parked => "P",
+                State::Idle => "I",
+                _ => unreachable!(),
+            }
+        }
+    }
+
     impl Distribution<State> for Standard {
         fn sample<R>(&self, rng: &mut R) -> State
         where
