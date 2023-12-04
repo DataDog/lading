@@ -1,15 +1,10 @@
 //! Procfs payload.
 
 use core::fmt;
-use std::{
-    io::Write,
-    num::{NonZeroU64, NonZeroU8},
-};
 
-use crate::{common::strings, Error, Generator};
+use crate::{common::strings, Generator};
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
-use serde::Deserialize;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 /// Maximum `pid` value, defined in the Linux kernel via a macro of the same
 /// name in `include/linux/threads.h`. Assumes a 64-bit system; the value below
@@ -35,10 +30,13 @@ const UMASK_MAX: u32 = 4096;
 /// to macro of the same name in `include/uapi/linux/limits.h`.
 const NGROUPS_MAX: usize = 65536;
 
-/// Maximum number of bytes in a path name, including a null byte. Rust does not
-/// automatically terminate strings with a null byte, so we subtract one from the
-/// macro of the same name in `include/uapi/linux/limits.h`.
-const PATH_MAX: usize = 4095;
+/// Maximum number of bytes in any component of a path name, including a null
+/// byte. Rust does not automatically terminate strings with a null byte, so we
+/// subtract one from the macro of the same name in
+/// `include/uapi/linux/limits.h`. To simplify the generation of
+/// `/proc/{pid}/cmdline`, we assume the command line has one component and no
+/// arguments.
+const NAME_MAX: usize = 254;
 
 /// Maximum number of Seccomp filters that can be attached to a given thread.
 /// This number is calculated from information in `man 2 seccomp`. The maximum
@@ -617,9 +615,10 @@ impl fmt::Display for SpeculationIndirectBranch {
 /// We can't use the `procfs::Process::Status` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Status<'a> {
-    /// Filename of executable (with escapes, limited to 64 bytes).
-    name: &'a str,
+struct Status {
+    /// Filename of executable (with escapes, limited to 64 bytes). Must encode
+    /// a valid UTF-8 string.
+    name: [u8; TASK_NAME_LEN],
     /// File mode creation mask.
     umask: Umask,
     /// State of process.
@@ -781,25 +780,27 @@ struct StatusGenerator {
     /// Its purpose is to enable clients to force `/proc/{pid}/stat` and
     /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
     pid: Pid,
-    /// Pool used to generate strings for task's (longer) `comm` name.
-    pool: strings::Pool,
+    /// Task's longer `comm` name; has length at most 64 bytes. Used to avoid
+    /// the need for multiple string pools. The name of this field is a snake
+    /// case version of the corresponding `Name` field in `/proc/{pid}/status`.
+    /// Must encode a valid UTF-8 string.
+    name: [u8; TASK_NAME_LEN],
 }
 
 impl StatusGenerator {
     /// Construct new instance of [`StatusGenerator`].
-    fn new<R>(pid: Pid, rng: &mut R) -> Self
+    ///
+    /// `name` must encode a valid UTF-8 string.
+    fn new<R>(pid: Pid, name: [u8; TASK_NAME_LEN], rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
-        Self {
-            pid,
-            pool: strings::Pool::with_size(rng, 1_000_000),
-        }
+        Self { pid, name }
     }
 }
 
 impl<'a> Generator<'a> for StatusGenerator {
-    type Output = Status<'a>;
+    type Output = Status;
 
     fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
@@ -841,7 +842,7 @@ impl<'a> Generator<'a> for StatusGenerator {
         }
 
         Status {
-            name: self.pool.of_size_range(rng, 1..TASK_NAME_LEN).unwrap(),
+            name: self.name.clone(),
             umask: rng.gen(),
             state: rng.gen(),
             tgid: pid,
@@ -976,12 +977,12 @@ impl fmt::Display for SchedulingPolicy {
 /// We can't use the `procfs::process::Stat` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Stat<'a> {
+struct Stat {
     /// (1) The process ID.
     pid: Pid,
     /// (2) File name of executable, in parentheses. Limited to `TASK_COMM_LEN`
-    /// bytes.
-    comm: &'a str,
+    /// bytes. Must encode a valid UTF-8 string.
+    comm: [u8; TASK_COMM_LEN],
     /// (3) Indicates process state.
     state: proc::State,
     /// (4) The PID of the parent of this process.
@@ -1133,25 +1134,26 @@ struct StatGenerator {
     /// Its purpose is to enable clients to force `/proc/{pid}/stat` and
     /// `/proc/{pid}/status` to have, at minimum, the same `pid`.
     pid: Pid,
-    /// Pool used to generate strings for task's `comm` name.
-    pool: strings::Pool,
+    /// String for task's `comm` name. Used to avoid having multiple string
+    /// pools, particularly because this string slice should be at most 16
+    /// bytes. Must encode a valid UTF-8 string.
+    comm: [u8; TASK_COMM_LEN],
 }
 
 impl StatGenerator {
     /// Construct new instance of [`StatGenerator`].
-    fn new<R>(pid: Pid, rng: &mut R) -> Self
+    ///
+    /// `comm` must encode a valid UTF-8 string.
+    fn new<R>(pid: Pid, comm: [u8; TASK_COMM_LEN], rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
-        Self {
-            pid,
-            pool: strings::Pool::with_size(rng, 1_000_000),
-        }
+        Self { pid, comm }
     }
 }
 
 impl<'a> Generator<'a> for StatGenerator {
-    type Output = Stat<'a>;
+    type Output = Stat;
 
     /// Generates a [`Stat`] instance (modeling `/proc/{pid}/stat`) under the
     /// following assumptions:
@@ -1191,7 +1193,7 @@ impl<'a> Generator<'a> for StatGenerator {
 
         Stat {
             pid,
-            comm: self.pool.of_size_range(&mut rng, 1..TASK_COMM_LEN).unwrap(),
+            comm: self.comm.clone(),
             state: rng.gen(),
             ppid: rng.gen(),
             // Assume process group ID group and session ID are eqaul to PID
@@ -1278,88 +1280,96 @@ impl<'a> Generator<'a> for StatGenerator {
 ///
 /// so this struct reflects that behavior.
 #[derive(Debug)]
-struct Process<'a> {
+pub struct Process {
     /// Command line for process (unless a zombie); corresponds to
     /// `/proc/{pid}/cmdline`.
-    cmdline: &'a str,
+    cmdline: [u8; NAME_MAX],
     /// Command name associated with process. Truncated to `TASK_COMM_LEN`
     /// bytes.
-    comm: &'a str,
+    comm: [u8; TASK_COMM_LEN],
     /// Corresponds to `/proc/{pid}/io`.
     io: proc::Io,
     /// Corresponds to `/proc/{pid}/stat`.
-    stat: Stat<'a>,
+    stat: Stat,
     /// Corresponds to `/proc/{pid}/statm`.
     statm: Statm,
     /// Corresponds to `/proc/{pid}/status`.
-    status: Status<'a>,
+    status: Status,
 }
 
-/*
+/// Generates a [`Process`].
+#[derive(Debug)]
+pub struct ProcessGenerator {
+    str_pool: strings::Pool,
+}
 
-impl Process {
-    /// Create a new [`Process`] modeling `/proc/{pid}` files.
-    ///
-    /// Very much a work-in-progress because some common setup work should be
-    /// factored out into a separate type.
-    fn new(rng: &mut rngs::StdRng, config: &Config) -> Self {
-        // Generate length of executable name (could be length 0).
-
-        // Generate executable name
-
-        // Generate number of arguments (if executable name has positive length)
-
-        // Generate each argument
-
-        // Assemble into a command line, which will be assigned to the
-        // `cmdline` field of `Self`.
-
-        // Generate 7 random `u64` elements for `task::Io `struct.
-
-        // --- start generating Status struct --- //
-
-        // Generate task name (up to 64 bytes). This name is related to
-        // cmdline, but could be different. I don't think this string can be
-        // empty.
-
-        // TODO(geoffrey.oxberry@datadoghq.com): Add remaining fields.
-        //
-        // The following fields should be pretty straightforward:
-        //
-        // - umask: choose any legel variant of that `enum` type
-        // - state: choose any variant of `task::State`
-        // - tgid, ngid, pid, ppid, tracer_pid: choose an i32.
-        // - fd_size: may need to check `/proc/sys/fs/file-max` or `ulimit`
-        //   before deciding on a `u64` range to use
-        // - kthread: choose a random bool
-        // - vm_, rss_*, huge_tlb_pages: pick `u64` values; the display value
-        //   will need to be in kibibytes (but printed as "kB").
-        // - core_dumping, thp_enabled: choose a random bool
-        // - untag_mask: IIRC, could be 0xffffffffffffffff on architectures that
-        //   don't support masking, and on those that do, need to know if
-        //   addresses are 48 bits or 57 bits. In practice, maybe it could be a
-        //   random `u64`; not sure it's important.
-        //
-        // The following fields are fields I need to look into:
-        //
-        // - uid: much of the time, real, effective, saved set, and filesystem
-        //   UIDs should be the same, but not always.
-        // - gid: much of the time, real, effective, saved set, and filesystem
-        //   GIDs could be the same, but not always.
-        // - ns_tgid: ?
-        // - ns_pid: ?
-        // - ns_sid: ?
-
-        // --- end generating Status struct --- //
-
-        // Statm struct is basically a view of the Status struct, assuming we're
-        // running on a kernel configured with an MMU. (For our main cases of
-        // interest, x86_64 and arm64 machines, this assumption is true.) How
-        // this view should be constructed is discussed in the comments for the
-        // `Statm` struct.
-
-        // Truncate task name to 16 bytes & store in `comm` field of `Self`.
+impl ProcessGenerator {
+    /// Construct a new instance of `ProcessGenerator`.
+    pub fn new<R>(rng: &mut R) -> Self
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+        }
     }
 }
 
-*/
+impl<'a> Generator<'a> for ProcessGenerator {
+    type Output = Process;
+
+    /// Generates a [`Process`].
+    ///
+    /// Generates a [`Process`] with a random the following caveats:
+    ///
+    /// - The `/proc/{pid}/stat`, `/proc/{pid}/status`, and `/proc/{pid}/statm`
+    ///   files aren't necessarily consistent with each other, nor are any of
+    ///   these files necessarily internally consistent.
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    where
+        R: rand::Rng + ?Sized,
+    {
+        // For simplicity, assume the command line is a single string consisting
+        // of a single path component and no arguments.
+        let cmdline_size: usize = rng.gen_range(1..NAME_MAX);
+
+        // SAFETY: If this call fails, then execution should panic because an
+        // inability to generate process command lines is a serious bug.
+        let cmdline_str = self.str_pool.of_size(rng, cmdline_size).unwrap();
+        let mut cmdline = [u8::default(); NAME_MAX];
+        cmdline[..cmdline_str.len()].copy_from_slice(cmdline_str.as_bytes());
+
+        // Assume the comm name and task name are derived from `cmdline`. Note
+        // from `man 5 proc` that a thread may modify its `comm` (command name)
+        // and/or its `cmdline` from what is executed in the terminal, so
+        // there's nothing that forces the command name or task name to be a
+        // subset of the command line.
+        let comm_size = std::cmp::min(TASK_COMM_LEN, cmdline_str.len());
+        let mut comm = [u8::default(); TASK_COMM_LEN];
+        comm[..comm_size].copy_from_slice(cmdline_str[..comm_size].as_bytes());
+
+        let name_size = std::cmp::min(TASK_NAME_LEN, cmdline_size);
+        let mut name = [u8::default(); TASK_NAME_LEN];
+        name[..name_size].copy_from_slice(cmdline_str[..name_size].as_bytes());
+
+        let io: proc::Io = rng.gen();
+        let statm: Statm = rng.gen();
+
+        let pid: Pid = Pid(rng.gen_range(1..PID_MAX_LIMIT));
+
+        let stat_gen = StatGenerator::new(pid, comm.clone(), rng);
+        let stat = stat_gen.generate(rng);
+
+        let status_gen = StatusGenerator::new(pid, name, rng);
+        let status = status_gen.generate(rng);
+
+        Process {
+            cmdline,
+            comm: comm.clone(),
+            io,
+            stat,
+            statm,
+            status,
+        }
+    }
+}
