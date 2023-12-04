@@ -18,6 +18,7 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{rngs::StdRng, SeedableRng};
 use rustc_hash::FxHashMap;
@@ -376,6 +377,8 @@ async fn inner_main(
         info!("warmup completed, collecting samples");
         sleep(experiment_duration).await;
     };
+
+    gauge!("online", 1.0);
 
     tokio::select! {
         _ = signal::ctrl_c() => {

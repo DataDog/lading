@@ -1130,7 +1130,6 @@ dependencies = [
  "procfs",
  "proptest",
  "proptest-derive",
- "quanta",
  "rand",
  "reqwest",
  "rustc-hash",
