@@ -561,6 +561,20 @@ impl fmt::Display for MaskEntry {
     }
 }
 
+/// Models `{Cpus,Mems}_allowed` fields of `/proc/{pid}/status`.
+///
+/// Models a vector of [`MaskEntry`] elements for formatting purposes.
+#[derive(Debug)]
+struct MaskCollection(Vec<MaskEntry>);
+
+impl fmt::Display for MaskCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string_vec: Vec<_> = self.0.iter().map(MaskEntry::to_string).collect();
+        let output = &string_vec.join(",");
+        write!(f, "{output}")
+    }
+}
+
 /// Models entries of `{Cpus,Mems}_allowed_list` in `/proc/{pid}/status`.
 ///
 /// Models entries of the `Cpus_allowed_list` and `Mems_allowed_list` fields in
@@ -591,6 +605,20 @@ impl fmt::Display for ListEntry {
             ListEntry::Single(entry) => write!(f, "{entry}"),
             ListEntry::RangeInclusive { first, last } => write!(f, "{first}-{last}"),
         }
+    }
+}
+
+/// Models `{Cpus,Mems}_allowed_list` fields of `/proc/{pid}/status`.
+///
+/// Models a vector of [`ListEntry`] elements for formatting purposes.
+#[derive(Debug)]
+struct ListCollection(Vec<ListEntry>);
+
+impl fmt::Display for ListCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string_vec: Vec<_> = self.0.iter().map(ListEntry::to_string).collect();
+        let output = &string_vec.join(",");
+        write!(f, "{output}")
     }
 }
 
@@ -872,15 +900,15 @@ struct Status {
     seccomp_filters: i32,
     /// Mask of CPUs on which this process may run; isomorphic to
     /// `cpus_allowed_list`.
-    cpus_allowed: Vec<MaskEntry>,
+    cpus_allowed: MaskCollection,
     /// List of CPUs on which this process may run; isomorphic to `cpus_allowed`.
-    cpus_allowed_list: Vec<ListEntry>,
+    cpus_allowed_list: ListCollection,
     /// Mask of memory nodes allowed to this process; isomorphic to
     /// `mems_allowed_list`.
-    mems_allowed: Vec<MaskEntry>,
+    mems_allowed: MaskCollection,
     /// List of memory nodes allowed to this process; isomorphic to
     /// `mems_allowed`.
-    mems_allowed_list: Vec<ListEntry>,
+    mems_allowed_list: ListCollection,
     /// Indicates whether process may or may not be vulnerable to a Speculative
     /// Store Bypass attack (CVE-2018-3639).
     speculation_store_bypass: SpeculationStoreBypass,
@@ -943,11 +971,11 @@ impl<'a> Generator<'a> for StatusGenerator {
         for i in 0..ASSUMED_NPROC {
             cpu_mask |= (1 << i);
         }
-        let cpus_allowed = vec![MaskEntry(cpu_mask)];
-        let cpus_allowed_list = vec![ListEntry::RangeInclusive {
+        let cpus_allowed = MaskCollection(vec![MaskEntry(cpu_mask)]);
+        let cpus_allowed_list = ListCollection(vec![ListEntry::RangeInclusive {
             first: 0,
             last: (ASSUMED_NPROC - 1) as u64,
-        }];
+        }]);
 
         // Sanity check the assumed number of groups a process may belong to here,
         // because this location is the only place where that data is used.
@@ -1024,8 +1052,8 @@ impl<'a> Generator<'a> for StatusGenerator {
             // Assume a single NUMA node is available due to a lack of
             // real-world examples of processes that are allowed to allocate
             // memory on a NUMA node other than node 0
-            mems_allowed: vec![MaskEntry(0x0)],
-            mems_allowed_list: vec![ListEntry::Single(0)],
+            mems_allowed: MaskCollection(vec![MaskEntry(0x0)]),
+            mems_allowed_list: ListCollection(vec![ListEntry::Single(0)]),
             speculation_store_bypass: rng.gen(),
             speculation_indirect_branch: rng.gen(),
             voluntary_ctxt_switches: rng.gen(),
