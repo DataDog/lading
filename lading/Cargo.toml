@@ -17,6 +17,7 @@ lading-throttle = { version = "0.1", path = "../lading_throttle" }
 byte-unit = { version = "4.0", features = ["serde"] }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
+console-subscriber = { version = "0.2", optional = true }
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
 futures = "0.3.28"
 http = "0.2"
@@ -38,7 +39,7 @@ serde_json = {workspace = true }
 serde_qs = "0.12"
 serde_yaml = "0.9"
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net", "tracing"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
@@ -56,6 +57,7 @@ proptest-derive = "0.4.0"
 
 [features]
 default = []
+tokio_console = ["console-subscriber"]
 
 [lib]
 doctest = false

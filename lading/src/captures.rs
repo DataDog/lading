@@ -100,6 +100,7 @@ impl CaptureManager {
         self.global_labels.insert(key.into(), value.into());
     }
 
+    #[tracing::instrument(skip(self))]
     async fn record_captures(&mut self) {
         let now_ms: u128 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -187,6 +188,7 @@ impl CaptureManager {
     /// # Panics
     ///
     /// None known.
+    #[tracing::instrument(skip(self))]
     pub async fn run(mut self) -> Result<(), io::Error> {
         let mut write_delay = time::interval(Duration::from_secs(1));
 
