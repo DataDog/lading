@@ -933,6 +933,14 @@ struct Status {
     nonvoluntary_ctxt_switches: u64,
 }
 
+// TODO(geoffrey.oxberry@datadoghq.com): Implement `std::Display` for `Status`.
+// Then, theoretically, I could use `format!` to stringify it and compute its
+// length as a string for the process generator. I could try to figure out an
+// upper bound on the length by hand, but if I have to serialize it to a string
+// anyway, and Rust is going to compute the length of that string in bytes, I
+// may as well have Rust compute the length for me because it will be more
+// accurate.
+
 /// Generates [`Status`].
 struct StatusGenerator {
     /// The process ID to assign to the `/proc/{pid}/status` file.
