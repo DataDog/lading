@@ -1265,7 +1265,7 @@ impl<'a> Generator<'a> for StatGenerator {
 ///
 /// `process-agent` currently only reads the following files in `/proc/{pid}`:
 ///
-/// - cmdline (string containing command lin)
+/// - cmdline (string containing command line)
 /// - comm (string of [`TASK_COMM_LEN`] characters or less).
 /// - io
 /// - stat
