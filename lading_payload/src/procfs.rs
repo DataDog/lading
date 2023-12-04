@@ -327,6 +327,34 @@ impl Distribution<Gid> for Standard {
     }
 }
 
+/// Models memory size entries in `/proc/{pid}/status` *only*.
+///
+/// Models memory size entries (e.g., `VmPeak`, `VmSize`) in
+/// `/proc/{pid}/status`. These entries are quirky because:
+///
+/// - the underlying memory size data is stored in units of bytes
+/// - the output is displayed in units of "kB", which in this context means
+///   *kibibyte* (i.e., 1024 bytes).
+#[derive(Debug, Clone, Copy)]
+struct MemSize(u64);
+
+impl Distribution<MemSize> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> MemSize
+    where
+        R: Rng + ?Sized,
+    {
+        MemSize(rng.gen())
+    }
+}
+
+impl fmt::Display for MemSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let size_in_bytes = self.0;
+        let size_in_kibibytes = size_in_bytes >> 10;
+        write!(f, "{size_in_kibibytes} kB")
+    }
+}
+
 /// Models SigQ field of `/proc/{pid}/status`.
 ///
 /// Equivalent to `(std::ffi::c_uint, std::ffi::c_ulong)`.
@@ -658,51 +686,51 @@ struct Status {
     ns_sid: Vec<Pid>,
     /// Peak virtual memory size (in bytes). Present only if task has non-null
     /// memory management pointer.
-    vm_peak: u64,
+    vm_peak: MemSize,
     /// Total program size (in bytes). Present only if task has non-null memory
     /// management pointer.
-    vm_size: u64,
+    vm_size: MemSize,
     /// Locked memory size (in bytes). Present only if task has non-null memory
     /// management pointer.
-    vm_lck: u64,
+    vm_lck: MemSize,
     /// Pinned memory size (in bytes). Present only if task has non-null memory
     /// management pointer.
-    vm_pin: u64,
+    vm_pin: MemSize,
     /// Peak resident set size (in bytes). Present only if task has non-null
     /// memory management pointer.
-    vm_hwm: u64,
+    vm_hwm: MemSize,
     /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem. Present
     /// only if task has non-null memory management pointer.
-    vm_rss: u64,
+    vm_rss: MemSize,
     /// Resident anonymous memory size (in bytes). Present only if task has
     /// non-null memory management pointer.
-    rss_anon: u64,
+    rss_anon: MemSize,
     /// Resident file mappings size (in bytes). Present only if task has
     /// non-null memory management pointer.
-    rss_file: u64,
+    rss_file: MemSize,
     /// Resident shmem memory size (in bytes; includes SysV shm, tmpfs mapping,
     /// shared anonymous mappings). Present only if task has non-null memory
     /// management pointer.
-    rss_shmem: u64,
+    rss_shmem: MemSize,
     /// Size of private data segments (in bytes). Present only if task has
     /// non-null memory management pointer.
-    vm_data: u64,
+    vm_data: MemSize,
     /// Size of stack segments (in bytes). Present only if task has non-null
     /// memory management pointer.
-    vm_stk: u64,
+    vm_stk: MemSize,
     /// Size of text segment (in bytes). Present only if task has non-null
     /// memory management pointer.
-    vm_exe: u64,
+    vm_exe: MemSize,
     /// Size of shared library code (in bytes). Present only if task has
     /// non-null memory management pointer.
-    vm_lib: u64,
+    vm_lib: MemSize,
     /// Size of page table entries (in bytes). Present only if task has non-null
     /// memory management pointer.
-    vm_pte: u64,
+    vm_pte: MemSize,
     /// Size of swap used by anonymous private data (in bytes; does not include
     /// shmem swap). Present only if task has non-null memory management
     /// pointer.
-    vm_swap: u64,
+    vm_swap: MemSize,
     /// Size of huge translation lookaside buffer (in bytes). Present only if
     /// task has non-null memory management pointer.
     huge_tlb_pages: u64,
