@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.1-rc4]
+### Added
+- We now have optional support for tokio-console for debugging purposes.
+### Changed
+- Remove generational storage in `metrics` to avoid contended RWLock.
+
 ## [0.20.1-rc3]
 ### Changed
 - Disabled ANSI codes in logging.
