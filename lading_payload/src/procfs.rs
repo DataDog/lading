@@ -1276,7 +1276,15 @@ impl<'a> Generator<'a> for StatGenerator {
 #[derive(Debug)]
 pub struct Process {
     /// Command line for process (unless a zombie); corresponds to
-    /// `/proc/{pid}/cmdline`.
+    /// `/proc/{pid}/cmdline`. Unlike other fields, must be serialized to a
+    /// binary format. This field is basically the `argv` argument to `execve`,
+    /// serialized in binary on a single line, including all of the null
+    /// characters. For example, a command like `python3 -m pip freeze` would be
+    /// serialized to a single, null-terminated line in binary in which each of
+    /// the interior whitespace characters is replaced with a null character:
+    /// `python3^@-m^@pip^@freeze`, where the digraph `^@` represents the "null
+    /// character" grapheme. (This digraph was chosen because that is how `less`
+    /// renders a null character.)
     cmdline: String,
     /// Command name associated with process. Truncated to [`TASK_COMM_LEN`]
     /// bytes.
