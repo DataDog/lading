@@ -295,13 +295,14 @@ async fn inner_main(
 
     let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
+    let mut gsrv_joinset = tokio::task::JoinSet::new();
     //
     // GENERATOR
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
         let generator_server = generator::Server::new(cfg, shutdown.clone()).unwrap();
-        let _gsrv = tokio::spawn(generator_server.run(tgt_rcv));
+        gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
     //
@@ -384,6 +385,18 @@ async fn inner_main(
         _ = experiment_sleep => {
             info!("experiment duration exceeded, signaling for shutdown");
             shutdown.signal().unwrap();
+        }
+        res = gsrv_joinset.join_next() => {
+            match res {
+                Some(join_result) => match join_result {
+                    Ok(generator_result) => match generator_result {
+                        Ok(()) => { /* Generator shut down successfully */ }
+                        Err(err) => error!("Generator shut down unexpectedly: {}", err),
+                    }
+                    Err(err) => error!("Could not join the spawned generator task: {}", err),
+                },
+                None => { /* Indicates all spawned generators have resolved */ }
+            }
         }
         res = tsrv => {
             match res {
