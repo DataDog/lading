@@ -5,25 +5,41 @@ generator:
       path: "/tmp/dsd.sock"
       variant:
         dogstatsd:
-          contexts_minimum: 1000
-          contexts_maximum: 8000
-          tags_per_msg_minimum: 20
-          tags_per_msg_maximum: 31
+          contexts:
+            constant: 10000
+          name_length:
+            inclusive:
+              min: 1
+              max: 200
+          tag_key_length:
+            inclusive:
+              min: 1
+              max: 100
+          tag_value_length:
+            inclusive:
+              min: 1
+              max: 100
+          tags_per_msg:
+            inclusive:
+              min: 2
+              max: 50
+          multivalue_count:
+            inclusive:
+              min: 2
+              max: 32
           multivalue_pack_probability: 0.08
-          multivalue_count_minimum: 2
-          multivalue_count_maximum: 10
           kind_weights:
-            metric: 80
-            event: 10
-            service_check: 10
+            metric: 90
+            event: 5
+            service_check: 5
           metric_weights:
-            count: 10
+            count: 100
             gauge: 10
-            timer: 2
-            distribution: 5
-            set: 2
-            histogram: 2
-      bytes_per_second: "150 Mb"
+            timer: 0
+            distribution: 0
+            set: 0
+            histogram: 0
+      bytes_per_second: "80 MiB"
       parallel_connections: 1
       block_sizes: ["1Kb", "2Kb", "3Kb"]
       maximum_prebuild_cache_size_bytes: "500 Mb"
