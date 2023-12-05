@@ -174,7 +174,6 @@ mod proc {
                 State::Zombie => "Z (zombie)",
                 State::Parked => "P (parked)",
                 State::Idle => "I (idle)",
-                _ => unreachable!(),
             }
         }
 
@@ -190,7 +189,6 @@ mod proc {
                 State::Zombie => "Z",
                 State::Parked => "P",
                 State::Idle => "I",
-                _ => unreachable!(),
             }
         }
     }
@@ -507,7 +505,7 @@ impl fmt::Display for BooleanField {
     }
 }
 
-/// Models SigQ field of `/proc/{pid}/status`.
+/// Models `SigQ` field of `/proc/{pid}/status`.
 ///
 /// Equivalent to `(std::ffi::c_uint, std::ffi::c_ulong)`.
 #[derive(Debug)]
@@ -1030,26 +1028,20 @@ impl fmt::Display for Status {
     /// filesystem](https://docs.kernel.org/filesystems/proc.html), Table 1-2,
     /// but omits the `Kthread` field and adds the `Seccomp_filters` field.
     ///
-    /// # General patterns
+    /// # Key points
     ///
-    /// - Every line starts with `{field_name}:\t`, where `{field_name}` should
-    ///   be replaced with the field name.
-    /// - Every line ends with a newline.
-    /// - Most "lists" are tab-delimited.
-    ///
-    /// # Notable exceptions
-    ///
-    /// - The `Groups` field adds a single space after the last element of the
-    ///   list before the newline.
-    ///
-    /// TODOs:
-    ///
-    /// - create a newtype for `Groups` field to format a `Vec<Gid>`.
-    /// - create a newtype field to format namespace hierarchies (basically
-    ///   `Vec<Pid>`) for the `NStgid`, `NSpid`, `NSpgid`, and `NSsid` fields.
-    /// - for Boolean fields, figure out the width of each field
-    ///
+    /// - Most of the code in the Linux kernel that outputs `/proc/{pid}/status`
+    ///   is in `fs/proc/array.c`.
+    /// - The memory fields in `/proc/{pid}/status` are written by a function in
+    ///   `fs/proc/task_mmu.c`; we assume the fake procfs we are generating is
+    ///   on a system with an MMU, hence the various virtual memory fields.
+    /// - Lines start with `{field_name}:\t` and end with a newline, where
+    ///   `{field_name}` should be replaced by the field's name (e.g.,
+    ///   `Groups`).
+    /// - The `Groups` field places a single space before its ending newline.
+    ///   Notably, this field may be empty.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #![allow(clippy::too_many_lines)]
         write!(
             f,
             concat!(
@@ -1194,10 +1186,7 @@ struct StatusGenerator {
 
 impl StatusGenerator {
     /// Construct new instance of [`StatusGenerator`].
-    fn new<R>(pid: Pid, name: String, rng: &mut R) -> Self
-    where
-        R: Rng + ?Sized,
-    {
+    fn new(pid: Pid, name: String) -> Self {
         assert!(name.len() <= TASK_NAME_LEN);
         Self { pid, name }
     }
@@ -1210,6 +1199,8 @@ impl<'a> Generator<'a> for StatusGenerator {
     where
         R: rand::Rng + ?Sized,
     {
+        #![allow(clippy::similar_names)]
+        #![allow(clippy::assertions_on_constants)]
         let pid = self.pid;
         let uid: Uid = rng.gen();
         let gid = Gid(uid.0);
@@ -1226,7 +1217,7 @@ impl<'a> Generator<'a> for StatusGenerator {
         // For simplicity, assume each process uses all available CPUs.
         let mut cpu_mask = 0_u32;
         for i in 0..ASSUMED_NPROC {
-            cpu_mask |= (1 << i);
+            cpu_mask |= 1 << i;
         }
         let cpus_allowed = MaskCollection(vec![MaskEntry(cpu_mask)]);
         let cpus_allowed_list = ListCollection(vec![ListEntry::RangeInclusive {
@@ -1342,6 +1333,7 @@ impl<'a> Generator<'a> for StatusGenerator {
 /// A variant associated with the value 4 is intentionally omitted; it is
 /// reserved in the kernel for
 /// `SCHED_ISO`, but that policy has not yet been implemented.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum SchedulingPolicy {
     /// `SCHED_OTHER` policy in POSIX, also called `SCHED_NORMAL` in kernel (see
@@ -1632,10 +1624,7 @@ struct StatGenerator {
 
 impl StatGenerator {
     /// Construct new instance of [`StatGenerator`].
-    fn new<R>(pid: Pid, comm: String, rng: &mut R) -> Self
-    where
-        R: Rng + ?Sized,
-    {
+    fn new(pid: Pid, comm: String) -> Self {
         assert!(comm.len() <= TASK_COMM_LEN);
         Self { pid, comm }
     }
@@ -1662,7 +1651,7 @@ impl<'a> Generator<'a> for StatGenerator {
     /// - The ranges `startcode..endcode`, `start_data..end_data`,
     ///   `arg_start..arg_end`, `env_start..env_end` may *not* have pairwise
     ///   empty intersections.
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
     where
         R: Rng + ?Sized,
     {
@@ -1703,7 +1692,7 @@ impl<'a> Generator<'a> for StatGenerator {
             priority,
             nice,
             // Assume up to 32 threads per process, arbitrarily.
-            num_threads: rng.gen_range(1..=(ASSUMED_THREAD_MAX as i64)),
+            num_threads: rng.gen_range(1..=i64::from(ASSUMED_THREAD_MAX)),
             itrealvalue: 0,
             starttime: rng.gen(),
             vsize: rng.gen(),
@@ -1767,6 +1756,7 @@ impl<'a> Generator<'a> for StatGenerator {
 /// - status
 ///
 /// so this struct reflects that behavior.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Process {
     /// Command line for process (unless a zombie); corresponds to
@@ -1860,10 +1850,10 @@ impl<'a> Generator<'a> for ProcessGenerator {
 
         let pid: Pid = Pid(rng.gen_range(1..PID_MAX_LIMIT));
 
-        let stat_gen = StatGenerator::new(pid, comm.clone(), rng);
+        let stat_gen = StatGenerator::new(pid, comm.clone());
         let stat = stat_gen.generate(rng);
 
-        let status_gen = StatusGenerator::new(pid, name, rng);
+        let status_gen = StatusGenerator::new(pid, name);
         let status = status_gen.generate(rng);
 
         Process {

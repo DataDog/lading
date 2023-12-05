@@ -16,7 +16,7 @@ use super::General;
 use crate::signals::Shutdown;
 
 #[derive(::thiserror::Error, Debug)]
-/// Errors emitted by ['ProcfsGen']
+/// Errors emitted by [`Procfs`]
 pub enum Error {
     /// Wrapper around [`std::io::Error`]
     #[error("Io error: {0}")]
@@ -24,11 +24,11 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-/// Configuration of [`ProcfsGen`]
+/// Configuration of [`Procfs`]
 pub struct Config {
     /// Seed for random operations against this target
     pub seed: [u8; 32],
-    /// Root path for procfs filesystem
+    /// Root path for `procfs` filesystem
     pub root: PathBuf,
     /// Upper bound on processes created
     pub max_processes: NonZeroU32,
@@ -36,7 +36,8 @@ pub struct Config {
 
 /// The procfs generator.
 ///
-/// Generates a fake procfs filesystem.
+/// Generates a fake `procfs` filesystem. Currently incomplete.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Procfs {
     config: Config,
@@ -53,7 +54,11 @@ impl Procfs {
         // TODO(geoffrey.oxberry@datadoghq.com): A more feature-ful version of a
         // procfs generator should check whether the maximum number of arguments
         // setting doesn't violate `sysconf` settings, e.g., `ARG_MAX`.
-        let mut rng = ::rand::rngs::StdRng::from_seed(config.seed);
+
+        // TODO(geoffrey.oxberry@datadoghq.com): Use this concrete RNG to build
+        // procfs payloads that are parametrized by an abstract type satisfying
+        // the trait bound `rand::Rng + ?Sized`.
+        let mut _rng = ::rand::rngs::StdRng::from_seed(config.seed);
 
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -70,7 +75,7 @@ impl Procfs {
     /// received.
     ///
     /// This function will generate a fake `/proc` filesystem (i.e., a `procfs`)
-    /// rooted at `self.root`.
+    /// rooted at `self.root`. Currently an incomplete stub.
     ///
     /// # Errors
     ///
@@ -78,14 +83,8 @@ impl Procfs {
     /// the directory tree rooted at `self.root`. Any error from
     /// `std::io::Error` is possible.
     pub async fn spin(mut self) -> Result<(), Error> {
-        loop {
-            tokio::select! {
-                _ = self.shutdown.recv() => {
-                    tracing::info!("shutdown signal received");
-                    break
-                },
-            }
-        }
+        self.shutdown.recv().await;
+        tracing::info!("shutdown signal received");
         Ok(())
     }
 }
