@@ -1338,6 +1338,10 @@ impl<'a> Generator<'a> for StatusGenerator {
 /// These values have implications for the `priority` and `nice` fields of
 /// `/proc/{pid}/stat` (see `man 7 sched`). That said, these implications are
 /// largely ignored by hard-coding the policy to a non-real-time policy.
+///
+/// A variant associated with the value 4 is intentionally omitted; it is
+/// reserved in the kernel for
+/// `SCHED_ISO`, but that policy has not yet been implemented.
 #[derive(Debug)]
 enum SchedulingPolicy {
     /// `SCHED_OTHER` policy in POSIX, also called `SCHED_NORMAL` in kernel (see
@@ -1354,9 +1358,6 @@ enum SchedulingPolicy {
     /// `SCHED_BATCH` policy for "batch" style execution of processes. Not a
     /// real-time policy.
     Batch = 3,
-    // A value for 4 is intentionally omitted; it is reserved in the kernel for
-    // `SCHED_ISO`, but that policy has not yet been implemented.
-    //
     /// `SCHED_IDLE` policy for running *very* low priority jobs. Not a
     /// real-time policy.
     Idle = 5,
