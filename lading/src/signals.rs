@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use tokio::sync::Semaphore;
+use tracing::info;
 
 #[derive(Debug)]
 /// Mechanism to control shutdown in lading.
@@ -37,7 +38,7 @@ impl Shutdown {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            sem: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            sem: Arc::new(Semaphore::new(0)),
             shutdown: false,
         }
     }
@@ -64,8 +65,10 @@ impl Shutdown {
 
     /// Send the shutdown signal through to this and all derived `Shutdown`
     /// instances.
+    #[tracing::instrument]
     pub fn signal(&self) {
         let fill = Semaphore::MAX_PERMITS.saturating_sub(self.sem.available_permits());
+        info!(permits = fill, "signaling shutdown");
         self.sem.add_permits(fill);
     }
 }
