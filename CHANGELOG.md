@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.1]
+### Changed
+- Internal shutdown sequence is now changed to an advisory signal. There is no
+  user-facing change.
+- Disabled ANSI codes in logging.
+### Fixed
+- Removed generational storage in capture management, resolving a runtime hang.
+
 ## [0.20.0]
 ### Added
 - Sampling and sampling probability configuration parameters added for
