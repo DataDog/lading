@@ -56,7 +56,7 @@ impl Shutdown {
         }
 
         // We have no need of the permit that comes on the okay side, we also
-        // are fine to set shutdown if the semephore has been closed on us.
+        // are fine to set shutdown if the semaphore has been closed on us.
         let _ = self.sem.acquire().await;
 
         // Remember that the signal has been received.
