@@ -20,6 +20,7 @@ pub mod file_tree;
 pub mod grpc;
 pub mod http;
 pub mod process_tree;
+pub mod procfs;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
@@ -59,6 +60,9 @@ pub enum Error {
     /// See [`crate::generator::process_tree::Error`] for details.
     #[error(transparent)]
     ProcessTree(#[from] process_tree::Error),
+    /// See [`crate::generator::procfs::Error`] for details.
+    #[error(transparent)]
+    Procfs(#[from] procfs::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
