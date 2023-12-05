@@ -381,11 +381,11 @@ async fn inner_main(
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("received ctrl-c");
-            shutdown.signal().unwrap();
+            shutdown.signal();
         },
         _ = experiment_sleep => {
             info!("experiment duration exceeded, signaling for shutdown");
-            shutdown.signal().unwrap();
+            shutdown.signal();
         }
         res = gsrv_joinset.join_next() => {
             match res {
@@ -407,7 +407,7 @@ async fn inner_main(
                 }
                 Ok(Ok(())) | Err(_) => {
                     // JoinError or a shutdown signal arrived
-                    shutdown.signal().unwrap();
+                    shutdown.signal();
                 }
             }
         }
