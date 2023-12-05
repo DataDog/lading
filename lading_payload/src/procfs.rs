@@ -421,14 +421,47 @@ impl fmt::Display for Gid {
     }
 }
 
-/// Models memory size entries in `/proc/{pid}/status` *only*.
+/// Models `Groups` field in `/proc/{pid}/status` for formatting.
 ///
-/// Models memory size entries (e.g., `VmPeak`, `VmSize`) in
-/// `/proc/{pid}/status`. These entries are quirky because:
+/// Does not append a trailing space at the end of the value of the `Groups`
+/// field. That step is instead delegated to the [`std::fmt::Display`] trait
+/// implementation for [`Status`].
+#[derive(Debug)]
+struct Groups(Vec<Gid>);
+
+impl fmt::Display for Groups {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string_vec: Vec<_> = self.0.iter().map(Gid::to_string).collect();
+        let output = &string_vec.join(" ");
+        write!(f, "{output}")
+    }
+}
+
+/// Models `NStgid`, `NSpid`, `NSpgid`, `NSsid` fields of `/proc/{pid}/status`.
+///
+/// Exists for formatting purposes only.
+#[derive(Debug)]
+struct NamespaceIdHierarchy(Vec<Pid>);
+
+impl fmt::Display for NamespaceIdHierarchy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string_vec: Vec<_> = self.0.iter().map(Pid::to_string).collect();
+        let output = &string_vec.join(" ");
+        write!(f, "{output}")
+    }
+}
+
+/// Models memory size fields in `/proc/{pid}/status` *only*, for formatting.
+///
+/// Models memory size fields (e.g., `VmPeak`, `VmSize`) in
+/// `/proc/{pid}/status`, mainly for formatting purposes. These entries are
+/// quirky because:
 ///
 /// - the underlying memory size data is stored in units of bytes
 /// - the output is displayed in units of "kB", which in this context means
 ///   *kibibyte* (i.e., 1024 bytes).
+/// - the numeric part is displayed in a left-space-padded fixed-width 8 byte
+///   string.
 #[derive(Debug, Clone, Copy)]
 struct MemSize(u64);
 
@@ -445,7 +478,32 @@ impl fmt::Display for MemSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let size_in_bytes = self.0;
         let size_in_kibibytes = size_in_bytes >> 10;
-        write!(f, "{size_in_kibibytes} kB")
+        write!(f, "{size_in_kibibytes:8} kB")
+    }
+}
+
+/// Models Boolean fields in `/proc/{pid}/status` for formatting purposes.
+///
+/// These fields are output using the `seq_put_decimal_ull` function from
+/// `linux/fs/seq_file.c`, which outputs values expressible as
+/// [`std::ffi::c_ulonglong`] in a fixed-width, right-justified 8 byte string
+/// left-padded with spaces.
+///
+/// If we're being pedantic, the `THP_enabled` field doesn't use
+/// `seq_put_decimal_ull`, but the `seq_printf` call it uses
+#[derive(Debug, Clone, Copy)]
+struct BooleanField(bool);
+
+impl Distribution<BooleanField> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BooleanField {
+        BooleanField(rng.gen())
+    }
+}
+
+impl fmt::Display for BooleanField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bool_as_int = u8::from(self.0);
+        write!(f, "{bool_as_int}")
     }
 }
 
@@ -473,6 +531,17 @@ impl Distribution<SigQ> for Standard {
             signals_queued: rng.gen(),
             max_number_for_queue: rng.gen(),
         }
+    }
+}
+
+impl fmt::Display for SigQ {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{queued}/{max_queued}",
+            queued = self.signals_queued,
+            max_queued = self.max_number_for_queue
+        )
     }
 }
 
@@ -504,10 +573,10 @@ impl fmt::Display for SignalMask {
     /// Signal masks are displayed in [`fmt::LowerHex`] format by default.
     ///
     /// In particular, a leading `0x` is used in the display representation, and
-    /// the output is left-zero-padded to exactly 8 digits (excluding the
+    /// the output is left-zero-padded to exactly 16 digits (excluding the
     /// leading `0x`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{mask:#08x}", mask = self.0)
+        write!(f, "{mask:#016x}", mask = self.0)
     }
 }
 
@@ -532,10 +601,50 @@ impl fmt::Display for CapabilityMask {
     /// Capability masks are displayed in [`fmt::LowerHex`] format by default.
     ///
     /// In particular, a leading `0x` is used in the display representation, and
-    /// the output is left-zero-padded to exactly 8 digits (excluding the
+    /// the output is left-zero-padded to exactly 16 digits (excluding the
     /// leading `0x`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{mask:#08x}", mask = self.0)
+        write!(f, "{mask:#016x}", mask = self.0)
+    }
+}
+
+/// Models `Seccomp` field of `/proc/{pid}/status`, if it exists.
+///
+/// The `Seccomp` field of `/proc/{pid}/status`, if it exists (if
+/// `CONFIG_SECCOMP` is set), stores the Seccomp mode of the process (since
+/// Linux 3.8). This field can take one of three values: 0
+/// (`SECCOMP_MODE_DISABLED`), 1 (`SECCOMP_MODE_STRICT`), or 2
+/// (`SECCOMP_MODE_FILTER`), even though the underlying data itself is a C
+/// `int`.
+#[derive(Debug)]
+enum SeccompMode {
+    Disabled = 0,
+    Strict = 1,
+    Filter = 2,
+}
+
+impl Distribution<SeccompMode> for Standard {
+    fn sample<R>(&self, rng: &mut R) -> SeccompMode
+    where
+        R: Rng + ?Sized,
+    {
+        match rng.gen_range(0..3) {
+            0 => SeccompMode::Disabled,
+            1 => SeccompMode::Strict,
+            2 => SeccompMode::Filter,
+            _ => unreachable!("match arg not in range 0..3"),
+        }
+    }
+}
+
+impl fmt::Display for SeccompMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_u8 = match self {
+            SeccompMode::Disabled => 0_u8,
+            SeccompMode::Strict => 1_u8,
+            SeccompMode::Filter => 2_u8,
+        };
+        write!(f, "{as_u8}")
     }
 }
 
@@ -619,35 +728,6 @@ impl fmt::Display for ListCollection {
         let string_vec: Vec<_> = self.0.iter().map(ListEntry::to_string).collect();
         let output = &string_vec.join(",");
         write!(f, "{output}")
-    }
-}
-
-/// Models `Seccomp` field of `/proc/{pid}/status`, if it exists.
-///
-/// The `Seccomp` field of `/proc/{pid}/status`, if it exists (if
-/// `CONFIG_SECCOMP` is set), stores the Seccomp mode of the process (since
-/// Linux 3.8). This field can take one of three values: 0
-/// (`SECCOMP_MODE_DISABLED`), 1 (`SECCOMP_MODE_STRICT`), or 2
-/// (`SECCOMP_MODE_FILTER`), even though the underlying data itself is a C
-/// `int`.
-#[derive(Debug)]
-enum SeccompMode {
-    Disabled = 0,
-    Strict = 1,
-    Filter = 2,
-}
-
-impl Distribution<SeccompMode> for Standard {
-    fn sample<R>(&self, rng: &mut R) -> SeccompMode
-    where
-        R: Rng + ?Sized,
-    {
-        match rng.gen_range(0..3) {
-            0 => SeccompMode::Disabled,
-            1 => SeccompMode::Strict,
-            2 => SeccompMode::Filter,
-            _ => unreachable!(),
-        }
     }
 }
 
@@ -748,7 +828,11 @@ impl fmt::Display for SpeculationIndirectBranch {
 ///
 /// See the [Linux kernel `/proc` filesystem
 /// documentation](https://docs.kernel.org/filesystems/proc.html), Table 1-2.
-/// The `Kthread` field is omitted for the time being.
+/// The `Kthread` (Boolean) and `untag_mask` (unsigned 64-bit integer for linear
+/// address masking) fields are omitted for the time being because a typical
+/// unprivileged Linux user won't see a `Kthread` field in their
+/// `/proc/{pid}/status` entries, and `untag_mask` was only added as of Linux
+/// 6.4 kernel.
 ///
 /// This struct needs to be consistent with the information in
 /// `/proc/[pid]/stat`. In many cases, the information in this struct has an
@@ -805,19 +889,19 @@ struct Status {
     /// not exceed the output of `ulimit -n -H`.
     fd_size: u64,
     /// Supplementary group list.
-    groups: Vec<Gid>,
+    groups: Groups,
     /// Descendant namespace thread group ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
-    ns_tgid: Vec<Pid>,
+    ns_tgid: NamespaceIdHierarchy,
     /// Descendant namespace process ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
-    ns_pid: Vec<Pid>,
+    ns_pid: NamespaceIdHierarchy,
     /// Descendant namespace process group ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
-    ns_pgid: Vec<Pid>,
+    ns_pgid: NamespaceIdHierarchy,
     /// Descendant namespace session ID hierarchy. Present only if kernel
     /// compiled with `CONFIG_PID_NS`.
-    ns_sid: Vec<Pid>,
+    ns_sid: NamespaceIdHierarchy,
     /// Peak virtual memory size (in bytes). Present only if task has non-null
     /// memory management pointer.
     vm_peak: MemSize,
@@ -867,17 +951,13 @@ struct Status {
     vm_swap: MemSize,
     /// Size of huge translation lookaside buffer (in bytes). Present only if
     /// task has non-null memory management pointer.
-    huge_tlb_pages: u64,
+    huge_tlb_pages: MemSize,
     /// Process's memory is currently being dumped. Present only if task has
     /// non-null memory management pointer.
-    core_dumping: bool,
+    core_dumping: BooleanField,
     /// Process is allowed to use transparent hugepage support. Present only if
     /// task has non-null memory management pointer.
-    thp_enabled: bool,
-    /// Mask for linear address masking (LAM) to support storing metadata in
-    /// pointer addresses. Present only if task has non-null memory management
-    /// pointer.
-    untag_mask: u64,
+    thp_enabled: BooleanField,
     /// Number of threads used by process.
     threads: i32,
     /// Number of signals queued / max number for queue.
@@ -900,16 +980,24 @@ struct Status {
     cap_eff: CapabilityMask,
     /// Bitmap of capabilities bounding set.
     cap_bnd: CapabilityMask,
+    /// Bitmap of ambient capabilities.
+    cap_amb: CapabilityMask,
     /// Value of the process's `no_new_privs` bit. If set to 1, the `execve`
     /// syscall promises not to grant the process any additional privileges to
     /// do anything that could not have been done without that syscall.
-    no_new_privs: bool,
+    no_new_privs: BooleanField,
     /// Seccomp mode of the process. Present only if kernel configured with
     /// `CONFIG_SECCOMP`.
     seccomp: SeccompMode,
     /// Number of Seccomp filters used by process. Present only if kernel
     /// configured with `CONFIG_SECCOMP_FILTER`.
     seccomp_filters: i32,
+    /// Indicates whether process may or may not be vulnerable to a Speculative
+    /// Store Bypass attack (CVE-2018-3639).
+    speculation_store_bypass: SpeculationStoreBypass,
+    /// Indicates whether process may or may not be vulnerable to branch target
+    /// injection attacks (Spectre variant 2)
+    speculation_indirect_branch: SpeculationIndirectBranch,
     /// Mask of CPUs on which this process may run; isomorphic to
     /// `cpus_allowed_list`.
     cpus_allowed: MaskCollection,
@@ -921,12 +1009,6 @@ struct Status {
     /// List of memory nodes allowed to this process; isomorphic to
     /// `mems_allowed`.
     mems_allowed_list: ListCollection,
-    /// Indicates whether process may or may not be vulnerable to a Speculative
-    /// Store Bypass attack (CVE-2018-3639).
-    speculation_store_bypass: SpeculationStoreBypass,
-    /// Indicates whether process may or may not be vulnerable to branch target
-    /// injection attacks (Spectre variant 2)
-    speculation_indirect_branch: SpeculationIndirectBranch,
     /// Number of times process has been context-switched voluntarily
     voluntary_ctxt_switches: u64,
     /// Number of times process has been context-switched involuntarily
@@ -940,6 +1022,161 @@ struct Status {
 // anyway, and Rust is going to compute the length of that string in bytes, I
 // may as well have Rust compute the length for me because it will be more
 // accurate.
+
+impl fmt::Display for Status {
+    /// Formats [`Status`] as it would be seen in `/proc/{pid}/status`.
+    ///
+    /// Mostly follows [Linux kernel documentation on the `/proc`
+    /// filesystem](https://docs.kernel.org/filesystems/proc.html), Table 1-2,
+    /// but omits the `Kthread` field and adds the `Seccomp_filters` field.
+    ///
+    /// # General patterns
+    ///
+    /// - Every line starts with `{field_name}:\t`, where `{field_name}` should
+    ///   be replaced with the field name.
+    /// - Every line ends with a newline.
+    /// - Most "lists" are tab-delimited.
+    ///
+    /// # Notable exceptions
+    ///
+    /// - The `Groups` field adds a single space after the last element of the
+    ///   list before the newline.
+    ///
+    /// TODOs:
+    ///
+    /// - create a newtype for `Groups` field to format a `Vec<Gid>`.
+    /// - create a newtype field to format namespace hierarchies (basically
+    ///   `Vec<Pid>`) for the `NStgid`, `NSpid`, `NSpgid`, and `NSsid` fields.
+    /// - for Boolean fields, figure out the width of each field
+    ///
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            concat!(
+                "Name:\t{name}\n",
+                "Umask:\t{umask}\n",
+                "State:\t{state}\n",
+                "Tgid:\t{tgid}\n",
+                "Ngid:\t{ngid}\n",
+                "Pid:\t{pid}\n",
+                "Ppid:\t{ppid}\n",
+                "TracerPid:\t{tracer_pid}\n",
+                "Uid:\t{ruid}\t{euid}\t{suid}\t{fuid}\n",
+                "Gid:\t{rgid}\t{egid}\t{sgid}\t{fgid}\n",
+                "FDSize:\t{fd_size}\n",
+                "Groups:\t{groups}\n",
+                "NStgid:\t{ns_tgid}\n",
+                "NSpid:\t{ns_pid}\n",
+                "NSpgid:\t{ns_pgid}\n",
+                "NSsid:\t{ns_sid}\n",
+                "VmPeak:\t{vm_peak}\n",
+                "VmSize:\t{vm_size}\n",
+                "VmLck:\t{vm_lck}\n",
+                "VmPin:\t{vm_pin}\n",
+                "VmHWM:\t{vm_hwm}\n",
+                "VmRSS:\t{vm_rss}\n",
+                "RssAnon:\t{rss_anon}\n",
+                "RssFile:\t{rss_file}\n",
+                "RssShmem:\t{rss_shmem}\n",
+                "VmData:\t{vm_data}\n",
+                "VmStk:\t{vm_stk}\n",
+                "VmExe:\t{vm_exe}\n",
+                "VmLib:\t{vm_lib}\n",
+                "VmPTE:\t{vm_pte}\n",
+                "VmSwap:\t{vm_swap}\n",
+                "HugetlbPages:\t{huge_tlb_pages}\n",
+                "CoreDumping:\t{core_dumping}\n",
+                "THP_enabled:\t{thp_enabled}",
+                "Threads:\t{threads}\n",
+                "SigQ:\t{sigq}\n",
+                "SigPnd:\t{sig_pnd}\n",
+                "ShdPnd:\t{shd_pnd}\n",
+                "SigBlk:\t{sig_blk}\n",
+                "SigIgn:\t{sig_ign}\n",
+                "SigCgt:\t{sig_cgt}\n",
+                "CapInh:\t{cap_inh}\n",
+                "CapPrm:\t{cap_prm}\n",
+                "CapEff:\t{cap_eff}\n",
+                "CapBnd:\t{cap_bnd}\n",
+                "CapAmb:\t{cap_amb}\n",
+                "NoNewPrivs:\t{no_new_privs}\n",
+                "Seccomp:\t{seccomp}\n",
+                "Seccomp_filters:\t{seccomp_filters}\n",
+                "Speculation_Store_Bypass:\t{speculation_store_bypass}\n",
+                "SpeculationIndirectBranch:\t{speculation_indirect_branch}\n",
+                "Cpus_allowed:\t{cpus_allowed}\n",
+                "Cpus_allowed_list:\t{cpus_allowed_list}\n",
+                "Mems_allowed:\t{mems_allowed}\n",
+                "Mems_allowed_list:\t{mems_allowed_list}\n",
+                "voluntary_ctxt_switches:\t{voluntary_ctxt_switches}\n",
+                "nonvoluntary_ctxt_switches:\t{nonvoluntary_ctxt_switches}\n"
+            ),
+            name = self.name,
+            umask = self.umask,
+            state = self.state.as_status_code(),
+            tgid = self.tgid,
+            ngid = self.ngid,
+            pid = self.pid,
+            ppid = self.ppid,
+            tracer_pid = self.tracer_pid,
+            ruid = self.ruid,
+            euid = self.euid,
+            suid = self.suid,
+            fuid = self.fuid,
+            rgid = self.rgid,
+            egid = self.egid,
+            sgid = self.sgid,
+            fgid = self.fgid,
+            fd_size = self.fd_size,
+            groups = self.groups,
+            ns_tgid = self.ns_tgid,
+            ns_pid = self.ns_pid,
+            ns_pgid = self.ns_pgid,
+            ns_sid = self.ns_sid,
+            vm_peak = self.vm_peak,
+            vm_size = self.vm_size,
+            vm_lck = self.vm_lck,
+            vm_pin = self.vm_pin,
+            vm_hwm = self.vm_hwm,
+            vm_rss = self.vm_rss,
+            rss_anon = self.rss_anon,
+            rss_file = self.rss_file,
+            rss_shmem = self.rss_shmem,
+            vm_data = self.vm_data,
+            vm_stk = self.vm_stk,
+            vm_exe = self.vm_exe,
+            vm_lib = self.vm_lib,
+            vm_pte = self.vm_pte,
+            vm_swap = self.vm_swap,
+            huge_tlb_pages = self.huge_tlb_pages,
+            core_dumping = self.core_dumping,
+            thp_enabled = self.thp_enabled,
+            threads = self.threads,
+            sigq = self.sigq,
+            sig_pnd = self.sig_pnd,
+            shd_pnd = self.shd_pnd,
+            sig_blk = self.sig_blk,
+            sig_ign = self.sig_ign,
+            sig_cgt = self.sig_cgt,
+            cap_inh = self.cap_inh,
+            cap_prm = self.cap_prm,
+            cap_eff = self.cap_eff,
+            cap_bnd = self.cap_bnd,
+            cap_amb = self.cap_amb,
+            no_new_privs = self.no_new_privs,
+            seccomp = self.seccomp,
+            seccomp_filters = self.seccomp_filters,
+            speculation_store_bypass = self.speculation_store_bypass,
+            speculation_indirect_branch = self.speculation_indirect_branch,
+            cpus_allowed = self.cpus_allowed,
+            cpus_allowed_list = self.cpus_allowed_list,
+            mems_allowed = self.mems_allowed,
+            mems_allowed_list = self.mems_allowed_list,
+            voluntary_ctxt_switches = self.voluntary_ctxt_switches,
+            nonvoluntary_ctxt_switches = self.nonvoluntary_ctxt_switches,
+        )
+    }
+}
 
 /// Generates [`Status`].
 struct StatusGenerator {
@@ -1007,6 +1244,7 @@ impl<'a> Generator<'a> for StatusGenerator {
         for _ in 0..ngroups {
             groups.push(Gid(rng.gen()));
         }
+        let groups = Groups(groups);
 
         Status {
             name: self.name.clone(),
@@ -1030,10 +1268,10 @@ impl<'a> Generator<'a> for StatusGenerator {
             fgid: gid,
             fd_size: rng.gen(),
             groups,
-            ns_tgid: vec![pid],
-            ns_pid: vec![pid],
-            ns_pgid: vec![pid],
-            ns_sid: vec![pid],
+            ns_tgid: NamespaceIdHierarchy(vec![pid]),
+            ns_pid: NamespaceIdHierarchy(vec![pid]),
+            ns_pgid: NamespaceIdHierarchy(vec![pid]),
+            ns_sid: NamespaceIdHierarchy(vec![pid]),
             vm_peak: rng.gen(),
             vm_size: rng.gen(),
             vm_lck: rng.gen(),
@@ -1052,7 +1290,6 @@ impl<'a> Generator<'a> for StatusGenerator {
             huge_tlb_pages: rng.gen(),
             core_dumping: rng.gen(),
             thp_enabled: rng.gen(),
-            untag_mask: rng.gen(),
             threads: rng.gen_range(1..=ASSUMED_THREAD_MAX),
             sigq: SigQ {
                 signals_queued: rng.gen(),
@@ -1067,9 +1304,12 @@ impl<'a> Generator<'a> for StatusGenerator {
             cap_prm: rng.gen(),
             cap_eff: rng.gen(),
             cap_bnd: rng.gen(),
+            cap_amb: rng.gen(),
             no_new_privs: rng.gen(),
             seccomp,
             seccomp_filters,
+            speculation_store_bypass: rng.gen(),
+            speculation_indirect_branch: rng.gen(),
             // Mask entries are displayed in hexadecimal, hence the use of
             // hexadecimal literals. For simplicity, assume each process uses
             // all available CPUs.
@@ -1080,8 +1320,6 @@ impl<'a> Generator<'a> for StatusGenerator {
             // memory on a NUMA node other than node 0
             mems_allowed: MaskCollection(vec![MaskEntry(0x0)]),
             mems_allowed_list: ListCollection(vec![ListEntry::Single(0)]),
-            speculation_store_bypass: rng.gen(),
-            speculation_indirect_branch: rng.gen(),
             voluntary_ctxt_switches: rng.gen(),
             nonvoluntary_ctxt_switches: rng.gen(),
         }
@@ -1300,6 +1538,7 @@ struct Stat {
 }
 
 impl fmt::Display for Stat {
+    /// Formats [`Stat`] as it would be seen in `/proc/{pid}/stat`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The concat macro is used here in an attempt to avoid excessively long
         // lines of string literals. Literals are deliberately grouped into rows
