@@ -46,7 +46,7 @@ tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false, features = [] }
+procfs = { version = "0.16", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
