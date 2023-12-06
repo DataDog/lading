@@ -63,6 +63,26 @@ impl Shutdown {
         self.shutdown = true;
     }
 
+    /// Check if a shutdown notice has been sent without blocking.
+    pub fn try_recv(&mut self) -> bool {
+        // If the shutdown signal has already been received, then return
+        // immediately.
+        if self.shutdown {
+            return true;
+        }
+
+        // We have no need of the permit that comes on the okay side, we also
+        // are fine to set shutdown if the semaphore has been closed on us.
+        if let Ok(_permit) = self.sem.try_acquire() {
+            // Remember that the signal has been received.
+            self.shutdown = true;
+
+            return true;
+        }
+
+        false
+    }
+
     /// Send the shutdown signal through to this and all derived `Shutdown`
     /// instances.
     #[tracing::instrument]

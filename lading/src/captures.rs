@@ -10,21 +10,16 @@
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    io,
+    io::{self, BufWriter, Write},
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use lading_capture::json;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
-use tokio::{
-    fs::File,
-    io::{AsyncWriteExt, BufWriter},
-    time::{self, Duration},
-};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::signals::Shutdown;
@@ -42,7 +37,7 @@ struct Inner {
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,
-    capture_fp: BufWriter<File>,
+    capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
     shutdown: Shutdown,
     inner: Arc<Inner>,
@@ -56,7 +51,8 @@ impl CaptureManager {
     ///
     /// Function will panic if the underlying capture file cannot be opened.
     pub async fn new(capture_path: PathBuf, shutdown: Shutdown) -> Self {
-        let fp = File::create(&capture_path).await.unwrap();
+        let fp = tokio::fs::File::create(&capture_path).await.unwrap();
+        let fp = fp.into_std().await;
         Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
@@ -91,7 +87,7 @@ impl CaptureManager {
         self.global_labels.insert(key.into(), value.into());
     }
 
-    async fn record_captures(&mut self) {
+    fn record_captures(&mut self) -> Result<(), io::Error> {
         let now_ms: u128 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -145,41 +141,49 @@ impl CaptureManager {
                 .unwrap()
         );
         for line in lines.drain(..) {
-            let pyld = serde_json::to_string(&line).unwrap();
-            self.capture_fp.write_all(pyld.as_bytes()).await.unwrap();
-            self.capture_fp.write_all(b"\n").await.unwrap();
+            let pyld = serde_json::to_string(&line)?;
+            self.capture_fp.write_all(pyld.as_bytes())?;
+            self.capture_fp.write_all(b"\n")?;
         }
+
+        Ok(())
     }
 
     /// Run [`CaptureManager`] to completion
     ///
-    /// Once a second any metrics produced by this program are flushed to disk
-    /// and this process only stops once an error occurs or a shutdown signal is
-    /// received.
-    ///
-    /// # Errors
-    ///
-    /// Function will error if underlying IO writes do not succeed.
+    /// Once a second any metrics produced by this program are flushed to disk.
+    /// This function only exits once a shutdown signal is received.
     ///
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), io::Error> {
-        let mut write_delay = time::interval(Duration::from_secs(1));
-
-        loop {
-            tokio::select! {
-                _ = write_delay.tick() => {
-                    self.record_captures().await;
+    pub async fn run(mut self) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::scope(move |s| {
+            let jh = std::thread::Builder::new()
+                .name("capture-manager".into())
+                .spawn_scoped(s, move || loop {
+                    if let Err(e) = self.record_captures() {
+                        warn!(
+                            "failed to record captures for idx {idx}: {e}",
+                            idx = self.fetch_index
+                        );
+                    }
                     self.fetch_index += 1;
-                }
-                () = self.shutdown.recv() => {
-                    self.record_captures().await;
-                    info!("shutdown signal received");
-                    return Ok(())
-                }
-            }
-        }
+                    if self.shutdown.try_recv() {
+                        info!("shutdown signal received");
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                })
+                .expect("failed to create capture manager thread");
+
+            let res = jh.join();
+            tx.send(res)
+                .expect("failed to send capture manager complete signal");
+        });
+
+        let _ = rx.await;
     }
 }
 
