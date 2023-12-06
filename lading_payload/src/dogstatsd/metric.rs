@@ -1,3 +1,5 @@
+//! `DogStatsD` metric.
+#[allow(missing_docs)]
 use std::fmt;
 
 use rand::{

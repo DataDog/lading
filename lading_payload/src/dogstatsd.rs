@@ -21,7 +21,7 @@ use super::Generator;
 
 mod common;
 mod event;
-mod metric;
+pub mod metric;
 mod service_check;
 
 /// Error for [`MemberGenerator`]
