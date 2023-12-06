@@ -62,17 +62,17 @@ impl<'a> Generator<'a> for EventGenerator {
 /// An event, like a syslog kind of.
 #[derive(Debug)]
 pub struct Event<'a> {
-    title: &'a str,
-    text: &'a str,
-    title_utf8_length: usize,
-    text_utf8_length: usize,
-    timestamp_second: Option<u32>,
-    hostname: Option<&'a str>,
-    aggregation_key: Option<&'a str>,
-    priority: Option<Priority>,
-    source_type_name: Option<&'a str>,
-    alert_type: Option<Alert>,
-    tags: Option<common::tags::Tagset>,
+    pub title: &'a str,
+    pub text: &'a str,
+    pub title_utf8_length: usize,
+    pub text_utf8_length: usize,
+    pub timestamp_second: Option<u32>,
+    pub hostname: Option<&'a str>,
+    pub aggregation_key: Option<&'a str>,
+    pub priority: Option<Priority>,
+    pub source_type_name: Option<&'a str>,
+    pub alert_type: Option<Alert>,
+    pub tags: Option<common::tags::Tagset>,
 }
 
 impl<'a> fmt::Display for Event<'a> {
@@ -122,7 +122,7 @@ impl<'a> fmt::Display for Event<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Priority {
+pub enum Priority {
     Normal,
     Low,
 }
@@ -150,7 +150,7 @@ impl fmt::Display for Priority {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Alert {
+pub enum Alert {
     Error,
     Warning,
     Info,
