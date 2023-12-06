@@ -157,33 +157,24 @@ impl CaptureManager {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::scope(move |s| {
-            let jh = std::thread::Builder::new()
-                .name("capture-manager".into())
-                .spawn_scoped(s, move || loop {
-                    if let Err(e) = self.record_captures() {
-                        warn!(
-                            "failed to record captures for idx {idx}: {e}",
-                            idx = self.fetch_index
-                        );
-                    }
-                    self.fetch_index += 1;
-                    if self.shutdown.try_recv() {
-                        info!("shutdown signal received");
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_secs(1));
-                })
-                .expect("failed to create capture manager thread");
-
-            let res = jh.join();
-            tx.send(res)
-                .expect("failed to send capture manager complete signal");
-        });
-
-        let _ = rx.await;
+    pub fn start(mut self) {
+        std::thread::Builder::new()
+            .name("capture-manager".into())
+            .spawn(move || loop {
+                if let Err(e) = self.record_captures() {
+                    warn!(
+                        "failed to record captures for idx {idx}: {e}",
+                        idx = self.fetch_index
+                    );
+                }
+                self.fetch_index += 1;
+                if self.shutdown.try_recv() {
+                    info!("shutdown signal received");
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            })
+            .expect("failed to create capture manager thread");
     }
 }
 
