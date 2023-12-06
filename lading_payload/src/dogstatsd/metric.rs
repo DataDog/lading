@@ -197,11 +197,11 @@ impl<'a> std::fmt::Debug for Metric<'a> {
 #[derive(Clone, Debug)]
 /// The count type in `DogStatsD` metric format. Monotonically increasing value.
 pub struct Count<'a> {
-    name: &'a str,
-    values: Vec<common::NumValue>,
-    sample_rate: Option<common::ZeroToOne>,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub values: Vec<common::NumValue>,
+    pub sample_rate: Option<common::ZeroToOne>,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Count<'a> {
@@ -238,10 +238,10 @@ impl<'a> fmt::Display for Count<'a> {
 #[derive(Clone, Debug)]
 /// The gauge type in `DogStatsD` format.
 pub struct Gauge<'a> {
-    name: &'a str,
-    values: Vec<common::NumValue>,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub values: Vec<common::NumValue>,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Gauge<'a> {
@@ -275,11 +275,11 @@ impl<'a> fmt::Display for Gauge<'a> {
 #[derive(Clone, Debug)]
 /// The timer type in `DogStatsD` format.
 pub struct Timer<'a> {
-    name: &'a str,
-    values: Vec<common::NumValue>,
-    sample_rate: Option<common::ZeroToOne>,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub values: Vec<common::NumValue>,
+    pub sample_rate: Option<common::ZeroToOne>,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Timer<'a> {
@@ -316,11 +316,11 @@ impl<'a> fmt::Display for Timer<'a> {
 #[derive(Clone, Debug)]
 /// The distribution type in `DogStatsD` format.
 pub struct Dist<'a> {
-    name: &'a str,
-    values: Vec<common::NumValue>,
-    sample_rate: Option<common::ZeroToOne>,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub values: Vec<common::NumValue>,
+    pub sample_rate: Option<common::ZeroToOne>,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Dist<'a> {
@@ -357,10 +357,10 @@ impl<'a> fmt::Display for Dist<'a> {
 #[derive(Clone, Debug)]
 /// The set type in `DogStatsD` format.
 pub struct Set<'a> {
-    name: &'a str,
-    value: common::NumValue,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub value: common::NumValue,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Set<'a> {
@@ -390,11 +390,11 @@ impl<'a> fmt::Display for Set<'a> {
 #[derive(Clone, Debug)]
 /// The histogram type in `DogStatsD` format.
 pub struct Histogram<'a> {
-    name: &'a str,
-    values: Vec<common::NumValue>,
-    sample_rate: Option<common::ZeroToOne>,
-    tags: &'a common::tags::Tagset,
-    container_id: Option<&'a str>,
+    pub name: &'a str,
+    pub values: Vec<common::NumValue>,
+    pub sample_rate: Option<common::ZeroToOne>,
+    pub tags: &'a common::tags::Tagset,
+    pub container_id: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for Histogram<'a> {
