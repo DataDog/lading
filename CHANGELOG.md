@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.2-rc1]
+### Added
+- Added captures to tally CPU and memory usage of the whole target process tree
+
 ## [0.20.1]
 ### Changed
 - Internal shutdown sequence is now changed to an advisory signal. There is no
