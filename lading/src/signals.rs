@@ -46,9 +46,6 @@ impl Shutdown {
     /// Receive the shutdown notice. This function will block if a notice has
     /// not already been sent.
     pub async fn recv(&mut self) {
-        // NOTE if we ever need a sync version of this function the interior of
-        // this function but with `try_acquire` will work just fine.
-
         // If the shutdown signal has already been received, then return
         // immediately.
         if self.shutdown {
