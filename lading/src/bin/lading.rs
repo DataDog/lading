@@ -277,7 +277,7 @@ async fn inner_main(
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
-            let _capmgr = tokio::spawn(capture_manager.run());
+            capture_manager.start();
         }
     }
 
