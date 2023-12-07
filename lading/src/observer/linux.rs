@@ -235,7 +235,7 @@ impl Sampler {
             .fold(Sample::default(), |acc, ((pid, _exe), sample)| Sample {
                 utime: acc.utime + sample.utime,
                 stime: acc.stime + sample.stime,
-                // use parent process uptime - not certain about this
+                // use parent process uptime
                 uptime: if *pid == self.parent.pid() {
                     sample.uptime
                 } else {
