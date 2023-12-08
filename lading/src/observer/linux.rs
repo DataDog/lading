@@ -36,6 +36,7 @@ pub(crate) struct Sampler {
     ticks_per_second: u64,
     page_size: u64,
     previous_samples: FxHashMap<(i32, String), Sample>,
+    previous_totals: Sample,
 }
 
 impl Sampler {
@@ -48,6 +49,7 @@ impl Sampler {
             ticks_per_second: procfs::ticks_per_second(),
             page_size: procfs::page_size(),
             previous_samples: FxHashMap::default(),
+            previous_totals: Sample::default(),
         })
     }
 
@@ -63,8 +65,8 @@ impl Sampler {
 
         let mut total_processes: u64 = 0;
         // We maintain a tally of the total RSS consumed by the parent process
-        // and its children for cooperation -- through RSS_BYTES -- with the
-        // throttle.
+        // and its children. This is used for analysis and for cooperation with
+        // the throttle (through RSS_BYTES).
         let mut total_rss: u64 = 0;
 
         // Calculate the ticks since machine uptime. This will be important
@@ -216,30 +218,70 @@ impl Sampler {
         for (key, sample) in &samples {
             let prev = self.previous_samples.remove(key).unwrap_or_default();
 
-            let uptime_diff = sample.uptime - prev.uptime; // CPU-ticks
-            let stime_diff: u64 = sample.stime - prev.stime; // CPU-ticks
-            let utime_diff: u64 = sample.utime - prev.utime; // CPU-ticks
-            let time_diff: u64 = (sample.stime + sample.utime) - (prev.stime + prev.utime); // CPU-ticks
-
-            let user_percentage =
-                percentage(utime_diff as f64, uptime_diff as f64, self.num_cores as f64);
-            let kernel_percentage =
-                percentage(stime_diff as f64, uptime_diff as f64, self.num_cores as f64);
-            let cpu_percentage =
-                percentage(time_diff as f64, uptime_diff as f64, self.num_cores as f64);
+            let calc = calculate_cpu_percentage(sample, &prev, self.num_cores);
 
             let labels = [
                 ("pid", format!("{pid}", pid = key.0)),
                 ("exe", key.1.clone()),
             ];
 
-            gauge!("cpu_percentage", cpu_percentage, &labels);
-            gauge!("kernel_cpu_percentage", kernel_percentage, &labels);
-            gauge!("user_cpu_percentage", user_percentage, &labels);
+            gauge!("cpu_percentage", calc.cpu_percentage, &labels);
+            gauge!("kernel_cpu_percentage", calc.kernel_percentage, &labels);
+            gauge!("user_cpu_percentage", calc.user_percentage, &labels);
         }
+
+        let total_sample = samples
+            .iter()
+            .fold(Sample::default(), |acc, ((pid, _exe), sample)| Sample {
+                utime: acc.utime + sample.utime,
+                stime: acc.stime + sample.stime,
+                // use parent process uptime
+                uptime: if *pid == self.parent.pid() {
+                    sample.uptime
+                } else {
+                    acc.uptime
+                },
+            });
+
+        let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
+
+        gauge!("total_rss_bytes", total_rss as f64);
+        gauge!("total_utime", total_sample.utime as f64);
+        gauge!("total_stime", total_sample.stime as f64);
+
+        gauge!("total_cpu_percentage", totals.cpu_percentage);
+        gauge!("total_kernel_cpu_percentage", totals.kernel_percentage);
+        gauge!("total_user_cpu_percentage", totals.user_percentage);
+
+        self.previous_totals = total_sample;
         self.previous_samples = samples;
 
         Ok(())
+    }
+}
+
+struct CpuPercentage {
+    cpu_percentage: f64,
+    kernel_percentage: f64,
+    user_percentage: f64,
+}
+
+#[allow(clippy::similar_names)]
+#[inline]
+fn calculate_cpu_percentage(sample: &Sample, previous: &Sample, num_cores: usize) -> CpuPercentage {
+    let uptime_diff = sample.uptime - previous.uptime; // CPU-ticks
+    let stime_diff: u64 = sample.stime - previous.stime; // CPU-ticks
+    let utime_diff: u64 = sample.utime - previous.utime; // CPU-ticks
+    let time_diff: u64 = (sample.stime + sample.utime) - (previous.stime + previous.utime); // CPU-ticks
+
+    let user_percentage = percentage(utime_diff as f64, uptime_diff as f64, num_cores as f64);
+    let kernel_percentage = percentage(stime_diff as f64, uptime_diff as f64, num_cores as f64);
+    let cpu_percentage = percentage(time_diff as f64, uptime_diff as f64, num_cores as f64);
+
+    CpuPercentage {
+        cpu_percentage,
+        kernel_percentage,
+        user_percentage,
     }
 }
 
