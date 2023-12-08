@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, io, sync::atomic::Ordering};
 
-use metrics::gauge;
+use metrics::{gauge, register_gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -37,6 +37,28 @@ pub(crate) struct Sampler {
     page_size: u64,
     previous_samples: FxHashMap<(i32, String), Sample>,
     previous_totals: Sample,
+    previous_gauges: Vec<Gauge>,
+}
+
+struct Gauge(metrics::Gauge);
+
+impl std::fmt::Debug for Gauge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gauge").finish_non_exhaustive()
+    }
+}
+
+impl From<metrics::Gauge> for Gauge {
+    fn from(gauge: metrics::Gauge) -> Self {
+        Self(gauge)
+    }
+}
+
+impl Gauge {
+    #[inline]
+    fn set(&self, value: f64) {
+        self.0.set(value);
+    }
 }
 
 impl Sampler {
@@ -50,6 +72,7 @@ impl Sampler {
             page_size: procfs::page_size(),
             previous_samples: FxHashMap::default(),
             previous_totals: Sample::default(),
+            previous_gauges: Vec::default(),
         })
     }
 
@@ -77,6 +100,12 @@ impl Sampler {
             .expect("could not query machine uptime")
             .uptime; // seconds since boot
         let uptime_ticks: u64 = uptime_seconds.round() as u64 * self.ticks_per_second; // CPU-ticks since boot
+
+        // Clear values from previous sample run. This ensures that processes
+        // that no longer exist will be reported with a 0 value.
+        for gauge in self.previous_gauges.drain(..) {
+            gauge.set(0.0);
+        }
 
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
@@ -197,13 +226,21 @@ impl Sampler {
             let labels = [("pid", format!("{pid}")), ("exe", basename)];
 
             // Number of pages that the process has in real memory.
-            gauge!("rss_bytes", rss as f64, &labels);
+            let rss_gauge = register_gauge!("rss_bytes", &labels);
+            rss_gauge.set(rss as f64);
+            self.previous_gauges.push(rss_gauge.into());
             // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
-            gauge!("rsslim_bytes", rsslim as f64, &labels);
+            let rsslim_gauge = register_gauge!("rsslim_bytes", &labels);
+            rsslim_gauge.set(rsslim as f64);
+            self.previous_gauges.push(rsslim_gauge.into());
             // The size in bytes of the process in virtual memory.
-            gauge!("vsize_bytes", vsize as f64, &labels);
+            let vsize_gauge = register_gauge!("vsize_bytes", &labels);
+            vsize_gauge.set(vsize as f64);
+            self.previous_gauges.push(vsize_gauge.into());
             // Number of threads this process has active.
-            gauge!("num_threads", stats.num_threads as f64, &labels);
+            let num_threads_gauge = register_gauge!("num_threads", &labels);
+            num_threads_gauge.set(stats.num_threads as f64);
+            self.previous_gauges.push(num_threads_gauge.into());
 
             total_rss += rss;
             total_processes += 1;
@@ -225,9 +262,15 @@ impl Sampler {
                 ("exe", key.1.clone()),
             ];
 
-            gauge!("cpu_percentage", calc.cpu_percentage, &labels);
-            gauge!("kernel_cpu_percentage", calc.kernel_percentage, &labels);
-            gauge!("user_cpu_percentage", calc.user_percentage, &labels);
+            let cpu_gauge = register_gauge!("cpu_percentage", &labels);
+            cpu_gauge.set(calc.cpu_percentage);
+            self.previous_gauges.push(cpu_gauge.into());
+            let kernel_gauge = register_gauge!("kernel_cpu_percentage", &labels);
+            kernel_gauge.set(calc.kernel_percentage);
+            self.previous_gauges.push(kernel_gauge.into());
+            let user_cpu_gauge = register_gauge!("user_cpu_percentage", &labels);
+            user_cpu_gauge.set(calc.user_percentage);
+            self.previous_gauges.push(user_cpu_gauge.into());
         }
 
         let total_sample = samples
