@@ -206,8 +206,6 @@ impl Sampler {
             gauge!("num_threads", stats.num_threads as f64, &labels);
 
             total_rss += rss;
-
-            tracing::warn!("{pid}\t | rss: {rss}, total_rss: {total_rss}");
             total_processes += 1;
         }
 
@@ -246,8 +244,6 @@ impl Sampler {
             });
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
-
-        tracing::warn!("\t\t\t\ttotal_rss: {total_rss}");
 
         gauge!("total_rss_bytes", total_rss as f64);
         gauge!("total_utime", total_sample.utime as f64);
