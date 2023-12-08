@@ -1051,7 +1051,7 @@ impl fmt::Display for Status {
                 "Tgid:\t{tgid}\n",
                 "Ngid:\t{ngid}\n",
                 "Pid:\t{pid}\n",
-                "Ppid:\t{ppid}\n",
+                "PPid:\t{ppid}\n",
                 "TracerPid:\t{tracer_pid}\n",
                 "Uid:\t{ruid}\t{euid}\t{suid}\t{fuid}\n",
                 "Gid:\t{rgid}\t{egid}\t{sgid}\t{fgid}\n",
