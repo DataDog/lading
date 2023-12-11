@@ -26,7 +26,7 @@ use tracing::{error, info};
 
 use crate::{
     common::{stdio, Output},
-    signals::Shutdown,
+    signals::Phase,
     target::TargetPidReceiver,
 };
 
@@ -65,7 +65,7 @@ pub struct Config {
 /// there are no protections for that.
 pub struct Server {
     config: Config,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Server {
@@ -78,7 +78,7 @@ impl Server {
     ///
     /// Function will error if the path to the sub-process is not valid or if
     /// the path is valid but is not to file executable by this program.
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
         Ok(Self { config, shutdown })
     }
 

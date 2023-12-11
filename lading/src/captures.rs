@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 struct Inner {
     registry: Registry<metrics::Key, AtomicStorage>,
@@ -39,7 +39,7 @@ pub struct CaptureManager {
     run_id: Uuid,
     capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
-    shutdown: Shutdown,
+    shutdown: Phase,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -50,7 +50,7 @@ impl CaptureManager {
     /// # Panics
     ///
     /// Function will panic if the underlying capture file cannot be opened.
-    pub async fn new(capture_path: PathBuf, shutdown: Shutdown) -> Self {
+    pub async fn new(capture_path: PathBuf, shutdown: Phase) -> Self {
         let fp = tokio::fs::File::create(&capture_path).await.unwrap();
         let fp = fp.into_std().await;
         Self {

@@ -10,7 +10,7 @@
 //! configured [throttle].
 //!
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 use is_executable::IsExecutable;
 use lading_throttle::Throttle;
 use nix::{
@@ -259,7 +259,7 @@ pub struct ProcessTree {
     lading_path: PathBuf,
     config_content: String,
     throttle: Throttle,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl ProcessTree {
@@ -269,7 +269,7 @@ impl ProcessTree {
     ///
     /// Return an error if the config can be serialized.
     ///
-    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let lading_path = match env::current_exe() {
             Ok(path) => path,
             Err(e) => return Err(Error::from(e)),

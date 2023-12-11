@@ -26,7 +26,7 @@ use serde::Deserialize;
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, info, trace};
 
-use crate::{common::PeekableReceiver, signals::Shutdown};
+use crate::{common::PeekableReceiver, signals::Phase};
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -72,7 +72,7 @@ pub struct Udp {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Udp {
@@ -87,7 +87,7 @@ impl Udp {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes

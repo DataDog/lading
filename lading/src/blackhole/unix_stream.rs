@@ -16,7 +16,7 @@ use tokio::net;
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 use super::General;
 
@@ -39,14 +39,14 @@ pub struct Config {
 /// The `UnixStream` blackhole.
 pub struct UnixStream {
     path: PathBuf,
-    shutdown: Shutdown,
+    shutdown: Phase,
     metric_labels: Vec<(String, String)>,
 }
 
 impl UnixStream {
     /// Create a new [`UnixStream`] server instance
     #[must_use]
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "unix_stream".to_string()),

@@ -13,7 +13,7 @@ use ::rand::SeedableRng;
 use ::serde::Deserialize;
 
 use super::General;
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 #[derive(::thiserror::Error, Debug)]
 /// Errors emitted by [`Procfs`]
@@ -41,7 +41,7 @@ pub struct Config {
 #[derive(Debug)]
 pub struct Procfs {
     config: Config,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Procfs {
@@ -50,7 +50,7 @@ impl Procfs {
     /// # Errors
     ///
     /// Returns an error if the config cannot be serialized.
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         // TODO(geoffrey.oxberry@datadoghq.com): A more feature-ful version of a
         // procfs generator should check whether the maximum number of arguments
         // setting doesn't violate `sysconf` settings, e.g., `ARG_MAX`.

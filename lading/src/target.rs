@@ -34,7 +34,7 @@ use tokio::process::Command;
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, observer::RSS_BYTES, signals::Shutdown};
+use crate::{common::stdio, observer::RSS_BYTES, signals::Phase};
 
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.
@@ -161,13 +161,13 @@ pub enum Config {
 /// protections for that.
 pub struct Server {
     config: Config,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Server {
     /// Create a new [`Server`] instance
     #[must_use]
-    pub fn new(config: Config, shutdown: Shutdown) -> Self {
+    pub fn new(config: Config, shutdown: Phase) -> Self {
         Self { config, shutdown }
     }
 
@@ -227,7 +227,7 @@ impl Server {
     async fn watch(
         config: PidConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: Shutdown,
+        mut shutdown: Phase,
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
@@ -298,7 +298,7 @@ impl Server {
     async fn execute_binary(
         config: BinaryConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: Shutdown,
+        mut shutdown: Phase,
     ) -> Result<ExitStatus, Error> {
         let mut target_cmd = Command::new(config.command);
         target_cmd

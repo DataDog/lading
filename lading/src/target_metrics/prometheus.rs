@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
@@ -63,7 +63,7 @@ impl FromStr for MetricType {
 #[derive(Debug)]
 pub struct Prometheus {
     config: Config,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Prometheus {
@@ -72,7 +72,7 @@ impl Prometheus {
     /// This is responsible for scraping metrics from the target process in the
     /// Prometheus format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Shutdown) -> Self {
+    pub(crate) fn new(config: Config, shutdown: Phase) -> Self {
         Self { config, shutdown }
     }
 

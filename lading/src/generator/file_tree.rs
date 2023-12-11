@@ -29,7 +29,7 @@ use serde::Deserialize;
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 static FILE_EXTENSION: &str = "txt";
 
@@ -121,7 +121,7 @@ pub struct FileTree {
     total_folder: usize,
     nodes: VecDeque<PathBuf>,
     rng: StdRng,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl FileTree {
@@ -131,7 +131,7 @@ impl FileTree {
     ///
     /// Creation will fail if the target file/folder cannot be opened for writing.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config);
 

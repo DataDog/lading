@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, trace};
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Expvar`]
@@ -35,7 +35,7 @@ pub struct Config {
 #[derive(Debug)]
 pub struct Expvar {
     config: Config,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Expvar {
@@ -44,7 +44,7 @@ impl Expvar {
     /// This is responsible for scraping metrics from the target process
     /// using Go's expvar format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Shutdown) -> Self {
+    pub(crate) fn new(config: Config, shutdown: Phase) -> Self {
         Self { config, shutdown }
     }
 

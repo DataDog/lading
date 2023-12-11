@@ -34,7 +34,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{common::PeekableReceiver, signals::Shutdown};
+use crate::{common::PeekableReceiver, signals::Phase};
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -94,7 +94,7 @@ pub struct Config {
 /// this without coordination to the target.
 pub struct Server {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Server {
@@ -109,7 +109,7 @@ impl Server {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
@@ -222,7 +222,7 @@ struct Child {
     maximum_bytes_per_log: NonZeroU32,
     block_cache: block::Cache,
     throttle: Throttle,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Child {
@@ -233,7 +233,7 @@ impl Child {
         maximum_bytes_per_log: NonZeroU32,
         block_cache: block::Cache,
         throttle: Throttle,
-        shutdown: Shutdown,
+        shutdown: Phase,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));

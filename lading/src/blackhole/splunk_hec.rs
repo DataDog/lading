@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{error, info};
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 use super::General;
 
@@ -149,14 +149,14 @@ async fn srv(
 pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,
-    shutdown: Shutdown,
+    shutdown: Phase,
     metric_labels: Vec<(String, String)>,
 }
 
 impl SplunkHec {
     /// Create a new [`SplunkHec`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "splunk_hec".to_string()),

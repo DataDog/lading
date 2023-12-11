@@ -28,7 +28,7 @@ use tonic::{
 };
 use tracing::{debug, info};
 
-use crate::{common::PeekableReceiver, signals::Shutdown};
+use crate::{common::PeekableReceiver, signals::Phase};
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -133,7 +133,7 @@ pub struct Grpc {
     config: Config,
     target_uri: Uri,
     rpc_path: PathAndQuery,
-    shutdown: Shutdown,
+    shutdown: Phase,
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
@@ -151,7 +151,7 @@ impl Grpc {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         use byte_unit::{Byte, ByteUnit};
 
         let mut rng = StdRng::from_seed(config.seed);

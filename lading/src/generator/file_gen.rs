@@ -19,7 +19,7 @@ use std::str;
 
 use serde::Deserialize;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 use super::General;
 
@@ -69,7 +69,7 @@ impl FileGen {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let srv = match config {
             Config::Traditional(c) => {
                 Self::Traditional(traditional::Server::new(general, c, shutdown)?)
