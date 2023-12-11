@@ -7,6 +7,7 @@
 //! Data types for fields generally assume a 64-bit architecture, rather than
 //! use Rust's C-compatible data types.
 
+use std::fs;
 use std::{fs::File, io::Write, num::NonZeroU32, path::PathBuf};
 
 use lading_payload::procfs;
@@ -61,6 +62,8 @@ impl ProcFs {
 
             let mut pid_root: PathBuf = config.root.clone();
             pid_root.push(format!("{pid}"));
+
+            fs::create_dir_all(&pid_root)?;
 
             // /proc/{pid}/cmdline
             {

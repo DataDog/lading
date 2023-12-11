@@ -928,7 +928,7 @@ impl fmt::Display for Status {
                 "VmSwap:\t{vm_swap}\n",
                 "HugetlbPages:\t{huge_tlb_pages}\n",
                 "CoreDumping:\t{core_dumping}\n",
-                "THP_enabled:\t{thp_enabled}",
+                "THP_enabled:\t{thp_enabled}\n",
                 "Threads:\t{threads}\n",
                 "SigQ:\t{sigq}\n",
                 "SigPnd:\t{sig_pnd}\n",
