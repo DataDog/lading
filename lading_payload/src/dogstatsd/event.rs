@@ -1,3 +1,4 @@
+//! `DogStatsD` event.
 use std::{fmt, ops::Range, rc::Rc};
 
 use rand::{distributions::Standard, prelude::Distribution, Rng};
@@ -62,16 +63,27 @@ impl<'a> Generator<'a> for EventGenerator {
 /// An event, like a syslog kind of.
 #[derive(Debug)]
 pub struct Event<'a> {
+    /// Title of the event.
     pub title: &'a str,
+    /// Text of the event.
     pub text: &'a str,
+    /// Length of the title in UTF-8 bytes.
     pub title_utf8_length: usize,
+    /// Length of the text in UTF-8 bytes.
     pub text_utf8_length: usize,
+    /// Timestamp of the event (in seconds from unix epoch)
     pub timestamp_second: Option<u32>,
+    /// Hostname of the event.
     pub hostname: Option<&'a str>,
+    /// Aggregation key of the event.
     pub aggregation_key: Option<&'a str>,
+    /// Priority of the event.
     pub priority: Option<Priority>,
+    /// Source type name of the event.
     pub source_type_name: Option<&'a str>,
+    /// Alert type of the event.
     pub alert_type: Option<Alert>,
+    /// Tags of the event.
     pub tags: Option<common::tags::Tagset>,
 }
 
@@ -121,9 +133,12 @@ impl<'a> fmt::Display for Event<'a> {
     }
 }
 
+/// Priority of an event.
 #[derive(Clone, Copy, Debug)]
 pub enum Priority {
+    /// Normal priority. (default)
     Normal,
+    /// Low priority.
     Low,
 }
 
@@ -149,11 +164,16 @@ impl fmt::Display for Priority {
     }
 }
 
+/// Alert Type associated with an event
 #[derive(Clone, Copy, Debug)]
 pub enum Alert {
+    /// Error alert type.
     Error,
+    /// Warning alert type.
     Warning,
+    /// Info alert type.
     Info,
+    /// Success alert type.
     Success,
 }
 

@@ -13,7 +13,7 @@
 #![deny(unused_assignments)]
 #![deny(unused_comparisons)]
 #![deny(unreachable_pub)]
-#![allow(missing_docs)]
+#![deny(missing_docs)]
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 #![allow(clippy::cast_precision_loss)]

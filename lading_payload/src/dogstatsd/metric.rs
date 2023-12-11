@@ -1,5 +1,4 @@
 //! `DogStatsD` metric.
-#[allow(missing_docs)]
 use std::fmt;
 
 use rand::{
@@ -160,13 +159,20 @@ impl<'a> Generator<'a> for MetricGenerator {
     }
 }
 
+/// Representation of a dogstatsd Metric
 #[derive(Clone)]
 pub enum Metric<'a> {
+    /// Dogstatsd 'count' metric type.
     Count(Count<'a>),
+    /// Dogstatsd 'gauge' metric type.
     Gauge(Gauge<'a>),
+    /// Dogstatsd 'timer' metric type.
     Timer(Timer<'a>),
+    /// Dogstatsd 'histogram' metric type.
     Histogram(Histogram<'a>),
+    /// Dogstatsd 'set' metric type.
     Set(Set<'a>),
+    /// Dogstatsd 'distribution' metric type.
     Distribution(Dist<'a>),
 }
 
@@ -199,10 +205,15 @@ impl<'a> std::fmt::Debug for Metric<'a> {
 #[derive(Clone, Debug)]
 /// The count type in `DogStatsD` metric format. Monotonically increasing value.
 pub struct Count<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Values of the metric.
     pub values: Vec<common::NumValue>,
+    /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
@@ -240,9 +251,13 @@ impl<'a> fmt::Display for Count<'a> {
 #[derive(Clone, Debug)]
 /// The gauge type in `DogStatsD` format.
 pub struct Gauge<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Values of the metric.
     pub values: Vec<common::NumValue>,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
@@ -277,10 +292,15 @@ impl<'a> fmt::Display for Gauge<'a> {
 #[derive(Clone, Debug)]
 /// The timer type in `DogStatsD` format.
 pub struct Timer<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Values of the metric.
     pub values: Vec<common::NumValue>,
+    /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
@@ -318,10 +338,15 @@ impl<'a> fmt::Display for Timer<'a> {
 #[derive(Clone, Debug)]
 /// The distribution type in `DogStatsD` format.
 pub struct Dist<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Values of the metric.
     pub values: Vec<common::NumValue>,
+    /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
@@ -359,9 +384,13 @@ impl<'a> fmt::Display for Dist<'a> {
 #[derive(Clone, Debug)]
 /// The set type in `DogStatsD` format.
 pub struct Set<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Value of the metric.
     pub value: common::NumValue,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
@@ -392,10 +421,15 @@ impl<'a> fmt::Display for Set<'a> {
 #[derive(Clone, Debug)]
 /// The histogram type in `DogStatsD` format.
 pub struct Histogram<'a> {
+    /// Name of the metric.
     pub name: &'a str,
+    /// Values of the metric.
     pub values: Vec<common::NumValue>,
+    /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
+    /// Tags of the metric.
     pub tags: &'a common::tags::Tagset,
+    /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
