@@ -47,12 +47,12 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
 /// Check of a service.
 #[derive(Debug)]
 pub struct ServiceCheck<'a> {
-    name: &'a str,
-    status: Status,
-    timestamp_second: Option<u32>,
-    hostname: Option<&'a str>,
-    tags: Option<Tagset>,
-    message: Option<&'a str>,
+    pub name: &'a str,
+    pub status: Status,
+    pub timestamp_second: Option<u32>,
+    pub hostname: Option<&'a str>,
+    pub tags: Option<Tagset>,
+    pub message: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for ServiceCheck<'a> {
@@ -91,7 +91,7 @@ impl<'a> fmt::Display for ServiceCheck<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Status {
+pub enum Status {
     Ok,
     Warning,
     Critical,

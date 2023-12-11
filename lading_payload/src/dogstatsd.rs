@@ -20,9 +20,9 @@ use self::{
 use super::Generator;
 
 mod common;
-mod event;
+pub mod event;
 pub mod metric;
-mod service_check;
+pub mod service_check;
 
 /// Error for [`MemberGenerator`]
 #[derive(Debug, thiserror::Error, Clone, Copy)]
