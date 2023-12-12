@@ -40,6 +40,7 @@ pub struct CaptureManager {
     capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
     shutdown: Phase,
+    experiment_started: Phase,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -50,7 +51,7 @@ impl CaptureManager {
     /// # Panics
     ///
     /// Function will panic if the underlying capture file cannot be opened.
-    pub async fn new(capture_path: PathBuf, shutdown: Phase) -> Self {
+    pub async fn new(capture_path: PathBuf, shutdown: Phase, experiment_started: Phase) -> Self {
         let fp = tokio::fs::File::create(&capture_path).await.unwrap();
         let fp = fp.into_std().await;
         Self {
@@ -59,6 +60,7 @@ impl CaptureManager {
             capture_fp: BufWriter::new(fp),
             capture_path,
             shutdown,
+            experiment_started,
             inner: Arc::new(Inner {
                 registry: Registry::atomic(),
             }),
@@ -144,6 +146,7 @@ impl CaptureManager {
             let pyld = serde_json::to_string(&line)?;
             self.capture_fp.write_all(pyld.as_bytes())?;
             self.capture_fp.write_all(b"\n")?;
+            self.capture_fp.flush()?;
         }
 
         Ok(())
@@ -157,7 +160,15 @@ impl CaptureManager {
     /// # Panics
     ///
     /// None known.
-    pub fn start(mut self) {
+    pub async fn start(mut self) {
+        info!("Capture manager running, waiting for warmup to complete");
+        self.experiment_started.recv().await; // block until experimental phase entered
+
+        // Defer installing the recorder until after the warmup period. This
+        // ensures that we don't get any metrics/errors from the warmup period.
+        self.install();
+        info!("Capture manager installed, recording to capture file.");
+
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || loop {

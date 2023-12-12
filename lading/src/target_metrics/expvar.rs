@@ -36,6 +36,7 @@ pub struct Config {
 pub struct Expvar {
     config: Config,
     shutdown: Phase,
+    experiment_started: Phase,
 }
 
 impl Expvar {
@@ -44,8 +45,12 @@ impl Expvar {
     /// This is responsible for scraping metrics from the target process
     /// using Go's expvar format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Phase) -> Self {
-        Self { config, shutdown }
+    pub(crate) fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+        Self {
+            config,
+            shutdown,
+            experiment_started,
+        }
     }
 
     /// Run this [`Server`] to completion
@@ -60,13 +65,15 @@ impl Expvar {
     ///
     /// None are known.
     pub(crate) async fn run(mut self) -> Result<(), Error> {
-        info!("Expvar target metrics scraper running");
+        info!("Expvar target metrics scraper running, but waiting for warmup to complete");
+        self.experiment_started.recv().await; // block until experimental phase entered
+        info!("Expvar target metrics scraper starting collection");
+
         let client = reqwest::Client::new();
 
         let server = async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-
                 let Ok(resp) = client
                     .get(&self.config.uri)
                     .timeout(Duration::from_secs(1))
