@@ -66,6 +66,10 @@ impl ProcFs {
     /// # Errors
     ///
     /// Returns an error if the config cannot be serialized.
+    ///
+    /// # Panics
+    ///
+    /// Function should never panic.
     pub fn new(config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
 
