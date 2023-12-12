@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.3]
+### Added
+- ProcFs generator is now suitable for use.
+
 ## [0.20.2]
 ### Fixed
 - Process gauges will now be zeroed before iteration. This prevents values from
