@@ -21,7 +21,7 @@ use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 use super::General;
 
@@ -52,14 +52,14 @@ pub struct Config {
 pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,
-    shutdown: Shutdown,
+    shutdown: Phase,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Sqs {
     /// Create a new [`Sqs`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "sqs".to_string()),

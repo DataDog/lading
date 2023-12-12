@@ -13,7 +13,7 @@ use std::{io, sync::atomic::AtomicU64};
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -56,7 +56,7 @@ pub struct Server {
     #[allow(dead_code)] // config is not actively used, left as a stub
     config: Config,
     #[allow(dead_code)] // this field is unused when target_os is not "linux"
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Server {
@@ -69,7 +69,7 @@ impl Server {
     ///
     /// Function will error if the path to the sub-process is not valid or if
     /// the path is valid but is not to file executable by this program.
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
         Ok(Self { config, shutdown })
     }
 

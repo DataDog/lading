@@ -14,7 +14,7 @@ use lading::{
     config::{Config, Telemetry},
     generator::{self, process_tree},
     inspector, observer,
-    signals::Shutdown,
+    signals::Phase,
     target::{self, Behavior, Output},
     target_metrics,
 };
@@ -250,7 +250,7 @@ async fn inner_main(
     disable_inspector: bool,
     config: Config,
 ) {
-    let shutdown = Shutdown::new();
+    let shutdown = Phase::new();
 
     // Set up the telemetry sub-system.
     //

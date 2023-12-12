@@ -25,7 +25,7 @@ use serde::Deserialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
 use tracing::{info, trace};
 
-use crate::{common::PeekableReceiver, signals::Shutdown};
+use crate::{common::PeekableReceiver, signals::Phase};
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -71,7 +71,7 @@ pub struct Tcp {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 impl Tcp {
@@ -86,7 +86,7 @@ impl Tcp {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes

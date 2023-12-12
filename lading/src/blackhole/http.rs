@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 use super::General;
 
@@ -145,7 +145,7 @@ pub struct Http {
     httpd_addr: SocketAddr,
     body_bytes: Vec<u8>,
     concurrency_limit: usize,
-    shutdown: Shutdown,
+    shutdown: Phase,
     headers: HeaderMap,
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
@@ -161,7 +161,7 @@ impl Http {
     /// # Panics
     ///
     /// None known.
-    pub fn new(general: General, config: &Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
         let mut metric_labels = vec![

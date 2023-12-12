@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 
-use crate::signals::Shutdown;
+use crate::signals::Phase;
 
 pub mod http;
 pub mod splunk_hec;
@@ -111,7 +111,7 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
-    pub fn new(config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
             Inner::Http(conf) => {

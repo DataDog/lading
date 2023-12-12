@@ -37,7 +37,7 @@ use tokio::{
 use tracing::info;
 
 use crate::{
-    common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel, signals::Shutdown,
+    common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel, signals::Phase,
 };
 use lading_payload::block::{self, Block};
 
@@ -119,7 +119,7 @@ pub struct SplunkHec {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
-    shutdown: Shutdown,
+    shutdown: Phase,
 }
 
 /// Derive the intended path from the format configuration
@@ -150,7 +150,7 @@ impl SplunkHec {
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
@@ -314,7 +314,7 @@ async fn send_hec_request(
     channel: Channel,
     client: Client<HttpConnector>,
     request: Request<Body>,
-    mut shutdown: Shutdown,
+    mut shutdown: Phase,
 ) {
     counter!("requests_sent", 1, &labels);
     let work = client.request(request);
