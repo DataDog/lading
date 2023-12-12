@@ -12,8 +12,8 @@ use super::{ConfRange, ValueConf};
 
 pub(crate) mod tags;
 
-#[derive(Clone, Debug)]
-pub(crate) enum NumValue {
+#[derive(Clone, Debug, Copy)]
+pub enum NumValue {
     Int(i64),
     Float(f64),
 }
@@ -95,13 +95,13 @@ impl fmt::Display for NumValue {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ZeroToOne {
+pub enum ZeroToOne {
     One,
     Frac(u32),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ZeroToOneError {
+pub enum ZeroToOneError {
     OutOfRange,
 }
 
