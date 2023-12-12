@@ -18,6 +18,7 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use rand::{rngs::StdRng, SeedableRng};
 use rustc_hash::FxHashMap;
@@ -25,10 +26,16 @@ use tokio::{
     runtime::Builder,
     signal,
     sync::broadcast,
-    time::{sleep, Duration},
+    time::{self, sleep, Duration},
 };
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("Target related error: {0}")]
+    Target(target::Error),
+}
 
 fn default_config_path() -> String {
     "/etc/lading/lading.yaml".to_string()
@@ -160,8 +167,10 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
-fn get_config(ops: &Opts) -> Config {
-    let contents = if let Ok(env_var_value) = env::var("LADING_CONFIG") {
+fn get_config(ops: &Opts, config: Option<String>) -> Config {
+    let contents = if let Some(config) = config {
+        config
+    } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
         debug!("Using config from env var 'LADING_CONFIG'");
         env_var_value
     } else {
@@ -181,7 +190,7 @@ fn get_config(ops: &Opts) -> Config {
         contents
     };
 
-    let mut config: Config = serde_yaml::from_str(&contents).unwrap();
+    let mut config: Config = serde_yaml::from_str(&contents).expect("invalid configuration file");
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit).unwrap();
@@ -249,8 +258,9 @@ async fn inner_main(
     warmup_duration: Duration,
     disable_inspector: bool,
     config: Config,
-) {
-    let shutdown = Phase::new();
+) -> Result<(), Error> {
+    let mut shutdown = Phase::new();
+    let experiment_started = Phase::new();
 
     // Set up the telemetry sub-system.
     //
@@ -266,18 +276,26 @@ async fn inner_main(
             for (k, v) in global_labels {
                 builder = builder.add_global_label(k, v);
             }
-            builder.install().unwrap();
+            let mut prom_experiment_started = experiment_started.clone();
+            tokio::spawn(async move {
+                prom_experiment_started.recv().await; // block until experimental phase entered
+                builder
+                    .install()
+                    .expect("failed to install prometheus recorder");
+            });
         }
         Telemetry::Log {
             path,
             global_labels,
         } => {
-            let mut capture_manager = CaptureManager::new(path, shutdown.clone()).await;
-            capture_manager.install();
+            let mut capture_manager =
+                CaptureManager::new(path, shutdown.clone(), experiment_started.clone()).await;
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
-            capture_manager.start();
+            tokio::spawn(async {
+                capture_manager.start().await;
+            });
         }
     }
 
@@ -338,7 +356,8 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.target_metrics {
         for cfg in cfgs {
-            let metrics_server = target_metrics::Server::new(cfg, shutdown.clone());
+            let metrics_server =
+                target_metrics::Server::new(cfg, shutdown.clone(), experiment_started.clone());
             tokio::spawn(async {
                 match metrics_server.run().await {
                     Ok(()) => debug!("target_metrics shut down successfully"),
@@ -348,11 +367,12 @@ async fn inner_main(
         }
     }
 
+    let mut tsrv_joinset = tokio::task::JoinSet::new();
     //
     // OBSERVER
     //
     // Observer is not used when there is no target.
-    let tsrv = if let Some(target) = config.target {
+    if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown.clone()).unwrap();
         let _osrv = tokio::spawn(observer_server.run(obs_rcv));
@@ -361,58 +381,71 @@ async fn inner_main(
         // TARGET
         //
         let target_server = target::Server::new(target, shutdown.clone());
-        let tsrv = tokio::spawn(target_server.run(tgt_snd));
-        futures::future::Either::Left(tsrv)
+        tsrv_joinset.spawn(target_server.run(tgt_snd));
     } else {
         // Many lading servers synchronize on target startup.
         tgt_snd
             .send(None)
             .expect("unable to transmit startup sync signal, catastrophic failure");
-        futures::future::Either::Right(futures::future::pending())
     };
 
-    let experiment_sleep = async move {
+    let experiment_completed_shutdown = shutdown.clone();
+    tokio::spawn(async move {
         info!("target is running, now sleeping for warmup");
         sleep(warmup_duration).await;
+        experiment_started.signal();
         info!("warmup completed, collecting samples");
         sleep(experiment_duration).await;
-    };
+        info!("experiment duration exceeded, signaling for shutdown");
+        experiment_completed_shutdown.signal();
+    });
 
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("received ctrl-c");
-            shutdown.signal();
-        },
-        _ = experiment_sleep => {
-            info!("experiment duration exceeded, signaling for shutdown");
-            shutdown.signal();
-        }
-        res = gsrv_joinset.join_next() => {
-            match res {
-                Some(join_result) => match join_result {
+    let mut interval = time::interval(Duration::from_millis(400));
+    let res = loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                gauge!("lading.running", 1.0);
+            },
+
+            _ = signal::ctrl_c() => {
+                info!("received ctrl-c");
+                shutdown.signal();
+            },
+            _ = shutdown.recv() => {
+                info!("shutdown signal received.");
+                break Ok(());
+            }
+            Some(res) = gsrv_joinset.join_next() => {
+                match res {
                     Ok(generator_result) => match generator_result {
                         Ok(()) => { /* Generator shut down successfully */ }
                         Err(err) => error!("Generator shut down unexpectedly: {}", err),
                     }
                     Err(err) => error!("Could not join the spawned generator task: {}", err),
-                },
-                None => { /* Indicates all spawned generators have resolved */ }
-            }
-        }
-        res = tsrv => {
-            match res {
-                Ok(Err(e)) => {
-                    error!("target shut down unexpectedly: {e}");
-                    std::process::exit(1);
                 }
-                Ok(Ok(())) | Err(_) => {
-                    // JoinError or a shutdown signal arrived
-                    shutdown.signal();
+            },
+            Some(target_result) = tsrv_joinset.join_next() => {
+                match target_result {
+                    // joined successfully, but how did the target server exit?
+                    Ok(target_result) => match target_result {
+                        Ok(_) => {
+                            debug!("Target shut down successfully");
+                            shutdown.signal();
+                            break Ok(());
+                        }
+                        Err(err) => {
+                            error!("Target shut down unexpectedly: {}", err);
+                            shutdown.signal();
+                            break Err(Error::Target(err));
+                        }
+                    }
+                    Err(err) => panic!("Could not join the spawned target task: {}", err),
                 }
-            }
+            },
         }
-    }
+    };
     drop(shutdown);
+    res
 }
 
 fn run_process_tree(opts: ProcessTreeGen) {
@@ -457,7 +490,7 @@ fn run_extra_cmds(cmds: ExtraCommands) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)
         .with_ansi(false)
@@ -470,10 +503,10 @@ fn main() {
     // handle extra commands
     if let Some(cmds) = opts.extracmds {
         run_extra_cmds(cmds);
-        return;
+        return Ok(());
     }
 
-    let config = get_config(&opts);
+    let config = get_config(&opts, None);
 
     let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
@@ -487,7 +520,7 @@ fn main() {
         .enable_time()
         .build()
         .unwrap();
-    runtime.block_on(inner_main(
+    let res = runtime.block_on(inner_main(
         experiment_duration,
         warmup_duration,
         disable_inspector,
@@ -504,11 +537,39 @@ fn main() {
     );
     runtime.shutdown_timeout(max_shutdown_delay);
     info!("Bye. :)");
+    res
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inner_main_capture_has_data() {
+        let contents = r#"
+generator: []
+"#;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let capture_path = tmp_dir.path().join("capture");
+        let capture_arg = format!("--capture-path={}", capture_path.display());
+
+        let args = vec!["lading", "--no-target", capture_arg.as_str()];
+        let ops: &Opts = &Opts::parse_from(args);
+        let config = get_config(ops, Some(contents.to_string()));
+        let exit_code = inner_main(
+            Duration::from_millis(2500),
+            Duration::from_millis(5000),
+            false,
+            config,
+        )
+        .await;
+
+        assert!(exit_code.is_ok());
+
+        let contents = std::fs::read_to_string(capture_path).unwrap();
+        assert_eq!(contents.rmatches("lading.running").count(), 2);
+    }
 
     #[test]
     fn cli_key_values_deserializes_empty_string_to_empty_set() {

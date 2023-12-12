@@ -47,12 +47,16 @@ impl Server {
     /// the target process.
     ///
     #[must_use]
-    pub fn new(config: Config, shutdown: Phase) -> Self {
+    pub fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
         match config {
-            Config::Expvar(conf) => Self::Expvar(expvar::Expvar::new(conf, shutdown)),
-            Config::Prometheus(conf) => {
-                Self::Prometheus(prometheus::Prometheus::new(conf, shutdown))
+            Config::Expvar(conf) => {
+                Self::Expvar(expvar::Expvar::new(conf, shutdown, experiment_started))
             }
+            Config::Prometheus(conf) => Self::Prometheus(prometheus::Prometheus::new(
+                conf,
+                shutdown,
+                experiment_started,
+            )),
         }
     }
 

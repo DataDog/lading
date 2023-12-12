@@ -64,6 +64,7 @@ impl FromStr for MetricType {
 pub struct Prometheus {
     config: Config,
     shutdown: Phase,
+    experiment_started: Phase,
 }
 
 impl Prometheus {
@@ -72,8 +73,12 @@ impl Prometheus {
     /// This is responsible for scraping metrics from the target process in the
     /// Prometheus format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Phase) -> Self {
-        Self { config, shutdown }
+    pub(crate) fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+        Self {
+            config,
+            shutdown,
+            experiment_started,
+        }
     }
 
     /// Run this [`Server`] to completion
@@ -91,13 +96,14 @@ impl Prometheus {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(mut self) -> Result<(), Error> {
-        info!("Prometheus target metrics scraper running");
         let client = reqwest::Client::new();
 
         let server = async move {
+            info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
+            self.experiment_started.recv().await; // block until experimental phase entered
+            info!("Prometheus target metrics scraper starting collection");
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-
                 let Ok(resp) = client
                     .get(&self.config.uri)
                     .timeout(Duration::from_secs(1))

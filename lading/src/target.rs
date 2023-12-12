@@ -21,6 +21,7 @@ use std::{
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
 };
 
 use metrics::gauge;
@@ -30,7 +31,7 @@ use nix::{
     unistd::Pid,
 };
 use rustc_hash::FxHashMap;
-use tokio::process::Command;
+use tokio::{process::Command, time};
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
@@ -264,7 +265,6 @@ impl Server {
         // does not give access to the exit code on early termination.
         #[cfg(not(target_os = "linux"))]
         let target_wait = async move {
-            use std::time::Duration;
             use tokio::time::sleep;
             loop {
                 let ret = kill(pid, None);
@@ -276,19 +276,26 @@ impl Server {
             Option::<ExitStatus>::None
         };
 
-        tokio::select! {
-            target_exit = target_wait => {
-                if let Some(code) = target_exit{
-                    error!("target exited unexpectedly with code {}", code);
-                    Err(Error::TargetExited(Some(code)))
-                } else {
+        let mut interval = time::interval(Duration::from_millis(400));
+        tokio::pin!(target_wait);
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    gauge!("target.running", 1.0);
+                },
+                target_exit = &mut target_wait => {
+                    if let Some(code) = target_exit{
+                        error!("target exited unexpectedly with code {}", code);
+                        break Err(Error::TargetExited(Some(code)));
+                    }
                     error!("target exited unexpectedly; exit code unavailable");
-                    Err(Error::TargetExited(None))
+                    break Err(Error::TargetExited(None));
+                },
+                () = shutdown.recv() => {
+                    info!("shutdown signal received");
+                    break Ok(());
                 }
-            },
-            () = shutdown.recv() => {
-                info!("shutdown signal received");
-                Ok(())
             }
         }
     }
@@ -319,28 +326,34 @@ impl Server {
             .expect("target server unable to transmit PID, catastrophic failure");
         drop(pid_snd);
 
-        tokio::select! {
-            res = target_child.wait() => {
-                match res {
-                    Ok(res) => {
-                        error!("target exited unexpectedly with code {}", res);
-                        Err(Error::TargetExited(Some(res)))
-                    },
-                    Err(e) => {
-                        error!("target exited unexpectedly; exit code unavailable ({})", e);
-                        Err(Error::TargetExited(None))
-                    },
+        let mut interval = time::interval(Duration::from_secs(400));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    gauge!("target.running", 1.0);
+                },
+                res = target_child.wait() => {
+                    match res {
+                        Ok(res) => {
+                            error!("target exited unexpectedly with code {}", res);
+                            break Err(Error::TargetExited(Some(res)))
+                        },
+                        Err(e) => {
+                            error!("target exited unexpectedly; exit code unavailable ({})", e);
+                            break Err(Error::TargetExited(None))
+                        },
+                    }
+                },
+                () = shutdown.recv() => {
+                    info!("shutdown signal received");
+                    // Note that `Child::kill` sends SIGKILL which is not what we
+                    // want. We instead send SIGTERM so that the child has a chance
+                    // to clean up.
+                    let pid: Pid = Pid::from_raw(target_id.try_into().unwrap());
+                    kill(pid, SIGTERM).map_err(Error::SigTerm)?;
+                    let res = target_child.wait().await.map_err(Error::TargetWait)?;
+                    break Ok(res)
                 }
-            },
-            () = shutdown.recv() => {
-                info!("shutdown signal received");
-                // Note that `Child::kill` sends SIGKILL which is not what we
-                // want. We instead send SIGTERM so that the child has a chance
-                // to clean up.
-                let pid: Pid = Pid::from_raw(target_id.try_into().unwrap());
-                kill(pid, SIGTERM).map_err(Error::SigTerm)?;
-                let res = target_child.wait().await.map_err(Error::TargetWait)?;
-                Ok(res)
             }
         }
     }
