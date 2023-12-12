@@ -265,7 +265,6 @@ impl Server {
         // does not give access to the exit code on early termination.
         #[cfg(not(target_os = "linux"))]
         let target_wait = async move {
-            use std::time::Duration;
             use tokio::time::sleep;
             loop {
                 let ret = kill(pid, None);
@@ -289,10 +288,9 @@ impl Server {
                     if let Some(code) = target_exit{
                         error!("target exited unexpectedly with code {}", code);
                         break Err(Error::TargetExited(Some(code)));
-                    } else {
-                        error!("target exited unexpectedly; exit code unavailable");
-                        break Err(Error::TargetExited(None));
                     }
+                    error!("target exited unexpectedly; exit code unavailable");
+                    break Err(Error::TargetExited(None));
                 },
                 () = shutdown.recv() => {
                     info!("shutdown signal received");

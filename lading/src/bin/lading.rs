@@ -445,7 +445,7 @@ async fn inner_main(
         }
     };
     drop(shutdown);
-    return res;
+    res
 }
 
 fn run_process_tree(opts: ProcessTreeGen) {
