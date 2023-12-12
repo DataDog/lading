@@ -62,7 +62,7 @@ pub enum Error {
     ProcessTree(#[from] process_tree::Error),
     /// See [`crate::generator::procfs::Error`] for details.
     #[error(transparent)]
-    Procfs(#[from] procfs::Error),
+    ProcFs(#[from] procfs::Error),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -112,6 +112,8 @@ pub enum Inner {
     UnixDatagram(unix_datagram::Config),
     /// See [`crate::generator::process_tree::Config`] for details.
     ProcessTree(process_tree::Config),
+    /// See [`crate::generator::procfs::Config`] for details.
+    ProcFs(procfs::Config),
 }
 
 #[derive(Debug)]
@@ -140,6 +142,8 @@ pub enum Server {
     UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::generator::process_tree::ProcessTree`] for details.
     ProcessTree(process_tree::ProcessTree),
+    /// See [`crate::generator::procfs::Procfs`] for details.
+    ProcFs(procfs::ProcFs),
 }
 
 impl Server {
@@ -178,6 +182,7 @@ impl Server {
             Inner::ProcessTree(conf) => {
                 Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
             }
+            Inner::ProcFs(conf) => Self::ProcFs(procfs::ProcFs::new(&conf, shutdown)?),
         };
         Ok(srv)
     }
@@ -209,6 +214,7 @@ impl Server {
             Server::UnixStream(inner) => inner.spin().await?,
             Server::UnixDatagram(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,
+            Server::ProcFs(inner) => inner.spin().await?,
         };
 
         Ok(())

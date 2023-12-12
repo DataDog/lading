@@ -1,10 +1,10 @@
 //! Procfs payload.
 
-use core::fmt;
-
 use crate::{common::strings, Generator};
-
 use rand::{distributions::Standard, prelude::Distribution, Rng};
+use std::fmt;
+
+mod proc;
 
 /// Maximum `pid` value, defined in the Linux kernel via a macro of the same
 /// name in `include/linux/threads.h`. Assumes a 64-bit system; the value below
@@ -64,156 +64,6 @@ const ASSUMED_THREAD_MAX: i32 = 32;
 /// service users.
 const ASSUMED_NGROUPS_MAX: usize = 32;
 
-mod proc {
-    use rand::{distributions::Standard, prelude::Distribution, Rng};
-
-    #[derive(Debug, Clone, Copy)]
-    pub(super) struct Io {
-        /// Bytes read (by process).
-        rchar: u64,
-        /// Bytes written (by process).
-        wchar: u64,
-        /// Number of read syscalls.
-        syscr: u64,
-        /// Number of write syscalls.
-        syscw: u64,
-        /// Number of bytes this task has caused to be read from storage.
-        read_bytes: u64,
-        /// Number of bytes this task has caused, or shall cause, to be written to
-        /// disk.
-        write_bytes: u64,
-        /// Accounts for "negative" IO, e.g., due to truncating a dirty pagecache.
-        /// See comments in the Linux `task_io_accounting` struct for details.
-        cancelled_write_bytes: u64,
-    }
-
-    impl Distribution<Io> for Standard {
-        fn sample<R>(&self, rng: &mut R) -> Io
-        where
-            R: Rng + ?Sized,
-        {
-            Io {
-                rchar: rng.gen(),
-                wchar: rng.gen(),
-                syscr: rng.gen(),
-                syscw: rng.gen(),
-                read_bytes: rng.gen(),
-                write_bytes: rng.gen(),
-                cancelled_write_bytes: rng.gen(),
-            }
-        }
-    }
-
-    impl ::std::fmt::Display for self::Io {
-        /// Formats [`Io`] as it would be seen in `/proc/{pid}/io`.
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            write!(
-                f,
-                concat!(
-                    "rchar: {rchar}\n",
-                    "wchar: {wchar}\n",
-                    "syscr: {syscr}\n",
-                    "syscw: {syscw}\n",
-                    "read_bytes: {read_bytes}\n",
-                    "write_bytes: {write_bytes}\n",
-                    "cancelled_write_bytes: {cancelled_write_bytes}"
-                ),
-                rchar = self.rchar,
-                wchar = self.wchar,
-                syscr = self.syscr,
-                syscw = self.syscw,
-                read_bytes = self.read_bytes,
-                write_bytes = self.write_bytes,
-                cancelled_write_bytes = self.cancelled_write_bytes
-            )
-        }
-    }
-
-    /// Corresponds to task states from Linux kernel `task_state_array`.
-    ///
-    /// See `linux/fs/array.c` for details. Assumes kernel version 4.14 or
-    /// later. Earlier kernel versions may lack some of these states (e.g.,
-    /// idle), have additional states (e.g., in kernel version 3.9, wakekill,
-    /// waking), or have multiple representations of the same state (e.g., in
-    /// kernel version 3.9, both "x" and "X" are used to represent a "dead"
-    /// task). For scope reasons, kernel version 4.14 is chosen as a cutoff
-    /// because it is the long-term release kernel with most recent end-of-life
-    /// data (2024-01) as of time of writing (circa 2023-11/12).
-    #[derive(Debug, Clone, Copy)]
-    pub(super) enum State {
-        /// Task state is "R (running)"
-        Running,
-        /// Task state is "S (sleeping)"
-        Sleeping,
-        /// Task state is "D (disk sleep)"
-        DiskSleep,
-        /// Task state is "T (stopped)"
-        Stopped,
-        /// Task state is "t (tracing stop)"
-        TracingStop,
-        /// Task state is "X (dead)"
-        Dead,
-        /// Task state is "Z (zombie)"
-        Zombie,
-        /// Task state is "P (parked)"
-        Parked,
-        /// Task state is "I (idle)"
-        Idle,
-    }
-
-    impl State {
-        /// Formats [`State`] as displayed in `/proc/{pid}/status`.
-        pub(super) fn as_status_code(&self) -> &str {
-            match self {
-                State::Running => "R (running)",
-                State::Sleeping => "S (sleeping)",
-                State::DiskSleep => "D (disk sleep)",
-                State::Stopped => "T (stopped)",
-                State::TracingStop => "t (tracing stop)",
-                State::Dead => "X (dead)",
-                State::Zombie => "Z (zombie)",
-                State::Parked => "P (parked)",
-                State::Idle => "I (idle)",
-            }
-        }
-
-        /// Formats [`State`] as displayed in `/proc/{pid}/stat`.
-        pub(super) fn as_stat_code(&self) -> &str {
-            match self {
-                State::Running => "R",
-                State::Sleeping => "S",
-                State::DiskSleep => "D",
-                State::Stopped => "T",
-                State::TracingStop => "t",
-                State::Dead => "X",
-                State::Zombie => "Z",
-                State::Parked => "P",
-                State::Idle => "I",
-            }
-        }
-    }
-
-    impl Distribution<State> for Standard {
-        fn sample<R>(&self, rng: &mut R) -> State
-        where
-            R: Rng + ?Sized,
-        {
-            match rng.gen_range(0..9) {
-                0 => State::Running,
-                1 => State::Sleeping,
-                2 => State::DiskSleep,
-                3 => State::Stopped,
-                4 => State::TracingStop,
-                5 => State::Dead,
-                6 => State::Zombie,
-                7 => State::Parked,
-                8 => State::Idle,
-                _ => unreachable!(),
-            }
-        }
-    }
-}
-
 /// Models `/proc/{pid}/statm`; see `proc_pid_statm` in Linux kernel.
 ///
 /// All of the fields in this struct model `unsigned long` values from C.
@@ -230,7 +80,7 @@ mod proc {
 /// `/proc/{pid}/stat` and `/proc/{pid}/status`, these consistency relationships
 /// are ignored for ease of implementation.
 #[derive(Debug, Clone, Copy)]
-struct Statm {
+pub struct Statm {
     /// Total program size (pages). Same as VmSize in
     /// `/proc/{pid}/status`.
     size: u64,
@@ -360,7 +210,7 @@ impl fmt::Display for DeviceMask {
 ///
 /// This data is modeled by the `pid_t` type in the Linux kernel.
 #[derive(Debug, Clone, Copy)]
-struct Pid(i32);
+pub struct Pid(i32);
 
 impl Distribution<Pid> for Standard {
     fn sample<R>(&self, rng: &mut R) -> Pid
@@ -848,7 +698,7 @@ impl fmt::Display for SpeculationIndirectBranch {
 /// We can't use the `procfs::Process::Status` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Status {
+pub struct Status {
     /// Filename of executable (with escapes, limited to [`TASK_NAME_LEN`] bytes).
     name: String,
     /// File mode creation mask.
@@ -1078,7 +928,7 @@ impl fmt::Display for Status {
                 "VmSwap:\t{vm_swap}\n",
                 "HugetlbPages:\t{huge_tlb_pages}\n",
                 "CoreDumping:\t{core_dumping}\n",
-                "THP_enabled:\t{thp_enabled}",
+                "THP_enabled:\t{thp_enabled}\n",
                 "Threads:\t{threads}\n",
                 "SigQ:\t{sigq}\n",
                 "SigPnd:\t{sig_pnd}\n",
@@ -1380,7 +1230,7 @@ impl fmt::Display for SchedulingPolicy {
 /// We can't use the `procfs::process::Stat` type because it is marked
 /// non-exhaustive.
 #[derive(Debug)]
-struct Stat {
+pub struct Stat {
     /// (1) The process ID.
     pid: Pid,
     /// (2) File name of executable, in parentheses. Limited to [`TASK_COMM_LEN`]
@@ -1769,18 +1619,20 @@ pub struct Process {
     /// `python3^@-m^@pip^@freeze`, where the digraph `^@` represents the "null
     /// character" grapheme. (This digraph was chosen because that is how `less`
     /// renders a null character.)
-    cmdline: String,
+    pub cmdline: String,
     /// Command name associated with process. Truncated to [`TASK_COMM_LEN`]
     /// bytes.
-    comm: String,
+    pub comm: String,
     /// Corresponds to `/proc/{pid}/io`.
-    io: proc::Io,
+    pub io: proc::Io,
     /// Corresponds to `/proc/{pid}/stat`.
-    stat: Stat,
+    pub stat: Stat,
     /// Corresponds to `/proc/{pid}/statm`.
-    statm: Statm,
+    pub statm: Statm,
     /// Corresponds to `/proc/{pid}/status`.
-    status: Status,
+    pub status: Status,
+    /// The {pid}
+    pub pid: Pid,
 }
 
 /// Generates a [`Process`].
@@ -1863,6 +1715,20 @@ impl<'a> Generator<'a> for ProcessGenerator {
             stat,
             statm,
             status,
+            pid,
         }
     }
+}
+
+/// Create a fixed number of Process instances
+pub fn fixed<R>(rng: &mut R, total: usize) -> Vec<Process>
+where
+    R: rand::Rng + ?Sized,
+{
+    let mut processes = Vec::with_capacity(total);
+    let gen = ProcessGenerator::new(rng);
+    for _ in 0..total {
+        processes.push(gen.generate(rng));
+    }
+    processes
 }

@@ -1,3 +1,4 @@
+//! `DogStatsD` service check.
 use std::fmt;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -47,12 +48,18 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
 /// Check of a service.
 #[derive(Debug)]
 pub struct ServiceCheck<'a> {
-    name: &'a str,
-    status: Status,
-    timestamp_second: Option<u32>,
-    hostname: Option<&'a str>,
-    tags: Option<Tagset>,
-    message: Option<&'a str>,
+    /// Name of the service check.
+    pub name: &'a str,
+    /// Status of the service check.
+    pub status: Status,
+    /// Timestamp of the service check.
+    pub timestamp_second: Option<u32>,
+    /// Hostname of the service check.
+    pub hostname: Option<&'a str>,
+    /// Tags of the service check.
+    pub tags: Option<Tagset>,
+    /// Message of the service check.
+    pub message: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for ServiceCheck<'a> {
@@ -90,11 +97,16 @@ impl<'a> fmt::Display for ServiceCheck<'a> {
     }
 }
 
+/// Status of a service check.
 #[derive(Clone, Copy, Debug)]
-enum Status {
+pub enum Status {
+    /// 'OK' status. Corresponds to 0
     Ok,
+    /// 'Warning' status. Corresponds to 1
     Warning,
+    /// 'Critical' status. Corresponds to 2
     Critical,
+    /// 'Unknown' status. Corresponds to 3
     Unknown,
 }
 
