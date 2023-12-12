@@ -8,6 +8,8 @@
 //! use Rust's C-compatible data types.
 
 use std::fs;
+use std::path::StripPrefixError;
+use std::str::FromStr;
 use std::{fs::File, io::Write, num::NonZeroU32, path::PathBuf};
 
 use lading_payload::procfs;
@@ -23,6 +25,16 @@ pub enum Error {
     /// Wrapper around [`std::io::Error`]
     #[error("Io error: {0}")]
     Io(#[from] ::std::io::Error),
+    /// Unable to strip prefix from passed copy file
+    #[error(transparent)]
+    Strip(#[from] StripPrefixError),
+}
+
+fn default_copy_from_host() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from_str("/proc/uptime").unwrap(),
+        PathBuf::from_str("/proc/stat").unwrap(),
+    ]
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -34,6 +46,9 @@ pub struct Config {
     pub root: PathBuf,
     /// Total number of processes created
     pub total_processes: NonZeroU32,
+    /// Files to copy from host /proc to `root`.
+    #[serde(default = "default_copy_from_host")]
+    pub copy_from_host: Vec<PathBuf>,
 }
 
 /// The procfs generator.
@@ -118,6 +133,17 @@ impl ProcFs {
                 let mut file = File::create(path)?;
                 file.write_all(format!("{}", process.status).as_bytes())?;
             }
+        }
+
+        // SAFETY: By construction this pathbuf cannot fail to be created.
+        let prefix = PathBuf::from_str("/proc").unwrap();
+
+        for path in &config.copy_from_host {
+            let base = path.strip_prefix(&prefix)?;
+            let mut new_path = config.root.clone();
+            new_path.push(base);
+
+            fs::copy(path, new_path)?;
         }
 
         Ok(Self { shutdown })
