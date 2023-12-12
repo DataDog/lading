@@ -6,11 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.20.3-rc1]
-### Changed
-- ProcFs generator now allows files to be copied from host verbatim.
-
-## [0.20.3-rc0]
+## [0.20.3]
 ### Added
 - ProcFs generator is now suitable for use.
 
