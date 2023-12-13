@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.4]
+### Changed
+- Dogstatsd payload structs now have public fields.
+
 ## [0.20.3]
 ### Added
 - ProcFs generator is now suitable for use.
