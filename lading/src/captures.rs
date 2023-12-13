@@ -40,7 +40,7 @@ pub struct CaptureManager {
     capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
     shutdown: Phase,
-    experiment_started: Phase,
+    _experiment_started: Phase,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -60,7 +60,7 @@ impl CaptureManager {
             capture_fp: BufWriter::new(fp),
             capture_path,
             shutdown,
-            experiment_started,
+            _experiment_started: experiment_started,
             inner: Arc::new(Inner {
                 registry: Registry::atomic(),
             }),
@@ -160,12 +160,10 @@ impl CaptureManager {
     /// # Panics
     ///
     /// None known.
-    pub async fn start(mut self) {
-        info!("Capture manager running, waiting for warmup to complete");
-        self.experiment_started.recv().await; // block until experimental phase entered
-
-        // Defer installing the recorder until after the warmup period. This
-        // ensures that we don't get any metrics/errors from the warmup period.
+    pub fn start(mut self) {
+        // Installing the recorder immediately on startup.
+        // This does _not_ wait on experiment_started signal, so
+        // warmup data will be included in the capture.
         self.install();
         info!("Capture manager installed, recording to capture file.");
 

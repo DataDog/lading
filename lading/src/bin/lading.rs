@@ -294,7 +294,7 @@ async fn inner_main(
                 capture_manager.add_global_label(k, v);
             }
             tokio::spawn(async {
-                capture_manager.start().await;
+                capture_manager.start();
             });
         }
     }
@@ -568,7 +568,7 @@ generator: []
         assert!(exit_code.is_ok());
 
         let contents = std::fs::read_to_string(capture_path).unwrap();
-        assert_eq!(contents.rmatches("lading.running").count(), 2);
+        assert_eq!(contents.rmatches("lading.running").count(), 7);
     }
 
     #[test]
