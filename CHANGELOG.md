@@ -6,9 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.20.4-rc1]
+## [0.20.4]
+### Added
+- `lading.running` gauge metric that submits a value of 1 as long as the main
+  `select!` of lading is executing.
+- `target.running` gauge metric that submits a value of 1 as long as the target
+  is running.
+
 ### Changed
 - Dogstatsd payload structs now have public fields.
+- Capture file descriptor is flushed as soon as current lines are written.
+- Renamed `Shutdown` data type to `Phase` so that this data type can be used as
+  a signal to control `lading` behavior over distinct stages of load generation
+  (e.g., warmup, shutdown).
+- Prometheus telemetry and Go expvar target metrics are no longer emitted during
+  `lading`'s warmup ("experimental") phase.
+
+### Fixed
+- Refactors the main `select!` in `lading/src/bin/lading.rs` to loop over the
+  select to address a potential early-termination bug when the set of generators
+  are empty.
 
 ## [0.20.3]
 ### Added
