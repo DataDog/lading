@@ -13,14 +13,19 @@
 
 use crate::{common::PeekableReceiver, signals::Phase};
 use byte_unit::{Byte, ByteUnit};
+use byteorder::{LittleEndian, WriteBytesExt};
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{num::NonZeroU32, path::PathBuf, thread};
+use std::{
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+    thread,
+};
 use tokio::{net, sync::mpsc, task::JoinError};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::General;
 
@@ -73,6 +78,36 @@ pub struct UnixStream {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Phase,
+}
+
+async fn connect_with_retry(
+    path: &Path,
+    max_retries: u16,
+    mut error_labels: Vec<(String, String)>,
+) -> Result<tokio::net::UnixStream, Error> {
+    let mut retries = 0;
+    loop {
+        match net::UnixStream::connect(path).await {
+            Ok(stream) => {
+                info!("Connected socket to path {path}", path = path.display());
+                break Ok(stream);
+            }
+            Err(err) => {
+                error!("Opening UDS path failed: {}", err);
+
+                error_labels.push(("error".to_string(), err.to_string()));
+                counter!("connection_failure", 1, &error_labels);
+                // Without this sleep, we will spin the CPU
+                // attempting to reconnect to a socket that doesn't exist yet.
+                if retries < max_retries {
+                    retries += 1;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                } else {
+                    return Err(err.into());
+                }
+            }
+        }
+    }
 }
 
 impl UnixStream {
@@ -164,32 +199,18 @@ impl UnixStream {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let mut unix_stream = Option::<net::UnixStream>::None;
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
+
+        let mut socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
 
         loop {
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                sock = net::UnixStream::connect(&self.path), if unix_stream.is_none() => {
-                    match sock {
-                        Ok(stream) => {
-                            debug!("UDS socket opened for writing.");
-                            unix_stream = Some(stream);
-                        }
-                        Err(err) => {
-                            error!("Opening UDS path failed: {}", err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("connection_failure", 1, &error_labels);
-                        }
-                    }
-                }
-                _ = self.throttle.wait_for(total_bytes), if unix_stream.is_some() => {
+                _ = self.throttle.wait_for(total_bytes) => {
                     // NOTE When we write into a unix stream it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
@@ -197,9 +218,13 @@ impl UnixStream {
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
+                    // dogstatsd stream needs a little endian u32 prefix that contains the length of the expected msg
+                    // for now lets hack this into the generator here. I don't know what the "better" solution is.
+                    // Probably a separate generator specific to dogstatsd?
+                    // This is a framing protocol that dogstatsd has specified, so in my mind a generator is the right
+                    // layer of abstraction to represent that
                     while blk_offset < blk_max {
-                        let stream = unix_stream.unwrap();
-                        unix_stream = None;
+                        let stream = &socket;
 
                         let ready = stream
                             .ready(tokio::io::Interest::WRITABLE)
@@ -209,7 +234,11 @@ impl UnixStream {
                         if ready.is_writable() {
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
-                            match stream.try_write(&blk.bytes[blk_offset..]) {
+                            let blk_write_length: u32 = (&blk.bytes.len() - blk_offset) as u32;
+                            let mut wtr = vec![];
+                            wtr.write_u32::<LittleEndian>(blk_write_length).unwrap();
+
+                            match stream.try_write(&[wtr.as_slice(), &blk.bytes[blk_offset..]].concat()) {
                                 Ok(bytes) => {
                                     bytes_written.increment(bytes as u64);
                                     packets_sent.increment(1);
@@ -223,19 +252,17 @@ impl UnixStream {
                                     tokio::task::yield_now().await;
                                 }
                                 Err(err) => {
-                                    debug!("write failed: {}", err);
+                                    warn!("write failed: {}", err);
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
-                                    // NOTE we here skip replacing `stream` into
-                                    // `unix_stream` and will attempt a new
-                                    // connection.
-                                    break;
+                                    socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
                                 }
                             }
+                        } else {
+                            warn!("socket is not writeable");
                         }
-                        unix_stream = Some(stream);
                     }
                 }
                 () = self.shutdown.recv() => {
