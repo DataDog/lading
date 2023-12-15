@@ -313,9 +313,10 @@ struct CpuPercentage {
 #[inline]
 fn calculate_cpu_percentage(sample: &Sample, previous: &Sample, num_cores: usize) -> CpuPercentage {
     let uptime_diff = sample.uptime - previous.uptime; // CPU-ticks
-    let stime_diff: u64 = sample.stime - previous.stime; // CPU-ticks
-    let utime_diff: u64 = sample.utime - previous.utime; // CPU-ticks
-    let time_diff: u64 = (sample.stime + sample.utime) - (previous.stime + previous.utime); // CPU-ticks
+    let stime_diff: u64 = sample.stime.saturating_sub(previous.stime); // CPU-ticks
+    let utime_diff: u64 = sample.utime.saturating_sub(previous.utime); // CPU-ticks
+    let time_diff: u64 =
+        (sample.stime + sample.utime).saturating_sub(previous.stime + previous.utime); // CPU-ticks
 
     let user_percentage = percentage(utime_diff as f64, uptime_diff as f64, num_cores as f64);
     let kernel_percentage = percentage(stime_diff as f64, uptime_diff as f64, num_cores as f64);
