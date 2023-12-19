@@ -67,6 +67,19 @@ pub enum Error {
     Subtask(#[from] JoinError),
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+/// Defines the supported Framing protocols
+pub enum Framing {
+    /// For each message, prefix the message with a 32-bit little endian integer
+    LengthPrefix,
+}
+
+#[derive(PartialEq)]
+struct LengthPrefixFraming {
+    prefix: Vec<u8>,
+    bytes_in_frame: usize,
+}
+
 #[derive(Debug)]
 /// The Unix Domain Socket stream generator.
 ///
@@ -78,8 +91,10 @@ pub struct UnixStream {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Phase,
+    framing_protocol: Option<Framing>,
 }
 
+// todo instead of specifying `max_retries`, we should retry forever until the `warmup-complete` signal comes through
 async fn connect_with_retry(
     path: &Path,
     max_retries: u16,
@@ -177,6 +192,7 @@ impl UnixStream {
             block_cache,
             throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
+            framing_protocol: None,
             shutdown,
         })
     }
@@ -208,6 +224,7 @@ impl UnixStream {
         loop {
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
+            let mut current_frame: Option<LengthPrefixFraming> = None;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
@@ -232,14 +249,28 @@ impl UnixStream {
                             .map_err(Error::Io)
                             .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
+                            if current_frame == None && self.framing_protocol == Some(Framing::LengthPrefix) {
+                                let blk_write_length: u32 = (&blk.bytes.len() - blk_offset) as u32;
+                                let mut wtr = vec![];
+                                WriteBytesExt::write_u32::<LittleEndian>(&mut wtr, blk_write_length).unwrap();
+                                current_frame = Some(LengthPrefixFraming{ prefix: wtr, bytes_in_frame: blk_write_length as usize,});
+                            }
+                            let prefix = if let Some(ref current_frame) = current_frame {
+                                current_frame.prefix.as_slice()
+                            } else {
+                                &[]
+                            };
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
-                            let blk_write_length: u32 = (&blk.bytes.len() - blk_offset) as u32;
-                            let mut wtr = vec![];
-                            wtr.write_u32::<LittleEndian>(blk_write_length).unwrap();
-
-                            match stream.try_write(&[wtr.as_slice(), &blk.bytes[blk_offset..]].concat()) {
+                            match stream.try_write(&[prefix, &blk.bytes[blk_offset..]].concat()) {
                                 Ok(bytes) => {
+                                    // We close the current frame if we wrote all the bytes we desired to write
+                                    // Otherwise the frame stays open.
+                                    if let Some(ref frame) = current_frame {
+                                        if bytes == frame.bytes_in_frame {
+                                            current_frame = None;
+                                        }
+                                    }
                                     bytes_written.increment(bytes as u64);
                                     packets_sent.increment(1);
                                     blk_offset = bytes;
