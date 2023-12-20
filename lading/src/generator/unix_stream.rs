@@ -13,7 +13,6 @@
 
 use crate::{common::PeekableReceiver, signals::Phase};
 use byte_unit::{Byte, ByteUnit};
-use byteorder::{LittleEndian, WriteBytesExt};
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
@@ -67,19 +66,6 @@ pub enum Error {
     Subtask(#[from] JoinError),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-/// Defines the supported Framing protocols
-pub enum Framing {
-    /// For each message, prefix the message with a 32-bit little endian integer
-    LengthPrefix,
-}
-
-#[derive(PartialEq)]
-struct LengthPrefixFraming {
-    prefix: Vec<u8>,
-    bytes_in_frame: usize,
-}
-
 #[derive(Debug)]
 /// The Unix Domain Socket stream generator.
 ///
@@ -91,7 +77,6 @@ pub struct UnixStream {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Phase,
-    framing_protocol: Option<Framing>,
 }
 
 // todo instead of specifying `max_retries`, we should retry forever until the `warmup-complete` signal comes through
@@ -192,7 +177,6 @@ impl UnixStream {
             block_cache,
             throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
-            framing_protocol: None,
             shutdown,
         })
     }
@@ -224,7 +208,6 @@ impl UnixStream {
         loop {
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
-            let mut current_frame: Option<LengthPrefixFraming> = None;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
@@ -235,11 +218,6 @@ impl UnixStream {
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
-                    // dogstatsd stream needs a little endian u32 prefix that contains the length of the expected msg
-                    // for now lets hack this into the generator here. I don't know what the "better" solution is.
-                    // Probably a separate generator specific to dogstatsd?
-                    // This is a framing protocol that dogstatsd has specified, so in my mind a generator is the right
-                    // layer of abstraction to represent that
                     while blk_offset < blk_max {
                         let stream = &socket;
 
@@ -249,29 +227,10 @@ impl UnixStream {
                             .map_err(Error::Io)
                             .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
-                            if current_frame == None && self.framing_protocol == Some(Framing::LengthPrefix) {
-                                let blk_write_length: u32 = (&blk.bytes.len() - blk_offset) as u32;
-                                let mut wtr = vec![];
-                                WriteBytesExt::write_u32::<LittleEndian>(&mut wtr, blk_write_length).unwrap();
-                                current_frame = Some(LengthPrefixFraming{ prefix: wtr, bytes_in_frame: blk_write_length as usize,});
-                            }
-                            let prefix = if let Some(ref current_frame) = current_frame {
-                                current_frame.prefix.as_slice()
-                            } else {
-                                &[]
-                            };
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
-                            match stream.try_write(&[prefix, &blk.bytes[blk_offset..]].concat()) {
+                            match stream.try_write(&blk.bytes[blk_offset..]) {
                                 Ok(bytes) => {
-                                    // We close the current frame if we wrote all the bytes we desired to write
-                                    // Otherwise the frame stays open.
-                                    if let Some(ref mut frame) = current_frame {
-                                        frame.bytes_in_frame -= bytes;
-                                        if frame.bytes_in_frame == 0 {
-                                            current_frame = None;
-                                        }
-                                    }
                                     bytes_written.increment(bytes as u64);
                                     packets_sent.increment(1);
                                     blk_offset = bytes;
@@ -290,6 +249,9 @@ impl UnixStream {
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
                                     socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
+                                    // If we're sending bad traffic, the remote end will close the connection
+                                    // Sleep briefly to avoid DOSing the remote end and spamming our logs with 'write failed'
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                                 }
                             }
                         } else {

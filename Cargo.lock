@@ -1053,7 +1053,6 @@ version = "0.20.4"
 dependencies = [
  "async-pidfd",
  "byte-unit",
- "byteorder",
  "bytes",
  "clap 3.2.25",
  "flate2",
