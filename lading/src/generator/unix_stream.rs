@@ -266,8 +266,9 @@ impl UnixStream {
                                 Ok(bytes) => {
                                     // We close the current frame if we wrote all the bytes we desired to write
                                     // Otherwise the frame stays open.
-                                    if let Some(ref frame) = current_frame {
-                                        if bytes == frame.bytes_in_frame {
+                                    if let Some(ref mut frame) = current_frame {
+                                        frame.bytes_in_frame -= bytes;
+                                        if frame.bytes_in_frame == 0 {
                                             current_frame = None;
                                         }
                                     }
