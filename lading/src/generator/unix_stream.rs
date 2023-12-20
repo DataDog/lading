@@ -18,11 +18,7 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
-use std::{
-    num::NonZeroU32,
-    path::{Path, PathBuf},
-    thread,
-};
+use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{net, sync::mpsc, task::JoinError};
 use tracing::{debug, error, info, warn};
 
@@ -77,25 +73,6 @@ pub struct UnixStream {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Phase,
-}
-
-async fn connect(
-    path: &Path,
-    mut error_labels: Vec<(String, String)>,
-) -> Result<tokio::net::UnixStream, Error> {
-    match net::UnixStream::connect(path).await {
-        Ok(stream) => {
-            info!("Connected socket to path {path}", path = path.display());
-            Ok(stream)
-        }
-        Err(err) => {
-            error!("Opening UDS path failed: {}", err);
-
-            error_labels.push(("error".to_string(), err.to_string()));
-            counter!("connection_failure", 1, &error_labels);
-            Err(err.into())
-        }
-    }
 }
 
 impl UnixStream {
@@ -195,12 +172,21 @@ impl UnixStream {
 
         loop {
             let Some(ref socket) = current_connection else {
-                match connect(&self.path, self.metric_labels.clone()).await {
+                match net::UnixStream::connect(&self.path).await {
                     Ok(socket) => {
+                        info!(
+                            "Connected socket to path {path}",
+                            path = &self.path.display()
+                        );
                         current_connection = Some(socket);
                     }
                     Err(err) => {
-                        warn!("Failed to connect to socket: {}", err);
+                        error!("Failed to connect to UDS socket at path: {}", err);
+
+                        let mut error_labels = self.metric_labels.clone();
+                        error_labels.push(("error".to_string(), err.to_string()));
+                        counter!("connection_failure", 1, &error_labels);
+
                         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                     }
                 }
