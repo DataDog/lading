@@ -154,7 +154,6 @@ impl Tcp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let mut connection = None;
         // Move the block_cache into an OS thread, exposing a channel between it
         // and this async context.
         let block_cache = self.block_cache;
@@ -164,35 +163,36 @@ impl Tcp {
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
+        let mut current_connection = None;
 
         loop {
+            let Some(ref mut connection) = current_connection else {
+                match TcpStream::connect(self.addr).await {
+                    Ok(client) => {
+                        current_connection = Some(client);
+                    }
+                    Err(err) => {
+                        trace!("connection to {} failed: {}", self.addr, err);
+
+                        let mut error_labels = self.metric_labels.clone();
+                        error_labels.push(("error".to_string(), err.to_string()));
+                        counter!("connection_failure", 1, &error_labels);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+                continue;
+            };
+
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                conn = TcpStream::connect(self.addr), if connection.is_none() => {
-                    match conn {
-                        Ok(client) => {
-                            connection = Some(client);
-                        }
-                        Err(err) => {
-                            trace!("connection to {} failed: {}", self.addr, err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("connection_failure", 1, &error_labels);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-                _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
-                    let mut client = connection.unwrap();
+                _ = self.throttle.wait_for(total_bytes) => {
                     let blk = rcv.next().await.unwrap(); // actually advance through the blocks
-                    match client.write_all(&blk.bytes).await {
+                    match connection.write_all(&blk.bytes).await {
                         Ok(()) => {
                             bytes_written.increment(u64::from(blk.total_bytes.get()));
                             packets_sent.increment(1);
-                            connection = Some(client);
                         }
                         Err(err) => {
                             trace!("write failed: {}", err);
@@ -200,7 +200,7 @@ impl Tcp {
                             let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
-                            connection = None;
+                            current_connection = None;
                         }
                     }
                 }
