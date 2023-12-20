@@ -79,24 +79,21 @@ pub struct UnixStream {
     shutdown: Phase,
 }
 
-// todo instead of specifying `max_retries`, we should retry forever until the `warmup-complete` signal comes through
 async fn connect(
     path: &Path,
     mut error_labels: Vec<(String, String)>,
 ) -> Result<tokio::net::UnixStream, Error> {
-    loop {
-        match net::UnixStream::connect(path).await {
-            Ok(stream) => {
-                info!("Connected socket to path {path}", path = path.display());
-                break Ok(stream);
-            }
-            Err(err) => {
-                error!("Opening UDS path failed: {}", err);
+    match net::UnixStream::connect(path).await {
+        Ok(stream) => {
+            info!("Connected socket to path {path}", path = path.display());
+            Ok(stream)
+        }
+        Err(err) => {
+            error!("Opening UDS path failed: {}", err);
 
-                error_labels.push(("error".to_string(), err.to_string()));
-                counter!("connection_failure", 1, &error_labels);
-                return Err(err.into());
-            }
+            error_labels.push(("error".to_string(), err.to_string()));
+            counter!("connection_failure", 1, &error_labels);
+            Err(err.into())
         }
     }
 }
@@ -197,20 +194,17 @@ impl UnixStream {
         let mut current_connection = None;
 
         loop {
-            let socket = match current_connection {
-                Some(ref socket) => socket,
-                None => {
-                    match connect(&self.path, self.metric_labels.clone()).await {
-                        Ok(socket) => {
-                            current_connection = Some(socket);
-                        }
-                        Err(err) => {
-                            warn!("Failed to connect to socket: {}", err);
-                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                        }
+            let Some(ref socket) = current_connection else {
+                match connect(&self.path, self.metric_labels.clone()).await {
+                    Ok(socket) => {
+                        current_connection = Some(socket);
                     }
-                    continue;
+                    Err(err) => {
+                        warn!("Failed to connect to socket: {}", err);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    }
                 }
+                continue;
             };
 
             let blk = rcv.peek().await.unwrap();
