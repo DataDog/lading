@@ -242,8 +242,6 @@ impl UnixStream {
                                     counter!("request_failure", 1, &error_labels);
                                 }
                             }
-                        } else {
-                            warn!("socket is not writeable");
                         }
                     }
                 }
