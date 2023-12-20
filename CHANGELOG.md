@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+- Fixes bug with retry logic in `unix-stream` generator that could result in
+  unexpected, extra unix stream connections.
+- Adds a new config option to `lading_payload::dogstatsd::Config`,
+  `length_prefix_framed`. If this option is on, each "block" emitted by the
+  dogstatsd generator will have a little-endian u32 prefix (4 bytes) containing
+  the length of the following block.
+
 ### Fixed
 - Total CPU calculation routine no longer panics in some scenarios
 

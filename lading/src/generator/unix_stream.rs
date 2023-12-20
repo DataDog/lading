@@ -80,12 +80,10 @@ pub struct UnixStream {
 }
 
 // todo instead of specifying `max_retries`, we should retry forever until the `warmup-complete` signal comes through
-async fn connect_with_retry(
+async fn connect(
     path: &Path,
-    max_retries: u16,
     mut error_labels: Vec<(String, String)>,
 ) -> Result<tokio::net::UnixStream, Error> {
-    let mut retries = 0;
     loop {
         match net::UnixStream::connect(path).await {
             Ok(stream) => {
@@ -97,14 +95,7 @@ async fn connect_with_retry(
 
                 error_labels.push(("error".to_string(), err.to_string()));
                 counter!("connection_failure", 1, &error_labels);
-                // Without this sleep, we will spin the CPU
-                // attempting to reconnect to a socket that doesn't exist yet.
-                if retries < max_retries {
-                    retries += 1;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                } else {
-                    return Err(err.into());
-                }
+                return Err(err.into());
             }
         }
     }
@@ -203,9 +194,25 @@ impl UnixStream {
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
-        let mut socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
+        let mut current_connection = None;
 
         loop {
+            let socket = match current_connection {
+                Some(ref socket) => socket,
+                None => {
+                    match connect(&self.path, self.metric_labels.clone()).await {
+                        Ok(socket) => {
+                            current_connection = Some(socket);
+                        }
+                        Err(err) => {
+                            warn!("Failed to connect to socket: {}", err);
+                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                        }
+                    }
+                    continue;
+                }
+            };
+
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
@@ -242,16 +249,17 @@ impl UnixStream {
                                     // whole CPU.
                                     tokio::task::yield_now().await;
                                 }
-                                Err(err) => {
+                                Err(err ) => {
                                     warn!("write failed: {}", err);
+                                    if err.kind() == tokio::io::ErrorKind::BrokenPipe {
+                                        warn!("Broken pipe, reconnecting");
+                                        current_connection = None;
+                                        break;
+                                    }
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
-                                    socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
-                                    // If we're sending bad traffic, the remote end will close the connection
-                                    // Sleep briefly to avoid DOSing the remote end and spamming our logs with 'write failed'
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                                 }
                             }
                         } else {
