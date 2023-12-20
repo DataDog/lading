@@ -13,7 +13,8 @@
 
 use crate::{common::PeekableReceiver, signals::Phase};
 use byte_unit::{Byte, ByteUnit};
-use byteorder::{LittleEndian, WriteBytesExt};
+use bytes::Bytes;
+use futures::SinkExt;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
@@ -25,6 +26,7 @@ use std::{
     thread,
 };
 use tokio::{net, sync::mpsc, task::JoinError};
+use tokio_util::codec::{length_delimited, Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, warn};
 
 use super::General;
@@ -67,19 +69,6 @@ pub enum Error {
     Subtask(#[from] JoinError),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-/// Defines the supported Framing protocols
-pub enum Framing {
-    /// For each message, prefix the message with a 32-bit little endian integer
-    LengthPrefix,
-}
-
-#[derive(PartialEq)]
-struct LengthPrefixFraming {
-    prefix: Vec<u8>,
-    bytes_in_frame: usize,
-}
-
 #[derive(Debug)]
 /// The Unix Domain Socket stream generator.
 ///
@@ -91,7 +80,7 @@ pub struct UnixStream {
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: Phase,
-    framing_protocol: Option<Framing>,
+    length_framed_codec: Option<LengthDelimitedCodec>,
 }
 
 // todo instead of specifying `max_retries`, we should retry forever until the `warmup-complete` signal comes through
@@ -187,12 +176,25 @@ impl UnixStream {
             }
         };
 
+        let should_frame = true;
+        let codec = if should_frame {
+            let max_frame_length = 8192;
+            Some(
+                length_delimited::Builder::new()
+                    .max_frame_length(max_frame_length)
+                    .little_endian()
+                    .new_codec(),
+            )
+        } else {
+            None
+        };
+
         Ok(Self {
             path: config.path,
             block_cache,
             throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
             metric_labels: labels,
-            framing_protocol: None,
+            length_framed_codec: codec,
             shutdown,
         })
     }
@@ -221,10 +223,14 @@ impl UnixStream {
 
         let mut socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
 
+        let mut framed = None;
+        if let Some(ref c) = self.length_framed_codec {
+            framed = Some(Framed::new(socket, c.clone()));
+        }
+
         loop {
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
-            let mut current_frame: Option<LengthPrefixFraming> = None;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
@@ -235,11 +241,6 @@ impl UnixStream {
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
-                    // dogstatsd stream needs a little endian u32 prefix that contains the length of the expected msg
-                    // for now lets hack this into the generator here. I don't know what the "better" solution is.
-                    // Probably a separate generator specific to dogstatsd?
-                    // This is a framing protocol that dogstatsd has specified, so in my mind a generator is the right
-                    // layer of abstraction to represent that
                     while blk_offset < blk_max {
                         let stream = &socket;
 
@@ -249,28 +250,25 @@ impl UnixStream {
                             .map_err(Error::Io)
                             .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
-                            if current_frame == None && self.framing_protocol == Some(Framing::LengthPrefix) {
-                                let blk_write_length: u32 = (&blk.bytes.len() - blk_offset) as u32;
-                                let mut wtr = vec![];
-                                WriteBytesExt::write_u32::<LittleEndian>(&mut wtr, blk_write_length).unwrap();
-                                current_frame = Some(LengthPrefixFraming{ prefix: wtr, bytes_in_frame: blk_write_length as usize,});
-                            }
-                            let prefix = if let Some(ref current_frame) = current_frame {
-                                current_frame.prefix.as_slice()
-                            } else {
-                                &[]
-                            };
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
-                            match stream.try_write(&[prefix, &blk.bytes[blk_offset..]].concat()) {
+
+                            let res = match framed {
+                                Some(ref mut framed) => {
+                                    // `framed.send` requires the argument here to be the same as the type of the codec
+                                    // the type of the codec is Bytes, so we'd need to copy this byte slice
+                                    // into a Bytes.
+                                    let to_send = Bytes::copy_from_slice(&blk.bytes[blk_offset..]);
+                                    framed.send(to_send).await;
+                                    Ok(blk.bytes.len() - blk_offset)
+                                },
+                                None => {
+                                    stream.try_write(&blk.bytes[blk_offset..])
+                                },
+                            };
+
+                            match res {
                                 Ok(bytes) => {
-                                    // We close the current frame if we wrote all the bytes we desired to write
-                                    // Otherwise the frame stays open.
-                                    if let Some(ref frame) = current_frame {
-                                        if bytes == frame.bytes_in_frame {
-                                            current_frame = None;
-                                        }
-                                    }
                                     bytes_written.increment(bytes as u64);
                                     packets_sent.increment(1);
                                     blk_offset = bytes;
@@ -289,6 +287,9 @@ impl UnixStream {
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
                                     socket = connect_with_retry(&self.path, 10, self.metric_labels.clone()).await?;
+                                    if let Some(ref c) = self.length_framed_codec {
+                                        framed = Some(Framed::new(socket, c.clone()));
+                                    }
                                 }
                             }
                         } else {
