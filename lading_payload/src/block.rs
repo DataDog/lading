@@ -239,6 +239,7 @@ impl Cache {
                     metric_weights,
                     value,
                     service_check_names,
+                    length_prefix_framed,
                 },
             ) => {
                 if !conf.valid() {
@@ -258,6 +259,7 @@ impl Cache {
                     *kind_weights,
                     *metric_weights,
                     *value,
+                    *length_prefix_framed,
                     &mut rng,
                 )?;
 
@@ -457,6 +459,7 @@ fn stream_inner(
                 kind_weights,
                 metric_weights,
                 value,
+                length_prefix_framed,
             },
         ) => {
             if !conf.valid() {
@@ -476,6 +479,7 @@ fn stream_inner(
                 *kind_weights,
                 *metric_weights,
                 *value,
+                *length_prefix_framed,
                 &mut rng,
             )?;
 

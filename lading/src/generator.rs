@@ -11,7 +11,7 @@
 //! experimental control.
 
 use serde::Deserialize;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{signals::Phase, target::TargetPidReceiver};
 
@@ -169,11 +169,19 @@ impl Server {
             }
             Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
             Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),
-            Inner::UnixStream(conf) => Self::UnixStream(unix_stream::UnixStream::new(
-                config.general,
-                conf,
-                shutdown,
-            )?),
+            Inner::UnixStream(conf) => {
+                if let lading_payload::Config::DogStatsD(variant) = conf.variant {
+                    if !variant.length_prefix_framed {
+                        warn!("Dogstatsd stream requires length prefix framing. You likely want to add `length_prefix_framed: true` to your payload config.");
+                    }
+                }
+
+                Self::UnixStream(unix_stream::UnixStream::new(
+                    config.general,
+                    conf,
+                    shutdown,
+                )?)
+            }
             Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
                 config.general,
                 &conf,
