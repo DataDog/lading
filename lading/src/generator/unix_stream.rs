@@ -20,7 +20,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{net, sync::mpsc, task::JoinError};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::General;
 
@@ -164,32 +164,40 @@ impl UnixStream {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let mut unix_stream = Option::<net::UnixStream>::None;
 
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
+        let mut current_connection = None;
+
         loop {
+            let Some(ref socket) = current_connection else {
+                match net::UnixStream::connect(&self.path).await {
+                    Ok(socket) => {
+                        info!(
+                            "Connected socket to path {path}",
+                            path = &self.path.display()
+                        );
+                        current_connection = Some(socket);
+                    }
+                    Err(err) => {
+                        error!("Failed to connect to UDS socket at path: {}", err);
+
+                        let mut error_labels = self.metric_labels.clone();
+                        error_labels.push(("error".to_string(), err.to_string()));
+                        counter!("connection_failure", 1, &error_labels);
+
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    }
+                }
+                continue;
+            };
+
             let blk = rcv.peek().await.unwrap();
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                sock = net::UnixStream::connect(&self.path), if unix_stream.is_none() => {
-                    match sock {
-                        Ok(stream) => {
-                            debug!("UDS socket opened for writing.");
-                            unix_stream = Some(stream);
-                        }
-                        Err(err) => {
-                            error!("Opening UDS path failed: {}", err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("connection_failure", 1, &error_labels);
-                        }
-                    }
-                }
-                _ = self.throttle.wait_for(total_bytes), if unix_stream.is_some() => {
+                _ = self.throttle.wait_for(total_bytes) => {
                     // NOTE When we write into a unix stream it may be that only
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
@@ -198,8 +206,7 @@ impl UnixStream {
                     let mut blk_offset = 0;
                     let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
                     while blk_offset < blk_max {
-                        let stream = unix_stream.unwrap();
-                        unix_stream = None;
+                        let stream = &socket;
 
                         let ready = stream
                             .ready(tokio::io::Interest::WRITABLE)
@@ -222,20 +229,20 @@ impl UnixStream {
                                     // whole CPU.
                                     tokio::task::yield_now().await;
                                 }
-                                Err(err) => {
-                                    debug!("write failed: {}", err);
+                                Err(err ) => {
+                                    warn!("write failed: {}", err);
+                                    if err.kind() == tokio::io::ErrorKind::BrokenPipe {
+                                        warn!("Broken pipe, reconnecting");
+                                        current_connection = None;
+                                        break;
+                                    }
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
                                     counter!("request_failure", 1, &error_labels);
-                                    // NOTE we here skip replacing `stream` into
-                                    // `unix_stream` and will attempt a new
-                                    // connection.
-                                    break;
                                 }
                             }
                         }
-                        unix_stream = Some(stream);
                     }
                 }
                 () = self.shutdown.recv() => {

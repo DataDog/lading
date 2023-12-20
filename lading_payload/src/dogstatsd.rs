@@ -9,6 +9,7 @@ use rand::{
     Rng,
 };
 use serde::Deserialize;
+use tracing::{debug, warn};
 
 use crate::{common::strings, Serialize};
 
@@ -84,6 +85,10 @@ fn sampling_range() -> ConfRange<f32> {
 
 fn sampling_probability() -> f32 {
     0.5
+}
+
+fn length_prefix_framed() -> bool {
+    false
 }
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
@@ -319,6 +324,14 @@ pub struct Config {
     /// The configuration of values that appear in all metrics.
     #[serde(default = "value_config")]
     pub value: ValueConf,
+
+    /// Whether completed blocks should use length-prefix framing.
+    ///
+    /// If enabled, each block emitted from this generator will have
+    /// a 4-byte header that is a little-endian u32 representing the
+    /// total length of the data block.
+    #[serde(default = "length_prefix_framed")]
+    pub length_prefix_framed: bool,
 }
 
 impl Config {
@@ -568,6 +581,7 @@ impl<'a> fmt::Display for Member<'a> {
 /// A generator for `DogStatsD` payloads
 pub struct DogStatsD {
     member_generator: MemberGenerator,
+    length_prefix_framed: bool,
 }
 
 impl DogStatsD {
@@ -594,6 +608,7 @@ impl DogStatsD {
             KindWeights::default(),
             MetricWeights::default(),
             value_config(),
+            length_prefix_framed(),
             rng,
         )
         .unwrap()
@@ -629,6 +644,7 @@ impl DogStatsD {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
+        length_prefix_framed: bool,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -651,11 +667,85 @@ impl DogStatsD {
             rng,
         )?;
 
-        Ok(Self { member_generator })
+        Ok(Self {
+            member_generator,
+            length_prefix_framed,
+        })
     }
 }
 
 impl Serialize for DogStatsD {
+    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), crate::Error>
+    where
+        R: Rng + Sized,
+        W: Write,
+    {
+        if self.length_prefix_framed {
+            self.to_bytes_length_prefix_framed(rng, max_bytes, writer)
+        } else {
+            self.to_bytes(rng, max_bytes, writer)
+        }
+    }
+}
+impl DogStatsD {
+    fn to_bytes_length_prefix_framed<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<(), crate::Error>
+    where
+        R: Rng + Sized,
+        W: Write,
+    {
+        let mut bytes_remaining = max_bytes;
+        let mut members = Vec::new();
+        // generate as many messages as we can fit
+        loop {
+            let member: Member = self.member_generator.generate(&mut rng);
+            let encoding = format!("{member}");
+            let line_length = encoding.len() + 1; // add one for the newline
+            match bytes_remaining.checked_sub(line_length) {
+                Some(remainder) => {
+                    members.push(encoding);
+                    bytes_remaining = remainder;
+                }
+                None => break,
+            }
+        }
+        if bytes_remaining == max_bytes {
+            warn!("Could not fit any messages into the block with requested size {max_bytes}. Omitting this block.");
+            return Ok(());
+        }
+
+        let max_bytes: u32 = max_bytes.try_into().unwrap_or_else(|_| {
+            panic!(
+                "Could not convert max_bytes to a u32, are you using a block size greater than {}?",
+                u32::MAX
+            );
+        });
+        let bytes_remaining: u32 = bytes_remaining.try_into().unwrap_or_else(|_| {
+            panic!(
+                "Could not convert bytes_remaining to a u32, are you using a block size greater than {}?",
+                u32::MAX
+            );
+        });
+        let length = max_bytes - bytes_remaining;
+
+        // write prefix
+        writer.write_all(&length.to_le_bytes())?;
+        debug!(
+            "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
+            length
+        );
+
+        // write contents
+        for member in members {
+            writeln!(writer, "{member}")?;
+        }
+
+        Ok(())
+    }
     fn to_bytes<W, R>(
         &self,
         mut rng: R,
@@ -679,6 +769,16 @@ impl Serialize for DogStatsD {
                 None => break,
             }
         }
+        if bytes_remaining == max_bytes {
+            warn!("Could not fit any messages into the block with requested size {max_bytes}. Omitting this block.");
+            return Ok(());
+        }
+
+        let length = max_bytes - bytes_remaining;
+        debug!(
+            "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
+            length
+        );
         Ok(())
     }
 }
@@ -694,7 +794,7 @@ mod test {
             sampling_probability, sampling_range, service_check_names, tag_key_length,
             tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
         },
-        DogStatsD, Serialize,
+        DogStatsD,
     };
 
     // We want to be sure that the serialized size of the payload does not
@@ -713,7 +813,35 @@ mod test {
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, &mut rng).unwrap();
+                                           metric_weights, value_conf, false, &mut rng).unwrap();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            debug_assert!(
+                bytes.len() <= max_bytes,
+                "{:?}",
+                std::str::from_utf8(&bytes).unwrap()
+            );
+        }
+    }
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes` if framing is enabled
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes_with_length_prefix_frames(seed: u64, max_bytes: u16) {
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let multivalue_pack_probability = multivalue_pack_probability();
+            let value_conf = value_config();
+
+            let kind_weights = KindWeights::default();
+            let metric_weights = MetricWeights::default();
+            let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
+                                           name_length(), tag_key_length(),
+                                           tag_value_length(), tags_per_msg(),
+                                           multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
+                                           metric_weights, value_conf, true, &mut rng).unwrap();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
