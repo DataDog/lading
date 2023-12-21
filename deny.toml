@@ -18,7 +18,6 @@ copyleft = "deny"
 default = "deny"
 
 [sources]
-allow-git = ["https://github.com/open-telemetry/opentelemetry-rust/"]
 unknown-git = "deny"
 
 [advisories]
