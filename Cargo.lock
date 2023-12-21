@@ -164,7 +164,7 @@ dependencies = [
  "bitflags 1.3.2",
  "bytes",
  "futures-util",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "itoa",
@@ -190,7 +190,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "http",
+ "http 0.2.11",
  "http-body",
  "mime",
  "rustversion",
@@ -805,7 +805,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.11",
  "indexmap 1.9.3",
  "slab",
  "tokio",
@@ -869,9 +869,20 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "http"
-version = "0.2.9"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
+checksum = "8947b1a6fad4393052c7ba1f4cd97bed3e953a95c79c92ad9b051a04611d9fbb"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
+name = "http"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
 dependencies = [
  "bytes",
  "fnv",
@@ -885,7 +896,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.11",
  "pin-project-lite",
 ]
 
@@ -895,7 +906,7 @@ version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f560b665ad9f1572cfcaf034f7fb84338a7ce945216d64a90fd81f046a3caee"
 dependencies = [
- "http",
+ "http 0.2.11",
  "serde",
 ]
 
@@ -922,7 +933,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "httparse",
  "httpdate",
@@ -1057,7 +1068,7 @@ dependencies = [
  "clap 3.2.25",
  "flate2",
  "futures",
- "http",
+ "http 1.0.0",
  "http-serde",
  "hyper",
  "is_executable",
@@ -1940,7 +1951,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "ipnet",
@@ -2496,7 +2507,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "hyper-timeout",
@@ -2527,7 +2538,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "hyper-timeout",
