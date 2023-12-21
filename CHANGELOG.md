@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.20.5]
 ### Added
 - Adds a new config option to `lading_payload::dogstatsd::Config`,
   `length_prefix_framed`. If this option is on, each "block" emitted by the
