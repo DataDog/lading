@@ -50,6 +50,12 @@ struct CliKeyValues {
     inner: FxHashMap<String, String>,
 }
 
+impl CliKeyValues {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.inner.get(key).map(|s| s.as_str())
+    }
+}
+
 impl Display for CliKeyValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         for (k, v) in self.inner.iter() {
@@ -595,5 +601,16 @@ generator: []
         let deser = CliKeyValues::from_str(val);
         let deser = deser.unwrap().to_string();
         assert_eq!(deser, "first=one,");
+    }
+
+    #[test]
+    fn cli_key_values_deserializes_kv_comma_separated_value() {
+        let val = "DD_API_KEY=00000001,DD_TELEMETRY_ENABLED=true,DD_TAGS=uqhwd:b2xiyw,hf9gy:uwcy04";
+        let deser = CliKeyValues::from_str(val);
+        let deser = deser.unwrap();
+
+        assert_eq!(deser.get("DD_API_KEY").unwrap(), "00000001");
+        assert_eq!(deser.get("DD_TELEMETRY_ENABLED").unwrap(), "true");
+        assert_eq!(deser.get("DD_TAGS").unwrap(), "uqhwd:b2xiyw,hf9gy:uwcy04");
     }
 }
