@@ -20,7 +20,9 @@ use lading::{
 };
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, SeedableRng};
+use regex::Regex;
 use rustc_hash::FxHashMap;
 use tokio::{
     runtime::Builder,
@@ -51,6 +53,7 @@ struct CliKeyValues {
 }
 
 impl CliKeyValues {
+    #[cfg(test)]
     fn get(&self, key: &str) -> Option<&str> {
         self.inner.get(key).map(|s| s.as_str())
     }
@@ -69,17 +72,31 @@ impl FromStr for CliKeyValues {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let pair_err = String::from("pairs must be separated by '='");
+        // A key always matches `[[:alpha:]_]+` and a value conforms to
+        // `[[:alpha:]_:,`. A key is always followed by a '=' and then a
+        // value. A key and value pair are delimited from other pairs by
+        // ','. But note that ',' is a valid character in a value, so it's
+        // ambiguous whether the last member of a value after a ',' is a key.
+        //
+        // The approach taken here is to use the key notion as delimiter and
+        // then tidy up afterward to find values.
+        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"([[:alpha:]_]+)=").unwrap());
+
         let mut labels = FxHashMap::default();
-        for kv in input.split(',') {
-            if kv.is_empty() {
-                continue;
-            }
-            let mut pair = kv.split('=');
-            let key = pair.next().ok_or_else(|| pair_err.clone())?;
-            let value = pair.next().ok_or_else(|| pair_err.clone())?;
-            labels.insert(key.into(), value.into());
+
+        for cap in RE.captures_iter(input) {
+            let key = cap[1].to_string();
+            let start = cap.get(0).unwrap().end();
+
+            // Find the next key or run into the end of the input.
+            let end = RE.find_at(input, start).map_or(input.len(), |m| m.start());
+
+            // Extract the value.
+            let value = input[start..end].trim_end_matches(',').to_string();
+
+            labels.insert(key, value);
         }
+
         Ok(Self { inner: labels })
     }
 }
@@ -582,32 +599,35 @@ generator: []
         let val = "";
         let deser = CliKeyValues::from_str(val);
         let deser = deser.unwrap().to_string();
-        assert_eq!(deser, "");
+        assert_eq!("", deser);
     }
 
     #[test]
     fn cli_key_values_deserializes_kv_list() {
         let val = "first=one,second=two";
         let deser = CliKeyValues::from_str(val);
-        let deser = deser.unwrap().to_string();
-        // CliKeyValues does not preserve order. That's okay! It's just less
-        // convenient to assert against.
-        assert!(deser == "first=one,second=two," || deser == "second=two,first=one,");
+        let deser = deser.unwrap();
+
+        assert_eq!(deser.get("first").unwrap(), "one");
+        assert_eq!(deser.get("second").unwrap(), "two");
     }
 
     #[test]
-    fn cli_key_values_deserializes_kv_list_trailing_comma() {
+    fn cli_key_values_deserializes_trailing_comma_kv_list() {
         let val = "first=one,";
         let deser = CliKeyValues::from_str(val);
-        let deser = deser.unwrap().to_string();
-        assert_eq!(deser, "first=one,");
+        let deser = deser.unwrap();
+
+        assert_eq!(deser.get("first").unwrap(), "one");
     }
 
     #[test]
-    fn cli_key_values_deserializes_kv_comma_separated_value() {
+    fn cli_key_values_deserializes_separated_value_kv_comma() {
         let val = "DD_API_KEY=00000001,DD_TELEMETRY_ENABLED=true,DD_TAGS=uqhwd:b2xiyw,hf9gy:uwcy04";
         let deser = CliKeyValues::from_str(val);
         let deser = deser.unwrap();
+
+        println!("RESULT: {deser}");
 
         assert_eq!(deser.get("DD_API_KEY").unwrap(), "00000001");
         assert_eq!(deser.get("DD_TELEMETRY_ENABLED").unwrap(), "true");

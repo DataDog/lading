@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.6-rc0]
+### Fixed
+- Fixed a bug in CLI key/value parsing where values might be incorrectly parsed
+  as key/value pairs if they held lading's delimiter character.
+
 ## [0.20.5]
 ### Added
 - Adds a new config option to `lading_payload::dogstatsd::Config`,
