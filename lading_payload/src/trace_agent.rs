@@ -73,6 +73,7 @@ const SERVICE_KIND: [&str; 4] = ["web", "db", "lambda", "cicd"];
 
 /// `TraceAgent` span
 #[derive(serde::Serialize)]
+#[allow(clippy::struct_field_names)]
 pub(crate) struct Span<'a> {
     /// service is the name of the service with which this span is associated.
     service: &'a str,
