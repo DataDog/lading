@@ -19,7 +19,7 @@ pub enum Error {
     #[cfg(target_os = "linux")]
     /// Wrapper for [`procfs::ProcError`]
     #[error("Unable to read procfs: {0}")]
-    ProcError(#[from] procfs::ProcError),
+    Proc(#[from] procfs::ProcError),
 }
 
 #[derive(Debug, Default)]
@@ -263,13 +263,13 @@ impl Sampler {
             ];
 
             let cpu_gauge = register_gauge!("cpu_percentage", &labels);
-            cpu_gauge.set(calc.cpu_percentage);
+            cpu_gauge.set(calc.cpu);
             self.previous_gauges.push(cpu_gauge.into());
             let kernel_gauge = register_gauge!("kernel_cpu_percentage", &labels);
-            kernel_gauge.set(calc.kernel_percentage);
+            kernel_gauge.set(calc.kernel);
             self.previous_gauges.push(kernel_gauge.into());
             let user_cpu_gauge = register_gauge!("user_cpu_percentage", &labels);
-            user_cpu_gauge.set(calc.user_percentage);
+            user_cpu_gauge.set(calc.user);
             self.previous_gauges.push(user_cpu_gauge.into());
         }
 
@@ -292,9 +292,9 @@ impl Sampler {
         gauge!("total_utime", total_sample.utime as f64);
         gauge!("total_stime", total_sample.stime as f64);
 
-        gauge!("total_cpu_percentage", totals.cpu_percentage);
-        gauge!("total_kernel_cpu_percentage", totals.kernel_percentage);
-        gauge!("total_user_cpu_percentage", totals.user_percentage);
+        gauge!("total_cpu_percentage", totals.cpu);
+        gauge!("total_kernel_cpu_percentage", totals.kernel);
+        gauge!("total_user_cpu_percentage", totals.user);
 
         self.previous_totals = total_sample;
         self.previous_samples = samples;
@@ -303,10 +303,11 @@ impl Sampler {
     }
 }
 
+#[allow(clippy::struct_field_names)]
 struct CpuPercentage {
-    cpu_percentage: f64,
-    kernel_percentage: f64,
-    user_percentage: f64,
+    cpu: f64,
+    kernel: f64,
+    user: f64,
 }
 
 #[allow(clippy::similar_names)]
@@ -318,15 +319,11 @@ fn calculate_cpu_percentage(sample: &Sample, previous: &Sample, num_cores: usize
     let time_diff: u64 =
         (sample.stime + sample.utime).saturating_sub(previous.stime + previous.utime); // CPU-ticks
 
-    let user_percentage = percentage(utime_diff as f64, uptime_diff as f64, num_cores as f64);
-    let kernel_percentage = percentage(stime_diff as f64, uptime_diff as f64, num_cores as f64);
-    let cpu_percentage = percentage(time_diff as f64, uptime_diff as f64, num_cores as f64);
+    let user = percentage(utime_diff as f64, uptime_diff as f64, num_cores as f64);
+    let kernel = percentage(stime_diff as f64, uptime_diff as f64, num_cores as f64);
+    let cpu = percentage(time_diff as f64, uptime_diff as f64, num_cores as f64);
 
-    CpuPercentage {
-        cpu_percentage,
-        kernel_percentage,
-        user_percentage,
-    }
+    CpuPercentage { cpu, kernel, user }
 }
 
 #[inline]
