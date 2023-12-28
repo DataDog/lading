@@ -14,7 +14,7 @@ serde_json = "1.0"
 shared = { path = "../shared" }
 tempfile = "3.8"
 tokio = { version = "1.32", features = ["rt", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
-tonic = { version = "0.9", default-features = false, features = ["transport", "prost"]}
+tonic = { version = "0.10", default-features = false, features = ["transport", "prost"]}
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }

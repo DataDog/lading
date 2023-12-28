@@ -40,7 +40,7 @@ serde_yaml = "0.9"
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tonic = { version = "0.9" }
+tonic = { version = "0.10" }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
