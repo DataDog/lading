@@ -10,14 +10,14 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-prost = "0.11"
+prost = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = {workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [build-dependencies]
-prost-build = { version = "0.11" }
+prost-build = { workspace = true }
 
 [lib]
 doctest = false
