@@ -263,7 +263,7 @@ impl Child {
                             Ok(bytes) => {
                                 bytes_written.increment(bytes as u64);
                                 packets_sent.increment(1);
-                                blk_offset = bytes;
+                                blk_offset += bytes;
                             }
                             Err(err) => {
                                 debug!("write failed: {}", err);
