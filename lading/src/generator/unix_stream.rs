@@ -220,7 +220,7 @@ impl UnixStream {
                                 Ok(bytes) => {
                                     bytes_written.increment(bytes as u64);
                                     packets_sent.increment(1);
-                                    blk_offset = bytes;
+                                    blk_offset += bytes;
                                 }
                                 Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
                                     // If the read side has hung up we will never
