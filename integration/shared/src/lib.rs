@@ -59,7 +59,6 @@ impl IntoRequest<TestConfig> for DucksConfig {
         })
     }
 }
-
 impl From<TestConfig> for DucksConfig {
     fn from(val: TestConfig) -> Self {
         serde_json::from_str(&val.json_blob).expect("Failed to convert to JSON")
