@@ -55,13 +55,14 @@ pub struct DucksConfig {
 impl IntoRequest<TestConfig> for DucksConfig {
     fn into_request(self) -> tonic::Request<TestConfig> {
         Request::new(TestConfig {
-            json_blob: serde_json::to_string(&self).unwrap(),
+            json_blob: serde_json::to_string(&self)
+                .expect("Error: Failed to convert config to JSON"),
         })
     }
 }
 
 impl From<TestConfig> for DucksConfig {
     fn from(val: TestConfig) -> Self {
-        serde_json::from_str(&val.json_blob).unwrap()
+        serde_json::from_str(&val.json_blob).expect("Error: Failed to convert to JSON")
     }
 }

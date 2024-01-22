@@ -111,7 +111,11 @@ impl IntegrationTest {
         let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "ducks=debug,info")
-            .arg(ducks_comm_file.to_str().unwrap())
+            .arg(
+                ducks_comm_file
+                    .to_str()
+                    .expect("Error: Path is invalid unicode"),
+            )
             .spawn()
             .context("launch ducks")?;
 
@@ -148,17 +152,30 @@ impl IntegrationTest {
             .stdout(Stdio::piped())
             .env("RUST_LOG", "lading=debug,info")
             .arg("--target-pid")
-            .arg(ducks_process.id().unwrap().to_string())
+            .arg(
+                ducks_process
+                    .id()
+                    .expect("Error: process is already done")
+                    .to_string(),
+            )
             .arg("--config-path")
-            .arg(lading_config_file.to_str().unwrap())
+            .arg(
+                lading_config_file
+                    .to_str()
+                    .expect("Error: path is invalid unicode"),
+            )
             .arg("--experiment-duration-seconds")
             .arg(self.experiment_duration.as_secs().to_string())
             .arg("--warmup-duration-seconds")
             .arg(self.experiment_warmup.as_secs().to_string())
             .arg("--capture-path")
-            .arg(captures_file.to_str().unwrap())
+            .arg(
+                captures_file
+                    .to_str()
+                    .expect("Error: path is invalid unicode"),
+            )
             .spawn()
-            .unwrap();
+            .expect("Error: lading binary failed to spawn");
 
         // wait for lading to push some load. It will exit on its own.
         debug!("lading is running");

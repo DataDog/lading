@@ -64,7 +64,9 @@ pub enum Telemetry {
 impl Default for Telemetry {
     fn default() -> Self {
         Self::Prometheus {
-            prometheus_addr: "0.0.0.0:9000".parse().unwrap(),
+            prometheus_addr: "0.0.0.0:9000"
+                .parse()
+                .expect("Error: Not possible to parse to SocketAddr"),
             global_labels: FxHashMap::default(),
         }
     }
@@ -102,7 +104,8 @@ blackhole:
   - tcp:
       binding_addr: "127.0.0.1:1001"
 "#;
-        let config: Config = serde_yaml::from_str(contents).unwrap();
+        let config: Config = serde_yaml::from_str(contents)
+            .expect("Error: Contents do not match the structure expected");
         assert_eq!(
             config,
             Config {
@@ -112,14 +115,16 @@ blackhole:
                     },
                     inner: generator::Inner::Http(generator::http::Config {
                         seed: Default::default(),
-                        target_uri: "http://localhost:1000/".try_into().unwrap(),
+                        target_uri: "http://localhost:1000/"
+                            .try_into()
+                            .expect("Error: Failed to convert to to valid URI"),
                         method: generator::http::Method::Post {
                             variant: lading_payload::Config::Fluent,
                             maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
                                 8_f64,
                                 byte_unit::ByteUnit::MB
                             )
-                            .unwrap(),
+                            .expect("Error: Value provided is negative"),
                             block_cache_method: block::CacheMethod::Fixed,
                         },
                         headers: HeaderMap::default(),
@@ -127,7 +132,7 @@ blackhole:
                             100_f64,
                             byte_unit::ByteUnit::MB
                         )
-                        .unwrap(),
+                        .expect("Error: Value provided is negative"),
                         block_sizes: Option::default(),
                         parallel_connections: 5,
                         throttle: lading_throttle::Config::default(),
@@ -139,13 +144,15 @@ blackhole:
                             id: Some(String::from("Data in"))
                         },
                         inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
-                            binding_addr: SocketAddr::from_str("127.0.0.1:1000").unwrap(),
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1000")
+                                .expect("Error: Failed to convert to valid SocketAddr"),
                         })
                     },
                     blackhole::Config {
                         general: blackhole::General { id: None },
                         inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
-                            binding_addr: SocketAddr::from_str("127.0.0.1:1001").unwrap(),
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1001")
+                                .expect("Error: Failed to convert to valid SocketAddr"),
                         })
                     },
                 ]),
