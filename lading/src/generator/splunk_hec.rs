@@ -131,11 +131,16 @@ fn get_uri_by_format(base_uri: &Uri, format: lading_payload::splunk_hec::Encodin
     };
 
     Uri::builder()
-        .authority(base_uri.authority().unwrap().to_string())
+        .authority(
+            base_uri
+                .authority()
+                .expect("Error: base uri authority is empty")
+                .to_string(),
+        )
         .scheme("http")
         .path_and_query(path)
         .build()
-        .unwrap()
+        .expect("Error: unable to build URI")
 }
 
 impl SplunkHec {
@@ -156,12 +161,18 @@ impl SplunkHec {
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
                 ]
             })
             .iter()

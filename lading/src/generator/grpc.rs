@@ -160,14 +160,19 @@ impl Grpc {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB)
+                        .expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB)
+                        .expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB)
+                        .expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB)
+                        .expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB)
+                        .expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Error: bytes must be non-zero"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Error: bytes must be non-zero"),
                 ]
             })
             .iter()
@@ -181,7 +186,8 @@ impl Grpc {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("Error: configu bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -226,7 +232,7 @@ impl Grpc {
     async fn connect(&self) -> Result<tonic::client::Grpc<tonic::transport::Channel>, Error> {
         let mut parts = self.target_uri.clone().into_parts();
         parts.path_and_query = Some(PathAndQuery::from_static(""));
-        let uri = Uri::from_parts(parts).unwrap();
+        let uri = Uri::from_parts(parts).expect("Error: failed to convert parts into uri");
 
         let endpoint = tonic::transport::Endpoint::new(uri)?;
         let endpoint = endpoint.concurrency_limit(self.config.parallel_connections as usize);
@@ -289,14 +295,17 @@ impl Grpc {
         let response_bytes = register_counter!("response_bytes", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.unwrap();
+            let blk = rcv
+                .peek()
+                .await
+                .expect("Error: block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     requests_sent.increment(1);
-                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("Error: there is no next block in rcv"); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),

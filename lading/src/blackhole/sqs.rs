@@ -258,21 +258,22 @@ async fn srv(
             .status(StatusCode::OK)
             .header("content-type", "text/html")
             .body(Body::from(generate_delete_message_response()))
-            .unwrap()),
+            .expect("Error: status, head, or body failed to parse for Delete Message")),
         "DeleteMessageBatch" => {
-            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes).unwrap();
+            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)
+                .expect("Error: Failed to deserialize DeleteMessageBatch from bytes");
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html")
                 .body(Body::from(action.generate_response()))
-                .unwrap())
+                .expect("Error: status, head, or body failed to parse for Delete Message Batch"))
         }
         action => {
             debug!("Unknown action: {action:?}");
             Ok(Response::builder()
                 .status(StatusCode::NOT_IMPLEMENTED)
                 .body(Body::from(vec![]))
-                .unwrap())
+                .expect("Error: status or body failed to parse"))
         }
     }
 }

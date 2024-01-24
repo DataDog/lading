@@ -83,36 +83,36 @@ pub enum Error {
 }
 
 fn default_max_depth() -> NonZeroU32 {
-    NonZeroU32::new(10).unwrap()
+    NonZeroU32::new(10).expect("Error: default max depth given was 0")
 }
 
 fn default_max_tree_per_second() -> NonZeroU32 {
-    NonZeroU32::new(5).unwrap()
+    NonZeroU32::new(5).expect("Error: default max tree per second given was 0")
 }
 
 // default to 100ms
 fn default_process_sleep_ns() -> NonZeroU32 {
-    NonZeroU32::new(100_000_000).unwrap()
+    NonZeroU32::new(100_000_000).expect("Error: default process sleep ns given was 0")
 }
 
 fn default_max_children() -> NonZeroU32 {
-    NonZeroU32::new(10).unwrap()
+    NonZeroU32::new(10).expect("Error: default max children given was 0")
 }
 
 fn default_args_len() -> NonZeroUsize {
-    NonZeroUsize::new(10).unwrap()
+    NonZeroUsize::new(10).expect("Error: default args len given was 0")
 }
 
 fn default_args_count() -> NonZeroU32 {
-    NonZeroU32::new(16).unwrap()
+    NonZeroU32::new(16).expect("Error: default args count given was 0")
 }
 
 fn default_envs_len() -> NonZeroUsize {
-    NonZeroUsize::new(16).unwrap()
+    NonZeroUsize::new(16).expect("Error: default envs len given was 0")
 }
 
 fn default_envs_count() -> NonZeroU32 {
-    NonZeroU32::new(10).unwrap()
+    NonZeroU32::new(10).expect("Error: default envs count given was 0")
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -305,7 +305,10 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let lading_path = self.lading_path.to_str().unwrap();
+        let lading_path = self
+            .lading_path
+            .to_str()
+            .expect("Error: lading path is not utf8");
 
         loop {
             tokio::select! {
@@ -317,12 +320,12 @@ impl ProcessTree {
                         .arg("--config-content")
                         .arg(&self.config_content)
                         .stdin(Stdio::null())
-                        .output().await.unwrap();
+                        .output().await.expect("Error: process tree generator failed to spawn");
 
                     if !output.status.success() {
                         error!("process tree generator execution error");
                         return Err(Error::from(ExecutionError {
-                            stderr: str::from_utf8(&output.stderr).unwrap().to_string()
+                            stderr: str::from_utf8(&output.stderr).expect("Error: The slice is not utf-8").to_string()
                         }));
                     }
                 },
@@ -375,7 +378,10 @@ pub struct Exec {
 
 impl Exec {
     fn new(rng: &mut StdRng, config: &Config) -> Self {
-        let exec = config.executables.choose(rng).unwrap();
+        let exec = config
+            .executables
+            .choose(rng)
+            .expect("Error: the rng slice is empty");
 
         let args = match &exec.args {
             Args::Static(params) => params.values.clone(),
@@ -388,7 +394,11 @@ impl Exec {
         };
 
         Self {
-            executable: exec.executable.to_str().unwrap().to_string(),
+            executable: exec
+                .executable
+                .to_str()
+                .expect("Error: exec executable could not be converted to str")
+                .to_string(),
             args,
             envs,
         }
@@ -438,7 +448,9 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
         let duration = Duration::from_nanos(sleep_ns.into());
         thread::sleep(duration);
 
-        let process = iter.next().unwrap();
+        let process = iter
+            .next()
+            .expect("Error: next failed, iteration has already finished");
 
         if let Some(exec) = &process.exec {
             let status = std::process::Command::new(&exec.executable)
@@ -448,8 +460,8 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
                 .stderr(Stdio::null())
                 .status()
                 .ok()
-                .unwrap();
-            exit(status.code().unwrap())
+                .expect("Error: failed to execute process");
+            exit(status.code().expect("Error: failed to get exit code"));
         }
 
         match unsafe { fork() } {

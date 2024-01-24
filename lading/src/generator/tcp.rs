@@ -93,14 +93,22 @@ impl Tcp {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB)
+                        .expect("Error: Bytes must not be negative"),
                 ]
             })
             .iter()
