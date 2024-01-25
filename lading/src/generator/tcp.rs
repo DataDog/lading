@@ -104,9 +104,7 @@ impl Tcp {
                 ]
             })
             .iter()
-            .map(|sz| {
-                NonZeroU32::new(sz.get_bytes() as u32).expect("Error: bytes must be non-zero")
-            })
+            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -135,7 +133,7 @@ impl Tcp {
         let addr = config
             .addr
             .to_socket_addrs()
-            .expect("Error: could not convert to socket")
+            .expect("could not convert to socket")
             .next()
             .expect("iterator was already finished");
         Ok(Self {
