@@ -28,7 +28,7 @@ impl Distribution<Member> for Standard {
     where
         R: Rng + ?Sized,
     {
-        let max = SIZES.choose(rng).unwrap();
+        let max = SIZES.choose(rng).expect("Error: failed to choose size");
 
         Member {
             id: rng.gen(),
@@ -98,7 +98,7 @@ mod test {
             let json = Json;
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            json.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
             assert!(bytes.len() <= max_bytes);
         }
     }
@@ -113,11 +113,11 @@ mod test {
             let json = Json;
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            json.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            json.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
 
-            let payload = std::str::from_utf8(&bytes).unwrap();
+            let payload = std::str::from_utf8(&bytes).expect("Error: failed to convert from utf-8 to str");
             for msg in payload.lines() {
-                let _members: Member = serde_json::from_str(msg).unwrap();
+                let _members: Member = serde_json::from_str(msg).expect("Error: failed to deserialize from str");
             }
         }
     }

@@ -131,9 +131,13 @@ impl Prometheus {
 
                     if line.starts_with("# TYPE") {
                         let mut parts = line.split_ascii_whitespace().skip(2);
-                        let name = parts.next().unwrap();
-                        let metric_type = parts.next().unwrap();
-                        let metric_type: MetricType = metric_type.parse().unwrap();
+                        let name = parts.next().expect("Error: parts iterator is missing name");
+                        let metric_type = parts
+                            .next()
+                            .expect("Error: parts iterator is missing metric type");
+                        let metric_type: MetricType = metric_type
+                            .parse()
+                            .expect("Error: failed to parse metric type");
                         // summary and histogram metrics additionally report names suffixed with _sum, _count, _bucket
                         if matches!(metric_type, MetricType::Histogram | MetricType::Summary) {
                             typemap.insert(format!("{name}_sum"), metric_type);
@@ -145,8 +149,12 @@ impl Prometheus {
                     }
 
                     let mut parts = line.split_ascii_whitespace();
-                    let name_and_labels = parts.next().unwrap();
-                    let value = parts.next().unwrap();
+                    let name_and_labels = parts
+                        .next()
+                        .expect("Error: parts iterator is missing name and labels");
+                    let value = parts
+                        .next()
+                        .expect("Error: parts iterator is missing value");
 
                     if value.contains('#') {
                         trace!("Unknown format: {value}");
@@ -157,7 +165,9 @@ impl Prometheus {
                         if let Some((name, labels)) = name_and_labels.split_once('{') {
                             let labels = labels.trim_end_matches('}');
                             let labels = labels.split(',').map(|label| {
-                                let (label_name, label_value) = label.split_once('=').unwrap();
+                                let (label_name, label_value) = label
+                                    .split_once('=')
+                                    .expect("Error: label failed to split on first =");
                                 let label_value = label_value.trim_matches('\"');
                                 (label_name.to_owned(), label_value.to_owned())
                             });

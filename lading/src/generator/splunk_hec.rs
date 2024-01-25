@@ -186,7 +186,8 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("Error: config bytes per second should not be zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -213,17 +214,21 @@ impl SplunkHec {
         let mut channels = Channels::new(config.parallel_connections);
         if let Some(ack_settings) = config.acknowledgements {
             let ack_uri = Uri::builder()
-                .authority(uri.authority().unwrap().to_string())
+                .authority(
+                    uri.authority()
+                        .expect("Error: Uri authority is empty")
+                        .to_string(),
+                )
                 .scheme("http")
                 .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
                 .build()
-                .unwrap();
+                .expect("Error: unable to build ack URI");
             channels.enable_acknowledgements(ack_uri, config.token.clone(), ack_settings);
         }
 
         CONNECTION_SEMAPHORE
             .set(Semaphore::new(config.parallel_connections as usize))
-            .unwrap();
+            .expect("Error: semaphore already set");
 
         Ok(Self {
             channels,
@@ -272,8 +277,14 @@ impl SplunkHec {
         let mut channels = self.channels.iter().cycle();
 
         loop {
-            let channel: Channel = channels.next().unwrap().clone();
-            let blk = rcv.peek().await.unwrap();
+            let channel: Channel = channels
+                .next()
+                .expect("Error: channel iteration already finished")
+                .clone();
+            let blk = rcv
+                .peek()
+                .await
+                .expect("Error: block cache does not have any blocks");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -282,7 +293,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("Error: block cache failed to find next value"); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 
@@ -293,14 +304,14 @@ impl SplunkHec {
                         .header(CONTENT_LENGTH, block_length)
                         .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
                         .body(body)
-                        .unwrap();
+                        .expect("Error: unable to build request");
 
                     // NOTE once JoinSet is in tokio stable we can make this
                     // much, much tidier by spawning requests in the JoinSet. I
                     // think we could also possibly have the send request return
                     // the AckID, meaning we could just keep the channel logic
                     // in this main loop here and avoid the AckService entirely.
-                    let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
+                    let permit = CONNECTION_SEMAPHORE.get().expect("Error: Connecton Semaphore is empty or being initialized").acquire().await.expect("Error: Semaphore has already been closed");
                     tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.clone()));
                 }
                 () = self.shutdown.recv() => {
@@ -343,9 +354,9 @@ async fn send_hec_request(
                         counter!("request_ok", 1, &status_labels);
                         channel
                             .send(async {
-                                let body_bytes = hyper::body::to_bytes(body).await.unwrap();
+                                let body_bytes = hyper::body::to_bytes(body).await.expect("Error: unable to convert response body to bytes");
                                 let hec_ack_response =
-                                    serde_json::from_slice::<HecAckResponse>(&body_bytes).unwrap();
+                                    serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("Error: unable to parse response body");
                                 hec_ack_response.ack_id
                             })
                             .await;

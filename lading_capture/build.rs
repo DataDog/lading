@@ -1,7 +1,8 @@
 fn main() {
     println!("cargo:rerun-if-changed=proto/",);
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("Error: CARGO_MANIFEST_DIR var not found");
     let payloads_proto = format!("{manifest_dir}/../../");
 
     let includes = ["proto/", &payloads_proto];
@@ -9,5 +10,5 @@ fn main() {
         .out_dir("src/proto")
         .extern_path(".libs", "")
         .compile_protos(&["proto/capture/v1/capture.proto"], &includes)
-        .unwrap();
+        .expect("Error: Failed to compile protos!");
 }

@@ -165,7 +165,7 @@ impl AckService {
                             .header(AUTHORIZATION, format!("Splunk {}", self.token))
                             .header(SPLUNK_HEC_CHANNEL_HEADER, channel_id.clone())
                             .body(body)
-                            .unwrap();
+                            .expect("Error: failed to build ack request");
                         let work = ack_request(self.client.clone(), request, channel_id.clone(), &mut ack_ids);
 
                         if let Err(_err) = timeout(Duration::from_secs(1), work).await {
@@ -191,8 +191,11 @@ async fn ack_request(
             let status = parts.status;
             counter!("ack_status_request_ok", 1, "channel_id" => channel_id.clone(), "status" => status.to_string());
             if status == StatusCode::OK {
-                let body = hyper::body::to_bytes(body).await.unwrap();
-                let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body).unwrap();
+                let body = hyper::body::to_bytes(body)
+                    .await
+                    .expect("Error: failed to convert response body to bytes");
+                let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body)
+                    .expect("Error: failed to deserialize ack status response");
 
                 let mut ack_ids_acked: u32 = 0;
                 // Remove successfully acked ack ids

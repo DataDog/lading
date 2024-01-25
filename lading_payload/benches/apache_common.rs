@@ -25,7 +25,8 @@ fn apache_common_all(c: &mut Criterion) {
                 let ac = apache_common::ApacheCommon::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
-                ac.to_bytes(rng, size, &mut writer).unwrap();
+                ac.to_bytes(rng, size, &mut writer)
+                    .expect("Error: failed to convert to bytes");
             });
         });
     }

@@ -69,7 +69,7 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
         let body: String = String::from(
             self.str_pool
                 .of_size_range(&mut rng, 1_u16..16_u16)
-                .unwrap(),
+                .expect("Error: failed to generate string"),
         );
 
         #[allow(deprecated)]
@@ -143,7 +143,7 @@ mod test {
             let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
             assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
@@ -157,7 +157,7 @@ mod test {
             let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
 
             assert!(!bytes.is_empty());
         }
@@ -173,9 +173,9 @@ mod test {
             let logs = OpentelemetryLogs::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).unwrap();
+            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).expect("Error: failed to decode the message from the buffer");
         }
     }
 }

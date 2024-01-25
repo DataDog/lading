@@ -142,7 +142,8 @@ impl UnixDatagram {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("Error: config bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -254,7 +255,7 @@ impl Child {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.unwrap();
+            let blk = rcv.peek().await.expect("Error: block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -263,7 +264,7 @@ impl Child {
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
-                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("Error: failed to advance through the blocks"); // actually advance through the blocks
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {

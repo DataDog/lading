@@ -90,7 +90,9 @@ impl Distribution<Sum> for Standard {
         // 0: Unspecified AggregationTemporality, MUST not be used
         // 1: Delta
         // 2: Cumulative
-        let aggregation_temporality = *[1, 2].choose(rng).unwrap();
+        let aggregation_temporality = *[1, 2]
+            .choose(rng)
+            .expect("Error: failed to choose aggregation temporality");
         let is_monotonic = rng.gen();
         let total = rng.gen_range(0..64);
         let data_points = Standard
@@ -140,9 +142,18 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         };
         let data = Some(data);
 
-        let name = self.str_pool.of_size_range(&mut rng, 1_u8..16).unwrap();
-        let description = self.str_pool.of_size_range(&mut rng, 1_u8..16).unwrap();
-        let unit = self.str_pool.of_size_range(&mut rng, 1_u8..16).unwrap();
+        let name = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .expect("Error: failed to generate string");
+        let description = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .expect("Error: failed to generate string");
+        let unit = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .expect("Error: failed to generate string");
 
         Metric(v1::Metric {
             name: String::from(name),
@@ -203,7 +214,7 @@ mod test {
             let logs = OpentelemetryMetrics::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
             assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
@@ -217,7 +228,7 @@ mod test {
             let logs = OpentelemetryMetrics::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
 
             assert!(!bytes.is_empty());
         }
@@ -233,9 +244,9 @@ mod test {
             let logs = OpentelemetryMetrics::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            logs.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).unwrap();
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("Error: failed to decode the message from the buffer");
         }
     }
 }

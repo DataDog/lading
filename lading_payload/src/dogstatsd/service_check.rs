@@ -25,7 +25,10 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
     where
         R: rand::Rng + ?Sized,
     {
-        let name = self.names.choose(&mut rng).unwrap();
+        let name = self
+            .names
+            .choose(&mut rng)
+            .expect("Error: failed to choose name");
         let hostname = choose_or_not_ref(&mut rng, &self.small_strings).map(String::as_str);
         let message = choose_or_not_ref(&mut rng, &self.texts_or_messages).map(String::as_str);
         let tags = if rng.gen() {

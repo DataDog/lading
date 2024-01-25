@@ -88,7 +88,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
         let total_bytes = u32::arbitrary(u)?;
         let bytes = u.bytes(total_bytes as usize).map(Bytes::copy_from_slice)?;
         Ok(Self {
-            total_bytes: NonZeroU32::new(total_bytes).unwrap(),
+            total_bytes: NonZeroU32::new(total_bytes).expect("Error: total_bytes must be non-zero"),
             bytes,
         })
     }
@@ -561,7 +561,10 @@ fn chunk_bytes<const N: usize>(
             break;
         }
         // SAFETY: By construction, the iterator will never terminate.
-        let block_size = iter.next().unwrap().get();
+        let block_size = iter
+            .next()
+            .expect("Error: iterator has no next value")
+            .get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.
@@ -662,7 +665,9 @@ where
         // push blocks into the sender until such time as it's full. When that
         // happens we overflow into the cache until such time as that's full.
         'refill: loop {
-            let block_size = block_chunks.choose(&mut rng).unwrap();
+            let block_size = block_chunks
+                .choose(&mut rng)
+                .expect("Error: rng slice is empty");
             if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
                 match snd.try_reserve() {
                     Ok(permit) => permit.send(block),
@@ -697,7 +702,7 @@ where
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
     serializer
         .to_bytes(&mut rng, chunk_size as usize, &mut block)
-        .unwrap();
+        .expect("Error: failed to convert to bytes");
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
         // Blocks may be empty, especially when the amount of bytes
@@ -709,7 +714,13 @@ where
         // serialized into.
         None
     } else {
-        let total_bytes = NonZeroU32::new(bytes.len().try_into().unwrap()).unwrap();
+        let total_bytes = NonZeroU32::new(
+            bytes
+                .len()
+                .try_into()
+                .expect("Error: failed to get length of bytes"),
+        )
+        .expect("Error: total_bytes must be non-zero");
         Some(Block { total_bytes, bytes })
     }
 }
@@ -795,7 +806,8 @@ mod verification {
         ];
         let mut block_chunks: [u32; 10] = [0; 10];
 
-        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks)
+            .expect("Error: chunk_bytes should never fail");
         kani::assert(
             chunks > 0,
             "chunk_bytes should never return an empty vec of chunks",
@@ -817,10 +829,12 @@ mod verification {
         ];
         let mut block_chunks: [u32; 10] = [0; 10];
 
-        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks)
+            .expect("Error: chunk_bytes should never fail");
         for chunk in &block_chunks[0..chunks] {
             kani::assert(
-                byte_sizes.contains(&NonZeroU32::new(*chunk).unwrap()),
+                byte_sizes
+                    .contains(&NonZeroU32::new(*chunk).expect("Error: chunk must be non-zero")),
                 "chunk_bytes should never return a chunk that is not present in the byte sizes",
             );
         }
@@ -841,7 +855,8 @@ mod verification {
         ];
         let mut block_chunks: [u32; 10] = [0; 10];
 
-        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks).unwrap();
+        let chunks = chunk_bytes(total_bytes, &byte_sizes, &mut block_chunks)
+            .expect("Error: chunk_bytes should never fail");
         for chunk in &block_chunks[chunks..] {
             kani::assert(
                 *chunk == 0,

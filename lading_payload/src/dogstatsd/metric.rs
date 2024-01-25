@@ -54,7 +54,11 @@ impl MetricGenerator {
         for _ in 0..num_contexts {
             let tags = tags_generator.generate(&mut rng);
             let name_sz = name_length.sample(&mut rng) as usize;
-            let name = String::from(str_pool.of_size(&mut rng, name_sz).unwrap());
+            let name = String::from(
+                str_pool
+                    .of_size(&mut rng, name_sz)
+                    .expect("Error: failed to generate string"),
+            );
 
             let res = match metric_weights.sample(rng) {
                 0 => Template::Count(template::Count { name, tags }),
@@ -89,14 +93,18 @@ impl<'a> Generator<'a> for MetricGenerator {
     {
         // SAFETY: If `self.templates` is ever empty this is a serious logic bug
         // and the program should crash prior to this point.
-        let template: &Template = self.templates.choose(&mut rng).unwrap();
+        let template: &Template = self
+            .templates
+            .choose(&mut rng)
+            .expect("Error: failed to choose templates");
 
         let container_id = choose_or_not_ref(&mut rng, &self.container_ids).map(String::as_str);
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
         let prob: f32 = OpenClosed01.sample(&mut rng);
         let sample_rate = if prob < self.sampling_probability {
             let sample_rate = self.sampling.sample(&mut rng).clamp(0.0, 1.0);
-            let sample_rate = common::ZeroToOne::try_from(sample_rate).unwrap();
+            let sample_rate = common::ZeroToOne::try_from(sample_rate)
+                .expect("Error: failed to convert sample rate to ZeroToOne");
             Some(sample_rate)
         } else {
             None
@@ -151,7 +159,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }),
             Template::Set(ref set) => Metric::Set(Set {
                 name: &set.name,
-                value: values.pop().unwrap(),
+                value: values.pop().expect("Error: failed to pop value from Vec"),
                 tags: &set.tags,
                 container_id,
             }),

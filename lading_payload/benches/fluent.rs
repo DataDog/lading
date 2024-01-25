@@ -25,7 +25,8 @@ fn fluent_all(c: &mut Criterion) {
                 let ta = Fluent::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
-                ta.to_bytes(rng, size, &mut writer).unwrap();
+                ta.to_bytes(rng, size, &mut writer)
+                    .expect("Error: failed to convert to bytes");
             });
         });
     }
