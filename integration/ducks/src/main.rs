@@ -80,12 +80,12 @@ impl From<&HttpCounters> for HttpMetrics {
             median_entropy: val
                 .entropy
                 .quantile(0.5)
-                .expect("quantile is outside of the valid range")
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
                 .unwrap_or_default(),
             median_size: val
                 .body_size
                 .quantile(0.5)
-                .expect("quantile is outside of the valid range")
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
                 .unwrap_or_default(),
         }
     }
@@ -118,7 +118,7 @@ impl From<&SocketCounters> for SocketMetrics {
             median_entropy: val
                 .entropy
                 .quantile(0.5)
-                .expect("quantile is outside of the valid range")
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
                 .unwrap_or_default(),
         }
     }
