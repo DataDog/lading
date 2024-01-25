@@ -459,7 +459,6 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
-                .ok()
                 .expect("Error: failed to execute process");
             exit(status.code().expect("Error: failed to get exit code"));
         }
