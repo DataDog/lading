@@ -83,36 +83,36 @@ pub enum Error {
 }
 
 fn default_max_depth() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("Error: default max depth given was 0")
+    NonZeroU32::new(10).expect("default max depth given was 0")
 }
 
 fn default_max_tree_per_second() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("Error: default max tree per second given was 0")
+    NonZeroU32::new(5).expect("default max tree per second given was 0")
 }
 
 // default to 100ms
 fn default_process_sleep_ns() -> NonZeroU32 {
-    NonZeroU32::new(100_000_000).expect("Error: default process sleep ns given was 0")
+    NonZeroU32::new(100_000_000).expect("default process sleep ns given was 0")
 }
 
 fn default_max_children() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("Error: default max children given was 0")
+    NonZeroU32::new(10).expect("default max children given was 0")
 }
 
 fn default_args_len() -> NonZeroUsize {
-    NonZeroUsize::new(10).expect("Error: default args len given was 0")
+    NonZeroUsize::new(10).expect("default args len given was 0")
 }
 
 fn default_args_count() -> NonZeroU32 {
-    NonZeroU32::new(16).expect("Error: default args count given was 0")
+    NonZeroU32::new(16).expect("default args count given was 0")
 }
 
 fn default_envs_len() -> NonZeroUsize {
-    NonZeroUsize::new(16).expect("Error: default envs len given was 0")
+    NonZeroUsize::new(16).expect("default envs len given was 0")
 }
 
 fn default_envs_count() -> NonZeroU32 {
-    NonZeroU32::new(10).expect("Error: default envs count given was 0")
+    NonZeroU32::new(10).expect("default envs count given was 0")
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -305,10 +305,7 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let lading_path = self
-            .lading_path
-            .to_str()
-            .expect("Error: lading path is not utf8");
+        let lading_path = self.lading_path.to_str().expect("lading path is not utf8");
 
         loop {
             tokio::select! {
@@ -320,12 +317,12 @@ impl ProcessTree {
                         .arg("--config-content")
                         .arg(&self.config_content)
                         .stdin(Stdio::null())
-                        .output().await.expect("Error: process tree generator failed to spawn");
+                        .output().await.expect("process tree generator failed to spawn");
 
                     if !output.status.success() {
                         error!("process tree generator execution error");
                         return Err(Error::from(ExecutionError {
-                            stderr: str::from_utf8(&output.stderr).expect("Error: The slice is not utf-8").to_string()
+                            stderr: str::from_utf8(&output.stderr).expect("The slice is not utf-8").to_string()
                         }));
                     }
                 },
@@ -381,7 +378,7 @@ impl Exec {
         let exec = config
             .executables
             .choose(rng)
-            .expect("Error: the rng slice is empty");
+            .expect("the rng slice is empty");
 
         let args = match &exec.args {
             Args::Static(params) => params.values.clone(),
@@ -397,7 +394,7 @@ impl Exec {
             executable: exec
                 .executable
                 .to_str()
-                .expect("Error: exec executable could not be converted to str")
+                .expect("exec executable could not be converted to str")
                 .to_string(),
             args,
             envs,
@@ -450,7 +447,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
 
         let process = iter
             .next()
-            .expect("Error: next failed, iteration has already finished");
+            .expect("next failed, iteration has already finished");
 
         if let Some(exec) = &process.exec {
             let status = std::process::Command::new(&exec.executable)
@@ -459,8 +456,8 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
-                .expect("Error: failed to execute process");
-            exit(status.code().expect("Error: failed to get exit code"));
+                .expect("failed to execute process");
+            exit(status.code().expect("failed to get exit code"));
         }
 
         match unsafe { fork() } {

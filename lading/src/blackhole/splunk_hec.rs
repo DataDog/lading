@@ -120,7 +120,7 @@ async fn srv(
                         code: 0,
                         ack_id,
                     })
-                    .expect("Error: Failed to serialize HecResponse");
+                    .expect("Failed to serialize HecResponse");
                     *okay.body_mut() = Body::from(body_bytes);
                 }
                 // Path for querying indexer acknowledgements
@@ -128,7 +128,7 @@ async fn srv(
                     match serde_json::from_slice::<HecAckRequest>(&body) {
                         Ok(ack_request) => {
                             let body_bytes = serde_json::to_vec(&HecAckResponse::from(ack_request))
-                                .expect("Error: Failed to serialize HecAckResponse");
+                                .expect("Failed to serialize HecAckResponse");
                             *okay.body_mut() = Body::from(body_bytes);
                         }
                         Err(_) => {

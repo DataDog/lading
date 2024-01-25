@@ -71,7 +71,7 @@ fn default_headers() -> HeaderMap {
         header::CONTENT_TYPE,
         "application/json"
             .parse()
-            .expect("Error: Not possible to parse into HeaderMap"),
+            .expect("Not possible to parse into HeaderMap"),
     );
     map
 }
@@ -188,7 +188,7 @@ impl Http {
                         record_id: "foobar".to_string(),
                     }],
                 };
-                serde_json::to_vec(&response).expect("Error: Unable to serialize response")
+                serde_json::to_vec(&response).expect("Unable to serialize response")
             }
             BodyVariant::Nothing => vec![],
             BodyVariant::RawBytes => config.raw_bytes.clone(),
@@ -276,14 +276,14 @@ mod tests {
 binding_addr: "127.0.0.1:1000"
 body_variant: "nothing"
 "#;
-        let config: Config = serde_yaml::from_str(contents)
-            .expect("Error: Contents do not match the structure expected");
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
         assert_eq!(
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
-                    .expect("Error: Not possible to parse into SocketAddr"),
+                    .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::Nothing,
                 headers: default_headers(),
                 status: default_status_code(),
@@ -299,14 +299,14 @@ binding_addr: "127.0.0.1:1000"
 body_variant: "raw_bytes"
 raw_bytes: [0x01, 0x02, 0x10]
 "#;
-        let config: Config = serde_yaml::from_str(contents)
-            .expect("Error: Contents do not match the structure expected");
+        let config: Config =
+            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
         assert_eq!(
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
-                    .expect("Error: Not possible to parse into SocketAddr"),
+                    .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::RawBytes,
                 headers: default_headers(),
                 status: default_status_code(),

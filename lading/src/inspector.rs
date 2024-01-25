@@ -146,7 +146,7 @@ impl Server {
                 // Note that `Child::kill` sends SIGKILL which is not what we
                 // want. We instead send SIGTERM so that the child has a chance
                 // to clean up.
-                let pid: Pid = Pid::from_raw(target_child.id().expect("Error: Process ID provided is already done").try_into().expect("Error: Failed to convert into valid PID"));
+                let pid: Pid = Pid::from_raw(target_child.id().expect("Process ID provided is already done").try_into().expect("Failed to convert into valid PID"));
                 kill(pid, SIGTERM).map_err(Error::Errno)?;
                 let res = target_child.wait().await.map_err(Error::Io)?;
                 Ok(res)

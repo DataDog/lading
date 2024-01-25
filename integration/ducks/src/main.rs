@@ -80,12 +80,12 @@ impl From<&HttpCounters> for HttpMetrics {
             median_entropy: val
                 .entropy
                 .quantile(0.5)
-                .expect("Error: quantile is outside of the valid range")
+                .expect("quantile is outside of the valid range")
                 .unwrap_or_default(),
             median_size: val
                 .body_size
                 .quantile(0.5)
-                .expect("Error: quantile is outside of the valid range")
+                .expect("quantile is outside of the valid range")
                 .unwrap_or_default(),
         }
     }
@@ -118,7 +118,7 @@ impl From<&SocketCounters> for SocketMetrics {
             median_entropy: val
                 .entropy
                 .quantile(0.5)
-                .expect("Error: quantile is outside of the valid range")
+                .expect("quantile is outside of the valid range")
                 .unwrap_or_default(),
         }
     }
@@ -130,9 +130,7 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
     let body = body::to_bytes(body).await?;
 
     {
-        let metric = HTTP_COUNTERS
-            .get()
-            .expect("Error: HTTP_COUNTERS not initialized");
+        let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
         let mut m = metric.lock().await;
         m.request_count += 1;
 
@@ -289,9 +287,7 @@ impl DucksTarget {
             socket.read_buf(&mut buffer).await?;
 
             {
-                let metric = TCP_COUNTERS
-                    .get()
-                    .expect("Error: TCP_COUNTERS not initialized");
+                let metric = TCP_COUNTERS.get().expect("TCP_COUNTERS not initialized");
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += buffer.len() as u64;
@@ -323,9 +319,7 @@ impl DucksTarget {
             trace!("Got {} B from {}", count, _remote);
 
             {
-                let metric = UDP_COUNTERS
-                    .get()
-                    .expect("Error: UDP_COUNTERS not initialized");
+                let metric = UDP_COUNTERS.get().expect("UDP_COUNTERS not initialized");
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
@@ -343,7 +337,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Every ducks-sheepdog pair is connected by a unique socket file
     let ducks_comm_file = std::env::args()
         .nth(1)
-        .expect("Error: The length of env args is less than 2");
+        .expect("ducks socket file argument missing");
     let ducks_comm =
         UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);

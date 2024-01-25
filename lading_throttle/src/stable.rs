@@ -168,9 +168,7 @@ mod verification {
 
         let ticks_elapsed: u64 = kani::any();
 
-        let slop = valve
-            .request(ticks_elapsed, 0)
-            .expect("Error: request failed.");
+        let slop = valve.request(ticks_elapsed, 0).expect("request failed.");
         kani::assert(slop == 0, "Requests that are zero always succeed.");
     }
 
@@ -189,7 +187,7 @@ mod verification {
 
         let slop = valve
             .request(ticks_elapsed, request)
-            .expect("Error: request failed");
+            .expect("request failed");
         kani::assert(
             slop == 0,
             "Request in-capacity, interval should succeed without wait.",
@@ -217,7 +215,7 @@ mod verification {
 
         let slop = valve
             .request(ticks_elapsed, request)
-            .expect("Error: request failed");
+            .expect("request failed");
         kani::assert(slop > 0, "Should be forced to wait.");
         kani::assert(
             valve.capacity == original_capacity,

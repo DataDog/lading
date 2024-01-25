@@ -166,16 +166,14 @@ impl<'a> Generator<'a> for TraceAgent {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("Error: failed to generate string");
+            .expect("failed to generate string");
         let resource = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..8)
-            .expect("Error: failed to generate string");
+            .expect("failed to generate string");
 
         Span {
-            service: SERVICES
-                .choose(rng)
-                .expect("Error: failed to choose service"),
+            service: SERVICES.choose(rng).expect("failed to choose service"),
             name,
             resource,
             trace_id: rng.gen(),
@@ -188,7 +186,7 @@ impl<'a> Generator<'a> for TraceAgent {
             metrics,
             kind: SERVICE_KIND
                 .choose(rng)
-                .expect("Error: failed to choose service kind"),
+                .expect("failed to choose service kind"),
             meta_struct: FxHashMap::default(),
         }
     }
@@ -277,11 +275,11 @@ mod test {
             let trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            trace_agent.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            trace_agent.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).expect("Error: failed to convert from utf-8 to str")
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }
@@ -294,11 +292,11 @@ mod test {
             let trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            trace_agent.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            trace_agent.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).expect("Error: failed to convert from utf-8 to str")
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }

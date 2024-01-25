@@ -80,18 +80,14 @@ impl FromStr for CliKeyValues {
         //
         // The approach taken here is to use the key notion as delimiter and
         // then tidy up afterward to find values.
-        static RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"([[:alpha:]_]+)=").expect("Error: Invalid regex pattern provided")
-        });
+        static RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"([[:alpha:]_]+)=").expect("Invalid regex pattern provided"));
 
         let mut labels = FxHashMap::default();
 
         for cap in RE.captures_iter(input) {
             let key = cap[1].to_string();
-            let start = cap
-                .get(0)
-                .expect("Error: value 0 not found in Captures")
-                .end();
+            let start = cap.get(0).expect("value 0 not found in Captures").end();
 
             // Find the next key or run into the end of the input.
             let end = RE.find_at(input, start).map_or(input.len(), |m| m.start());
@@ -214,7 +210,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
             });
         let mut contents = String::new();
         file.read_to_string(&mut contents)
-            .expect("Error: Data in contents is not valid utf-8");
+            .expect("Data in contents is not valid utf-8");
 
         contents
     };
@@ -223,7 +219,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit)
-            .expect("Error: rss_bytes_limit is greater than u64::MAX");
+            .expect("rss_bytes_limit is greater than u64::MAX");
     }
     let target = if ops.no_target {
         None
@@ -254,14 +250,14 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
         config.telemetry = Telemetry::Prometheus {
             prometheus_addr: prom_addr
                 .parse()
-                .expect("Error: Not possible to parse to SocketAddr"),
+                .expect("Not possible to parse to SocketAddr"),
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path
                 .parse()
-                .expect("Error: Not possible to parse to PathBuf"),
+                .expect("Not possible to parse to PathBuf"),
             global_labels: options_global_labels.inner,
         };
     } else {
@@ -355,7 +351,7 @@ async fn inner_main(
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
         let generator_server = generator::Server::new(cfg, shutdown.clone())
-            .expect("Error: Underlying sub-server creation signals erro");
+            .expect("Underlying sub-server creation signals erro");
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -366,7 +362,7 @@ async fn inner_main(
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
             let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())
-                .expect("Error: Path is invalid or path is not executable by this program");
+                .expect("Path is invalid or path is not executable by this program");
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -377,7 +373,7 @@ async fn inner_main(
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
             let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())
-                .expect("Error: Underlying sub-server creation signals error");
+                .expect("Underlying sub-server creation signals error");
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -411,7 +407,7 @@ async fn inner_main(
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown.clone())
-            .expect("Error: Path is invalid or path is not executable by this program");
+            .expect("Path is invalid or path is not executable by this program");
         let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
         //
@@ -499,7 +495,7 @@ fn run_process_tree(opts: ProcessTreeGen) {
             .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", path.display()));
 
         file.read_to_string(&mut contents)
-            .expect("Error: Data in contents is not valid utf-8");
+            .expect("Data in contents is not valid utf-8");
     } else if let Some(str) = &opts.config_content {
         contents = str.to_string()
     } else {
@@ -557,7 +553,7 @@ fn main() -> Result<(), Error> {
         .enable_io()
         .enable_time()
         .build()
-        .expect("Error: Failed to create runtime");
+        .expect("Failed to create runtime");
     let res = runtime.block_on(inner_main(
         experiment_duration,
         warmup_duration,
@@ -588,7 +584,7 @@ mod tests {
 generator: []
 "#;
 
-        let tmp_dir = tempfile::tempdir().expect("Error: directory could not be created");
+        let tmp_dir = tempfile::tempdir().expect("directory could not be created");
         let capture_path = tmp_dir.path().join("capture");
         let capture_arg = format!("--capture-path={}", capture_path.display());
 
@@ -606,7 +602,7 @@ generator: []
         assert!(exit_code.is_ok());
 
         let contents = std::fs::read_to_string(capture_path)
-            .expect("Error: File path does not already exist or does not contain valid utf-8");
+            .expect("File path does not already exist or does not contain valid utf-8");
         assert_eq!(contents.rmatches("lading.running").count(), 7);
     }
 
@@ -615,7 +611,7 @@ generator: []
         let val = "";
         let deser = CliKeyValues::from_str(val);
         let deser = deser
-            .expect("Error: String could not be converted into valid CliKeyValues")
+            .expect("String could not be converted into valid CliKeyValues")
             .to_string();
         assert_eq!("", deser);
     }
@@ -623,8 +619,8 @@ generator: []
     #[test]
     fn cli_key_values_deserializes_kv_list() {
         let val = "first=one,second=two";
-        let deser = CliKeyValues::from_str(val)
-            .expect("Error: String cannot be converted into CliKeyValues");
+        let deser =
+            CliKeyValues::from_str(val).expect("String cannot be converted into CliKeyValues");
 
         assert_eq!(
             deser.get("first").expect("Deser does not have key first"),
@@ -639,13 +635,11 @@ generator: []
     #[test]
     fn cli_key_values_deserializes_trailing_comma_kv_list() {
         let val = "first=one,";
-        let deser = CliKeyValues::from_str(val)
-            .expect("Error: String cannot be converted into CliKeyValues");
+        let deser =
+            CliKeyValues::from_str(val).expect("String cannot be converted into CliKeyValues");
 
         assert_eq!(
-            deser
-                .get("first")
-                .expect("Error: Deser does not have key first"),
+            deser.get("first").expect("Deser does not have key first"),
             "one"
         );
     }
@@ -654,26 +648,26 @@ generator: []
     fn cli_key_values_deserializes_separated_value_kv_comma() {
         let val = "DD_API_KEY=00000001,DD_TELEMETRY_ENABLED=true,DD_TAGS=uqhwd:b2xiyw,hf9gy:uwcy04";
         let deser = CliKeyValues::from_str(val);
-        let deser = deser.expect("Error: String cannot be converted into CliKeyValues");
+        let deser = deser.expect("String cannot be converted into CliKeyValues");
 
         println!("RESULT: {deser}");
 
         assert_eq!(
             deser
                 .get("DD_API_KEY")
-                .expect("Error: DD_API_KEY is not a valid key for the map"),
+                .expect("DD_API_KEY is not a valid key for the map"),
             "00000001"
         );
         assert_eq!(
             deser
                 .get("DD_TELEMETRY_ENABLED")
-                .expect("Error: DD_TELEMETRY_ENABLED is not a valid key for the map"),
+                .expect("DD_TELEMETRY_ENABLED is not a valid key for the map"),
             "true"
         );
         assert_eq!(
             deser
                 .get("DD_TAGS")
-                .expect("Error: DD_TAGS is not a valid key for the map"),
+                .expect("DD_TAGS is not a valid key for the map"),
             "uqhwd:b2xiyw,hf9gy:uwcy04"
         );
     }

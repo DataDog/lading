@@ -42,7 +42,7 @@ impl crate::Serialize for Ascii {
             let encoding: &str = self
                 .pool
                 .of_size(&mut rng, usize::from(bytes))
-                .expect("Error: failed to generate string");
+                .expect("failed to generate string");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
@@ -72,7 +72,7 @@ mod test {
             let ascii = Ascii::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            ascii.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            ascii.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             prop_assert!(bytes.len() <= max_bytes);
         }
     }

@@ -48,31 +48,31 @@ impl From<::std::io::Error> for Error {
 }
 
 fn default_max_depth() -> NonZeroUsize {
-    NonZeroUsize::new(10).expect("Error: default max depth given was 0")
+    NonZeroUsize::new(10).expect("default max depth given was 0")
 }
 
 fn default_max_sub_folders() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("Error: default max sub folders given was 0")
+    NonZeroU32::new(5).expect("default max sub folders given was 0")
 }
 
 fn default_max_files() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("Error: default max files given was 0")
+    NonZeroU32::new(5).expect("default max files given was 0")
 }
 
 fn default_max_nodes() -> NonZeroUsize {
-    NonZeroUsize::new(100).expect("Error: default max nodes given was 0")
+    NonZeroUsize::new(100).expect("default max nodes given was 0")
 }
 
 fn default_name_len() -> NonZeroUsize {
-    NonZeroUsize::new(8).expect("Error: default name len given was 0")
+    NonZeroUsize::new(8).expect("default name len given was 0")
 }
 
 fn default_open_per_second() -> NonZeroU32 {
-    NonZeroU32::new(8).expect("Error: default open per second given was 0")
+    NonZeroU32::new(8).expect("default open per second given was 0")
 }
 
 fn default_rename_per_name() -> NonZeroU32 {
-    NonZeroU32::new(1).expect("Error: default rename per second given was 0")
+    NonZeroU32::new(1).expect("default rename per second given was 0")
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -173,7 +173,7 @@ impl FileTree {
         loop {
             tokio::select! {
                 _ = self.open_throttle.wait() => {
-                    let node = iter.next().expect("Error: next failed, node path already finished");
+                    let node = iter.next().expect("next failed, node path already finished");
                     if node.exists() {
                         File::open(node.as_path()).await?;
                     } else {
@@ -224,7 +224,7 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize
 
                 let curr_depth = node
                     .to_str()
-                    .expect("Error: node is invalid unicode and could not convert to str")
+                    .expect("node is invalid unicode and could not convert to str")
                     .matches(path::MAIN_SEPARATOR)
                     .count()
                     - root_depth;
@@ -250,7 +250,7 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize
 
 #[inline]
 async fn rename_folder(rng: &mut StdRng, folder: &Path, len: usize) -> Result<(), Error> {
-    let parent = PathBuf::from(folder.parent().expect("Error: folder has no parent"));
+    let parent = PathBuf::from(folder.parent().expect("folder has no parent"));
     let dir = rnd_node_name(rng, &parent, len);
 
     // rename twice to keep the original folder name so that future file access

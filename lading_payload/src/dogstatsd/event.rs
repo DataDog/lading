@@ -27,11 +27,11 @@ impl<'a> Generator<'a> for EventGenerator {
         let title = self
             .str_pool
             .of_size(&mut rng, title_sz)
-            .expect("Error: failed to generate string");
+            .expect("failed to generate string");
         let text = self
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
-            .expect("Error: failed to generate string");
+            .expect("failed to generate string");
         let tags = if rng.gen() {
             Some(self.tags_generator.generate(&mut rng))
         } else {

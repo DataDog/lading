@@ -43,7 +43,7 @@ impl<'a> Generator<'a> for Fluent {
                     let key = self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("Error: failed to generate string");
+                        .expect("failed to generate string");
                     let val = record_value(rng, &self.str_pool);
                     rec.insert(key, val);
                 }
@@ -51,7 +51,7 @@ impl<'a> Generator<'a> for Fluent {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("Error: failed to generate string"),
+                        .expect("failed to generate string"),
                     time: rng.gen(),
                     record: rec,
                 })
@@ -66,7 +66,7 @@ impl<'a> Generator<'a> for Fluent {
                         let key = self
                             .str_pool
                             .of_size_range(rng, 1_u8..16)
-                            .expect("Error: failed to generate string");
+                            .expect("failed to generate string");
                         let val = record_value(rng, &self.str_pool);
                         rec.insert(key, val);
                     }
@@ -80,7 +80,7 @@ impl<'a> Generator<'a> for Fluent {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("Error: failed to generate string"),
+                        .expect("failed to generate string"),
                     entries,
                 })
             }
@@ -124,14 +124,14 @@ where
         0 => RecordValue::String(
             str_pool
                 .of_size_range(rng, 1_u8..16)
-                .expect("Error: failed to generate string"),
+                .expect("failed to generate string"),
         ),
         1 => {
             let mut obj = FxHashMap::default();
             for _ in 0..rng.gen_range(0..128) {
                 let key = str_pool
                     .of_size_range(rng, 1_u8..16)
-                    .expect("Error: failed to generate string");
+                    .expect("failed to generate string");
                 let val = rng.gen();
 
                 obj.insert(key, val);
@@ -166,7 +166,7 @@ impl crate::Serialize for Fluent {
 
         let mut members: Vec<Vec<u8>> = (0..10)
             .map(|_| self.generate(&mut rng))
-            .map(|m: Member| rmp_serde::to_vec(&m).expect("Error: failed to serialize"))
+            .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize"))
             .collect();
 
         // Search for too many Member instances.
@@ -179,7 +179,7 @@ impl crate::Serialize for Fluent {
             members.extend(
                 (0..10)
                     .map(|_| self.generate(&mut rng))
-                    .map(|m: Member| rmp_serde::to_vec(&m).expect("Error: failed to serialize")),
+                    .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize")),
             );
         }
 
@@ -218,11 +218,11 @@ mod test {
             let fluent = Fluent::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            fluent.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            fluent.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).expect("Error: failed to convert from utf-8 to str")
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }

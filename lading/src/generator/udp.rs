@@ -94,22 +94,14 @@ impl Udp {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB)
-                        .expect("Error: Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
                 ]
             })
             .iter()
@@ -124,7 +116,7 @@ impl Udp {
         }
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("Error: bytes must be non-zero");
+            .expect("bytes must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -144,7 +136,7 @@ impl Udp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("Error: iterator already finished");
+            .expect("iterator already finished");
 
         Ok(Self {
             addr,
@@ -179,10 +171,7 @@ impl Udp {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv
-                .peek()
-                .await
-                .expect("Error: block cache has no next block");
+            let blk = rcv.peek().await.expect("block cache has no next block");
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,
@@ -207,8 +196,8 @@ impl Udp {
                     }
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
-                    let sock = connection.expect("Error: connection failed");
-                    let blk = rcv.next().await.expect("Error: failed to advance through blocks"); // actually advance through the blocks
+                    let sock = connection.expect("connection failed");
+                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             bytes_written.increment(bytes as u64);

@@ -57,7 +57,7 @@ impl MetricGenerator {
             let name = String::from(
                 str_pool
                     .of_size(&mut rng, name_sz)
-                    .expect("Error: failed to generate string"),
+                    .expect("failed to generate string"),
             );
 
             let res = match metric_weights.sample(rng) {
@@ -96,7 +96,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         let template: &Template = self
             .templates
             .choose(&mut rng)
-            .expect("Error: failed to choose templates");
+            .expect("failed to choose templates");
 
         let container_id = choose_or_not_ref(&mut rng, &self.container_ids).map(String::as_str);
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
@@ -104,7 +104,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         let sample_rate = if prob < self.sampling_probability {
             let sample_rate = self.sampling.sample(&mut rng).clamp(0.0, 1.0);
             let sample_rate = common::ZeroToOne::try_from(sample_rate)
-                .expect("Error: failed to convert sample rate to ZeroToOne");
+                .expect("failed to convert sample rate to ZeroToOne");
             Some(sample_rate)
         } else {
             None
@@ -159,7 +159,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }),
             Template::Set(ref set) => Metric::Set(Set {
                 name: &set.name,
-                value: values.pop().expect("Error: failed to pop value from Vec"),
+                value: values.pop().expect("failed to pop value from Vec"),
                 tags: &set.tags,
                 container_id,
             }),

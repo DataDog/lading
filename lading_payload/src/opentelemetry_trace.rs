@@ -78,7 +78,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("Error: failed to generate string");
+            .expect("failed to generate string");
 
         Span(v1::Span {
             trace_id,
@@ -153,7 +153,7 @@ mod test {
             let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            traces.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            traces.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
@@ -167,7 +167,7 @@ mod test {
             let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            traces.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            traces.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
             assert!(!bytes.is_empty());
         }
@@ -183,9 +183,9 @@ mod test {
             let traces = OpentelemetryTraces::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            traces.to_bytes(rng, max_bytes, &mut bytes).expect("Error: failed to convert to bytes");
+            traces.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(bytes.as_slice()).expect("Error: failed to decode the message from the buffer");
+            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 }
