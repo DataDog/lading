@@ -25,7 +25,8 @@ fn dogstatsd_all(c: &mut Criterion) {
                 let dd = dogstatsd::DogStatsD::default(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
-                dd.to_bytes(rng, size, &mut writer).unwrap();
+                dd.to_bytes(rng, size, &mut writer)
+                    .expect("failed to convert to bytes");
             });
         });
     }

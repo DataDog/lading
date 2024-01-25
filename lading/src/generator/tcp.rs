@@ -93,14 +93,14 @@ impl Tcp {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
                 ]
             })
             .iter()
@@ -114,7 +114,8 @@ impl Tcp {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("config bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -134,7 +135,7 @@ impl Tcp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .unwrap();
+            .expect("iterator was already finished");
         Ok(Self {
             addr,
             block_cache,
@@ -183,12 +184,12 @@ impl Tcp {
                 continue;
             };
 
-            let blk = rcv.peek().await.unwrap();
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("block cache has no next value"); // actually advance through the blocks
                     match connection.write_all(&blk.bytes).await {
                         Ok(()) => {
                             bytes_written.increment(u64::from(blk.total_bytes.get()));

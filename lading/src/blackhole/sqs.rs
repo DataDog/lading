@@ -113,7 +113,7 @@ impl Sqs {
                 addr.set_keepalive(Some(Duration::from_secs(60)));
                 addr
             })
-            .unwrap();
+            .expect("Unable to bind to socket address provided");
         let server = Server::builder(addr).serve(svc);
         tokio::select! {
             res = server => {
@@ -241,37 +241,39 @@ async fn srv(
     let bytes = body::to_bytes(req).await?;
     bytes_received.increment(bytes.len() as u64);
 
-    let action: Action = serde_qs::from_bytes(&bytes).unwrap();
+    let action: Action = serde_qs::from_bytes(&bytes).expect("Failed to deserialize Action");
 
     match action.action.as_str() {
         "ReceiveMessage" => {
-            let action: ReceiveMessage = serde_qs::from_bytes(&bytes).unwrap();
+            let action: ReceiveMessage =
+                serde_qs::from_bytes(&bytes).expect("Failed to deserialize ReceiveMessage");
             let num_messages = action.max_number_of_messages;
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html")
                 .body(Body::from(generate_receive_message_response(num_messages)))
-                .unwrap())
+                .expect("Failed to build response body"))
         }
         "DeleteMessage" => Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/html")
             .body(Body::from(generate_delete_message_response()))
-            .unwrap()),
+            .expect("status, head, or body failed to parse for Delete Message")),
         "DeleteMessageBatch" => {
-            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes).unwrap();
+            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)
+                .expect("Failed to deserialize DeleteMessageBatch from bytes");
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html")
                 .body(Body::from(action.generate_response()))
-                .unwrap())
+                .expect("status, head, or body failed to parse for Delete Message Batch"))
         }
         action => {
             debug!("Unknown action: {action:?}");
             Ok(Response::builder()
                 .status(StatusCode::NOT_IMPLEMENTED)
                 .body(Body::from(vec![]))
-                .unwrap())
+                .expect("status or body failed to parse"))
         }
     }
 }

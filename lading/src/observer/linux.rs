@@ -122,7 +122,7 @@ impl Sampler {
             // infinite loops.
             if let Ok(tasks) = process.tasks() {
                 for task in tasks.filter(std::result::Result::is_ok) {
-                    let task = task.unwrap(); // SAFETY: filter on iterator
+                    let task = task.expect("failed to read task"); // SAFETY: filter on iterator
                     if let Ok(mut children) = task.children() {
                         for child in children
                             .drain(..)
@@ -148,7 +148,7 @@ impl Sampler {
                 // have sufficient permission.
                 continue;
             }
-            let status = status.unwrap(); // SAFETY: is_err check above
+            let status = status.expect("issue with status"); // SAFETY: is_err check above
             if status.tgid != pid {
                 // This is a thread, not a process and we do not wish to scan it.
                 continue;
@@ -160,7 +160,11 @@ impl Sampler {
             // and name, again like `top`.
             let basename: String = if let Ok(exe) = process.exe() {
                 if let Some(basename) = exe.file_name() {
-                    String::from(basename.to_str().unwrap())
+                    String::from(
+                        basename
+                            .to_str()
+                            .expect("could not convert basename to str"),
+                    )
                 } else {
                     // It's possible to have a process with no named exe. On
                     // Linux systems with functional security setups it's not
@@ -178,7 +182,7 @@ impl Sampler {
                 // likely, the process has exited.
                 continue;
             }
-            let stats = stats.unwrap(); // SAFETY: is_err check above
+            let stats = stats.expect("stats failed"); // SAFETY: is_err check above
 
             // Calculate process uptime. We have two pieces of information from
             // the kernel: computer uptime and process starttime relative to

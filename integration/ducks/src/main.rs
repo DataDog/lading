@@ -77,8 +77,16 @@ impl From<&HttpCounters> for HttpMetrics {
         HttpMetrics {
             request_count: val.request_count,
             total_bytes: val.total_bytes,
-            median_entropy: val.entropy.quantile(0.5).unwrap().unwrap_or_default(),
-            median_size: val.body_size.quantile(0.5).unwrap().unwrap_or_default(),
+            median_entropy: val
+                .entropy
+                .quantile(0.5)
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
+                .unwrap_or_default(),
+            median_size: val
+                .body_size
+                .quantile(0.5)
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
+                .unwrap_or_default(),
         }
     }
 }
@@ -107,7 +115,11 @@ impl From<&SocketCounters> for SocketMetrics {
         SocketMetrics {
             read_count: val.read_count,
             total_bytes: val.total_bytes,
-            median_entropy: val.entropy.quantile(0.5).unwrap().unwrap_or_default(),
+            median_entropy: val
+                .entropy
+                .quantile(0.5)
+                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
+                .unwrap_or_default(),
         }
     }
 }
@@ -118,7 +130,7 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
     let body = body::to_bytes(body).await?;
 
     {
-        let metric = HTTP_COUNTERS.get().unwrap();
+        let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
         let mut m = metric.lock().await;
         m.request_count += 1;
 
@@ -275,7 +287,7 @@ impl DucksTarget {
             socket.read_buf(&mut buffer).await?;
 
             {
-                let metric = TCP_COUNTERS.get().unwrap();
+                let metric = TCP_COUNTERS.get().expect("TCP_COUNTERS not initialized");
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += buffer.len() as u64;
@@ -307,7 +319,7 @@ impl DucksTarget {
             trace!("Got {} B from {}", count, _remote);
 
             {
-                let metric = UDP_COUNTERS.get().unwrap();
+                let metric = UDP_COUNTERS.get().expect("UDP_COUNTERS not initialized");
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
@@ -323,7 +335,9 @@ async fn main() -> Result<(), anyhow::Error> {
     debug!("hello from ducks");
 
     // Every ducks-sheepdog pair is connected by a unique socket file
-    let ducks_comm_file = std::env::args().nth(1).unwrap();
+    let ducks_comm_file = std::env::args()
+        .nth(1)
+        .expect("ducks socket file argument missing");
     let ducks_comm =
         UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);

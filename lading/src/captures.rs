@@ -52,7 +52,9 @@ impl CaptureManager {
     ///
     /// Function will panic if the underlying capture file cannot be opened.
     pub async fn new(capture_path: PathBuf, shutdown: Phase, experiment_started: Phase) -> Self {
-        let fp = tokio::fs::File::create(&capture_path).await.unwrap();
+        let fp = tokio::fs::File::create(&capture_path)
+            .await
+            .expect("create either called from outside tokio or create errored");
         let fp = fp.into_std().await;
         Self {
             run_id: Uuid::new_v4(),
@@ -77,7 +79,7 @@ impl CaptureManager {
         let recorder = CaptureRecorder {
             inner: Arc::clone(&self.inner),
         };
-        metrics::set_boxed_recorder(Box::new(recorder)).unwrap();
+        metrics::set_boxed_recorder(Box::new(recorder)).expect("recorder already set");
     }
 
     /// Add a global label to all metrics managed by [`CaptureManager`].
@@ -92,7 +94,7 @@ impl CaptureManager {
     fn record_captures(&mut self) -> Result<(), io::Error> {
         let now_ms: u128 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("UNIX_EPOCH is earlier than the provided time")
             .as_millis();
         let mut lines = Vec::new();
         self.inner
@@ -140,7 +142,7 @@ impl CaptureManager {
             self.capture_path
                 .file_name()
                 .and_then(OsStr::to_str)
-                .unwrap()
+                .expect("capture path is not a valid file name")
         );
         for line in lines.drain(..) {
             let pyld = serde_json::to_string(&line)?;

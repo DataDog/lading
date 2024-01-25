@@ -94,14 +94,14 @@ impl UnixStream {
             .clone()
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
                 ]
             })
             .iter()
@@ -115,7 +115,8 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("config bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -193,7 +194,7 @@ impl UnixStream {
                 continue;
             };
 
-            let blk = rcv.peek().await.unwrap();
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -204,7 +205,7 @@ impl UnixStream {
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
-                    let blk = rcv.next().await.unwrap(); // advance to the block that was previously peeked
+                    let blk = rcv.next().await.expect("failed to advance to peeked block"); // advance to the block that was previously peeked
                     while blk_offset < blk_max {
                         let stream = &socket;
 
@@ -212,7 +213,7 @@ impl UnixStream {
                             .ready(tokio::io::Interest::WRITABLE)
                             .await
                             .map_err(Error::Io)
-                            .unwrap(); // Cannot ? in a spawned task :<. Mimics UDP generator.
+                            .expect("Unable to start stream"); // Cannot ? in a spawned task :<. Mimics UDP generator.
                         if ready.is_writable() {
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.

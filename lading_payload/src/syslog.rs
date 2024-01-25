@@ -67,11 +67,11 @@ impl Distribution<Member> for Standard {
             priority: rng.gen_range(0..=191),
             syslog_version: rng.gen_range(1..=3),
             timestamp: to_rfc3339(SystemTime::now()),
-            hostname: (*HOSTNAMES.choose(rng).unwrap()).to_string(),
-            app_name: (*APP_NAMES.choose(rng).unwrap()).to_string(),
+            hostname: (*HOSTNAMES.choose(rng).expect("failed to choose hostnanme")).to_string(),
+            app_name: (*APP_NAMES.choose(rng).expect("failed to choose app name")).to_string(),
             procid: rng.gen_range(100..=9999),
             msgid: rng.gen_range(1..=999),
-            message: serde_json::to_string(&rng.gen::<Message>()).unwrap(),
+            message: serde_json::to_string(&rng.gen::<Message>()).expect("failed to serialize"),
         }
     }
 }
@@ -80,7 +80,7 @@ fn to_rfc3339<T>(dt: T) -> String
 where
     T: Into<OffsetDateTime>,
 {
-    dt.into().format(&Rfc3339).unwrap()
+    dt.into().format(&Rfc3339).expect("failed to format")
 }
 
 impl Member {
@@ -145,11 +145,11 @@ mod test {
             let syslog = Syslog5424::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            syslog.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            syslog.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }

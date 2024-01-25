@@ -1684,7 +1684,11 @@ impl<'a> Generator<'a> for ProcessGenerator {
 
         // SAFETY: If this call fails, then execution should panic because an
         // inability to generate process command lines is a serious bug.
-        let cmdline = String::from(self.str_pool.of_size(rng, cmdline_size).unwrap());
+        let cmdline = String::from(
+            self.str_pool
+                .of_size(rng, cmdline_size)
+                .expect("failed to generate process command line"),
+        );
 
         // Assume the comm name and task name are derived from `cmdline`. Note
         // from `man 5 proc` that a thread may modify its `comm` (command name)

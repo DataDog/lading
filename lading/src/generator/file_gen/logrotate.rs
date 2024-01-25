@@ -115,12 +115,12 @@ impl Server {
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(8_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(16_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(32_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(8_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(16_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(32_f64, ByteUnit::MB).expect("Bytes must not be negative"),
                 ]
             })
             .iter()
@@ -134,7 +134,8 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("Expect: config bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -142,7 +143,8 @@ impl Server {
         );
 
         let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32).unwrap();
+            NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32)
+                .expect("Maximumm bytes per log must be non-zero");
 
         let mut handles = Vec::new();
 
@@ -265,10 +267,13 @@ impl Child {
 
         let total_names = self.names.len();
         // SAFETY: By construction there is guaranteed to be at least one name.
-        let last_name = &self.names.last().unwrap();
+        let last_name = &self
+            .names
+            .last()
+            .expect("there is no last element in names");
 
         // SAFETY: By construction the name is guaranteed to have a parent.
-        fs::create_dir_all(&self.names[0].parent().unwrap()).await?;
+        fs::create_dir_all(&self.names[0].parent().expect("names has no parent")).await?;
         let mut fp = BufWriter::with_capacity(
             bytes_per_second,
             fs::OpenOptions::new()
@@ -290,12 +295,12 @@ impl Child {
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
-            let blk = rcv.peek().await.unwrap();
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.unwrap(); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let total_bytes = u64::from(total_bytes.get());
 
                     {

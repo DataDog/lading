@@ -25,7 +25,8 @@ fn trace_agent_all(c: &mut Criterion) {
                 let ta = trace_agent::TraceAgent::msg_pack(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
-                ta.to_bytes(rng, size, &mut writer).unwrap();
+                ta.to_bytes(rng, size, &mut writer)
+                    .expect("failed to convert to bytes");
             });
         });
     }

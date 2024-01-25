@@ -54,8 +54,14 @@ where
     R: rand::Rng + ?Sized,
 {
     match rng.gen_range(0..2) {
-        0 => Message::Unstructured(str_pool.of_size_range(rng, 1_u8..16).unwrap()),
-        1 => Message::Structured(serde_json::to_string(&rng.gen::<Structured>()).unwrap()),
+        0 => Message::Unstructured(
+            str_pool
+                .of_size_range(rng, 1_u8..16)
+                .expect("failed to generate string"),
+        ),
+        1 => Message::Structured(
+            serde_json::to_string(&rng.gen::<Structured>()).expect("failed to generate string"),
+        ),
         _ => unreachable!(),
     }
 }
@@ -106,12 +112,14 @@ impl<'a> Generator<'a> for DatadogLog {
     {
         Member {
             message: message(&mut rng, &self.str_pool),
-            status: STATUSES.choose(rng).unwrap(),
+            status: STATUSES.choose(rng).expect("failed to generate status"),
             timestamp: rng.gen(),
-            hostname: HOSTNAMES.choose(rng).unwrap(),
-            service: SERVICES.choose(rng).unwrap(),
-            ddsource: SOURCES.choose(rng).unwrap(),
-            ddtags: TAG_OPTIONS.choose(rng).unwrap(),
+            hostname: HOSTNAMES.choose(rng).expect("failed to generate hostnames"),
+            service: SERVICES.choose(rng).expect("failed to generate services"),
+            ddsource: SOURCES.choose(rng).expect("failed to generate sources"),
+            ddtags: TAG_OPTIONS
+                .choose(rng)
+                .expect("failed to generate tag options"),
         }
     }
 }
@@ -172,11 +180,11 @@ mod test {
             let ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }
@@ -191,11 +199,11 @@ mod test {
             let ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            ddlogs.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            let payload = std::str::from_utf8(&bytes).unwrap();
+            let payload = std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str");
             for msg in payload.lines() {
-                let _members: Vec<Member> = serde_json::from_str(msg).unwrap();
+                let _members: Vec<Member> = serde_json::from_str(msg).expect("failed to deserialize from str");
             }
         }
     }

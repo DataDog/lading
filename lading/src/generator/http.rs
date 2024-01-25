@@ -127,12 +127,12 @@ impl Http {
             .block_sizes
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-                    Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
                 ]
             })
             .iter()
@@ -146,7 +146,8 @@ impl Http {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).unwrap();
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
+            .expect("config bytes per second must be non-zero");
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -176,7 +177,7 @@ impl Http {
 
                 CONNECTION_SEMAPHORE
                     .set(Semaphore::new(config.parallel_connections as usize))
-                    .unwrap();
+                    .expect("failed to set semaphore");
 
                 Ok(Self {
                     parallel_connections: config.parallel_connections,
@@ -220,7 +221,7 @@ impl Http {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         loop {
-            let blk = rcv.next().await.unwrap();
+            let blk = rcv.next().await.expect("block cache closed");
             let total_bytes = blk.total_bytes;
 
             let body = Body::from(blk.bytes.clone());
@@ -231,7 +232,7 @@ impl Http {
                 .uri(&uri)
                 .header(CONTENT_LENGTH, block_length)
                 .body(body)
-                .unwrap();
+                .expect("failed to build request");
             let headers = request.headers_mut();
             for (k, v) in self.headers.clone().drain() {
                 if let Some(k) = k {
@@ -244,7 +245,7 @@ impl Http {
                     let client = client.clone();
                     let labels = labels.clone();
 
-                    let permit = CONNECTION_SEMAPHORE.get().unwrap().acquire().await.unwrap();
+                    let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
                     tokio::spawn(async move {
                         counter!("requests_sent", 1, &labels);
                         match client.request(request).await {
@@ -269,7 +270,7 @@ impl Http {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.
-                    let _semaphore = CONNECTION_SEMAPHORE.get().unwrap().acquire_many(u32::from(self.parallel_connections)).await.unwrap();
+                    let _semaphore = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire_many(u32::from(self.parallel_connections)).await.expect("Connection Semaphore has already closed");
                     return Ok(());
                 },
             }

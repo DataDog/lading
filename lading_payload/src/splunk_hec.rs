@@ -53,13 +53,23 @@ impl Distribution<Attrs> for Standard {
         R: Rng + ?Sized,
     {
         Attrs {
-            system_id: String::from(*SYSTEM_IDS.choose(rng).unwrap()),
-            stage: String::from(*STAGES.choose(rng).unwrap()),
-            event_type: String::from(*EVENT_TYPES.choose(rng).unwrap()),
-            c2c_service: String::from(*SERVICES.choose(rng).unwrap()),
-            c2c_partition: String::from(*PARTITIONS.choose(rng).unwrap()),
-            c2c_stage: String::from(*STAGES.choose(rng).unwrap()),
-            c2c_container_type: String::from(*CONTAINER_TYPES.choose(rng).unwrap()),
+            system_id: String::from(*SYSTEM_IDS.choose(rng).expect("failed to choose system ids")),
+            stage: String::from(*STAGES.choose(rng).expect("failed to choose stages")),
+            event_type: String::from(
+                *EVENT_TYPES
+                    .choose(rng)
+                    .expect("failed to choose event types"),
+            ),
+            c2c_service: String::from(*SERVICES.choose(rng).expect("failed to choose services")),
+            c2c_partition: String::from(
+                *PARTITIONS.choose(rng).expect("failed to choose partitions"),
+            ),
+            c2c_stage: String::from(*STAGES.choose(rng).expect("failed to choose stages")),
+            c2c_container_type: String::from(
+                *CONTAINER_TYPES
+                    .choose(rng)
+                    .expect("failed to choose container types"),
+            ),
             aws_account: String::from("verymodelofthemodernmajor"),
         }
     }
@@ -79,7 +89,7 @@ impl Distribution<Event> for Standard {
     {
         Event {
             timestamp: 1_606_215_269.333_915,
-            message: String::from(*MESSAGES.choose(rng).unwrap()),
+            message: String::from(*MESSAGES.choose(rng).expect("failed to choose messages")),
             attrs: rng.gen(),
         }
     }
@@ -101,8 +111,8 @@ impl Distribution<Member> for Standard {
         Member {
             event: rng.gen(),
             time: rng.gen(),
-            host: String::from(*SYSTEM_IDS.choose(rng).unwrap()),
-            index: String::from(*PARTITIONS.choose(rng).unwrap()),
+            host: String::from(*SYSTEM_IDS.choose(rng).expect("failed to choose system ids")),
+            index: String::from(*PARTITIONS.choose(rng).expect("failed to choose partitions")),
         }
     }
 }
@@ -193,7 +203,7 @@ mod test {
             let hec = SplunkHec::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            hec.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            hec.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             assert!(bytes.len() <= max_bytes);
         }
     }
@@ -208,11 +218,11 @@ mod test {
             let hec = SplunkHec::default();
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            hec.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            hec.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            let payload = std::str::from_utf8(&bytes).unwrap();
+            let payload = std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str");
             for msg in payload.lines() {
-                let _members: Member = serde_json::from_str(msg).unwrap();
+                let _members: Member = serde_json::from_str(msg).expect("failed to deserialize from str");
             }
         }
     }

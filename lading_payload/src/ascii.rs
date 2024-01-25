@@ -39,7 +39,10 @@ impl crate::Serialize for Ascii {
             let bytes = rng.gen_range(1..MAX_LENGTH);
             // SAFETY: the maximum request is always less than the size of the
             // pool, per our constructor.
-            let encoding: &str = self.pool.of_size(&mut rng, usize::from(bytes)).unwrap();
+            let encoding: &str = self
+                .pool
+                .of_size(&mut rng, usize::from(bytes))
+                .expect("failed to generate string");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
@@ -69,7 +72,7 @@ mod test {
             let ascii = Ascii::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            ascii.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            ascii.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             prop_assert!(bytes.len() <= max_bytes);
         }
     }

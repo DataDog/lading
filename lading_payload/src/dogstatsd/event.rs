@@ -24,11 +24,14 @@ impl<'a> Generator<'a> for EventGenerator {
         R: rand::Rng + ?Sized,
     {
         let title_sz = self.title_length.sample(&mut rng) as usize;
-        let title = self.str_pool.of_size(&mut rng, title_sz).unwrap();
+        let title = self
+            .str_pool
+            .of_size(&mut rng, title_sz)
+            .expect("failed to generate string");
         let text = self
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
-            .unwrap();
+            .expect("failed to generate string");
         let tags = if rng.gen() {
             Some(self.tags_generator.generate(&mut rng))
         } else {

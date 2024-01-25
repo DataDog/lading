@@ -25,7 +25,8 @@ fn ascii_all(c: &mut Criterion) {
                 let asc = ascii::Ascii::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
-                asc.to_bytes(rng, size, &mut writer).unwrap();
+                asc.to_bytes(rng, size, &mut writer)
+                    .expect("failed to convert to bytes");
             });
         });
     }

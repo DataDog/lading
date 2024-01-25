@@ -418,7 +418,10 @@ where
     let mut buf = Vec::with_capacity(total);
     for _ in 0..total {
         let sz = length_range.sample(&mut rng) as usize;
-        buf.push(String::from(pool.of_size(&mut rng, sz).unwrap()));
+        buf.push(String::from(
+            pool.of_size(&mut rng, sz)
+                .expect("failed to generate string"),
+        ));
     }
     buf
 }
@@ -611,7 +614,7 @@ impl DogStatsD {
             length_prefix_framed(),
             rng,
         )
-        .unwrap()
+        .expect("failed to create DogStatsD")
     }
 
     /// Generate a single `Member`.
@@ -813,14 +816,14 @@ mod test {
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, false, &mut rng).unwrap();
+                                           metric_weights, value_conf, false, &mut rng).expect("failed to create DogStatsD");
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }
@@ -841,14 +844,14 @@ mod test {
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, true, &mut rng).unwrap();
+                                           metric_weights, value_conf, true, &mut rng).expect("failed to create DogStatsD");
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }

@@ -27,7 +27,11 @@ impl Distribution<StatusCode> for Standard {
     where
         R: Rng + ?Sized,
     {
-        StatusCode(*STATUS_CODES.choose(rng).unwrap())
+        StatusCode(
+            *STATUS_CODES
+                .choose(rng)
+                .expect("failed to choose status codes"),
+        )
     }
 }
 
@@ -324,7 +328,7 @@ impl<'a> Generator<'a> for ApacheCommon {
             user: self
                 .str_pool
                 .of_size_range(&mut rng, 1_u16..16_u16)
-                .unwrap(),
+                .expect("failed to generate string"),
             timestamp: rng.gen(),
             method: rng.gen(),
             path: rng.gen(),
@@ -375,11 +379,11 @@ mod test {
             let apache = ApacheCommon::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            apache.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            apache.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
-                std::str::from_utf8(&bytes).unwrap()
+                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }
