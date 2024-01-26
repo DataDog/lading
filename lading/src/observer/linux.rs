@@ -4,6 +4,9 @@ use metrics::{gauge, register_gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
+use tracing::warn;
+
+use crate::observer::memory::Regions;
 
 use super::RSS_BYTES;
 
@@ -223,7 +226,7 @@ impl Sampler {
             let rsslim: u64 = stats.rsslim;
             let vsize: u64 = stats.vsize;
 
-            let labels = [("pid", format!("{pid}")), ("exe", basename)];
+            let labels = [("pid", format!("{pid}")), ("exe", basename.clone())];
 
             // Number of pages that the process has in real memory.
             let rss_gauge = register_gauge!("rss_bytes", &labels);
@@ -244,6 +247,34 @@ impl Sampler {
 
             total_rss += rss;
             total_processes += 1;
+
+            // todo add maps parsing
+            let memory_regions = match Regions::from_pid(pid) {
+                Ok(memory_regions) => memory_regions,
+                Err(e) => {
+                    // We don't want to bail out entirely if we can't read stats
+                    // which will happen if we don't have permissions or, more
+                    // likely, the process has exited.
+                    warn!("Couldn't process `/proc/{pid}/maps`: {}", e);
+                    continue;
+                }
+            };
+            // This is not the final reporter code
+            // the memory_regions need to be accumulated by `pathname`
+            // and report one guage per `pathname`
+            // Alternatively, make the metrics library do this and submit
+            // this as a "count", but I trust my own logic more than I trust
+            // metrics "count"
+            for region in memory_regions.0 {
+                // todo re-use above labels probs
+                let labels = [
+                    ("pid", format!("{pid}")),
+                    ("exe", basename.clone()),
+                    ("pathname", region.pathname.clone()),
+                ];
+                gauge!("maps_rss", region.rss as f64, &labels);
+                gauge!("maps_pss", region.pss as f64, &labels);
+            }
         }
 
         gauge!("num_processes", total_processes as f64);
