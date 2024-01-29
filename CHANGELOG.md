@@ -6,12 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.6-rc2]
+### Fixed
+- Addresses some compilation errors present in rc1
+
+## [0.20.6-rc1]
+### Added
+- Adds experimental /proc/<pid>/smap parsing to add very detailed memory usage
+
 ## [0.20.6-rc0]
 ### Fixed
 - Fixed a bug in CLI key/value parsing where values might be incorrectly parsed
   as key/value pairs if they held lading's delimiter character.
-### Added
-- Adds experimental /proc/<pid>/smap parsing to add very detailed memory usage
 
 ## [0.20.5]
 ### Added
