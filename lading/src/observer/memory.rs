@@ -51,16 +51,16 @@ impl Region {
         let start = u64::from_str_radix(&metadata[0][..12], 16)?;
         let end = u64::from_str_radix(&metadata[0][13..], 16)?;
         let perms = metadata[1].to_string();
-        let offset = u64::from_str_radix(&metadata[2], 16)?;
+        let offset = u64::from_str_radix(metadata[2], 10)?;
         let dev = metadata[3].to_string();
-        let inode = u64::from_str_radix(&metadata[4], 10)?;
-        let pathname = metadata.get(5).unwrap_or(&"<empty pathname>").to_string();
+        let inode = u64::from_str_radix(metadata[4], 10)?;
+        let pathname = (*metadata.get(5).unwrap_or(&"")).to_string();
 
-        let size = u64::from_str_radix(&values[0][1], 10)?;
-        let rss = u64::from_str_radix(&values[3][1], 10)?;
-        let pss = u64::from_str_radix(&values[4][1], 10)?;
-        let pss_dirty = u64::from_str_radix(&values[5][1], 10)?;
-        let swap = u64::from_str_radix(&values[18][1], 10)?;
+        let size = u64::from_str_radix(values[0][1], 10)?;
+        let rss = u64::from_str_radix(values[3][1], 10)?;
+        let pss = u64::from_str_radix(values[4][1], 10)?;
+        let pss_dirty = u64::from_str_radix(values[5][1], 10)?;
+        let swap = u64::from_str_radix(values[18][1], 10)?;
 
         // todo no units taken into account right now
         // everything in is kB, but implicitly
@@ -239,5 +239,52 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_two.swap, 0);
         assert_eq!(region_two.rss, 8);
         assert_eq!(region_two.pss_dirty, 0);
+    }
+
+    #[allow(clippy::unreadable_literal)]
+    #[test]
+    fn test_empty_pathname() {
+        let smap_region = "
+abcdefabcfed-abdcef123450 r-xp 10101010 12:34 0
+Size:                  80000000 kB
+KernelPageSize:        400 kB
+MMUPageSize:           4 kB
+Rss:                   0 kB
+Pss:                   1 kB
+Pss_Dirty:             2 kB
+Shared_Clean:          3 kB
+Shared_Dirty:          4 kB
+Private_Clean:         5 kB
+Private_Dirty:         6 kB
+Referenced:            7 kB
+Anonymous:             8 kB
+LazyFree:              9 kB
+AnonHugePages:         10 kB
+ShmemPmdMapped:        110 kB
+FilePmdMapped:         120 kB
+Shared_Hugetlb:        130 kB
+Private_Hugetlb:       140140140140 kB
+Swap:                  100000000000 kB
+SwapPss:               10000000000000000 kB
+Locked:                1000000000 kB
+THPeligible:    0
+ProtectionKey:         0
+VmFlags: rd ex mr mw me de sd";
+        let regions = Regions::from_str(smap_region).unwrap();
+        assert_eq!(regions.0.len(), 1);
+
+        let region_one = &regions.0[0];
+        assert_eq!(region_one.start, 0xabcdefabcfed);
+        assert_eq!(region_one.end, 0xabdcef123450);
+        assert_eq!(region_one.perms, "r-xp");
+        assert_eq!(region_one.offset, 10101010);
+        assert_eq!(region_one.dev, "12:34");
+        assert_eq!(region_one.inode, 0);
+        assert_eq!(region_one.pathname, "");
+        assert_eq!(region_one.size, 80000000);
+        assert_eq!(region_one.pss, 1);
+        assert_eq!(region_one.swap, 100000000000);
+        assert_eq!(region_one.rss, 0);
+        assert_eq!(region_one.pss_dirty, 2);
     }
 }
