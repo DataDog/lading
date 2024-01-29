@@ -18,7 +18,7 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
-use metrics::gauge;
+use metrics::{gauge, SetRecorderError};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, SeedableRng};
@@ -37,6 +37,10 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 enum Error {
     #[error("Target related error: {0}")]
     Target(target::Error),
+
+    /// Wrapper around [`SetRecorderError`].
+    #[error("Set recorder error: {0}")]
+    SetRecorderError(#[from] SetRecorderError),
 }
 
 fn default_config_path() -> String {
@@ -324,7 +328,9 @@ async fn inner_main(
                 capture_manager.add_global_label(k, v);
             }
             tokio::spawn(async {
-                capture_manager.start();
+                capture_manager
+                    .start()
+                    .expect("failed to start capture manager");
             });
         }
     }
