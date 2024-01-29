@@ -1,6 +1,8 @@
 use regex::Regex;
 use std::{collections::HashMap, io::Read};
 
+const SMAP_SIZE_HINT: usize = 128 * 1024; // 128 kB
+
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
 pub(crate) enum Error {
@@ -117,7 +119,7 @@ impl Regions {
     fn from_file(path: &str) -> Result<Self, Error> {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
-        let mut contents = String::new(); // todo add pre-set capacity probs
+        let mut contents = String::with_capacity(SMAP_SIZE_HINT);
         file.read_to_string(&mut contents).unwrap();
 
         Self::from_str(&contents)
@@ -129,7 +131,7 @@ impl Regions {
         // regions are separated by a line like this:
         // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
         let region_start_regex =
-            Regex::new("[0-9a-fA-F]{12}-[0-9a-fA-F]{12}").expect("Regex to be valid"); // todo can I use char classes here?
+            Regex::new("[[:xdigit:]]{12}-[[:xdigit:]]{12}").expect("Regex to be valid");
         let mut start_indices = region_start_regex.find_iter(contents).map(|m| m.start());
 
         if let Some(mut start_index) = start_indices.next() {
