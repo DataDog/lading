@@ -12,6 +12,9 @@ pub(crate) enum Error {
 
     #[error("Number Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+
+    #[error("Parsing: {0}")]
+    Parsing(String),
 }
 
 pub(crate) struct Regions(pub(crate) Vec<Region>);
@@ -22,50 +25,175 @@ pub(crate) struct Region {
     pub(crate) end: u64,
     pub(crate) perms: String,
     pub(crate) offset: u64,
+    // major:minor
     pub(crate) dev: String,
+    // 0 indicates no inode
     pub(crate) inode: u64,
+    // empty string indicates no pathname
     pub(crate) pathname: String,
-    // Values
+
+    // Values (all in kB)
     pub(crate) size: u64,
     pub(crate) pss: u64,
     pub(crate) swap: u64,
     pub(crate) rss: u64,
     pub(crate) pss_dirty: u64,
 }
+// Best docs ref I have:
+// https://docs.kernel.org/filesystems/proc.html
+//
+// Future improvement: clean up the naming to match man proc
+// The /proc/PID/smaps is an extension based on maps, showing
+// the memory consumption for each of the process's mappings.
+// For each mapping (aka Virtual Memory Area, or VMA) there is a series of lines such as the following:
+//
+// So what I'm calling "Region" is more accurately referred to as a Virtual Memory Area or VMA
 
 impl Region {
     #[allow(clippy::similar_names)]
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn from_str(contents: &str) -> Result<Self, Error> {
         let mut lines = contents.lines();
 
+        // parse metadata
+        // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
         let metadata_line = lines.next().unwrap();
-        let metadata = metadata_line.split_whitespace().collect::<Vec<_>>();
 
-        let values = lines
-            .map(|l| l.split_whitespace().collect::<Vec<_>>())
-            .collect::<Vec<_>>();
+        let mut start: Option<u64> = None;
+        let mut end: Option<u64> = None;
+        let mut perms: Option<String> = None;
+        let mut offset: Option<u64> = None;
+        let mut dev: Option<String> = None;
+        let mut inode: Option<u64> = None;
+        let mut pathname: Option<String> = None;
 
-        // lol this is all gpt-generated, I don't think it'll be correct
-        // but lets try it out maybe it works
-        // okay update, gpt got it pretty much entirely right
-        // not very efficient to allocate all these Vecs, but w/e
+        let mut chars = metadata_line.char_indices().peekable();
+        let next_token = |iter: &mut std::iter::Peekable<std::str::CharIndices>| -> Option<&str> {
+            while let Some((_, c)) = iter.peek() {
+                if !c.is_whitespace() {
+                    break;
+                }
+                iter.next();
+            }
+            let start = iter.peek()?.0;
+            while let Some((_, c)) = iter.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                iter.next();
+            }
+            let end = iter.peek().map_or(metadata_line.len(), |&(idx, _)| idx);
+            Some(&metadata_line[start..end])
+        };
 
-        let start = u64::from_str_radix(&metadata[0][..12], 16)?;
-        let end = u64::from_str_radix(&metadata[0][13..], 16)?;
-        let perms = metadata[1].to_string();
-        let offset = u64::from_str_radix(metadata[2], 10)?;
-        let dev = metadata[3].to_string();
-        let inode = u64::from_str_radix(metadata[4], 10)?;
-        let pathname = (*metadata.get(5).unwrap_or(&"")).to_string();
+        loop {
+            let token = next_token(&mut chars);
+            let Some(token) = token else {
+                break;
+            };
 
-        let size = u64::from_str_radix(values[0][1], 10)?;
-        let rss = u64::from_str_radix(values[3][1], 10)?;
-        let pss = u64::from_str_radix(values[4][1], 10)?;
-        let pss_dirty = u64::from_str_radix(values[5][1], 10)?;
-        let swap = u64::from_str_radix(values[18][1], 10)?;
+            if let (None, None) = (start, end) {
+                let start_str = &token[0..12];
+                let end_str = &token[13..25];
+                start = Some(u64::from_str_radix(start_str, 16)?);
+                end = Some(u64::from_str_radix(end_str, 16)?);
+            } else if perms.is_none() {
+                perms = Some(token.to_string());
+            } else if offset.is_none() {
+                offset = Some(u64::from_str_radix(token, 10)?);
+            } else if dev.is_none() {
+                dev = Some(token.to_string());
+            } else if inode.is_none() {
+                inode = Some(u64::from_str_radix(token, 10)?);
+            } else if pathname.is_none() {
+                pathname = Some(token.to_string());
+            } else {
+                break;
+            }
+        }
 
-        // todo no units taken into account right now
-        // everything in is kB, but implicitly
+        let (Some(start), Some(end), Some(perms), Some(offset), Some(dev), Some(inode)) =
+            (start, end, perms, offset, dev, inode)
+        else {
+            return Err(Error::Parsing(format!(
+                "Could not parse all metadata fields from line: {metadata_line}"
+            )));
+        };
+
+        let mut size: Option<u64> = None;
+        let mut pss: Option<u64> = None;
+        let mut rss: Option<u64> = None;
+        let mut swap: Option<u64> = None;
+        let mut pss_dirty: Option<u64> = None;
+
+        for line in lines {
+            let mut chars = line.char_indices().peekable();
+            let next_token =
+                |iter: &mut std::iter::Peekable<std::str::CharIndices>| -> Option<&str> {
+                    while let Some((_, c)) = iter.peek() {
+                        if !c.is_whitespace() {
+                            break;
+                        }
+                        iter.next();
+                    }
+                    let start = iter.peek()?.0;
+                    while let Some((_, c)) = iter.peek() {
+                        if c.is_whitespace() {
+                            break;
+                        }
+                        iter.next();
+                    }
+                    let end = iter.peek().map_or(line.len(), |&(idx, _)| idx);
+                    Some(&line[start..end])
+                };
+            let Some(name) = next_token(&mut chars) else {
+                // if there is no token on the line, that means empty line, that's fine
+                continue;
+            };
+
+            match name {
+                "Rss:" => {
+                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                        "Could not parse numeric value from line: {line}"
+                    )))?;
+                    rss = Some(numeric.parse::<u64>()?);
+                }
+                "Pss:" => {
+                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                        "Could not parse numeric value from line: {line}"
+                    )))?;
+                    pss = Some(numeric.parse::<u64>()?);
+                }
+                "Size:" => {
+                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                        "Could not parse numeric value from line: {line}"
+                    )))?;
+                    size = Some(numeric.parse::<u64>()?);
+                }
+                "Swap:" => {
+                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                        "Could not parse numeric value from line: {line}"
+                    )))?;
+                    swap = Some(numeric.parse::<u64>()?);
+                }
+                "Pss_Dirty:" => {
+                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                        "Could not parse numeric value from line: {line}"
+                    )))?;
+                    pss_dirty = Some(numeric.parse::<u64>()?);
+                }
+                _ => {}
+            }
+        }
+
+        let (Some(size), Some(pss), Some(rss), Some(swap), Some(pss_dirty)) =
+            (size, pss, rss, swap, pss_dirty)
+        else {
+            return Err(Error::Parsing(format!(
+                "Could not parse all value fields from line: {metadata_line}"
+            )));
+        };
+
         Ok(Region {
             start,
             end,
@@ -73,7 +201,7 @@ impl Region {
             offset,
             dev,
             inode,
-            pathname,
+            pathname: pathname.unwrap_or_default(),
             size,
             pss,
             swap,
