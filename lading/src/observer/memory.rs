@@ -1,5 +1,5 @@
 use regex::Regex;
-use std::io::Read;
+use std::{collections::HashMap, io::Read};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -54,7 +54,7 @@ impl Region {
         let offset = u64::from_str_radix(&metadata[2], 16)?;
         let dev = metadata[3].to_string();
         let inode = u64::from_str_radix(&metadata[4], 10)?;
-        let pathname = metadata[5].to_string();
+        let pathname = metadata.get(5).unwrap_or(&"<empty pathname>").to_string();
 
         let size = u64::from_str_radix(&values[0][1], 10)?;
         let rss = u64::from_str_radix(&values[3][1], 10)?;
@@ -81,9 +81,37 @@ impl Region {
     }
 }
 
+pub(crate) struct AggrMeasure {
+    pub(crate) size: u64,
+    pub(crate) pss: u64,
+    pub(crate) swap: u64,
+    pub(crate) rss: u64,
+}
+
 impl Regions {
     pub(crate) fn from_pid(pid: i32) -> Result<Self, Error> {
         Regions::from_file(&format!("/proc/{pid}/smaps"))
+    }
+
+    pub(crate) fn aggregate_by_pathname(&self) -> Vec<(String, AggrMeasure)> {
+        let mut map: HashMap<String, AggrMeasure> = HashMap::new();
+
+        for region in &self.0 {
+            let pathname = region.pathname.clone();
+
+            let entry = map.entry(pathname).or_insert(AggrMeasure {
+                size: 0,
+                pss: 0,
+                swap: 0,
+                rss: 0,
+            });
+            entry.size += region.size;
+            entry.pss += region.pss;
+            entry.swap += region.swap;
+            entry.rss += region.rss;
+        }
+
+        map.into_iter().collect()
     }
 
     fn from_file(path: &str) -> Result<Self, Error> {
@@ -100,7 +128,6 @@ impl Regions {
         // split this smaps file into regions
         // regions are separated by a line like this:
         // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
-        let mut start_index = 0;
         let region_start_regex =
             Regex::new("[0-9a-fA-F]{12}-[0-9a-fA-F]{12}").expect("Regex to be valid"); // todo can I use char classes here?
         let mut start_indices = region_start_regex.find_iter(contents).map(|m| m.start());

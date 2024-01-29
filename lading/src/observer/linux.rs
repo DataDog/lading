@@ -274,21 +274,16 @@ impl Sampler {
                     continue;
                 }
             };
-            // This is not the final reporter code
-            // the memory_regions need to be accumulated by `pathname`
-            // and report one guage per `pathname`
-            // Alternatively, make the metrics library do this and submit
-            // this as a "count", but I trust my own logic more than I trust
-            // metrics "count"
-            for region in memory_regions.0 {
-                // todo re-use above labels probs
+            for (pathname, measures) in memory_regions.aggregate_by_pathname() {
                 let labels = [
                     ("pid", format!("{pid}")),
                     ("exe", basename.clone()),
-                    ("pathname", region.pathname.clone()),
+                    ("pathname", pathname),
                 ];
-                gauge!("maps_rss", region.rss as f64, &labels);
-                gauge!("maps_pss", region.pss as f64, &labels);
+                gauge!("smaps_rss", measures.rss as f64, &labels);
+                gauge!("smaps_pss", measures.pss as f64, &labels);
+                gauge!("smaps_size", measures.size as f64, &labels);
+                gauge!("smaps_swap", measures.swap as f64, &labels);
             }
         }
 
