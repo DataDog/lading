@@ -19,6 +19,7 @@ pub(crate) enum Error {
 
 pub(crate) struct Regions(pub(crate) Vec<Region>);
 
+#[allow(dead_code)]
 pub(crate) struct Region {
     // Metadata
     pub(crate) start: u64,
@@ -100,11 +101,11 @@ impl Region {
             } else if perms.is_none() {
                 perms = Some(token.to_string());
             } else if offset.is_none() {
-                offset = Some(u64::from_str_radix(token, 10)?);
+                offset = Some(token.parse::<u64>()?);
             } else if dev.is_none() {
                 dev = Some(token.to_string());
             } else if inode.is_none() {
-                inode = Some(u64::from_str_radix(token, 10)?);
+                inode = Some(token.parse::<u64>()?);
             } else if pathname.is_none() {
                 pathname = Some(token.to_string());
             } else {
