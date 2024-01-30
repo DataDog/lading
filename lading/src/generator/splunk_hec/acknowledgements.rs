@@ -17,8 +17,12 @@ use super::{AckSettings, SPLUNK_HEC_CHANNEL_HEADER};
 
 type AckId = u64;
 
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum Error {}
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Wrapper around [`hyper::http::Error`].
+    #[error("HTTP error: {0}")]
+    Http(#[from] hyper::http::Error),
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum Channel {
@@ -130,7 +134,11 @@ impl AckService {
     /// Spawn a tokio task that will continuously query
     /// to check on a particular Splunk channel's ack id statuses. The task
     /// receives new ack ids from [`super::worker::Worker`]
-    pub(crate) async fn spin<'a>(self, channel_id: String, mut ack_rx: Receiver<AckId>) {
+    pub(crate) async fn spin<'a>(
+        self,
+        channel_id: String,
+        mut ack_rx: Receiver<AckId>,
+    ) -> Result<(), Error> {
         let mut ack_ids: FxHashMap<AckId, u64> = FxHashMap::default();
         let mut interval = tokio::time::interval(Duration::from_secs(
             self.ack_settings.ack_query_interval_seconds,
@@ -144,7 +152,7 @@ impl AckService {
                     match resp {
                         None => {
                             info!("AckService receiver closed, shutting down");
-                            return;
+                            return Ok(());
                         }
                         Some(ack_id) => {
                             ack_ids.insert(ack_id, retries);
@@ -164,8 +172,7 @@ impl AckService {
                             .uri(self.ack_uri.clone())
                             .header(AUTHORIZATION, format!("Splunk {}", self.token))
                             .header(SPLUNK_HEC_CHANNEL_HEADER, channel_id.clone())
-                            .body(body)
-                            .expect("failed to build ack request");
+                            .body(body)?;
                         let work = ack_request(self.client.clone(), request, channel_id.clone(), &mut ack_ids);
 
                         if let Err(_err) = timeout(Duration::from_secs(1), work).await {
