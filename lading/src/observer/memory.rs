@@ -59,7 +59,11 @@ impl Region {
 
         // parse metadata
         // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
-        let metadata_line = lines.next().unwrap();
+        let Some(metadata_line) = lines.next() else {
+            return Err(Error::Parsing(format!(
+                "No metadata line found in given region '{contents}'"
+            )));
+        };
 
         let mut start: Option<u64> = None;
         let mut end: Option<u64> = None;
@@ -285,12 +289,11 @@ impl Regions {
 #[cfg(test)]
 #[allow(clippy::identity_op)]
 #[allow(clippy::erasing_op)]
+#[allow(clippy::unreadable_literal)]
 mod tests {
-    use std::fs;
-
     use super::*;
 
-    const TWO_REGION: &str = "
+    const KERNEL_6_TWO_REGIONS: &str = "
 7fffa9f35000-7fffa9f39000 r--p 00000000 12:11 0                          [vvar]
 Size:                 16 kB
 KernelPageSize:        4 kB
@@ -342,10 +345,9 @@ THPeligible:    0
 ProtectionKey:         0
 VmFlags: rd ex mr mw me de sd";
 
-    #[allow(clippy::unreadable_literal)]
     #[test]
     fn test_basic_case() {
-        let regions = Regions::from_str(TWO_REGION).unwrap();
+        let regions = Regions::from_str(KERNEL_6_TWO_REGIONS).unwrap();
         assert_eq!(regions.0.len(), 2);
 
         let region_one = &regions.0[0];
@@ -377,7 +379,6 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_two.pss_dirty, Some(0));
     }
 
-    #[allow(clippy::unreadable_literal)]
     #[test]
     fn test_empty_pathname() {
         let smap_region = "
@@ -424,7 +425,6 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.pss_dirty, Some(2 * BYTES_PER_KIBIBYTE));
     }
 
-    #[allow(clippy::unreadable_literal)]
     #[test]
     fn test_no_pss_dirty() {
         let smap_region = "

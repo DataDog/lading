@@ -263,7 +263,6 @@ impl Sampler {
             total_rss += rss;
             total_processes += 1;
 
-            // todo add maps parsing
             let memory_regions = match Regions::from_pid(pid) {
                 Ok(memory_regions) => memory_regions,
                 Err(e) => {
@@ -280,10 +279,10 @@ impl Sampler {
                     ("exe", basename.clone()),
                     ("pathname", pathname),
                 ];
-                gauge!("smaps_rss", measures.rss as f64, &labels);
-                gauge!("smaps_pss", measures.pss as f64, &labels);
-                gauge!("smaps_size", measures.size as f64, &labels);
-                gauge!("smaps_swap", measures.swap as f64, &labels);
+                gauge!("smaps.rss", measures.rss as f64, &labels);
+                gauge!("smaps.pss", measures.pss as f64, &labels);
+                gauge!("smaps.size", measures.size as f64, &labels);
+                gauge!("smaps.swap", measures.swap as f64, &labels);
             }
         }
 
