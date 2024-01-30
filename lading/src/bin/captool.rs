@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use average::{concatenate, Estimate, Quantile, Variance};
+use average::{concatenate, Estimate, Variance};
 use clap::Parser;
 use futures::io;
 use lading_capture::json::Line;
-use rustc_hash::FxHashMap;
 use tokio::io::AsyncReadExt;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
@@ -71,35 +70,18 @@ async fn main() -> Result<(), Error> {
         }
         return Ok(());
     }
+
     if let Some(metric) = args.metric {
         info!("Metric: {metric}");
-        concatenate!(
-            Estimator,
-            [Variance, variance, mean, error],
-            [Quantile, quantile, quantile]
-        );
-
-        let s: Estimator = lines
-            .iter()
-            .filter(|line| line.metric_name == metric)
-            .map(|line| line.value.as_f64())
-            .collect();
-
-        info!(
-            "Stats: mean: {} (+- {}), median: {}",
-            s.mean(),
-            s.error(),
-            s.quantile()
-        );
 
         let mut key_and_values: HashMap<String, HashSet<String>> = HashMap::new();
         // TODO consolidate these loops into two, one to compute, one to print
-        let labels: Vec<FxHashMap<String, String>> = lines
+        let labels = lines
             .iter()
             .filter(|line| line.metric_name == metric)
-            .map(|line| line.labels.clone())
-            .collect();
-        for label in labels.iter() {
+            .map(|line| line.labels.clone());
+
+        for label in labels {
             for (key, value) in label.iter() {
                 key_and_values
                     .entry(key.clone())
@@ -110,6 +92,25 @@ async fn main() -> Result<(), Error> {
         info!("Labels:");
         for (key, values) in key_and_values.iter_mut() {
             println!("{}: {:?}", key, values);
+        }
+
+        concatenate!(Estimator, [Variance, variance, mean]);
+
+        // Note this does not correctly expand all timeseries present for this metric
+        // It only filters by one key, not multiple keys.
+        for (key, labels) in key_and_values.iter_mut() {
+            for label in labels.iter() {
+                let s: Estimator = lines
+                    .iter()
+                    .filter(|line| {
+                        line.metric_name == metric
+                            && line.labels.contains_key(key)
+                            && line.labels.get(key).unwrap() == label
+                    })
+                    .map(|line| line.value.as_f64())
+                    .collect();
+                info!("Stats for {metric}[{key}:{label}]: mean: {}", s.mean(),);
+            }
         }
     }
 
