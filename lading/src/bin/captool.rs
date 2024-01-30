@@ -72,6 +72,7 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
     if let Some(metric) = args.metric {
+        info!("Metric: {metric}");
         concatenate!(
             Estimator,
             [Variance, variance, mean, error],
@@ -85,8 +86,7 @@ async fn main() -> Result<(), Error> {
             .collect();
 
         info!(
-            "For metric: {}, mean: {} (+- {}), median: {}",
-            metric,
+            "Stats: mean: {} (+- {}), median: {}",
             s.mean(),
             s.error(),
             s.quantile()
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Error> {
                     .insert(value.clone());
             }
         }
-        info!("Labels for metric: {}", metric);
+        info!("Labels:");
         for (key, values) in key_and_values.iter_mut() {
             println!("{}: {:?}", key, values);
         }
