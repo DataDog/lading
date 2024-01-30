@@ -33,12 +33,12 @@ pub(crate) struct Region {
     // empty string indicates no pathname
     pub(crate) pathname: String,
 
-    // Values (all in kB)
+    // Values (all in kibibytes)
     pub(crate) size: u64,
     pub(crate) pss: u64,
     pub(crate) swap: u64,
     pub(crate) rss: u64,
-    pub(crate) pss_dirty: u64,
+    pub(crate) pss_dirty: Option<u64>, // only present in 6.0+
 }
 // Best docs ref I have:
 // https://docs.kernel.org/filesystems/proc.html
@@ -187,11 +187,9 @@ impl Region {
             }
         }
 
-        let (Some(size), Some(pss), Some(rss), Some(swap), Some(pss_dirty)) =
-            (size, pss, rss, swap, pss_dirty)
-        else {
+        let (Some(size), Some(pss), Some(rss), Some(swap)) = (size, pss, rss, swap) else {
             return Err(Error::Parsing(format!(
-                "Could not parse all value fields from line: {metadata_line}"
+                "Could not parse all value fields from region: '{contents}'"
             )));
         };
 
@@ -355,7 +353,7 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.pss, 0);
         assert_eq!(region_one.swap, 7);
         assert_eq!(region_one.rss, 0);
-        assert_eq!(region_one.pss_dirty, 0);
+        assert_eq!(region_one.pss_dirty, Some(0));
 
         let region_two = &regions.0[1];
         assert_eq!(region_two.start, 0x7fffa9f39000);
@@ -369,7 +367,7 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_two.pss, 2);
         assert_eq!(region_two.swap, 0);
         assert_eq!(region_two.rss, 8);
-        assert_eq!(region_two.pss_dirty, 0);
+        assert_eq!(region_two.pss_dirty, Some(0));
     }
 
     #[allow(clippy::unreadable_literal)]
@@ -416,6 +414,52 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.pss, 1);
         assert_eq!(region_one.swap, 100000000000);
         assert_eq!(region_one.rss, 0);
-        assert_eq!(region_one.pss_dirty, 2);
+        assert_eq!(region_one.pss_dirty, Some(2));
+    }
+
+    #[allow(clippy::unreadable_literal)]
+    #[test]
+    fn test_no_pss_dirty() {
+        let smap_region = "
+7ffeb825c000-7ffeb827d000 rw-p 00000000 00:00 0                          [stack]
+Size:                  80000000 kB
+KernelPageSize:        400 kB
+MMUPageSize:           4 kB
+Rss:                   0 kB
+Pss:                   1 kB
+Shared_Clean:          3 kB
+Shared_Dirty:          4 kB
+Private_Clean:         5 kB
+Private_Dirty:         6 kB
+Referenced:            7 kB
+Anonymous:             8 kB
+LazyFree:              9 kB
+AnonHugePages:         10 kB
+ShmemPmdMapped:        110 kB
+FilePmdMapped:         120 kB
+Shared_Hugetlb:        130 kB
+Private_Hugetlb:       140140140140 kB
+Swap:                  100000000000 kB
+SwapPss:               10000000000000000 kB
+Locked:                1000000000 kB
+THPeligible:    0
+ProtectionKey:         0
+VmFlags: rd ex mr mw me de sd";
+        let regions = Regions::from_str(smap_region).unwrap();
+        assert_eq!(regions.0.len(), 1);
+
+        let region_one = &regions.0[0];
+        assert_eq!(region_one.start, 0x7ffeb825c000);
+        assert_eq!(region_one.end, 0x7ffeb827d000);
+        assert_eq!(region_one.perms, "rw-p");
+        assert_eq!(region_one.offset, 0);
+        assert_eq!(region_one.dev, "00:00");
+        assert_eq!(region_one.inode, 0);
+        assert_eq!(region_one.pathname, "[stack]");
+        assert_eq!(region_one.size, 80000000);
+        assert_eq!(region_one.pss, 1);
+        assert_eq!(region_one.swap, 100000000000);
+        assert_eq!(region_one.rss, 0);
+        assert_eq!(region_one.pss_dirty, None);
     }
 }
