@@ -45,6 +45,7 @@ tower = { version = "0.4", default-features = false, features = ["timeout", "lim
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
+average = "0.14.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false, features = [] }
