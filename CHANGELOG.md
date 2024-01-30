@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.20.6-rc2]
 ### Fixed
-- Addresses some compilation errors present in rc1
+- Addresses some compilation errors present in rc1, fixes pss_dirty assumption
 
 ## [0.20.6-rc1]
 ### Added
