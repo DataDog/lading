@@ -2,6 +2,7 @@ use regex::Regex;
 use std::{collections::HashMap, io::Read};
 
 const SMAP_SIZE_HINT: usize = 128 * 1024; // 128 kB
+const BYTES_PER_KIBIBYTE: u64 = 1024;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -33,7 +34,7 @@ pub(crate) struct Region {
     // empty string indicates no pathname
     pub(crate) pathname: String,
 
-    // Values (all in kibibytes)
+    // Values (all in bytes)
     pub(crate) size: u64,
     pub(crate) pss: u64,
     pub(crate) swap: u64,
@@ -152,36 +153,38 @@ impl Region {
                 continue;
             };
 
+            let mut value_in_kibibytes = || -> Result<u64, Error> {
+                let value_token = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                    "Could not parse numeric value from line: {line}"
+                )))?;
+                let unit = next_token(&mut chars).ok_or(Error::Parsing(format!(
+                    "Could not parse unit from line: {line}"
+                )))?;
+                let numeric = value_token.parse::<u64>()?;
+
+                match unit {
+                    "kB" => Ok(numeric * BYTES_PER_KIBIBYTE),
+                    unknown => Err(Error::Parsing(format!(
+                        "Unknown unit: {unknown} in line: {line}"
+                    ))),
+                }
+            };
+
             match name {
                 "Rss:" => {
-                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
-                        "Could not parse numeric value from line: {line}"
-                    )))?;
-                    rss = Some(numeric.parse::<u64>()?);
+                    rss = Some(value_in_kibibytes()?);
                 }
                 "Pss:" => {
-                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
-                        "Could not parse numeric value from line: {line}"
-                    )))?;
-                    pss = Some(numeric.parse::<u64>()?);
+                    pss = Some(value_in_kibibytes()?);
                 }
                 "Size:" => {
-                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
-                        "Could not parse numeric value from line: {line}"
-                    )))?;
-                    size = Some(numeric.parse::<u64>()?);
+                    size = Some(value_in_kibibytes()?);
                 }
                 "Swap:" => {
-                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
-                        "Could not parse numeric value from line: {line}"
-                    )))?;
-                    swap = Some(numeric.parse::<u64>()?);
+                    swap = Some(value_in_kibibytes()?);
                 }
                 "Pss_Dirty:" => {
-                    let numeric = next_token(&mut chars).ok_or(Error::Parsing(format!(
-                        "Could not parse numeric value from line: {line}"
-                    )))?;
-                    pss_dirty = Some(numeric.parse::<u64>()?);
+                    pss_dirty = Some(value_in_kibibytes()?);
                 }
                 _ => {}
             }
@@ -280,6 +283,8 @@ impl Regions {
 }
 
 #[cfg(test)]
+#[allow(clippy::identity_op)]
+#[allow(clippy::erasing_op)]
 mod tests {
     use super::*;
 
@@ -349,9 +354,9 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.dev, "12:11");
         assert_eq!(region_one.inode, 0);
         assert_eq!(region_one.pathname, "[vvar]");
-        assert_eq!(region_one.size, 16);
+        assert_eq!(region_one.size, 16 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.pss, 0);
-        assert_eq!(region_one.swap, 7);
+        assert_eq!(region_one.swap, 7 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, Some(0));
 
@@ -363,10 +368,10 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_two.dev, "00:00");
         assert_eq!(region_two.inode, 0);
         assert_eq!(region_two.pathname, "[vdso]");
-        assert_eq!(region_two.size, 8);
-        assert_eq!(region_two.pss, 2);
-        assert_eq!(region_two.swap, 0);
-        assert_eq!(region_two.rss, 8);
+        assert_eq!(region_two.size, 8 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.pss, 2 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.swap, 0 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.rss, 8 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_two.pss_dirty, Some(0));
     }
 
@@ -410,11 +415,11 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.dev, "12:34");
         assert_eq!(region_one.inode, 0);
         assert_eq!(region_one.pathname, "");
-        assert_eq!(region_one.size, 80000000);
-        assert_eq!(region_one.pss, 1);
-        assert_eq!(region_one.swap, 100000000000);
+        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
-        assert_eq!(region_one.pss_dirty, Some(2));
+        assert_eq!(region_one.pss_dirty, Some(2 * BYTES_PER_KIBIBYTE));
     }
 
     #[allow(clippy::unreadable_literal)]
@@ -456,10 +461,10 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.dev, "00:00");
         assert_eq!(region_one.inode, 0);
         assert_eq!(region_one.pathname, "[stack]");
-        assert_eq!(region_one.size, 80000000);
-        assert_eq!(region_one.pss, 1);
-        assert_eq!(region_one.swap, 100000000000);
-        assert_eq!(region_one.rss, 0);
+        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.rss, 0 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.pss_dirty, None);
     }
 }
