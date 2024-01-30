@@ -18,7 +18,7 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
-use metrics::{gauge, SetRecorderError};
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, SeedableRng};
@@ -37,9 +37,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 enum Error {
     #[error("Target related error: {0}")]
     Target(target::Error),
-
-    #[error("Set recorder error: {0}")]
-    SetRecorder(#[from] SetRecorderError),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),

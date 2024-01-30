@@ -29,7 +29,7 @@ use crate::signals::Phase;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper around [`SetRecorderError`].
-    #[error("Set recorder error: {0}")]
+    #[error("Failed to set recorder: {0}")]
     SetRecorderError(#[from] SetRecorderError),
 }
 
@@ -169,12 +169,10 @@ impl CaptureManager {
     ///
     /// Once a second any metrics produced by this program are flushed to disk.
     /// This function only exits once a shutdown signal is received.
-    ///
     /// # Panics
-    /// # Errors
-    ///
-    /// Will return `Err` if there is already a global recorder set
     /// None known.
+    /// # Errors
+    /// Will return `Err` if there is already a global recorder set
     pub fn start(mut self) -> Result<(), Error> {
         // Installing the recorder immediately on startup.
         // This does _not_ wait on experiment_started signal, so

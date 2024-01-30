@@ -12,7 +12,7 @@ use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Error for a serde [`serde_yaml`].
-    #[error("Serde error: {0}")]
+    #[error("Failed to deserialize yaml: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
 }
 

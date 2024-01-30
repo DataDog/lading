@@ -339,7 +339,9 @@ async fn main() -> Result<(), anyhow::Error> {
     debug!("hello from ducks");
 
     // Every ducks-sheepdog pair is connected by a unique socket file
-    let ducks_comm_file = std::env::args().nth(1).ok_or(anyhow::anyhow!("Error"))?;
+    let ducks_comm_file = std::env::args()
+        .nth(1)
+        .ok_or(anyhow::anyhow!("ducks socket file argument missing"))?;
     let ducks_comm =
         UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);
