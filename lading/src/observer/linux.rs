@@ -255,7 +255,7 @@ impl Sampler {
                     // We don't want to bail out entirely if we can't read stats
                     // which will happen if we don't have permissions or, more
                     // likely, the process has exited.
-                    warn!("Couldn't process `/proc/{pid}/maps`: {}", e);
+                    warn!("Couldn't process `/proc/{pid}/smaps`: {}", e);
                     continue;
                 }
             };

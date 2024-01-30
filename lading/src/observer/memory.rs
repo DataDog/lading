@@ -102,7 +102,7 @@ impl Region {
             } else if perms.is_none() {
                 perms = Some(token.to_string());
             } else if offset.is_none() {
-                offset = Some(token.parse::<u64>()?);
+                offset = Some(u64::from_str_radix(token, 16)?);
             } else if dev.is_none() {
                 dev = Some(token.to_string());
             } else if inode.is_none() {
@@ -286,6 +286,8 @@ impl Regions {
 #[allow(clippy::identity_op)]
 #[allow(clippy::erasing_op)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     const TWO_REGION: &str = "
@@ -411,7 +413,7 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.start, 0xabcdefabcfed);
         assert_eq!(region_one.end, 0xabdcef123450);
         assert_eq!(region_one.perms, "r-xp");
-        assert_eq!(region_one.offset, 10101010);
+        assert_eq!(region_one.offset, 0x10101010);
         assert_eq!(region_one.dev, "12:34");
         assert_eq!(region_one.inode, 0);
         assert_eq!(region_one.pathname, "");
@@ -466,5 +468,67 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.pss_dirty, None);
+    }
+
+    #[test]
+    fn test_agent_regions() {
+        let region =
+            " 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
+        Size:                  8 kB
+        KernelPageSize:        4 kB
+        MMUPageSize:           4 kB
+        Rss:                   8 kB
+        Pss:                   2 kB
+        Pss_Dirty:             0 kB
+        Shared_Clean:          8 kB
+        Shared_Dirty:          0 kB
+        Private_Clean:         0 kB
+        Private_Dirty:         0 kB
+        Referenced:            8 kB
+        Anonymous:             0 kB
+        LazyFree:              0 kB
+        AnonHugePages:         0 kB
+        ShmemPmdMapped:        0 kB
+        FilePmdMapped:         0 kB
+        Shared_Hugetlb:        0 kB
+        Private_Hugetlb:       0 kB
+        Swap:                  0 kB
+        SwapPss:               0 kB
+        Locked:                0 kB
+        THPeligible:    0
+        ProtectionKey:         0
+        VmFlags: rd ex mr mw me de sd";
+        let region = Region::from_str(region).unwrap();
+
+        assert_eq!(region.pathname, "[vdso]");
+        assert_eq!(region.size, 8 * BYTES_PER_KIBIBYTE);
+
+        let region = "ffff3fddf000-ffff3fde4000 rw-p 0037f000 fe:01 9339677                    /opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so
+        Size:                 20 kB
+        KernelPageSize:        4 kB
+        MMUPageSize:           4 kB
+        Rss:                  20 kB
+        Pss:                  20 kB
+        Shared_Clean:          0 kB
+        Shared_Dirty:          0 kB
+        Private_Clean:         0 kB
+        Private_Dirty:        20 kB
+        Referenced:           20 kB
+        Anonymous:            20 kB
+        LazyFree:              0 kB
+        AnonHugePages:         0 kB
+        ShmemPmdMapped:        0 kB
+        FilePmdMapped:         0 kB
+        Shared_Hugetlb:        0 kB
+        Private_Hugetlb:       0 kB
+        Swap:                  0 kB
+        SwapPss:               0 kB
+        Locked:                0 kB
+        THPeligible:    0
+        VmFlags: rd wr mr mw me ac";
+
+        let region = Region::from_str(region).unwrap();
+        assert_eq!(region.pathname, "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so");
+        assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
     }
 }
