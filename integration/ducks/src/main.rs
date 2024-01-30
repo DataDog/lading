@@ -287,7 +287,9 @@ impl DucksTarget {
             socket.read_buf(&mut buffer).await?;
 
             {
-                let metric = TCP_COUNTERS.get().expect("TCP_COUNTERS not initialized");
+                let metric = TCP_COUNTERS
+                    .get()
+                    .ok_or(anyhow::anyhow!("TCP_COUNTERS not initialized"))?;
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += buffer.len() as u64;
@@ -319,7 +321,9 @@ impl DucksTarget {
             trace!("Got {} B from {}", count, _remote);
 
             {
-                let metric = UDP_COUNTERS.get().expect("UDP_COUNTERS not initialized");
+                let metric = UDP_COUNTERS
+                    .get()
+                    .ok_or(anyhow::anyhow!("UDP_COUNTERS not initialized"))?;
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
@@ -335,9 +339,7 @@ async fn main() -> Result<(), anyhow::Error> {
     debug!("hello from ducks");
 
     // Every ducks-sheepdog pair is connected by a unique socket file
-    let ducks_comm_file = std::env::args()
-        .nth(1)
-        .expect("ducks socket file argument missing");
+    let ducks_comm_file = std::env::args().nth(1).ok_or(anyhow::anyhow!("Error"))?;
     let ducks_comm =
         UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);

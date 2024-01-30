@@ -166,8 +166,7 @@ impl IntegrationTest {
             .arg(self.experiment_warmup.as_secs().to_string())
             .arg("--capture-path")
             .arg(captures_file.to_str().expect("path is invalid unicode"))
-            .spawn()
-            .expect("lading binary failed to spawn");
+            .spawn()?;
 
         // wait for lading to push some load. It will exit on its own.
         debug!("lading is running");
