@@ -84,6 +84,7 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) fn sample(&mut self) -> Result<(), Error> {
+        // Key for this map is (pid, cmdline)
         let mut samples: FxHashMap<(i32, String), Sample> = FxHashMap::default();
 
         let mut total_processes: u64 = 0;
@@ -154,25 +155,12 @@ impl Sampler {
                 continue;
             }
 
-            // Collect the 'name' of the process. This is pulled from
-            // /proc/<pid>/exe and we take the last part of that, like posix
-            // `top` does. This will require us to label all data with both pid
-            // and name, again like `top`.
-            let basename: String = if let Ok(exe) = process.exe() {
-                if let Some(basename) = exe.file_name() {
-                    String::from(
-                        basename
-                            .to_str()
-                            .expect("could not convert basename to str"),
-                    )
-                } else {
-                    // It's possible to have a process with no named exe. On
-                    // Linux systems with functional security setups it's not
-                    // clear _when_ this would be the case but, hey.
-                    String::new()
-                }
+            let cmdline: String = if let Ok(cmdline) = process.cmdline() {
+                cmdline.join(" ")
             } else {
-                continue;
+                // docs say that no cmdline means this is a zombie process
+                // what would be the most useful thing to do here?
+                String::new()
             };
 
             let stats = process.stat();
@@ -201,7 +189,7 @@ impl Sampler {
                 stime,
                 uptime,
             };
-            samples.insert((pid, basename.clone()), sample);
+            samples.insert((pid, cmdline.clone()), sample);
 
             // Answering the question "How much memory is my program consuming?"
             // is not as straightforward as one might hope. Reside set size
@@ -227,7 +215,7 @@ impl Sampler {
             let rsslim: u64 = stats.rsslim;
             let vsize: u64 = stats.vsize;
 
-            let labels = [("pid", format!("{pid}")), ("exe", basename)];
+            let labels = [("pid", format!("{pid}")), ("cmdline", cmdline.clone())];
 
             // Number of pages that the process has in real memory.
             let rss_gauge = register_gauge!("rss_bytes", &labels);
@@ -263,7 +251,7 @@ impl Sampler {
 
             let labels = [
                 ("pid", format!("{pid}", pid = key.0)),
-                ("exe", key.1.clone()),
+                ("cmdline", key.1.clone()),
             ];
 
             let cpu_gauge = register_gauge!("cpu_percentage", &labels);
@@ -277,18 +265,21 @@ impl Sampler {
             self.previous_gauges.push(user_cpu_gauge.into());
         }
 
-        let total_sample = samples
-            .iter()
-            .fold(Sample::default(), |acc, ((pid, _exe), sample)| Sample {
-                utime: acc.utime + sample.utime,
-                stime: acc.stime + sample.stime,
-                // use parent process uptime
-                uptime: if *pid == self.parent.pid() {
-                    sample.uptime
-                } else {
-                    acc.uptime
-                },
-            });
+        let total_sample =
+            samples
+                .iter()
+                .fold(Sample::default(), |acc, ((pid, _cmdline), sample)| {
+                    Sample {
+                        utime: acc.utime + sample.utime,
+                        stime: acc.stime + sample.stime,
+                        // use parent process uptime
+                        uptime: if *pid == self.parent.pid() {
+                            sample.uptime
+                        } else {
+                            acc.uptime
+                        },
+                    }
+                });
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
 
