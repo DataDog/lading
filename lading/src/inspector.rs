@@ -30,12 +30,14 @@ use crate::{
     target::TargetPidReceiver,
 };
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]
 pub enum Error {
     /// Wrapper for [`nix::errno::Errno`]
+    #[error(transparent)]
     Errno(Errno),
     /// Wrapper for [`std::io::Error`]
+    #[error(transparent)]
     Io(io::Error),
 }
 

@@ -117,8 +117,7 @@ impl UnixDatagram {
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .as_ref()
-            .map(|sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>())
-            .unwrap_or_else(|| {
+            .map_or(
                 vec![
                     Byte::from_unit(1.0 / 32.0, ByteUnit::MB),
                     Byte::from_unit(1.0 / 16.0, ByteUnit::MB),
@@ -128,8 +127,9 @@ impl UnixDatagram {
                     Byte::from_unit(1_f64, ByteUnit::MB),
                     Byte::from_unit(2_f64, ByteUnit::MB),
                     Byte::from_unit(4_f64, ByteUnit::MB),
-                ]
-            })
+                ],
+                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
+            )
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?
             .iter()

@@ -116,8 +116,7 @@ impl Server {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
-            .map(|sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>())
-            .unwrap_or_else(|| {
+            .map_or(
                 vec![
                     Byte::from_unit(1_f64, ByteUnit::MB),
                     Byte::from_unit(2_f64, ByteUnit::MB),
@@ -125,8 +124,9 @@ impl Server {
                     Byte::from_unit(8_f64, ByteUnit::MB),
                     Byte::from_unit(16_f64, ByteUnit::MB),
                     Byte::from_unit(32_f64, ByteUnit::MB),
-                ]
-            })
+                ],
+                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
+            )
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?
             .iter()

@@ -20,10 +20,11 @@ use crate::signals::Phase;
 
 use super::General;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors emitted by [`Tcp`]
 pub enum Error {
     /// Wrapper for [`std::io::Error`].
+    #[error(transparent)]
     Io(io::Error),
 }
 

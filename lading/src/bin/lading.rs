@@ -44,9 +44,9 @@ enum Error {
     #[error("Lading blackhole returned an error: {0}")]
     LadingBlackhole(#[from] lading::blackhole::Error),
     #[error("Lading inspector returned an error")]
-    LadingInspector,
+    LadingInspector(#[from] lading::inspector::Error),
     #[error("Lading failed to sync servers {0}")]
-    SendError(#[from] tokio::sync::broadcast::error::SendError<()>),
+    Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
 }
 
 fn default_config_path() -> String {
@@ -372,8 +372,7 @@ async fn inner_main(
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())
-                .map_err(|_| Error::LadingInspector)?;
+            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -383,8 +382,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())
-                .map_err(|_| Error::LadingBlackhole)?;
+            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),

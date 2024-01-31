@@ -25,10 +25,11 @@ use crate::signals::Phase;
 
 use super::General;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Sqs`]
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
+    #[error(transparent)]
     Hyper(hyper::Error),
 }
 
