@@ -45,17 +45,15 @@ enum Error {
     LadingBlackhole(#[from] lading::blackhole::Error),
     #[error("Lading inspector returned an error: {0}")]
     LadingInspector(#[from] lading::inspector::Error),
-    #[error("Failed to deserialize: {0}")]
+    #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
     Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
-    #[error("Failed to set the maximum RSS bytes limit: {0}")]
+    #[error("Maximum RSS bytes limit exceeds u64::MAX {0}")]
     Meta(#[from] lading::target::MetaError),
-    #[error("Not possible to parse to SocketAddr: {0}")]
-    ParseAddr(#[from] std::net::AddrParseError),
-    #[error("Failed to parse prom addr to PathBuf")]
-    PromAddr,
-    #[error("Failed to parse capture path PathAddr")]
+    #[error("Parsing Prometheus address failed: {0}")]
+    PrometheusAddr(#[from] std::net::AddrParseError),
+    #[error("Parsing Prometheus address failed")]
     CapturePath,
 }
 
@@ -266,7 +264,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
-            prometheus_addr: prom_addr.parse().map_err(|_| Error::PromAddr)?,
+            prometheus_addr: prom_addr.parse()?,
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {

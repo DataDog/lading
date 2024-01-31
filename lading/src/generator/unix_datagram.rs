@@ -83,9 +83,9 @@ pub enum Error {
     StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
-    ZeroError,
+    Zero,
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 
@@ -157,7 +157,7 @@ impl UnixDatagram {
         for _ in 0..config.parallel_connections {
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .ok_or(Error::ZeroError)?;
+                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Streaming => block::Cache::stream(
                     config.seed,

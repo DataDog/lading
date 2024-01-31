@@ -110,10 +110,10 @@ pub enum Error {
     #[error("HTTP error: {0}")]
     Http(#[from] hyper::http::Error),
     /// Empty URI authority
-    #[error("Empty URI error")]
+    #[error("URI authority is empty")]
     EmptyAuthorityURI,
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 

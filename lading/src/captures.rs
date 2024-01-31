@@ -84,7 +84,6 @@ impl CaptureManager {
     /// # Errors
     ///
     /// Returns an error if there is already a global recorder set.
-    /// Function if there is already a global recorder set.
     pub fn install(&self) -> Result<(), Error> {
         let recorder = CaptureRecorder {
             inner: Arc::clone(&self.inner),
@@ -172,7 +171,7 @@ impl CaptureManager {
     /// # Panics
     /// None known.
     /// # Errors
-    /// Will return `Err` if there is already a global recorder set
+    /// Will return 'error' if there is already a global recorder set
     pub fn start(mut self) -> Result<(), Error> {
         // Installing the recorder immediately on startup.
         // This does _not_ wait on experiment_started signal, so

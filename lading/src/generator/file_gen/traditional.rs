@@ -58,7 +58,7 @@ pub enum Error {
     #[error("Child join error: {0}")]
     Child(#[from] JoinError),
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 
