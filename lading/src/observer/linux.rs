@@ -277,6 +277,7 @@ impl Sampler {
                 let labels = [
                     ("pid", format!("{pid}")),
                     ("exe", basename.clone()),
+                    ("cmdline", cmdline.clone()),
                     ("pathname", pathname),
                 ];
                 gauge!("smaps.rss", measures.rss as f64, &labels);
