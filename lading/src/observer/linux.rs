@@ -179,7 +179,7 @@ impl Sampler {
             let cmdline: String = if let Ok(cmdline) = process.cmdline() {
                 cmdline.join(" ")
             } else {
-                String::new()
+                "zombie".to_string()
             };
 
             let stats = process.stat();
