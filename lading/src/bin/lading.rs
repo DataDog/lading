@@ -43,10 +43,20 @@ enum Error {
     LadingGenerator(#[from] lading::generator::Error),
     #[error("Lading blackhole returned an error: {0}")]
     LadingBlackhole(#[from] lading::blackhole::Error),
-    #[error("Lading inspector returned an error")]
+    #[error("Lading inspector returned an error: {0}")]
     LadingInspector(#[from] lading::inspector::Error),
+    #[error("Failed to deserialize: {0}")]
+    SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
     Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
+    #[error("Failed to set the maximum RSS bytes limit: {0}")]
+    Meta(#[from] lading::target::MetaError),
+    #[error("Not possible to parse to SocketAddr: {0}")]
+    ParseAddr(#[from] std::net::AddrParseError),
+    #[error("Failed to parse prom addr to PathBuf")]
+    PromAddr,
+    #[error("Failed to parse capture path PathAddr")]
+    CapturePath,
 }
 
 fn default_config_path() -> String {
@@ -201,7 +211,7 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
-fn get_config(ops: &Opts, config: Option<String>) -> Config {
+fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
         config
     } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
@@ -219,17 +229,15 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
                 panic!("Could not open configuration file at: {}", &ops.config_path)
             });
         let mut contents = String::new();
-        file.read_to_string(&mut contents)
-            .expect("Data in contents is not valid utf-8");
+        file.read_to_string(&mut contents)?;
 
         contents
     };
 
-    let mut config: Config = serde_yaml::from_str(&contents).expect("invalid configuration file");
+    let mut config: Config = serde_yaml::from_str(&contents)?;
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
-        target::Meta::set_rss_bytes_limit(rss_bytes_limit)
-            .expect("rss_bytes_limit is greater than u64::MAX");
+        target::Meta::set_rss_bytes_limit(rss_bytes_limit)?;
     }
     let target = if ops.no_target {
         None
@@ -258,16 +266,12 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
-            prometheus_addr: prom_addr
-                .parse()
-                .expect("Not possible to parse to SocketAddr"),
+            prometheus_addr: prom_addr.parse().map_err(|_| Error::PromAddr)?,
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
-            path: capture_path
-                .parse()
-                .expect("Not possible to parse to PathBuf"),
+            path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
         };
     } else {
@@ -290,7 +294,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
             }
         }
     }
-    config
+    Ok(config)
 }
 
 async fn inner_main(
@@ -565,7 +569,7 @@ fn main() -> Result<(), Error> {
         experiment_duration,
         warmup_duration,
         disable_inspector,
-        config,
+        config?,
     ));
     // The splunk_hec generator spawns long running tasks that are not plugged
     // into the shutdown mechanism we have here. This is a bug and needs to be
@@ -602,7 +606,7 @@ generator: []
             Duration::from_millis(2500),
             Duration::from_millis(5000),
             false,
-            config,
+            config.expect("Could not convert to valid Config"),
         )
         .await;
 
