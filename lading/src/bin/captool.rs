@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet};
+use std::hash::BuildHasher;
+use std::hash::Hasher;
 
 use average::{concatenate, Estimate, Variance};
 use clap::Parser;
@@ -13,7 +15,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 struct Args {
     /// list metric names
     #[clap(short, long)]
-    list_names: bool,
+    list_metrics: bool,
 
     /// show details about a metric
     #[clap(short, long)]
@@ -61,7 +63,9 @@ async fn main() -> Result<(), Error> {
         .map(|line| line.unwrap())
         .collect();
 
-    if args.list_names {
+    // Print out available metrics if user asked for it
+    // or if they didn't specify a specific metric
+    if args.list_metrics || args.metric.is_none() {
         let mut names: Vec<String> = lines.iter().map(|line| line.metric_name.clone()).collect();
         names.sort();
         names.dedup();
@@ -72,45 +76,45 @@ async fn main() -> Result<(), Error> {
     }
 
     if let Some(metric) = args.metric {
+        // key is hash of the metric name and all the sorted, concatenated labels
+        // value is a tuple of
+        // - hashset of "key:value" strings (aka, concatenated labels)
+        // - vec of data points
+        let mut context_map: HashMap<u64, (BTreeSet<String>, Vec<f64>)> = HashMap::new();
+        let hash_builder = RandomState::new();
         info!("Metric: {metric}");
 
-        let mut key_and_values: HashMap<String, HashSet<String>> = HashMap::new();
-        // TODO consolidate these loops into two, one to compute, one to print
-        let labels = lines
+        // Use a BTreeSet to ensure that the tags are sorted
+        lines
             .iter()
             .filter(|line| line.metric_name == metric)
-            .map(|line| line.labels.clone());
-
-        for label in labels {
-            for (key, value) in label.iter() {
-                key_and_values
-                    .entry(key.clone())
-                    .or_default()
-                    .insert(value.clone());
-            }
-        }
-        info!("Labels:");
-        for (key, values) in key_and_values.iter_mut() {
-            println!("{}: {:?}", key, values);
-        }
+            .for_each(|line| {
+                let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
+                for (key, value) in line.labels.iter() {
+                    let tag = format!("{}:{}", key, value);
+                    sorted_labels.insert(tag);
+                }
+                let mut context_key = hash_builder.build_hasher();
+                context_key.write_usize(metric.len());
+                context_key.write(metric.as_bytes());
+                for label in sorted_labels.iter() {
+                    context_key.write_usize(label.len());
+                    context_key.write(label.as_bytes());
+                }
+                let entry = context_map.entry(context_key.finish()).or_default();
+                entry.0 = sorted_labels;
+                entry.1.push(line.value.as_f64());
+            });
 
         concatenate!(Estimator, [Variance, variance, mean]);
 
-        // Note this does not correctly expand all timeseries present for this metric
-        // It only filters by one key, not multiple keys.
-        for (key, labels) in key_and_values.iter_mut() {
-            for label in labels.iter() {
-                let s: Estimator = lines
-                    .iter()
-                    .filter(|line| {
-                        line.metric_name == metric
-                            && line.labels.contains_key(key)
-                            && line.labels.get(key).unwrap() == label
-                    })
-                    .map(|line| line.value.as_f64())
-                    .collect();
-                info!("Stats for {metric}[{key}:{label}]: mean: {}", s.mean(),);
-            }
+        for (_, (labels, values)) in context_map.iter() {
+            let s: Estimator = values.iter().copied().collect();
+            info!(
+                "{metric}[{labels}]: mean: {}",
+                s.mean(),
+                labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
+            );
         }
     }
 
