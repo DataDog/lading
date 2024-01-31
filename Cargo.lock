@@ -1065,7 +1065,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.20.6-rc2"
+version = "0.20.6-rc3"
 dependencies = [
  "async-pidfd",
  "average",
