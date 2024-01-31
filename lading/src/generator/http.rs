@@ -13,7 +13,7 @@
 
 use std::{num::NonZeroU32, thread};
 
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use hyper::{
     client::{Client, HttpConnector},
     header::CONTENT_LENGTH,
@@ -91,6 +91,9 @@ pub enum Error {
     /// Wrapper around [`hyper::http::Error`].
     #[error("HTTP error: {0}")]
     Http(#[from] hyper::http::Error),
+    /// Byte error
+    #[error("Failed to convert into bytes {0}")]
+    Byte(#[from] ByteError),
 }
 
 /// The HTTP generator.
@@ -125,16 +128,19 @@ impl Http {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
+            .map(|sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>())
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
                 ]
             })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();

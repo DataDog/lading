@@ -23,7 +23,7 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{gauge, register_counter};
@@ -57,6 +57,9 @@ pub enum Error {
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(#[from] JoinError),
+    /// Byte error
+    #[error("Failed to convert into bytes {0}")]
+    Byte(#[from] ByteError),
 }
 
 fn default_rotation() -> bool {
@@ -133,16 +136,19 @@ impl Server {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
+            .map(|sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>())
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(8_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(16_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(32_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
+                    Byte::from_unit(8_f64, ByteUnit::MB),
+                    Byte::from_unit(16_f64, ByteUnit::MB),
+                    Byte::from_unit(32_f64, ByteUnit::MB),
                 ]
             })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();

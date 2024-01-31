@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
@@ -61,6 +61,9 @@ pub enum Error {
     /// Generic IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Byte error
+    #[error("Failed to convert into bytes {0}")]
+    Byte(#[from] ByteError),
 }
 
 #[derive(Debug)]
@@ -92,18 +95,21 @@ impl Udp {
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
             .clone()
+            .map(|sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>())
             .unwrap_or_else(|| {
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
                 ]
             })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();

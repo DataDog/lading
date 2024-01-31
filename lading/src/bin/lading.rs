@@ -37,9 +37,16 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 enum Error {
     #[error("Target related error: {0}")]
     Target(target::Error),
-
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Lading generator returned an error: {0}")]
+    LadingGenerator(#[from] lading::generator::Error),
+    #[error("Lading blackhole returned an error: {0}")]
+    LadingBlackhole(#[from] lading::blackhole::Error),
+    #[error("Lading inspector returned an error")]
+    LadingInspector,
+    #[error("Lading failed to sync servers {0}")]
+    SendError(#[from] tokio::sync::broadcast::error::SendError<()>),
 }
 
 fn default_config_path() -> String {
@@ -355,8 +362,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown.clone())
-            .expect("Underlying sub-server creation signals erro");
+        let generator_server = generator::Server::new(cfg, shutdown.clone())?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -367,7 +373,7 @@ async fn inner_main(
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
             let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())
-                .expect("Path is invalid or path is not executable by this program");
+                .map_err(|_| Error::LadingInspector)?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -378,7 +384,7 @@ async fn inner_main(
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
             let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())
-                .expect("Underlying sub-server creation signals error");
+                .map_err(|_| Error::LadingBlackhole)?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -422,9 +428,7 @@ async fn inner_main(
         tsrv_joinset.spawn(target_server.run(tgt_snd));
     } else {
         // Many lading servers synchronize on target startup.
-        tgt_snd
-            .send(None)
-            .expect("unable to transmit startup sync signal, catastrophic failure");
+        tgt_snd.send(None)?;
     };
 
     let experiment_completed_shutdown = shutdown.clone();

@@ -111,7 +111,11 @@ impl IntegrationTest {
         let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
             .env("RUST_LOG", "ducks=debug,info")
-            .arg(ducks_comm_file.to_str().expect("Path is invalid unicode"))
+            .arg(
+                ducks_comm_file
+                    .to_str()
+                    .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
+            )
             .spawn()
             .context("launch ducks")?;
 
@@ -158,7 +162,7 @@ impl IntegrationTest {
             .arg(
                 lading_config_file
                     .to_str()
-                    .expect("path is invalid unicode"),
+                    .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
             )
             .arg("--experiment-duration-seconds")
             .arg(self.experiment_duration.as_secs().to_string())
