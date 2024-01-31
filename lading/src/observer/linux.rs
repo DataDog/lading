@@ -35,7 +35,7 @@ pub(crate) struct Sampler {
     num_cores: usize,
     ticks_per_second: u64,
     page_size: u64,
-    previous_samples: FxHashMap<(i32, String), Sample>,
+    previous_samples: FxHashMap<(i32, String, String), Sample>,
     previous_totals: Sample,
     previous_gauges: Vec<Gauge>,
 }
@@ -84,8 +84,8 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) fn sample(&mut self) -> Result<(), Error> {
-        // Key for this map is (pid, cmdline)
-        let mut samples: FxHashMap<(i32, String), Sample> = FxHashMap::default();
+        // Key for this map is (pid, basename/exe, cmdline)
+        let mut samples: FxHashMap<(i32, String, String), Sample> = FxHashMap::default();
 
         let mut total_processes: u64 = 0;
         // We maintain a tally of the total RSS consumed by the parent process
@@ -155,11 +155,30 @@ impl Sampler {
                 continue;
             }
 
+            // Collect the 'name' of the process. This is pulled from
+            // /proc/<pid>/exe and we take the last part of that, like posix
+            // `top` does. This will require us to label all data with both pid
+            // and name, again like `top`.
+            let basename: String = if let Ok(exe) = process.exe() {
+                if let Some(basename) = exe.file_name() {
+                    String::from(
+                        basename
+                            .to_str()
+                            .expect("could not convert basename to str"),
+                    )
+                } else {
+                    // It's possible to have a process with no named exe. On
+                    // Linux systems with functional security setups it's not
+                    // clear _when_ this would be the case but, hey.
+                    String::new()
+                }
+            } else {
+                continue;
+            };
+
             let cmdline: String = if let Ok(cmdline) = process.cmdline() {
                 cmdline.join(" ")
             } else {
-                // docs say that no cmdline means this is a zombie process
-                // what would be the most useful thing to do here?
                 String::new()
             };
 
@@ -189,7 +208,7 @@ impl Sampler {
                 stime,
                 uptime,
             };
-            samples.insert((pid, cmdline.clone()), sample);
+            samples.insert((pid, basename.clone(), cmdline.clone()), sample);
 
             // Answering the question "How much memory is my program consuming?"
             // is not as straightforward as one might hope. Reside set size
@@ -215,7 +234,11 @@ impl Sampler {
             let rsslim: u64 = stats.rsslim;
             let vsize: u64 = stats.vsize;
 
-            let labels = [("pid", format!("{pid}")), ("cmdline", cmdline.clone())];
+            let labels = [
+                ("pid", format!("{pid}")),
+                ("exe", basename),
+                ("cmdline", cmdline.clone()),
+            ];
 
             // Number of pages that the process has in real memory.
             let rss_gauge = register_gauge!("rss_bytes", &labels);
@@ -251,7 +274,8 @@ impl Sampler {
 
             let labels = [
                 ("pid", format!("{pid}", pid = key.0)),
-                ("cmdline", key.1.clone()),
+                ("exe", key.1.clone()),
+                ("cmdline", key.2.clone()),
             ];
 
             let cpu_gauge = register_gauge!("cpu_percentage", &labels);
@@ -268,7 +292,7 @@ impl Sampler {
         let total_sample =
             samples
                 .iter()
-                .fold(Sample::default(), |acc, ((pid, _cmdline), sample)| {
+                .fold(Sample::default(), |acc, ((pid, _exe, _cmdline), sample)| {
                     Sample {
                         utime: acc.utime + sample.utime,
                         stime: acc.stime + sample.stime,
