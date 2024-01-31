@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.6-rc3]
+### Fixed
+- Final RC for smaps parsing logic, no significant changes from rc2.
+
 ## [0.20.6-rc2]
 ### Fixed
 - Fixes some bugs in the initial smaps parsing logic, renames metrics to
