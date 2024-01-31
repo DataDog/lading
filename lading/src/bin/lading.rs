@@ -37,6 +37,9 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 enum Error {
     #[error("Target related error: {0}")]
     Target(target::Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 fn default_config_path() -> String {
@@ -324,7 +327,9 @@ async fn inner_main(
                 capture_manager.add_global_label(k, v);
             }
             tokio::spawn(async {
-                capture_manager.start();
+                capture_manager
+                    .start()
+                    .expect("failed to start capture manager");
             });
         }
     }
@@ -481,7 +486,7 @@ async fn inner_main(
     res
 }
 
-fn run_process_tree(opts: ProcessTreeGen) {
+fn run_process_tree(opts: ProcessTreeGen) -> Result<(), Error> {
     let mut contents = String::new();
 
     if let Some(path) = opts.config_path {
@@ -494,8 +499,7 @@ fn run_process_tree(opts: ProcessTreeGen) {
             .open(&path)
             .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", path.display()));
 
-        file.read_to_string(&mut contents)
-            .expect("Data in contents is not valid utf-8");
+        file.read_to_string(&mut contents)?;
     } else if let Some(str) = &opts.config_content {
         contents = str.to_string()
     } else {
@@ -515,9 +519,10 @@ fn run_process_tree(opts: ProcessTreeGen) {
         }
         Err(e) => panic!("invalide configuration: {}", e),
     }
+    Ok(())
 }
 
-fn run_extra_cmds(cmds: ExtraCommands) {
+fn run_extra_cmds(cmds: ExtraCommands) -> Result<(), Error> {
     match cmds {
         // This command will call fork and the process must be kept fork-safe up to this point.
         ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts),
@@ -536,7 +541,7 @@ fn main() -> Result<(), Error> {
 
     // handle extra commands
     if let Some(cmds) = opts.extracmds {
-        run_extra_cmds(cmds);
+        run_extra_cmds(cmds)?;
         return Ok(());
     }
 

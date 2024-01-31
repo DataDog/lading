@@ -106,6 +106,9 @@ pub enum Error {
     /// IO error
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// Wrapper around [`hyper::http::Error`].
+    #[error("HTTP error: {0}")]
+    Http(#[from] hyper::http::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -293,8 +296,7 @@ impl SplunkHec {
                         .header(AUTHORIZATION, format!("Splunk {}", self.token))
                         .header(CONTENT_LENGTH, block_length)
                         .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
-                        .body(body)
-                        .expect("unable to build request");
+                        .body(body)?;
 
                     // NOTE once JoinSet is in tokio stable we can make this
                     // much, much tidier by spawning requests in the JoinSet. I

@@ -17,12 +17,21 @@ use std::{
 };
 
 use lading_capture::json;
+use metrics::SetRecorderError;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::signals::Phase;
+
+/// Errors produced by [`CaptureManager`]
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Wrapper around [`SetRecorderError`].
+    #[error("Failed to set recorder: {0}")]
+    SetRecorderError(#[from] SetRecorderError),
+}
 
 struct Inner {
     registry: Registry<metrics::Key, AtomicStorage>,
@@ -72,14 +81,16 @@ impl CaptureManager {
 
     /// Install the [`CaptureManager`] as global [`metrics::Recorder`]
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Function will panic if there is already a global recorder set.
-    pub fn install(&self) {
+    /// Returns an error if there is already a global recorder set.
+    /// Function if there is already a global recorder set.
+    pub fn install(&self) -> Result<(), Error> {
         let recorder = CaptureRecorder {
             inner: Arc::clone(&self.inner),
         };
-        metrics::set_boxed_recorder(Box::new(recorder)).expect("recorder already set");
+        metrics::set_boxed_recorder(Box::new(recorder))?;
+        Ok(())
     }
 
     /// Add a global label to all metrics managed by [`CaptureManager`].
@@ -158,15 +169,15 @@ impl CaptureManager {
     ///
     /// Once a second any metrics produced by this program are flushed to disk.
     /// This function only exits once a shutdown signal is received.
-    ///
     /// # Panics
-    ///
     /// None known.
-    pub fn start(mut self) {
+    /// # Errors
+    /// Will return `Err` if there is already a global recorder set
+    pub fn start(mut self) -> Result<(), Error> {
         // Installing the recorder immediately on startup.
         // This does _not_ wait on experiment_started signal, so
         // warmup data will be included in the capture.
-        self.install();
+        self.install()?;
         info!("Capture manager installed, recording to capture file.");
 
         std::thread::Builder::new()
@@ -186,6 +197,7 @@ impl CaptureManager {
                 std::thread::sleep(Duration::from_secs(1));
             })
             .expect("failed to create capture manager thread");
+        Ok(())
     }
 }
 

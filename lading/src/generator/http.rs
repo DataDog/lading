@@ -231,8 +231,7 @@ impl Http {
                 .method(method.clone())
                 .uri(&uri)
                 .header(CONTENT_LENGTH, block_length)
-                .body(body)
-                .expect("failed to build request");
+                .body(body)?;
             let headers = request.headers_mut();
             for (k, v) in self.headers.clone().drain() {
                 if let Some(k) = k {

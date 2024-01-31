@@ -8,6 +8,14 @@ use serde::Deserialize;
 
 use crate::{blackhole, generator, inspector, observer, target, target_metrics};
 
+/// Errors produced by [`Config`]
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Error for a serde [`serde_yaml`].
+    #[error("Failed to deserialize yaml: {0}")]
+    SerdeYaml(#[from] serde_yaml::Error),
+}
+
 /// Main configuration struct for this program
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -83,7 +91,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_deserializes() {
+    fn config_deserializes() -> Result<(), Error> {
         let contents = r#"
 generator:
   - id: "Data out"
@@ -104,8 +112,7 @@ blackhole:
   - tcp:
       binding_addr: "127.0.0.1:1001"
 "#;
-        let config: Config =
-            serde_yaml::from_str(contents).expect("Contents do not match the structure expected");
+        let config: Config = serde_yaml::from_str(contents)?;
         assert_eq!(
             config,
             Config {
@@ -163,5 +170,6 @@ blackhole:
                 target_metrics: Option::default(),
             },
         );
+        Ok(())
     }
 }
