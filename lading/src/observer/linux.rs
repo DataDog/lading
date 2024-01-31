@@ -35,7 +35,7 @@ pub(crate) struct Sampler {
     num_cores: usize,
     ticks_per_second: u64,
     page_size: u64,
-    previous_samples: FxHashMap<(i32, String), Sample>,
+    previous_samples: FxHashMap<(i32, String, String), Sample>,
     previous_totals: Sample,
     previous_gauges: Vec<Gauge>,
 }
@@ -84,7 +84,8 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) fn sample(&mut self) -> Result<(), Error> {
-        let mut samples: FxHashMap<(i32, String), Sample> = FxHashMap::default();
+        // Key for this map is (pid, basename/exe, cmdline)
+        let mut samples: FxHashMap<(i32, String, String), Sample> = FxHashMap::default();
 
         let mut total_processes: u64 = 0;
         // We maintain a tally of the total RSS consumed by the parent process
@@ -175,6 +176,12 @@ impl Sampler {
                 continue;
             };
 
+            let cmdline: String = if let Ok(cmdline) = process.cmdline() {
+                cmdline.join(" ")
+            } else {
+                "zombie".to_string()
+            };
+
             let stats = process.stat();
             if stats.is_err() {
                 // We don't want to bail out entirely if we can't read stats
@@ -201,7 +208,7 @@ impl Sampler {
                 stime,
                 uptime,
             };
-            samples.insert((pid, basename.clone()), sample);
+            samples.insert((pid, basename.clone(), cmdline.clone()), sample);
 
             // Answering the question "How much memory is my program consuming?"
             // is not as straightforward as one might hope. Reside set size
@@ -227,7 +234,11 @@ impl Sampler {
             let rsslim: u64 = stats.rsslim;
             let vsize: u64 = stats.vsize;
 
-            let labels = [("pid", format!("{pid}")), ("exe", basename)];
+            let labels = [
+                ("pid", format!("{pid}")),
+                ("exe", basename),
+                ("cmdline", cmdline.clone()),
+            ];
 
             // Number of pages that the process has in real memory.
             let rss_gauge = register_gauge!("rss_bytes", &labels);
@@ -264,6 +275,7 @@ impl Sampler {
             let labels = [
                 ("pid", format!("{pid}", pid = key.0)),
                 ("exe", key.1.clone()),
+                ("cmdline", key.2.clone()),
             ];
 
             let cpu_gauge = register_gauge!("cpu_percentage", &labels);
@@ -277,18 +289,21 @@ impl Sampler {
             self.previous_gauges.push(user_cpu_gauge.into());
         }
 
-        let total_sample = samples
-            .iter()
-            .fold(Sample::default(), |acc, ((pid, _exe), sample)| Sample {
-                utime: acc.utime + sample.utime,
-                stime: acc.stime + sample.stime,
-                // use parent process uptime
-                uptime: if *pid == self.parent.pid() {
-                    sample.uptime
-                } else {
-                    acc.uptime
-                },
-            });
+        let total_sample =
+            samples
+                .iter()
+                .fold(Sample::default(), |acc, ((pid, _exe, _cmdline), sample)| {
+                    Sample {
+                        utime: acc.utime + sample.utime,
+                        stime: acc.stime + sample.stime,
+                        // use parent process uptime
+                        uptime: if *pid == self.parent.pid() {
+                            sample.uptime
+                        } else {
+                            acc.uptime
+                        },
+                    }
+                });
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
 
