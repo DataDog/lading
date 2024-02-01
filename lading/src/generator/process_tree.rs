@@ -423,9 +423,11 @@ impl Process {
 /// Spawn the process tree
 ///
 /// # Errors
+///
 /// Function will error if the nodes list in incorrectly proccessed.
 ///
 /// # Panics
+///
 /// Function will panic if the process execution fails.
 ///
 pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error> {
@@ -508,7 +510,9 @@ fn goto_next_sibling(depth: u32, iter: &mut Peekable<vec_deque::Iter<'_, Process
 }
 
 /// Generate a process tree
+///
 /// # Errors
+///
 /// Return an error if the exec cannot be created
 pub fn generate_tree(rng: &mut StdRng, config: &Config) -> Result<VecDeque<Process>, Error> {
     let mut nodes = VecDeque::new();

@@ -31,13 +31,13 @@ pub enum Error {
     /// Wrapper for [`hyper::Error`].
     #[error(transparent)]
     Hyper(#[from] hyper::Error),
-    /// std formatting error
+    /// Wrapper for [`std::fmt::Error`].
     #[error(transparent)]
     Fmt(#[from] std::fmt::Error),
-    /// serde_qs error
+    /// Wrapper for [`serde_qs::Error`].
     #[error(transparent)]
     SerdeQs(#[from] serde_qs::Error),
-    /// http error
+    /// Wrapper for [`hyper::http::Error`].
     #[error(transparent)]
     Http(#[from] hyper::http::Error),
 }
