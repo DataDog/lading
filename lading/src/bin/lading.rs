@@ -331,7 +331,7 @@ async fn inner_main(
             global_labels,
         } => {
             let mut capture_manager =
-                CaptureManager::new(path, shutdown.clone(), experiment_started.clone()).await;
+                CaptureManager::new(path, shutdown.clone(), experiment_started.clone()).await?;
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }

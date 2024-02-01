@@ -155,7 +155,9 @@ impl IntegrationTest {
             .arg(
                 ducks_process
                     .id()
-                    .expect("process is already done")
+                    .ok_or(anyhow::anyhow!(
+                        "child has already been polled to completion"
+                    ))?
                     .to_string(),
             )
             .arg("--config-path")
@@ -169,7 +171,11 @@ impl IntegrationTest {
             .arg("--warmup-duration-seconds")
             .arg(self.experiment_warmup.as_secs().to_string())
             .arg("--capture-path")
-            .arg(captures_file.to_str().expect("path is invalid unicode"))
+            .arg(
+                captures_file
+                    .to_str()
+                    .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
+            )
             .spawn()?;
 
         // wait for lading to push some load. It will exit on its own.

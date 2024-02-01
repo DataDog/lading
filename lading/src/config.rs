@@ -14,6 +14,12 @@ pub enum Error {
     /// Error for a serde [`serde_yaml`].
     #[error("Failed to deserialize yaml: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
+    /// Error for a byte unit [`byte_unit`].
+    #[error("Value provided is negative: {0}")]
+    ByteUnit(#[from] byte_unit::ByteError),
+    /// Error for a socket address [`std::net::SocketAddr`].
+    #[error("Failed to convert to valid SocketAddr: {0}")]
+    SocketAddr(#[from] std::net::AddrParseError),
 }
 
 /// Main configuration struct for this program
@@ -130,16 +136,14 @@ blackhole:
                             maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_unit(
                                 8_f64,
                                 byte_unit::ByteUnit::MB
-                            )
-                            .expect("Value provided is negative"),
+                            )?,
                             block_cache_method: block::CacheMethod::Fixed,
                         },
                         headers: HeaderMap::default(),
                         bytes_per_second: byte_unit::Byte::from_unit(
                             100_f64,
                             byte_unit::ByteUnit::MB
-                        )
-                        .expect("Value provided is negative"),
+                        )?,
                         block_sizes: Option::default(),
                         parallel_connections: 5,
                         throttle: lading_throttle::Config::default(),
@@ -151,15 +155,13 @@ blackhole:
                             id: Some(String::from("Data in"))
                         },
                         inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
-                            binding_addr: SocketAddr::from_str("127.0.0.1:1000")
-                                .expect("Failed to convert to valid SocketAddr"),
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1000")?,
                         })
                     },
                     blackhole::Config {
                         general: blackhole::General { id: None },
                         inner: blackhole::Inner::Tcp(blackhole::tcp::Config {
-                            binding_addr: SocketAddr::from_str("127.0.0.1:1001")
-                                .expect("Failed to convert to valid SocketAddr"),
+                            binding_addr: SocketAddr::from_str("127.0.0.1:1001")?,
                         })
                     },
                 ]),
