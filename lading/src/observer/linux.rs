@@ -10,6 +10,8 @@ use crate::observer::memory::Regions;
 
 use super::RSS_BYTES;
 
+const BYTES_PER_KIBIBYTE: u64 = 1024;
+
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
 pub enum Error {
@@ -23,6 +25,18 @@ pub enum Error {
     /// Wrapper for [`procfs::ProcError`]
     #[error("Unable to read procfs: {0}")]
     Proc(#[from] procfs::ProcError),
+}
+
+macro_rules! report_status_field {
+    ($status:expr, $labels:expr, $field:tt) => {
+        if let Some(value) = $status.$field {
+            gauge!(
+                concat!("status.", stringify!($field), "_bytes"),
+                (value * BYTES_PER_KIBIBYTE) as f64,
+                &$labels
+            );
+        }
+    };
 }
 
 #[derive(Debug, Default)]
@@ -262,6 +276,16 @@ impl Sampler {
 
             total_rss += rss;
             total_processes += 1;
+
+            // Also report memory data from `proc/status` as a reference point
+            report_status_field!(status, labels, vmrss);
+            report_status_field!(status, labels, rssanon);
+            report_status_field!(status, labels, rssfile);
+            report_status_field!(status, labels, rssshmem);
+            report_status_field!(status, labels, vmdata);
+            report_status_field!(status, labels, vmstk);
+            report_status_field!(status, labels, vmexe);
+            report_status_field!(status, labels, vmlib);
 
             let memory_regions = match Regions::from_pid(pid) {
                 Ok(memory_regions) => memory_regions,
