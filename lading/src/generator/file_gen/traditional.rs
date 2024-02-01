@@ -60,6 +60,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 fn default_rotation() -> bool {
@@ -160,8 +163,8 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("config bytes must be non-zero");
+        let bytes_per_second =
+            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -169,8 +172,7 @@ impl Server {
         );
 
         let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32)
-                .expect("config maximum bytes per file must be non-zero");
+            NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).ok_or(Error::Zero)?;
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
@@ -180,7 +182,7 @@ impl Server {
 
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .expect("bytes must be non-zero");
+                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Streaming => block::Cache::stream(
                     config.seed,

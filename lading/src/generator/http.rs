@@ -94,6 +94,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 /// The HTTP generator.
@@ -168,7 +171,7 @@ impl Http {
             } => {
                 let total_bytes =
                     NonZeroU32::new(maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                        .expect("bytes must be non-zero");
+                        .ok_or(Error::Zero)?;
                 let block_cache = match block_cache_method {
                     block::CacheMethod::Streaming => block::Cache::stream(
                         config.seed,

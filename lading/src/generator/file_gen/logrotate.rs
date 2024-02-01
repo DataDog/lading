@@ -54,6 +54,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -149,8 +152,7 @@ impl Server {
         );
 
         let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32)
-                .expect("Maximumm bytes per log must be non-zero");
+            NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32).ok_or(Error::Zero)?;
 
         let mut handles = Vec::new();
 
@@ -159,7 +161,7 @@ impl Server {
 
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .expect("bytes must be non-zero");
+                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Streaming => block::Cache::stream(
                     config.seed,

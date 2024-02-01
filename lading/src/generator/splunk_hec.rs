@@ -116,7 +116,7 @@ pub enum Error {
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
     /// Failed to convert, value is 0
-    #[error("Value provided is zero")]
+    #[error("Value provided must not be zero")]
     Zero,
 }
 
