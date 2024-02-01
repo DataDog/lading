@@ -186,7 +186,7 @@ impl Prometheus {
                     match metric_type {
                         Some(MetricType::Gauge) => {
                             let Ok(value): Result<f64, _> = value.parse() else {
-                                let e = value.parse::<f64>().unwrap_err();
+                                let e = value.parse::<f64>().expect("failed to parse gauge value");
                                 warn!("{e}: {name} = {value}");
                                 continue;
                             };
@@ -196,7 +196,8 @@ impl Prometheus {
                         }
                         Some(MetricType::Counter) => {
                             let Ok(value): Result<f64, _> = value.parse() else {
-                                let e = value.parse::<f64>().unwrap_err();
+                                let e =
+                                    value.parse::<f64>().expect("failed to parse counter value");
                                 warn!("{e}: {name} = {value}");
                                 continue;
                             };
