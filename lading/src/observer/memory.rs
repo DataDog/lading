@@ -217,6 +217,7 @@ impl Region {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct AggrMeasure {
     pub(crate) size: u64,
     pub(crate) pss: u64,
@@ -227,6 +228,20 @@ pub(crate) struct AggrMeasure {
 impl Regions {
     pub(crate) fn from_pid(pid: i32) -> Result<Self, Error> {
         Regions::from_file(&format!("/proc/{pid}/smaps"))
+    }
+
+    /// Returns a sum of all the fields from each region within this Regions
+    pub(crate) fn aggregate(&self) -> AggrMeasure {
+        let mut aggr = AggrMeasure::default();
+
+        for region in &self.0 {
+            aggr.size = aggr.size.saturating_add(region.size);
+            aggr.pss = aggr.pss.saturating_add(region.pss);
+            aggr.swap = aggr.swap.saturating_add(aggr.swap);
+            aggr.rss = aggr.rss.saturating_add(region.rss);
+        }
+
+        aggr
     }
 
     pub(crate) fn aggregate_by_pathname(&self) -> Vec<(String, AggrMeasure)> {

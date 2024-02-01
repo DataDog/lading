@@ -280,11 +280,23 @@ impl Sampler {
                     ("cmdline", cmdline.clone()),
                     ("pathname", pathname),
                 ];
-                gauge!("smaps.rss", measures.rss as f64, &labels);
-                gauge!("smaps.pss", measures.pss as f64, &labels);
-                gauge!("smaps.size", measures.size as f64, &labels);
-                gauge!("smaps.swap", measures.swap as f64, &labels);
+                gauge!("smaps.rss.by_pathname", measures.rss as f64, &labels);
+                gauge!("smaps.pss.by_pathname", measures.pss as f64, &labels);
+                gauge!("smaps.size.by_pathname", measures.size as f64, &labels);
+                gauge!("smaps.swap.by_pathname", measures.swap as f64, &labels);
             }
+
+            let measures = memory_regions.aggregate();
+            let labels = [
+                ("pid", format!("{pid}")),
+                ("exe", basename.clone()),
+                ("cmdline", cmdline.clone()),
+            ];
+
+            gauge!("smaps.rss.sum", measures.rss as f64, &labels);
+            gauge!("smaps.pss.sum", measures.pss as f64, &labels);
+            gauge!("smaps.size.sum", measures.size as f64, &labels);
+            gauge!("smaps.swap.sum", measures.swap as f64, &labels);
         }
 
         gauge!("num_processes", total_processes as f64);
