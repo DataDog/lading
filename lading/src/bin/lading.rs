@@ -55,6 +55,8 @@ enum Error {
     PrometheusAddr(#[from] std::net::AddrParseError),
     #[error("Invalid capture path")]
     CapturePath,
+    #[error("Process tree failed to generate tree")]
+    ProcessTree(#[from] process_tree::Error),
 }
 
 fn default_config_path() -> String {
@@ -515,9 +517,9 @@ fn run_process_tree(opts: ProcessTreeGen) -> Result<(), Error> {
             info!("Generating a process tree.");
 
             let mut rng = StdRng::from_seed(config.seed);
-            let nodes = process_tree::generate_tree(&mut rng, &config);
+            let nodes = process_tree::generate_tree(&mut rng, &config)?;
 
-            process_tree::spawn_tree(&nodes, config.process_sleep_ns.get());
+            process_tree::spawn_tree(&nodes, config.process_sleep_ns.get())?;
 
             info!("Bye. :)");
         }
