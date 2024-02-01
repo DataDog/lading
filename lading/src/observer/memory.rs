@@ -355,7 +355,8 @@ impl Regions {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
         let mut contents = String::with_capacity(SMAP_SIZE_HINT);
-        file.read_to_string(&mut contents).unwrap();
+        file.read_to_string(&mut contents)
+            .expect("Failed to read contents into string");
 
         Self::from_str(&contents)
     }
@@ -448,7 +449,7 @@ VmFlags: rd ex mr mw me de sd";
 
     #[test]
     fn test_basic_case() {
-        let regions = Regions::from_str(KERNEL_6_TWO_REGIONS).unwrap();
+        let regions = Regions::from_str(KERNEL_6_TWO_REGIONS).expect("Parsing failed");
         assert_eq!(regions.0.len(), 2);
 
         let region_one = &regions.0[0];
@@ -508,7 +509,7 @@ Locked:                1000000000 kB
 THPeligible:    0
 ProtectionKey:         0
 VmFlags: rd ex mr mw me de sd";
-        let regions = Regions::from_str(smap_region).unwrap();
+        let regions = Regions::from_str(smap_region).expect("Parsing failed");
         assert_eq!(regions.0.len(), 1);
 
         let region_one = &regions.0[0];
@@ -553,7 +554,7 @@ Locked:                1000000000 kB
 THPeligible:    0
 ProtectionKey:         0
 VmFlags: rd ex mr mw me de sd";
-        let regions = Regions::from_str(smap_region).unwrap();
+        let regions = Regions::from_str(smap_region).expect("Parsing failed");
         assert_eq!(regions.0.len(), 1);
 
         let region_one = &regions.0[0];
@@ -599,7 +600,7 @@ VmFlags: rd ex mr mw me de sd";
         THPeligible:    0
         ProtectionKey:         0
         VmFlags: rd ex mr mw me de sd";
-        let region = Region::from_str(region).unwrap();
+        let region = Region::from_str(region).expect("Parsing failed");
 
         assert_eq!(region.pathname, "[vdso]");
         assert_eq!(region.size, 8 * BYTES_PER_KIBIBYTE);
@@ -628,7 +629,7 @@ VmFlags: rd ex mr mw me de sd";
         THPeligible:    0
         VmFlags: rd wr mr mw me ac";
 
-        let region = Region::from_str(region).unwrap();
+        let region = Region::from_str(region).expect("Parsing failed");
         assert_eq!(region.pathname, "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so");
         assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
     }
