@@ -100,7 +100,8 @@ impl Sampler {
         clippy::cast_sign_loss,
         clippy::cast_possible_wrap
     )]
-    pub(crate) fn sample(&mut self) -> Result<(), Error> {
+    pub(crate) async fn sample(&mut self) -> Result<(), Error> {
+        let mut joinset = tokio::task::JoinSet::new();
         // Key for this map is (pid, basename/exe, cmdline)
         let mut samples: FxHashMap<(i32, String, String), Sample> = FxHashMap::default();
 
@@ -287,66 +288,68 @@ impl Sampler {
             report_status_field!(status, labels, vmexe);
             report_status_field!(status, labels, vmlib);
 
-            let memory_regions = match Regions::from_pid(pid) {
-                Ok(memory_regions) => memory_regions,
-                Err(e) => {
-                    // We don't want to bail out entirely if we can't read stats
-                    // which will happen if we don't have permissions or, more
-                    // likely, the process has exited.
-                    warn!("Couldn't process `/proc/{pid}/smaps`: {}", e);
-                    continue;
+            joinset.spawn(async move {
+                let memory_regions = match Regions::from_pid(pid) {
+                    Ok(memory_regions) => memory_regions,
+                    Err(e) => {
+                        // We don't want to bail out entirely if we can't read stats
+                        // which will happen if we don't have permissions or, more
+                        // likely, the process has exited.
+                        warn!("Couldn't process `/proc/{pid}/smaps`: {}", e);
+                        return;
+                    }
+                };
+                for (pathname, measures) in memory_regions.aggregate_by_pathname() {
+                    let labels = [
+                        ("pid", format!("{pid}")),
+                        ("exe", basename.clone()),
+                        ("cmdline", cmdline.clone()),
+                        ("pathname", pathname),
+                    ];
+                    gauge!("smaps.rss.by_pathname", measures.rss as f64, &labels);
+                    gauge!("smaps.pss.by_pathname", measures.pss as f64, &labels);
+                    gauge!("smaps.size.by_pathname", measures.size as f64, &labels);
+                    gauge!("smaps.swap.by_pathname", measures.swap as f64, &labels);
                 }
-            };
-            for (pathname, measures) in memory_regions.aggregate_by_pathname() {
+
+                let measures = memory_regions.aggregate();
                 let labels = [
                     ("pid", format!("{pid}")),
                     ("exe", basename.clone()),
                     ("cmdline", cmdline.clone()),
-                    ("pathname", pathname),
                 ];
-                gauge!("smaps.rss.by_pathname", measures.rss as f64, &labels);
-                gauge!("smaps.pss.by_pathname", measures.pss as f64, &labels);
-                gauge!("smaps.size.by_pathname", measures.size as f64, &labels);
-                gauge!("smaps.swap.by_pathname", measures.swap as f64, &labels);
-            }
 
-            let measures = memory_regions.aggregate();
-            let labels = [
-                ("pid", format!("{pid}")),
-                ("exe", basename.clone()),
-                ("cmdline", cmdline.clone()),
-            ];
+                gauge!("smaps.rss.sum", measures.rss as f64, &labels);
+                gauge!("smaps.pss.sum", measures.pss as f64, &labels);
+                gauge!("smaps.size.sum", measures.size as f64, &labels);
+                gauge!("smaps.swap.sum", measures.swap as f64, &labels);
 
-            gauge!("smaps.rss.sum", measures.rss as f64, &labels);
-            gauge!("smaps.pss.sum", measures.pss as f64, &labels);
-            gauge!("smaps.size.sum", measures.size as f64, &labels);
-            gauge!("smaps.swap.sum", measures.swap as f64, &labels);
+                let rollup = match Rollup::from_pid(pid) {
+                    Ok(rollup) => rollup,
+                    Err(e) => {
+                        // We don't want to bail out entirely if we can't read smap rollup
+                        // which will happen if we don't have permissions or, more
+                        // likely, the process has exited.
+                        warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
+                        return;
+                    }
+                };
 
-            let rollup = match Rollup::from_pid(pid) {
-                Ok(rollup) => rollup,
-                Err(e) => {
-                    // We don't want to bail out entirely if we can't read smap rollup
-                    // which will happen if we don't have permissions or, more
-                    // likely, the process has exited.
-                    warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
-                    continue;
+                gauge!("smaps_rollup.rss", rollup.rss as f64, &labels);
+                gauge!("smaps_rollup.pss", rollup.pss as f64, &labels);
+                if let Some(v) = rollup.pss_dirty {
+                    gauge!("smaps_rollup.pss_dirty", v as f64, &labels);
                 }
-            };
-
-            gauge!("smaps_rollup.rss", rollup.rss as f64, &labels);
-            gauge!("smaps_rollup.pss", rollup.pss as f64, &labels);
-            if let Some(v) = rollup.pss_dirty {
-                gauge!("smaps_rollup.pss_dirty", v as f64, &labels);
-            }
-            if let Some(v) = rollup.pss_anon {
-                gauge!("smaps_rollup.pss_anon", v as f64, &labels);
-            }
-            if let Some(v) = rollup.pss_file {
-                gauge!("smaps_rollup.pss_file", v as f64, &labels);
-            }
-            if let Some(v) = rollup.pss_shmem {
-                gauge!("smaps_rollup.pss_shmem", v as f64, &labels);
-            }
+                if let Some(v) = rollup.pss_anon {
+                    gauge!("smaps_rollup.pss_anon", v as f64, &labels);
+                }
+                if let Some(v) = rollup.pss_file {
+                    gauge!("smaps_rollup.pss_file", v as f64, &labels);
+                }
+                if let Some(v) = rollup.pss_shmem {
+                    gauge!("smaps_rollup.pss_shmem", v as f64, &labels);
+                }
+            });
         }
 
         gauge!("num_processes", total_processes as f64);
@@ -406,6 +409,8 @@ impl Sampler {
         self.previous_totals = total_sample;
         self.previous_samples = samples;
 
+        // drain any tasks before returning
+        while (joinset.join_next().await).is_some() {}
         Ok(())
     }
 }
