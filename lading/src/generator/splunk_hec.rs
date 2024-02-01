@@ -19,7 +19,7 @@ mod acknowledgements;
 use std::{num::NonZeroU32, thread, time::Duration};
 
 use acknowledgements::Channels;
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
@@ -109,6 +109,12 @@ pub enum Error {
     /// Wrapper around [`hyper::http::Error`].
     #[error("HTTP error: {0}")]
     Http(#[from] hyper::http::Error),
+    /// Empty URI authority
+    #[error("URI authority is empty")]
+    EmptyAuthorityURI,
+    /// Byte error
+    #[error("Bytes must not be negative: {0}")]
+    Byte(#[from] ByteError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -127,13 +133,16 @@ pub struct SplunkHec {
 
 /// Derive the intended path from the format configuration
 // https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_uri_by_format(base_uri: &Uri, format: lading_payload::splunk_hec::Encoding) -> Uri {
+fn get_uri_by_format(
+    base_uri: &Uri,
+    format: lading_payload::splunk_hec::Encoding,
+) -> Result<Uri, Error> {
     let path = match format {
         lading_payload::splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
         lading_payload::splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
     };
 
-    Uri::builder()
+    let uri = Uri::builder()
         .authority(
             base_uri
                 .authority()
@@ -142,8 +151,8 @@ fn get_uri_by_format(base_uri: &Uri, format: lading_payload::splunk_hec::Encodin
         )
         .scheme("http")
         .path_and_query(path)
-        .build()
-        .expect("unable to build URI")
+        .build()?;
+    Ok(uri)
 }
 
 impl SplunkHec {
@@ -162,16 +171,19 @@ impl SplunkHec {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
-            .unwrap_or_else(|| {
+            .map_or(
                 vec![
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                ]
-            })
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
+                ],
+                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
@@ -191,7 +203,7 @@ impl SplunkHec {
             &labels
         );
 
-        let uri = get_uri_by_format(&config.target_uri, config.format);
+        let uri = get_uri_by_format(&config.target_uri, config.format)?;
 
         let payload_config = lading_payload::Config::SplunkHec {
             encoding: config.format,
@@ -211,7 +223,7 @@ impl SplunkHec {
         let mut channels = Channels::new(config.parallel_connections);
         if let Some(ack_settings) = config.acknowledgements {
             let ack_uri = Uri::builder()
-                .authority(uri.authority().expect("Uri authority is empty").to_string())
+                .authority(uri.authority().ok_or(Error::EmptyAuthorityURI)?.to_string())
                 .scheme("http")
                 .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
                 .build()

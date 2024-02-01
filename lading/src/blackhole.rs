@@ -17,22 +17,29 @@ pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`].
 pub enum Error {
     /// See [`crate::blackhole::tcp::Error`] for details.
+    #[error(transparent)]
     Tcp(tcp::Error),
     /// See [`crate::blackhole::http::Error`] for details.
+    #[error(transparent)]
     Http(http::Error),
     /// See [`crate::blackhole::splunk_hec::Error`] for details.
+    #[error(transparent)]
     SplunkHec(splunk_hec::Error),
     /// See [`crate::blackhole::udp::Error`] for details.
+    #[error(transparent)]
     Udp(udp::Error),
     /// See [`crate::blackhole::unix_stream::Error`] for details.
+    #[error(transparent)]
     UnixStream(unix_stream::Error),
     /// See [`crate::blackhole::unix_datagram::Error`] for details.
+    #[error(transparent)]
     UnixDatagram(unix_datagram::Error),
     /// See [`crate::blackhole::sqs::Error`] for details.
+    #[error(transparent)]
     Sqs(sqs::Error),
 }
 

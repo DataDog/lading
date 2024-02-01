@@ -12,7 +12,7 @@
 //!
 
 use crate::{common::PeekableReceiver, signals::Phase};
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
@@ -81,6 +81,12 @@ pub enum Error {
     /// Child startup wait error.
     #[error("Child startup wait error: {0}")]
     StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
+    /// Failed to convert, value is 0
+    #[error("Value provided is zero")]
+    Zero,
+    /// Byte error
+    #[error("Bytes must not be negative: {0}")]
+    Byte(#[from] ByteError),
 }
 
 #[derive(Debug)]
@@ -110,19 +116,22 @@ impl UnixDatagram {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
-            .clone()
-            .unwrap_or_else(|| {
+            .as_ref()
+            .map_or(
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                ]
-            })
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
+                ],
+                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
@@ -148,7 +157,7 @@ impl UnixDatagram {
         for _ in 0..config.parallel_connections {
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .expect("bytes must be non-zero");
+                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Streaming => block::Cache::stream(
                     config.seed,

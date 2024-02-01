@@ -36,10 +36,11 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors produced by [`SplunkHec`].
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
+    #[error(transparent)]
     Hyper(hyper::Error),
 }
 

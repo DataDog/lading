@@ -37,9 +37,24 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 enum Error {
     #[error("Target related error: {0}")]
     Target(target::Error),
-
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Lading generator returned an error: {0}")]
+    LadingGenerator(#[from] lading::generator::Error),
+    #[error("Lading blackhole returned an error: {0}")]
+    LadingBlackhole(#[from] lading::blackhole::Error),
+    #[error("Lading inspector returned an error: {0}")]
+    LadingInspector(#[from] lading::inspector::Error),
+    #[error("Failed to deserialize Lading config: {0}")]
+    SerdeYaml(#[from] serde_yaml::Error),
+    #[error("Lading failed to sync servers {0}")]
+    Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
+    #[error("Maximum RSS bytes limit exceeds u64::MAX {0}")]
+    Meta(#[from] lading::target::MetaError),
+    #[error("Parsing Prometheus address failed: {0}")]
+    PrometheusAddr(#[from] std::net::AddrParseError),
+    #[error("Invalid capture path")]
+    CapturePath,
 }
 
 fn default_config_path() -> String {
@@ -194,7 +209,7 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
-fn get_config(ops: &Opts, config: Option<String>) -> Config {
+fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
         config
     } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
@@ -212,17 +227,15 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
                 panic!("Could not open configuration file at: {}", &ops.config_path)
             });
         let mut contents = String::new();
-        file.read_to_string(&mut contents)
-            .expect("Data in contents is not valid utf-8");
+        file.read_to_string(&mut contents)?;
 
         contents
     };
 
-    let mut config: Config = serde_yaml::from_str(&contents).expect("invalid configuration file");
+    let mut config: Config = serde_yaml::from_str(&contents)?;
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
-        target::Meta::set_rss_bytes_limit(rss_bytes_limit)
-            .expect("rss_bytes_limit is greater than u64::MAX");
+        target::Meta::set_rss_bytes_limit(rss_bytes_limit)?;
     }
     let target = if ops.no_target {
         None
@@ -251,16 +264,12 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
-            prometheus_addr: prom_addr
-                .parse()
-                .expect("Not possible to parse to SocketAddr"),
+            prometheus_addr: prom_addr.parse()?,
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
         config.telemetry = Telemetry::Log {
-            path: capture_path
-                .parse()
-                .expect("Not possible to parse to PathBuf"),
+            path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
         };
     } else {
@@ -283,7 +292,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Config {
             }
         }
     }
-    config
+    Ok(config)
 }
 
 async fn inner_main(
@@ -355,8 +364,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown.clone())
-            .expect("Underlying sub-server creation signals erro");
+        let generator_server = generator::Server::new(cfg, shutdown.clone())?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -366,8 +374,7 @@ async fn inner_main(
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())
-                .expect("Path is invalid or path is not executable by this program");
+            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -377,8 +384,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())
-                .expect("Underlying sub-server creation signals error");
+            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -422,9 +428,7 @@ async fn inner_main(
         tsrv_joinset.spawn(target_server.run(tgt_snd));
     } else {
         // Many lading servers synchronize on target startup.
-        tgt_snd
-            .send(None)
-            .expect("unable to transmit startup sync signal, catastrophic failure");
+        tgt_snd.send(None)?;
     };
 
     let experiment_completed_shutdown = shutdown.clone();
@@ -563,7 +567,7 @@ fn main() -> Result<(), Error> {
         experiment_duration,
         warmup_duration,
         disable_inspector,
-        config,
+        config?,
     ));
     // The splunk_hec generator spawns long running tasks that are not plugged
     // into the shutdown mechanism we have here. This is a bug and needs to be
@@ -600,7 +604,7 @@ generator: []
             Duration::from_millis(2500),
             Duration::from_millis(5000),
             false,
-            config,
+            config.expect("Could not convert to valid Config"),
         )
         .await;
 

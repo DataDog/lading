@@ -12,7 +12,7 @@
 //!
 
 use crate::{common::PeekableReceiver, signals::Phase};
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, ByteError, ByteUnit};
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
@@ -60,6 +60,9 @@ pub enum Error {
     /// Subtask error
     #[error("Subtask failure: {0}")]
     Subtask(#[from] JoinError),
+    /// Byte error
+    #[error("Bytes must not be negative: {0}")]
+    Byte(#[from] ByteError),
 }
 
 #[derive(Debug)]
@@ -91,19 +94,22 @@ impl UnixStream {
         let mut rng = StdRng::from_seed(config.seed);
         let block_sizes: Vec<NonZeroU32> = config
             .block_sizes
-            .clone()
-            .unwrap_or_else(|| {
+            .as_ref()
+            .map_or(
                 vec![
-                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(1_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(2_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                    Byte::from_unit(4_f64, ByteUnit::MB).expect("Bytes must not be negative"),
-                ]
-            })
+                    Byte::from_unit(1.0 / 32.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 16.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
+                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
+                    Byte::from_unit(1_f64, ByteUnit::MB),
+                    Byte::from_unit(2_f64, ByteUnit::MB),
+                    Byte::from_unit(4_f64, ByteUnit::MB),
+                ],
+                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
             .iter()
             .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
             .collect();
