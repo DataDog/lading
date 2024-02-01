@@ -57,7 +57,8 @@ impl Rollup {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
         let mut contents = String::with_capacity(SMAP_SIZE_HINT);
-        file.read_to_string(&mut contents).expect("Failed to read contents into string")
+        file.read_to_string(&mut contents)
+            .expect("Failed to read contents into string");
 
         Self::from_str(&contents)
     }
