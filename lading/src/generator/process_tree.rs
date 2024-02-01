@@ -80,6 +80,18 @@ pub enum Error {
     /// Process tree command execution error
     #[error("Execution error: {0}")]
     ExecutionError(#[from] ExecutionError),
+    /// The rng slice is empty
+    #[error("Rng slice is empty")]
+    RngEmpty,
+    /// Error converting path to string
+    #[error("Error converting path to string")]
+    ToStr,
+    /// Utf8 error
+    #[error("Utf8 error: {0}")]
+    Utf8(#[from] str::Utf8Error),
+    /// Iterator has already finished
+    #[error("next failed, node path already finished")]
+    Next,
 }
 
 fn default_max_depth() -> NonZeroU32 {
@@ -305,7 +317,7 @@ impl ProcessTree {
     /// Panic if the lading path can't determine.
     ///
     pub async fn spin(mut self) -> Result<(), Error> {
-        let lading_path = self.lading_path.to_str().expect("lading path is not utf8");
+        let lading_path = self.lading_path.to_str().ok_or(Error::ToStr)?;
 
         loop {
             tokio::select! {
@@ -322,7 +334,7 @@ impl ProcessTree {
                     if !output.status.success() {
                         error!("process tree generator execution error");
                         return Err(Error::from(ExecutionError {
-                            stderr: str::from_utf8(&output.stderr).expect("The slice is not utf-8").to_string()
+                            stderr: str::from_utf8(&output.stderr)?.to_string()
                         }));
                     }
                 },
@@ -374,11 +386,8 @@ pub struct Exec {
 }
 
 impl Exec {
-    fn new(rng: &mut StdRng, config: &Config) -> Self {
-        let exec = config
-            .executables
-            .choose(rng)
-            .expect("the rng slice is empty");
+    fn new(rng: &mut StdRng, config: &Config) -> Result<Self, Error> {
+        let exec = config.executables.choose(rng).ok_or(Error::RngEmpty)?;
 
         let args = match &exec.args {
             Args::Static(params) => params.values.clone(),
@@ -390,15 +399,11 @@ impl Exec {
             Envs::Generate(params) => gen_rnd_envs(rng, params.length.get(), params.count.get()),
         };
 
-        Self {
-            executable: exec
-                .executable
-                .to_str()
-                .expect("exec executable could not be converted to str")
-                .to_string(),
+        Ok(Self {
+            executable: exec.executable.to_str().ok_or(Error::ToStr)?.to_string(),
             args,
             envs,
-        }
+        })
     }
 }
 
@@ -417,11 +422,15 @@ impl Process {
 
 /// Spawn the process tree
 ///
+/// # Errors
+///
+/// Function will error if the nodes list in incorrectly proccessed.
+///
 /// # Panics
 ///
-/// Function will panic if the nodes list in incorrectly proccessed.
+/// Function will panic if the process execution fails.
 ///
-pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
+pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error> {
     let mut iter = nodes.iter().peekable();
     let mut pids_to_wait: FxHashSet<Pid> = FxHashSet::default();
     let mut depth = 0;
@@ -439,15 +448,13 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) {
                 exit(0)
             }
 
-            return;
+            return Ok(());
         }
 
         let duration = Duration::from_nanos(sleep_ns.into());
         thread::sleep(duration);
 
-        let process = iter
-            .next()
-            .expect("next failed, iteration has already finished");
+        let process = iter.next().ok_or(Error::Next)?;
 
         if let Some(exec) = &process.exec {
             let status = std::process::Command::new(&exec.executable)
@@ -503,7 +510,11 @@ fn goto_next_sibling(depth: u32, iter: &mut Peekable<vec_deque::Iter<'_, Process
 }
 
 /// Generate a process tree
-pub fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<Process> {
+///
+/// # Errors
+///
+/// Return an error if the exec cannot be created
+pub fn generate_tree(rng: &mut StdRng, config: &Config) -> Result<VecDeque<Process>, Error> {
     let mut nodes = VecDeque::new();
     let mut stack = Vec::new();
 
@@ -515,7 +526,7 @@ pub fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<Process> {
         nodes.push_back(process);
 
         if curr_depth + 1 > config.max_depth.get() {
-            let exec = Exec::new(rng, config);
+            let exec = Exec::new(rng, config)?;
 
             let process = Process::new(curr_depth + 1, Some(exec));
             nodes.push_back(process);
@@ -527,7 +538,7 @@ pub fn generate_tree(rng: &mut StdRng, config: &Config) -> VecDeque<Process> {
         }
     }
 
-    nodes
+    Ok(nodes)
 }
 
 /// Parse the configuration of the process tree

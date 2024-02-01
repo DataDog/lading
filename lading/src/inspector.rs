@@ -39,6 +39,12 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error(transparent)]
     Io(io::Error),
+    /// Process already finished error
+    #[error("Child has already been polled to completion")]
+    ProcessFinished,
+    /// Target failed to transmit PID
+    #[error("Target failed to transmit PID, catastrophic failure: {0}")]
+    Recv(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -103,10 +109,7 @@ impl Server {
     ///
     /// None are known.
     pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<ExitStatus, Error> {
-        let target_pid = pid_snd
-            .recv()
-            .await
-            .expect("target failed to transmit PID, catastrophic failure");
+        let target_pid = pid_snd.recv().await?;
         drop(pid_snd);
 
         let config = self.config;
@@ -148,7 +151,7 @@ impl Server {
                 // Note that `Child::kill` sends SIGKILL which is not what we
                 // want. We instead send SIGTERM so that the child has a chance
                 // to clean up.
-                let pid: Pid = Pid::from_raw(target_child.id().expect("Process ID provided is already done").try_into().expect("Failed to convert into valid PID"));
+                let pid: Pid = Pid::from_raw(target_child.id().ok_or(Error::ProcessFinished)?.try_into().expect("Failed to convert into valid PID"));
                 kill(pid, SIGTERM).map_err(Error::Errno)?;
                 let res = target_child.wait().await.map_err(Error::Io)?;
                 Ok(res)

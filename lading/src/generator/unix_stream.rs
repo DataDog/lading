@@ -63,6 +63,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 #[derive(Debug)]
@@ -121,8 +124,8 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("config bytes per second must be non-zero");
+        let bytes_per_second =
+            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -131,7 +134,7 @@ impl UnixStream {
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                .expect("bytes must be non-zero");
+                .ok_or(Error::Zero)?;
         let block_cache = match config.block_cache_method {
             block::CacheMethod::Streaming => block::Cache::stream(
                 config.seed,

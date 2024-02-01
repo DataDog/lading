@@ -52,6 +52,9 @@ pub enum Error {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// Error from `next` method
+    #[error("Iterator has no next value")]
+    Next,
 }
 
 /// Errors for the construction of chunks
@@ -561,7 +564,7 @@ fn chunk_bytes<const N: usize>(
             break;
         }
         // SAFETY: By construction, the iterator will never terminate.
-        let block_size = iter.next().expect("iterator has no next value").get();
+        let block_size = iter.next().ok_or(Error::Next)?.get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.
@@ -714,8 +717,7 @@ where
                 .len()
                 .try_into()
                 .expect("failed to get length of bytes"),
-        )
-        .expect("total_bytes must be non-zero");
+        )?;
         Some(Block { total_bytes, bytes })
     }
 }

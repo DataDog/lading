@@ -22,7 +22,8 @@ fn dogstatsd_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let dd = dogstatsd::DogStatsD::default(&mut rng);
+                let dd =
+                    dogstatsd::DogStatsD::default(&mut rng).expect("failed to create DogStatsD");
                 let mut writer = Vec::with_capacity(size);
 
                 dd.to_bytes(rng, size, &mut writer)

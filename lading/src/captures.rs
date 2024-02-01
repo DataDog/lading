@@ -31,6 +31,15 @@ pub enum Error {
     /// Wrapper around [`SetRecorderError`].
     #[error("Failed to set recorder: {0}")]
     SetRecorderError(#[from] SetRecorderError),
+    /// Wrapper around [`io::Error`].
+    #[error("Io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Time provided is later than right now : {0}")]
+    /// Wrapper around [`std::time::SystemTimeError`].
+    SystemTime(#[from] std::time::SystemTimeError),
+    /// Wrapper around [`serde_json::Error`].
+    #[error("Json serialization error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 struct Inner {
@@ -57,15 +66,17 @@ pub struct CaptureManager {
 impl CaptureManager {
     /// Create a new [`CaptureManager`]
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Function will panic if the underlying capture file cannot be opened.
-    pub async fn new(capture_path: PathBuf, shutdown: Phase, experiment_started: Phase) -> Self {
-        let fp = tokio::fs::File::create(&capture_path)
-            .await
-            .expect("create either called from outside tokio or create errored");
+    /// Function will error if the underlying capture file cannot be opened.
+    pub async fn new(
+        capture_path: PathBuf,
+        shutdown: Phase,
+        experiment_started: Phase,
+    ) -> Result<Self, io::Error> {
+        let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
-        Self {
+        Ok(Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
             capture_fp: BufWriter::new(fp),
@@ -76,7 +87,7 @@ impl CaptureManager {
                 registry: Registry::atomic(),
             }),
             global_labels: FxHashMap::default(),
-        }
+        })
     }
 
     /// Install the [`CaptureManager`] as global [`metrics::Recorder`]
@@ -101,11 +112,8 @@ impl CaptureManager {
         self.global_labels.insert(key.into(), value.into());
     }
 
-    fn record_captures(&mut self) -> Result<(), io::Error> {
-        let now_ms: u128 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("UNIX_EPOCH is earlier than the provided time")
-            .as_millis();
+    fn record_captures(&mut self) -> Result<(), Error> {
+        let now_ms: u128 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
         let mut lines = Vec::new();
         self.inner
             .registry
@@ -194,8 +202,7 @@ impl CaptureManager {
                     return;
                 }
                 std::thread::sleep(Duration::from_secs(1));
-            })
-            .expect("failed to create capture manager thread");
+            })?;
         Ok(())
     }
 }

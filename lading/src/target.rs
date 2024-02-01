@@ -117,6 +117,12 @@ pub enum Error {
     /// The target process exited unexpectedly
     #[error("target exited unexpectedly: {0:?}")]
     TargetExited(Option<ExitStatus>),
+    /// See [`SendError`]
+    #[error(transparent)]
+    Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
+    /// Process already finished error
+    #[error("Child has already been polled to completion")]
+    ProcessFinished,
 }
 
 /// Configuration for PID target mode
@@ -245,9 +251,7 @@ impl Server {
             return Err(Error::PidNotFound(config.pid.get()));
         }
 
-        pid_snd
-            .send(Some(config.pid.get()))
-            .expect("target server unable to transmit PID, catastrophic failure");
+        pid_snd.send(Some(config.pid.get()))?;
         drop(pid_snd);
 
         // Use PIDfd to watch the target process (linux kernel 5.3 and up)
@@ -320,10 +324,8 @@ impl Server {
             .args(config.arguments)
             .envs(config.environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::TargetSpawn)?;
-        let target_id = target_child.id().expect("target must have PID");
-        pid_snd
-            .send(Some(target_id))
-            .expect("target server unable to transmit PID, catastrophic failure");
+        let target_id = target_child.id().ok_or(Error::ProcessFinished)?;
+        pid_snd.send(Some(target_id))?;
         drop(pid_snd);
 
         let mut interval = time::interval(Duration::from_secs(400));

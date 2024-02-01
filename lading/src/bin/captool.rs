@@ -60,7 +60,7 @@ async fn main() -> Result<(), Error> {
 
     let lines: Vec<Line> = serde_json::Deserializer::from_str(&contents)
         .into_iter::<Line>()
-        .map(|line| line.unwrap())
+        .map(|line| line.expect("failed to deserialize line"))
         .collect();
 
     // Print out available metrics if user asked for it

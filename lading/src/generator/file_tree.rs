@@ -39,6 +39,15 @@ pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
     Io(::std::io::Error),
+    /// Folder has no parent error
+    #[error("Folder has no parent")]
+    Parent,
+    /// Iterator has already finished
+    #[error("next failed, node path already finished")]
+    Next,
+    /// Error converting path to string
+    #[error("Error converting path to string")]
+    ToStr,
 }
 
 impl From<::std::io::Error> for Error {
@@ -133,7 +142,7 @@ impl FileTree {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config);
+        let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config)?;
 
         let _labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -173,7 +182,7 @@ impl FileTree {
         loop {
             tokio::select! {
                 _ = self.open_throttle.wait() => {
-                    let node = iter.next().expect("next failed, node path already finished");
+                    let node = iter.next().ok_or(Error::Next)?;
                     if node.exists() {
                         File::open(node.as_path()).await?;
                     } else {
@@ -199,7 +208,10 @@ impl FileTree {
     }
 }
 
-fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize, usize) {
+fn generate_tree(
+    rng: &mut StdRng,
+    config: &Config,
+) -> Result<(VecDeque<PathBuf>, usize, usize), Error> {
     let mut nodes = VecDeque::new();
 
     let root_depth = config.root.matches(path::MAIN_SEPARATOR).count();
@@ -224,7 +236,7 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize
 
                 let curr_depth = node
                     .to_str()
-                    .expect("node is invalid unicode and could not convert to str")
+                    .ok_or(Error::ToStr)?
                     .matches(path::MAIN_SEPARATOR)
                     .count()
                     - root_depth;
@@ -243,14 +255,14 @@ fn generate_tree(rng: &mut StdRng, config: &Config) -> (VecDeque<PathBuf>, usize
 
             nodes.push_back(node);
         } else {
-            return (nodes, total_file, total_folder);
+            return Ok((nodes, total_file, total_folder));
         }
     }
 }
 
 #[inline]
 async fn rename_folder(rng: &mut StdRng, folder: &Path, len: usize) -> Result<(), Error> {
-    let parent = PathBuf::from(folder.parent().expect("folder has no parent"));
+    let parent = PathBuf::from(folder.parent().ok_or(Error::Parent)?);
     let dir = rnd_node_name(rng, &parent, len);
 
     // rename twice to keep the original folder name so that future file access

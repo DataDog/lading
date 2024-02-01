@@ -115,6 +115,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -146,7 +149,7 @@ fn get_uri_by_format(
         .authority(
             base_uri
                 .authority()
-                .expect("base uri authority is empty")
+                .ok_or(Error::EmptyAuthorityURI)?
                 .to_string(),
         )
         .scheme("http")
@@ -195,8 +198,8 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("config bytes per second should not be zero");
+        let bytes_per_second =
+            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
         gauge!(
             "bytes_per_second",
             f64::from(bytes_per_second.get()),
@@ -210,7 +213,7 @@ impl SplunkHec {
         };
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                .expect("bytes must be non-zero");
+                .ok_or(Error::Zero)?;
         let block_cache = match config.block_cache_method {
             block::CacheMethod::Streaming => {
                 block::Cache::stream(config.seed, total_bytes, &block_sizes, payload_config)?
@@ -226,8 +229,7 @@ impl SplunkHec {
                 .authority(uri.authority().ok_or(Error::EmptyAuthorityURI)?.to_string())
                 .scheme("http")
                 .path_and_query(SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH)
-                .build()
-                .expect("unable to build ack URI");
+                .build()?;
             channels.enable_acknowledgements(ack_uri, config.token.clone(), ack_settings);
         }
 

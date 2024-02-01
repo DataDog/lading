@@ -590,14 +590,13 @@ pub struct DogStatsD {
 impl DogStatsD {
     /// Create a new default instance of `DogStatsD` with reasonable settings.
     ///
-    /// # Panics
-    ///
-    /// Function will panic if the default constructor is buggy.
-    pub fn default<R>(rng: &mut R) -> Self
+    /// # Errors
+    /// Function will error if dogstatd could not be created
+    pub fn default<R>(rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
-        Self::new(
+        let dogstatd = Self::new(
             contexts(),
             service_check_names(),
             name_length(),
@@ -613,8 +612,8 @@ impl DogStatsD {
             value_config(),
             length_prefix_framed(),
             rng,
-        )
-        .expect("failed to create DogStatsD")
+        )?;
+        Ok(dogstatd)
     }
 
     /// Generate a single `Member`.
@@ -816,10 +815,10 @@ mod test {
                                            name_length(), tag_key_length(),
                                            tag_value_length(), tags_per_msg(),
                                            multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, false, &mut rng).expect("failed to create DogStatsD");
+                                           metric_weights, value_conf, false, &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+            dogstatsd.to_bytes(rng, max_bytes, &mut bytes)?;
             debug_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
