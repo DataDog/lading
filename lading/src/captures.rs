@@ -66,9 +66,9 @@ pub struct CaptureManager {
 impl CaptureManager {
     /// Create a new [`CaptureManager`]
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Function will panic if the underlying capture file cannot be opened.
+    /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
         shutdown: Phase,

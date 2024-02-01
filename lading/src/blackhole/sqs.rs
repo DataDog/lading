@@ -30,7 +30,16 @@ use super::General;
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
     #[error(transparent)]
-    Hyper(hyper::Error),
+    Hyper(#[from] hyper::Error),
+    /// std formatting error
+    #[error(transparent)]
+    Fmt(#[from] std::fmt::Error),
+    /// serde_qs error
+    #[error(transparent)]
+    SerdeQs(#[from] serde_qs::Error),
+    /// http error
+    #[error(transparent)]
+    Http(#[from] hyper::http::Error),
 }
 
 fn default_concurrent_requests_max() -> usize {
@@ -218,17 +227,16 @@ impl DeleteMessageBatch {
         output
     }
 
-    #[must_use]
-    fn generate_response(&self) -> String {
+    #[must_use = "This function returns a string or errors"]
+    fn generate_response(&self) -> Result<String, Error> {
         let mut entries = String::new();
         for id in self.get_entry_ids() {
             write!(
                 &mut entries,
                 "<DeleteMessageBatchResultEntry><Id>{id}</Id></DeleteMessageBatchResultEntry>",
-            )
-            .expect("This write shouldn't fail");
+            )?;
         }
-        format!("<DeleteMessageBatchResponse><DeleteMessageBatchResult>{entries}</DeleteMessageBatchResult><ResponseMetadata><RequestId>5EH8IGJZI4VZQTZ2VQ3KQN1AOMNA81OZ3AL1S4RHKII94ZD4FPG8</RequestId></ResponseMetadata></DeleteMessageBatchResponse>")
+        Ok(format!("<DeleteMessageBatchResponse><DeleteMessageBatchResult>{entries}</DeleteMessageBatchResult><ResponseMetadata><RequestId>5EH8IGJZI4VZQTZ2VQ3KQN1AOMNA81OZ3AL1S4RHKII94ZD4FPG8</RequestId></ResponseMetadata></DeleteMessageBatchResponse>"))
     }
 }
 
@@ -236,45 +244,39 @@ async fn srv(
     req: Request<Body>,
     requests_received: Counter,
     bytes_received: Counter,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<Response<Body>, Error> {
     requests_received.increment(1);
 
     let bytes = body::to_bytes(req).await?;
     bytes_received.increment(bytes.len() as u64);
 
-    let action: Action = serde_qs::from_bytes(&bytes).expect("Failed to deserialize Action");
+    let action: Action = serde_qs::from_bytes(&bytes)?;
 
     match action.action.as_str() {
         "ReceiveMessage" => {
-            let action: ReceiveMessage =
-                serde_qs::from_bytes(&bytes).expect("Failed to deserialize ReceiveMessage");
+            let action: ReceiveMessage = serde_qs::from_bytes(&bytes)?;
             let num_messages = action.max_number_of_messages;
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html")
-                .body(Body::from(generate_receive_message_response(num_messages)))
-                .expect("Failed to build response body"))
+                .body(Body::from(generate_receive_message_response(num_messages)))?)
         }
         "DeleteMessage" => Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/html")
-            .body(Body::from(generate_delete_message_response()))
-            .expect("status, head, or body failed to parse for Delete Message")),
+            .body(Body::from(generate_delete_message_response()))?),
         "DeleteMessageBatch" => {
-            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)
-                .expect("Failed to deserialize DeleteMessageBatch from bytes");
+            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)?;
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/html")
-                .body(Body::from(action.generate_response()))
-                .expect("status, head, or body failed to parse for Delete Message Batch"))
+                .body(Body::from(action.generate_response()?))?)
         }
         action => {
             debug!("Unknown action: {action:?}");
             Ok(Response::builder()
                 .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Body::from(vec![]))
-                .expect("status or body failed to parse"))
+                .body(Body::from(vec![]))?)
         }
     }
 }

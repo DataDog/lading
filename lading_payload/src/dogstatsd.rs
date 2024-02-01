@@ -590,9 +590,8 @@ pub struct DogStatsD {
 impl DogStatsD {
     /// Create a new default instance of `DogStatsD` with reasonable settings.
     ///
-    /// # Panics
-    ///
-    /// Function will panic if the default constructor is buggy.
+    /// # Errors
+    /// Function will error if dogstatd could not be created
     pub fn default<R>(rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
