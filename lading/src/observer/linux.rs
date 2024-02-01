@@ -6,7 +6,7 @@ use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
-use crate::observer::memory::Regions;
+use crate::observer::memory::{Regions, Rollup};
 
 use super::RSS_BYTES;
 
@@ -321,6 +321,32 @@ impl Sampler {
             gauge!("smaps.pss.sum", measures.pss as f64, &labels);
             gauge!("smaps.size.sum", measures.size as f64, &labels);
             gauge!("smaps.swap.sum", measures.swap as f64, &labels);
+
+            let rollup = match Rollup::from_pid(pid) {
+                Ok(rollup) => rollup,
+                Err(e) => {
+                    // We don't want to bail out entirely if we can't read smap rollup
+                    // which will happen if we don't have permissions or, more
+                    // likely, the process has exited.
+                    warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
+                    continue;
+                }
+            };
+
+            gauge!("smaps_rollup.rss", rollup.rss as f64, &labels);
+            gauge!("smaps_rollup.pss", rollup.pss as f64, &labels);
+            if let Some(v) = rollup.pss_dirty {
+                gauge!("smaps_rollup.pss_dirty", v as f64, &labels);
+            }
+            if let Some(v) = rollup.pss_anon {
+                gauge!("smaps_rollup.pss_anon", v as f64, &labels);
+            }
+            if let Some(v) = rollup.pss_file {
+                gauge!("smaps_rollup.pss_file", v as f64, &labels);
+            }
+            if let Some(v) = rollup.pss_shmem {
+                gauge!("smaps_rollup.pss_shmem", v as f64, &labels);
+            }
         }
 
         gauge!("num_processes", total_processes as f64);
