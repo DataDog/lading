@@ -190,6 +190,7 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || loop {
+                let now = SystemTime::now();
                 if let Err(e) = self.record_captures() {
                     warn!(
                         "failed to record captures for idx {idx}: {e}",
@@ -201,7 +202,11 @@ impl CaptureManager {
                     info!("shutdown signal received");
                     return;
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                // Sleep for 1 second minus however long we just spent recording captures
+                // assumption here is that the time spent recording captures is consistent
+                std::thread::sleep(
+                    Duration::from_secs(1) - now.elapsed().expect("Time went backwards"),
+                );
             })?;
         Ok(())
     }
