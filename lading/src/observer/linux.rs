@@ -10,6 +10,8 @@ use crate::observer::memory::Regions;
 
 use super::RSS_BYTES;
 
+const BYTES_PER_KIBIBYTE: u64 = 1024;
+
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
 pub enum Error {
@@ -23,6 +25,18 @@ pub enum Error {
     /// Wrapper for [`procfs::ProcError`]
     #[error("Unable to read procfs: {0}")]
     Proc(#[from] procfs::ProcError),
+}
+
+macro_rules! report_status_field {
+    ($status:expr, $labels:expr, $field:tt) => {
+        if let Some(value) = $status.$field {
+            gauge!(
+                concat!("status.", stringify!($field), "_bytes"),
+                (value * BYTES_PER_KIBIBYTE) as f64,
+                &$labels
+            );
+        }
+    };
 }
 
 #[derive(Debug, Default)]
@@ -263,6 +277,16 @@ impl Sampler {
             total_rss += rss;
             total_processes += 1;
 
+            // Also report memory data from `proc/status` as a reference point
+            report_status_field!(status, labels, vmrss);
+            report_status_field!(status, labels, rssanon);
+            report_status_field!(status, labels, rssfile);
+            report_status_field!(status, labels, rssshmem);
+            report_status_field!(status, labels, vmdata);
+            report_status_field!(status, labels, vmstk);
+            report_status_field!(status, labels, vmexe);
+            report_status_field!(status, labels, vmlib);
+
             let memory_regions = match Regions::from_pid(pid) {
                 Ok(memory_regions) => memory_regions,
                 Err(e) => {
@@ -280,11 +304,23 @@ impl Sampler {
                     ("cmdline", cmdline.clone()),
                     ("pathname", pathname),
                 ];
-                gauge!("smaps.rss", measures.rss as f64, &labels);
-                gauge!("smaps.pss", measures.pss as f64, &labels);
-                gauge!("smaps.size", measures.size as f64, &labels);
-                gauge!("smaps.swap", measures.swap as f64, &labels);
+                gauge!("smaps.rss.by_pathname", measures.rss as f64, &labels);
+                gauge!("smaps.pss.by_pathname", measures.pss as f64, &labels);
+                gauge!("smaps.size.by_pathname", measures.size as f64, &labels);
+                gauge!("smaps.swap.by_pathname", measures.swap as f64, &labels);
             }
+
+            let measures = memory_regions.aggregate();
+            let labels = [
+                ("pid", format!("{pid}")),
+                ("exe", basename.clone()),
+                ("cmdline", cmdline.clone()),
+            ];
+
+            gauge!("smaps.rss.sum", measures.rss as f64, &labels);
+            gauge!("smaps.pss.sum", measures.pss as f64, &labels);
+            gauge!("smaps.size.sum", measures.size as f64, &labels);
+            gauge!("smaps.swap.sum", measures.swap as f64, &labels);
         }
 
         gauge!("num_processes", total_processes as f64);
