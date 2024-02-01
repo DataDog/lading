@@ -57,7 +57,7 @@ impl Rollup {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
         let mut contents = String::with_capacity(SMAP_SIZE_HINT);
-        file.read_to_string(&mut contents).unwrap();
+        file.read_to_string(&mut contents).expect("Failed to read contents into string")
 
         Self::from_str(&contents)
     }
@@ -659,7 +659,7 @@ VmFlags: rd ex mr mw me de sd";
         Swap:                  0 kB
         SwapPss:               0 kB
         Locked:                0 kB";
-        let rollup = Rollup::from_str(rollup).unwrap();
+        let rollup = Rollup::from_str(rollup).expect("Parsing failed");
         assert_eq!(rollup.pss, 312044 * BYTES_PER_KIBIBYTE);
         assert_eq!(rollup.rss, 312048 * BYTES_PER_KIBIBYTE);
         assert_eq!(rollup.pss_dirty, Some(310508 * BYTES_PER_KIBIBYTE));
@@ -681,7 +681,7 @@ VmFlags: rd ex mr mw me de sd";
         Swap:                  0 kB
         SwapPss:               0 kB
         Locked:                0 kB";
-        let rollup = Rollup::from_str(rollup).unwrap();
+        let rollup = Rollup::from_str(rollup).expect("Parsing failed");
         assert_eq!(rollup.pss, 312044 * BYTES_PER_KIBIBYTE);
         assert_eq!(rollup.rss, 312048 * BYTES_PER_KIBIBYTE);
         assert_eq!(rollup.pss_dirty, None);
