@@ -61,7 +61,7 @@ pub enum Error {
     #[error("Subtask failure: {0}")]
     Subtask(#[from] JoinError),
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 

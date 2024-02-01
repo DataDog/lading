@@ -62,7 +62,7 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 

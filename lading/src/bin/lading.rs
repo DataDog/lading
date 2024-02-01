@@ -53,7 +53,7 @@ enum Error {
     Meta(#[from] lading::target::MetaError),
     #[error("Parsing Prometheus address failed: {0}")]
     PrometheusAddr(#[from] std::net::AddrParseError),
-    #[error("Parsing Prometheus address failed")]
+    #[error("Invalid capture path")]
     CapturePath,
 }
 

@@ -50,7 +50,7 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     /// Byte error
-    #[error("Failed to convert into bytes {0}")]
+    #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
 }
 
