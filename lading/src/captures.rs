@@ -13,7 +13,7 @@ use std::{
     io::{self, BufWriter, Write},
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use lading_capture::json;
@@ -190,7 +190,7 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || loop {
-                let now = SystemTime::now();
+                let now = Instant::now();
                 if let Err(e) = self.record_captures() {
                     warn!(
                         "failed to record captures for idx {idx}: {e}",
@@ -204,9 +204,7 @@ impl CaptureManager {
                 }
                 // Sleep for 1 second minus however long we just spent recording captures
                 // assumption here is that the time spent recording captures is consistent
-                std::thread::sleep(
-                    Duration::from_secs(1) - now.elapsed().expect("Time went backwards"),
-                );
+                std::thread::sleep(Duration::from_secs(1) - now.elapsed());
             })?;
         Ok(())
     }
