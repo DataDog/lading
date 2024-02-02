@@ -32,6 +32,9 @@ pub enum SpinError {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// rng slice is Empty
+    #[error("RNG slice is empty")]
+    EmptyRng,
 }
 
 /// Error for [`Cache`]
@@ -665,7 +668,7 @@ where
         // push blocks into the sender until such time as it's full. When that
         // happens we overflow into the cache until such time as that's full.
         'refill: loop {
-            let block_size = block_chunks.choose(&mut rng).expect("rng slice is empty");
+            let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
             if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
                 match snd.try_reserve() {
                     Ok(permit) => permit.send(block),

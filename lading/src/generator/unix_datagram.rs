@@ -87,6 +87,12 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
+    /// Empty block cache
+    #[error("Block cache does not have any blocks")]
+    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -256,7 +262,7 @@ impl Child {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -265,7 +271,7 @@ impl Child {
                     // some of the written bytes make it through in which case we
                     // must cycle back around and try to write the remainder of the
                     // buffer.
-                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
+                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
                     while blk_offset < blk_max {

@@ -97,6 +97,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
 }
 
 /// The HTTP generator.
@@ -230,7 +233,7 @@ impl Http {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         loop {
-            let blk = rcv.next().await.expect("block cache closed");
+            let blk = rcv.next().await.ok_or(Error::Next)?;
             let total_bytes = blk.total_bytes;
 
             let body = Body::from(blk.bytes.clone());

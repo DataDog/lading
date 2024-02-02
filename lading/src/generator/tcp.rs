@@ -66,6 +66,12 @@ pub enum Error {
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
+    /// Empty block cache
+    #[error("Block cache does not have any blocks")]
+    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -144,7 +150,7 @@ impl Tcp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("iterator was already finished");
+            .ok_or(Error::Next)?;
         Ok(Self {
             addr,
             block_cache,
@@ -193,12 +199,12 @@ impl Tcp {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("block cache has no next value"); // actually advance through the blocks
+                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
                     match connection.write_all(&blk.bytes).await {
                         Ok(()) => {
                             bytes_written.increment(u64::from(blk.total_bytes.get()));

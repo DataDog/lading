@@ -55,6 +55,12 @@ pub enum Error {
     /// Zero value
     #[error("Value cannot be zero")]
     Zero,
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
+    /// Empty block cache
+    #[error("Block cache does not have any blocks")]
+    EmptyBlockCache,
 }
 
 /// Config for [`Grpc`]
@@ -300,14 +306,14 @@ impl Grpc {
         let response_bytes = register_counter!("response_bytes", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
+            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     requests_sent.increment(1);
-                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
+                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),

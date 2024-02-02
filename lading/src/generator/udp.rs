@@ -67,6 +67,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
+    /// Empty block cache
+    #[error("Block cache does not have any blocks")]
+    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -145,7 +151,7 @@ impl Udp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("iterator already finished");
+            .ok_or(Error::Next)?;
 
         Ok(Self {
             addr,
@@ -180,7 +186,7 @@ impl Udp {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.expect("block cache has no next block");
+            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,
@@ -206,7 +212,7 @@ impl Udp {
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let sock = connection.expect("connection failed");
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             bytes_written.increment(bytes as u64);

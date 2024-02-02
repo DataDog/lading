@@ -66,6 +66,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Iterator has already finished
+    #[error("Next failed, iterator already finished")]
+    Next,
+    /// Empty block cache
+    #[error("Block cache does not have any blocks")]
+    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -203,7 +209,7 @@ impl UnixStream {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -214,7 +220,7 @@ impl UnixStream {
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
-                    let blk = rcv.next().await.expect("failed to advance to peeked block"); // advance to the block that was previously peeked
+                    let blk = rcv.next().await.ok_or(Error::Next)?; // advance to the block that was previously peeked
                     while blk_offset < blk_max {
                         let stream = &socket;
 

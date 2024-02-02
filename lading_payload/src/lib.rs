@@ -72,6 +72,12 @@ pub enum Error {
     /// IO operation failed
     #[error("IO operation failed: {0}")]
     Io(#[from] io::Error),
+    /// failed to generate string
+    #[error("Failed to generate string")]
+    StringGenerate,
+    /// Serialization failed
+    #[error("Serialization failed")]
+    Serialize,
 }
 
 /// To serialize into bytes
