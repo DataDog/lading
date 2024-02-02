@@ -61,8 +61,9 @@ impl OpentelemetryLogs {
 
 impl<'a> Generator<'a> for OpentelemetryLogs {
     type Output = LogRecord;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -72,22 +73,24 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
                 .expect("failed to generate string"),
         );
 
-        #[allow(deprecated)]
-        LogRecord(v1::LogRecord {
-            time_unix_nano: rng.gen(),
-            observed_time_unix_nano: rng.gen(),
-            severity_number: rng.gen_range(1..=24),
-            severity_text: String::new(),
-            name: String::new(),
-            body: Some(AnyValue {
-                value: Some(any_value::Value::StringValue(body)),
+        Ok(
+            #[allow(deprecated)]
+            LogRecord(v1::LogRecord {
+                time_unix_nano: rng.gen(),
+                observed_time_unix_nano: rng.gen(),
+                severity_number: rng.gen_range(1..=24),
+                severity_text: String::new(),
+                name: String::new(),
+                body: Some(AnyValue {
+                    value: Some(any_value::Value::StringValue(body)),
+                }),
+                attributes: Vec::new(),
+                dropped_attributes_count: 0,
+                flags: 0,
+                trace_id: Vec::new(),
+                span_id: Vec::new(),
             }),
-            attributes: Vec::new(),
-            dropped_attributes_count: 0,
-            flags: 0,
-            trace_id: Vec::new(),
-            span_id: Vec::new(),
-        })
+        )
     }
 }
 
@@ -107,7 +110,7 @@ impl crate::Serialize for OpentelemetryLogs {
 
         let mut acc = ExportLogsServiceRequest(Vec::new());
         loop {
-            let member: LogRecord = self.generate(&mut rng);
+            let member: LogRecord = self.generate(&mut rng)?;
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {

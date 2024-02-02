@@ -46,12 +46,13 @@ pub struct Json;
 
 impl<'a> Generator<'a> for Json {
     type Output = Member;
+    type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
-        rng.gen()
+        Ok(rng.gen())
     }
 }
 
@@ -65,7 +66,7 @@ impl crate::Serialize for Json {
 
         loop {
             let member = self.generate(&mut rng);
-            let encoding = serde_json::to_string(&member)?;
+            let encoding = serde_json::to_string(&member?)?;
             let line_length = encoding.len() + 1; // add one for the newline
 
             match bytes_remaining.checked_sub(line_length) {

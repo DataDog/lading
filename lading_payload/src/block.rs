@@ -13,8 +13,6 @@ use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tracing::{error, info, span, Level};
 
-use crate::dogstatsd;
-
 const MAX_CHUNKS: usize = 4096;
 
 /// Error for `Cache::spin`
@@ -26,15 +24,15 @@ pub enum SpinError {
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid.")]
     InvalidConfig,
-    /// DogStatsD creation error
-    #[error(transparent)]
-    DogStatsD(#[from] dogstatsd::Error),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
     /// rng slice is Empty
     #[error("RNG slice is empty")]
     EmptyRng,
+    /// Error for crate deserialization
+    #[error("Deserialization error: {0}")]
+    Deserialize(#[from] crate::Error),
 }
 
 /// Error for [`Cache`]
@@ -49,15 +47,15 @@ pub enum Error {
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid.")]
     InvalidConfig,
-    /// DogStatsD creation error
-    #[error(transparent)]
-    DogStatsD(#[from] dogstatsd::Error),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
     /// Error from `next` method
     #[error("Iterator has no next value")]
     Next,
+    /// Error for crate deserialization
+    #[error("Deserialization error: {0}")]
+    Deserialize(#[from] crate::Error),
 }
 
 /// Errors for the construction of chunks

@@ -30,8 +30,9 @@ impl Fluent {
 
 impl<'a> Generator<'a> for Fluent {
     type Output = Member<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -47,14 +48,14 @@ impl<'a> Generator<'a> for Fluent {
                     let val = record_value(rng, &self.str_pool);
                     rec.insert(key, val);
                 }
-                Member::Message(FluentMessage {
+                Ok(Member::Message(FluentMessage {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
                         .expect("failed to generate string"),
                     time: rng.gen(),
                     record: rec,
-                })
+                }))
             }
             1 => {
                 let mut entries = Vec::with_capacity(32);
@@ -76,13 +77,13 @@ impl<'a> Generator<'a> for Fluent {
                     });
                 }
 
-                Member::Forward(FluentForward {
+                Ok(Member::Forward(FluentForward {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
                         .expect("failed to generate string"),
                     entries,
-                })
+                }))
             }
             _ => unimplemented!(),
         }
@@ -165,7 +166,7 @@ impl crate::Serialize for Fluent {
         // below the limit.
 
         let mut members: Vec<Vec<u8>> = (0..10)
-            .map(|_| self.generate(&mut rng))
+            .map(|_| self.generate(&mut rng).expect("failed to generate"))
             .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize"))
             .collect();
 
@@ -178,7 +179,7 @@ impl crate::Serialize for Fluent {
 
             members.extend(
                 (0..10)
-                    .map(|_| self.generate(&mut rng))
+                    .map(|_| self.generate(&mut rng).expect("failed to generate"))
                     .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize")),
             );
         }

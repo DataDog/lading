@@ -61,8 +61,9 @@ impl OpentelemetryTraces {
 
 impl<'a> Generator<'a> for OpentelemetryTraces {
     type Output = Span;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -80,7 +81,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
             .of_size_range(&mut rng, 1_u8..16)
             .expect("failed to generate string");
 
-        Span(v1::Span {
+        Ok(Span(v1::Span {
             trace_id,
             span_id,
             // https://www.w3.org/TR/trace-context/#tracestate-header
@@ -98,7 +99,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
             links: Vec::new(),
             dropped_links_count: 0,
             status: None,
-        })
+        }))
     }
 }
 
@@ -118,7 +119,7 @@ impl crate::Serialize for OpentelemetryTraces {
 
         let mut acc = ExportTraceServiceRequest(Vec::new());
         loop {
-            let member: Span = self.generate(&mut rng);
+            let member: Span = self.generate(&mut rng)?;
             // Note: this 2 is a guessed value for an unknown size factor.
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {

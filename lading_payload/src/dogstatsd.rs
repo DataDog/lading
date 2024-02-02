@@ -3,7 +3,7 @@
 use std::{cmp, fmt, io::Write, ops::Range, rc::Rc};
 
 use rand::{
-    distributions::{uniform::SampleUniform, WeightedError, WeightedIndex},
+    distributions::{uniform::SampleUniform, WeightedIndex},
     prelude::Distribution,
     seq::SliceRandom,
     Rng,
@@ -24,14 +24,6 @@ mod common;
 pub mod event;
 pub mod metric;
 pub mod service_check;
-
-/// Error for [`MemberGenerator`]
-#[derive(Debug, thiserror::Error, Clone, Copy)]
-pub enum Error {
-    /// See [`WeightedError`]
-    #[error(transparent)]
-    Weights(#[from] WeightedError),
-}
 
 const MAX_CONTEXTS: u32 = 100_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
@@ -451,7 +443,7 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         mut rng: &mut R,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, crate::Error>
     where
         R: Rng + ?Sized,
     {
@@ -535,23 +527,25 @@ impl MemberGenerator {
             kind_weights: WeightedIndex::new(member_choices)?,
             event_generator,
             service_check_generator,
-            metric_generator,
+            metric_generator: metric_generator?,
         })
     }
 }
 
 impl MemberGenerator {
-    fn generate<'a, R>(&'a self, rng: &mut R) -> Member<'a>
+    fn generate<'a, R>(&'a self, rng: &mut R) -> Result<Member<'a>, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
         match self.kind_weights.sample(rng) {
-            0 => Member::Metric(self.metric_generator.generate(rng)),
+            0 => Ok(Member::Metric(self.metric_generator.generate(rng)?)),
             1 => {
-                let event = self.event_generator.generate(rng);
-                Member::Event(event)
+                let event = self.event_generator.generate(rng)?;
+                Ok(Member::Event(event))
             }
-            2 => Member::ServiceCheck(self.service_check_generator.generate(rng)),
+            2 => Ok(Member::ServiceCheck(
+                self.service_check_generator.generate(rng)?,
+            )),
             _ => unreachable!(),
         }
     }
@@ -592,7 +586,7 @@ impl DogStatsD {
     ///
     /// # Errors
     /// Function will error if dogstatd could not be created
-    pub fn default<R>(rng: &mut R) -> Result<Self, Error>
+    pub fn default<R>(rng: &mut R) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -619,7 +613,11 @@ impl DogStatsD {
     /// Generate a single `Member`.
     /// Prefer using the Serialize implementation for `DogStatsD` which
     /// generates a stream of `Member`s according to some constraints.
-    pub fn generate<R>(&self, rng: &mut R) -> Member
+    ///
+    /// # Errors
+    ///
+    /// Function will error if a member could not be generated
+    pub fn generate<R>(&self, rng: &mut R) -> Result<Member, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -648,7 +646,7 @@ impl DogStatsD {
         value_conf: ValueConf,
         length_prefix_framed: bool,
         rng: &mut R,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -704,7 +702,7 @@ impl DogStatsD {
         let mut members = Vec::new();
         // generate as many messages as we can fit
         loop {
-            let member: Member = self.member_generator.generate(&mut rng);
+            let member: Member = self.member_generator.generate(&mut rng)?;
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
@@ -760,7 +758,7 @@ impl DogStatsD {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let member: Member = self.member_generator.generate(&mut rng);
+            let member: Member = self.member_generator.generate(&mut rng)?;
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

@@ -6,7 +6,7 @@ use rand::{
     Rng,
 };
 
-use crate::Generator;
+use crate::{Error, Generator};
 
 use super::{ConfRange, ValueConf};
 
@@ -52,8 +52,9 @@ impl NumValueGenerator {
 
 impl<'a> Generator<'a> for NumValueGenerator {
     type Output = NumValue;
+    type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -65,9 +66,9 @@ impl<'a> Generator<'a> for NumValueGenerator {
                 float,
             } => {
                 if prob < *float_probability {
-                    NumValue::Float(*float)
+                    Ok(NumValue::Float(*float))
                 } else {
-                    NumValue::Int(*int)
+                    Ok(NumValue::Int(*int))
                 }
             }
             Self::Uniform {
@@ -76,9 +77,9 @@ impl<'a> Generator<'a> for NumValueGenerator {
                 float_distr,
             } => {
                 if prob < *float_probability {
-                    NumValue::Float(float_distr.sample(rng))
+                    Ok(NumValue::Float(float_distr.sample(rng)))
                 } else {
-                    NumValue::Int(int_distr.sample(rng))
+                    Ok(NumValue::Int(int_distr.sample(rng)))
                 }
             }
         }

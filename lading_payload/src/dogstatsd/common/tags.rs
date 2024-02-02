@@ -5,7 +5,7 @@ use std::{
 
 use rand::{rngs::SmallRng, SeedableRng};
 
-use crate::{common::strings, dogstatsd::ConfRange};
+use crate::{common::strings, dogstatsd::ConfRange, Error};
 
 // This represents a list of tags that will be present on a single
 // dogstatsd message.
@@ -54,8 +54,9 @@ impl Generator {
 // https://docs.datadoghq.com/getting_started/tagging/#define-tags
 impl<'a> crate::Generator<'a> for Generator {
     type Output = Tagset;
+    type Error = Error;
 
-    fn generate<R>(&'a self, _rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, _rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -85,7 +86,7 @@ impl<'a> crate::Generator<'a> for Generator {
             tagset.push(format!("{key}:{value}"));
         }
 
-        tagset
+        Ok(tagset)
     }
 }
 
@@ -114,7 +115,7 @@ mod test {
                 pool.clone(),
                 num_tagsets,
             );
-            let tagset = generator.generate(&mut rng);
+            let tagset = generator.generate(&mut rng)?;
             assert!(tagset.len() <= tags_per_msg_max as usize);
         }
     }

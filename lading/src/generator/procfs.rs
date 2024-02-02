@@ -28,6 +28,9 @@ pub enum Error {
     /// Unable to strip prefix from passed copy file
     #[error(transparent)]
     Strip(#[from] StripPrefixError),
+    /// Wrapper aroun [`lading_payload::Error`]
+    #[error(transparent)]
+    Payload(#[from] lading_payload::Error),
 }
 
 fn default_copy_from_host() -> Vec<PathBuf> {
@@ -74,7 +77,7 @@ impl ProcFs {
         let mut rng = StdRng::from_seed(config.seed);
 
         let total_processes = config.total_processes.get();
-        let mut processes = procfs::fixed(&mut rng, total_processes as usize);
+        let mut processes = procfs::fixed(&mut rng, total_processes as usize)?;
 
         for process in processes.drain(..) {
             let pid = process.pid;

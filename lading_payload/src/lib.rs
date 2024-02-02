@@ -25,7 +25,7 @@ use std::{
     path::PathBuf,
 };
 
-use rand::Rng;
+use rand::{distributions::WeightedError, Rng};
 use serde::Deserialize;
 
 pub mod block;
@@ -78,6 +78,9 @@ pub enum Error {
     /// Serialization failed
     #[error("Serialization failed")]
     Serialize,
+    /// See [`WeightedError`]
+    #[error(transparent)]
+    Weights(#[from] WeightedError),
 }
 
 /// To serialize into bytes
@@ -213,8 +216,9 @@ const fn div_ceil(lhs: usize, rhs: usize) -> usize {
 /// Generate instance of `I` from source of randomness `S`.
 pub(crate) trait Generator<'a> {
     type Output: 'a;
+    type Error: 'a;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized;
 }

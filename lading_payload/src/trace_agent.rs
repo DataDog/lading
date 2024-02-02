@@ -151,8 +151,9 @@ impl TraceAgent {
 
 impl<'a> Generator<'a> for TraceAgent {
     type Output = Span<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -172,7 +173,7 @@ impl<'a> Generator<'a> for TraceAgent {
             .of_size_range(&mut rng, 1_u8..8)
             .expect("failed to generate string");
 
-        Span {
+        Ok(Span {
             service: SERVICES.choose(rng).expect("failed to choose service"),
             name,
             resource,
@@ -188,7 +189,7 @@ impl<'a> Generator<'a> for TraceAgent {
                 .choose(rng)
                 .expect("failed to choose service kind"),
             meta_struct: FxHashMap::default(),
-        }
+        })
     }
 }
 
@@ -210,7 +211,9 @@ impl crate::Serialize for TraceAgent {
         let mut remaining: u16 = 10_000;
         while remaining > 0 {
             let total = rng.gen_range(0..=remaining);
-            let spans: Vec<Span> = (0..total).map(|_| self.generate(&mut rng)).collect();
+            let spans: Vec<Span> = (0..total)
+                .map(|_| self.generate(&mut rng).expect("Generate failed"))
+                .collect();
             members.push(spans);
             remaining = remaining.saturating_sub(total);
         }
@@ -229,7 +232,11 @@ impl crate::Serialize for TraceAgent {
                 break;
             }
 
-            members.push((0..5_000).map(|_| self.generate(&mut rng)).collect());
+            members.push(
+                (0..5_000)
+                    .map(|_| self.generate(&mut rng).expect("Generate failed"))
+                    .collect(),
+            );
         }
 
         // Search for an encoding that's just right.

@@ -1,6 +1,6 @@
 //! Procfs payload.
 
-use crate::{common::strings, Generator};
+use crate::{common::strings, Error, Generator};
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 use std::fmt;
 
@@ -1044,8 +1044,9 @@ impl StatusGenerator {
 
 impl<'a> Generator<'a> for StatusGenerator {
     type Output = Status;
+    type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -1087,7 +1088,7 @@ impl<'a> Generator<'a> for StatusGenerator {
         }
         let groups = Groups(groups);
 
-        Status {
+        Ok(Status {
             name: self.name.clone(),
             umask: rng.gen(),
             state: rng.gen(),
@@ -1163,7 +1164,7 @@ impl<'a> Generator<'a> for StatusGenerator {
             mems_allowed_list: ListCollection(vec![ListEntry::Single(0)]),
             voluntary_ctxt_switches: rng.gen(),
             nonvoluntary_ctxt_switches: rng.gen(),
-        }
+        })
     }
 }
 
@@ -1482,6 +1483,7 @@ impl StatGenerator {
 
 impl<'a> Generator<'a> for StatGenerator {
     type Output = Stat;
+    type Error = Error;
 
     /// Generates a [`Stat`] instance (modeling `/proc/{pid}/stat`) under the
     /// following assumptions:
@@ -1501,7 +1503,7 @@ impl<'a> Generator<'a> for StatGenerator {
     /// - The ranges `startcode..endcode`, `start_data..end_data`,
     ///   `arg_start..arg_end`, `env_start..env_end` may *not* have pairwise
     ///   empty intersections.
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: Rng + ?Sized,
     {
@@ -1519,7 +1521,7 @@ impl<'a> Generator<'a> for StatGenerator {
         // then `priority`, `nice`, and `policy` must also be modified.
         let rt_priority = 0;
 
-        Stat {
+        Ok(Stat {
             pid,
             comm: self.comm.clone(),
             state: rng.gen(),
@@ -1590,7 +1592,7 @@ impl<'a> Generator<'a> for StatGenerator {
             env_end: rng.gen(),
             // Exit code is assigned arbitrarily, for simplicity.
             exit_code: rng.gen(),
-        }
+        })
     }
 }
 
@@ -1655,6 +1657,7 @@ impl ProcessGenerator {
 
 impl<'a> Generator<'a> for ProcessGenerator {
     type Output = Process;
+    type Error = Error;
 
     /// Generates a [`Process`].
     ///
@@ -1674,7 +1677,7 @@ impl<'a> Generator<'a> for ProcessGenerator {
     ///   `/proc/{pid}/cmdline`. If `/proc/{pid}/cmdline` is shorter than
     ///   [`TASK_COMM_LEN`] bytes, then `/proc/{pid}/comm` and
     ///   `/proc/{pid}/cmdline` are identical.
-    fn generate<R>(&'a self, rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -1712,20 +1715,24 @@ impl<'a> Generator<'a> for ProcessGenerator {
         let status_gen = StatusGenerator::new(pid, name);
         let status = status_gen.generate(rng);
 
-        Process {
+        Ok(Process {
             cmdline,
             comm: comm.clone(),
             io,
-            stat,
+            stat: stat?,
             statm,
-            status,
+            status: status?,
             pid,
-        }
+        })
     }
 }
 
 /// Create a fixed number of Process instances
-pub fn fixed<R>(rng: &mut R, total: usize) -> Vec<Process>
+///
+/// # Errors
+///
+/// Will throw an error if the process cannot be generated
+pub fn fixed<R>(rng: &mut R, total: usize) -> Result<Vec<Process>, Error>
 where
     R: rand::Rng + ?Sized,
 {
@@ -1734,5 +1741,5 @@ where
     for _ in 0..total {
         processes.push(gen.generate(rng));
     }
-    processes
+    processes.into_iter().collect()
 }

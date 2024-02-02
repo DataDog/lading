@@ -3,7 +3,7 @@ use std::fmt;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::Generator;
+use crate::{Error, Generator};
 
 use super::{
     choose_or_not_ref,
@@ -20,8 +20,9 @@ pub(crate) struct ServiceCheckGenerator {
 
 impl<'a> Generator<'a> for ServiceCheckGenerator {
     type Output = ServiceCheck<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -29,19 +30,19 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
         let hostname = choose_or_not_ref(&mut rng, &self.small_strings).map(String::as_str);
         let message = choose_or_not_ref(&mut rng, &self.texts_or_messages).map(String::as_str);
         let tags = if rng.gen() {
-            Some(self.tags_generator.generate(&mut rng))
+            Some(self.tags_generator.generate(&mut rng)?)
         } else {
             None
         };
 
-        ServiceCheck {
+        Ok(ServiceCheck {
             name,
             status: rng.gen(),
             timestamp_second: rng.gen(),
             hostname,
             tags,
             message,
-        }
+        })
     }
 }
 
