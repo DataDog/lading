@@ -119,7 +119,7 @@ impl Server {
         loop {
             tokio::select! {
                 _ = sample_delay.tick() => {
-                    sampler.sample()?;
+                    sampler.sample().await?;
                 }
                 () = self.shutdown.recv() => {
                     tracing::info!("shutdown signal received");
