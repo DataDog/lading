@@ -6,20 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.20.6-rc3]
-### Fixed
-- Final RC for smaps parsing logic, no significant changes from rc2.
-
-## [0.20.6-rc2]
-### Fixed
-- Fixes some bugs in the initial smaps parsing logic, renames metrics to
-  `smaps.*`
-
-## [0.20.6-rc1]
+## [0.20.6]
 ### Added
-- Adds experimental /proc/<pid>/smap parsing to add very detailed memory usage
+- Adds `/proc/<pid>/smap` parsing to add very detailed memory usage.
 
-## [0.20.6-rc0]
 ### Fixed
 - Fixed a bug in CLI key/value parsing where values might be incorrectly parsed
   as key/value pairs if they held lading's delimiter character.

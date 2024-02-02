@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.20.6-rc3"
+version = "0.20.6"
 authors = ["Brian L. Troutwine <brian.troutwine@datadoghq.com>", "George Hahn <george.hahn@datadoghq.com"]
 edition = "2021"
 license = "MIT"
