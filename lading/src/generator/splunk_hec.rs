@@ -118,9 +118,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Iterator has already finished
-    #[error("Next failed, iterator already finished")]
-    Next,
     /// Empty block cache
     #[error("Block cache does not have any blocks")]
     EmptyBlockCache,
@@ -290,7 +287,10 @@ impl SplunkHec {
         let mut channels = self.channels.iter().cycle();
 
         loop {
-            let channel: Channel = channels.next().ok_or(Error::Next)?.clone();
+            let channel: Channel = channels
+                .next()
+                .expect("there is no next block in rcv")
+                .clone();
             let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
             let total_bytes = blk.total_bytes;
 
@@ -300,7 +300,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
+                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 

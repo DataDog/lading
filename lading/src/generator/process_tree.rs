@@ -89,9 +89,6 @@ pub enum Error {
     /// Utf8 error
     #[error("Utf8 error: {0}")]
     Utf8(#[from] str::Utf8Error),
-    /// Iterator has already finished
-    #[error("next failed, node path already finished")]
-    Next,
 }
 
 fn default_max_depth() -> NonZeroU32 {
@@ -454,7 +451,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
         let duration = Duration::from_nanos(sleep_ns.into());
         thread::sleep(duration);
 
-        let process = iter.next().ok_or(Error::Next)?;
+        let process = iter.next().expect("there is no next block in rcv");
 
         if let Some(exec) = &process.exec {
             let status = std::process::Command::new(&exec.executable)

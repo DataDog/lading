@@ -50,9 +50,6 @@ pub enum Error {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
-    /// Error from `next` method
-    #[error("Iterator has no next value")]
-    Next,
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
@@ -565,7 +562,7 @@ fn chunk_bytes<const N: usize>(
             break;
         }
         // SAFETY: By construction, the iterator will never terminate.
-        let block_size = iter.next().ok_or(Error::Next)?.get();
+        let block_size = iter.next().expect("there is no next block in rcv").get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.

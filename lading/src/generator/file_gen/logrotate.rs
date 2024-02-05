@@ -57,9 +57,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Iterator has already finished
-    #[error("Next failed, iterator already finished")]
-    Next,
     /// Empty block cache
     #[error("Block cache does not have any blocks")]
     EmptyBlockCache,
@@ -314,7 +311,7 @@ impl Child {
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.ok_or(Error::Next)?; // actually advance through the blocks
+                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
                     let total_bytes = u64::from(total_bytes.get());
 
                     {
