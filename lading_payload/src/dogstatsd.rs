@@ -8,7 +8,7 @@ use rand::{
     seq::SliceRandom,
     Rng,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize as SerdeSerialize};
 use tracing::{debug, warn};
 
 use crate::{common::strings, Serialize};
@@ -94,7 +94,7 @@ fn length_prefix_framed() -> bool {
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -128,7 +128,7 @@ impl Default for KindWeights {
 }
 
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -171,7 +171,7 @@ impl Default for MetricWeights {
 }
 
 /// Configuration for the values of a metric.
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 
@@ -199,7 +199,7 @@ impl Default for ValueConf {
     }
 }
 /// Range expression for configuration
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -263,7 +263,7 @@ where
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields)]
 pub struct Config {
