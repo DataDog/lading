@@ -1690,7 +1690,7 @@ impl<'a> Generator<'a> for ProcessGenerator {
         let cmdline = String::from(
             self.str_pool
                 .of_size(rng, cmdline_size)
-                .expect("failed to generate process command line"),
+                .ok_or(Error::StringGenerate)?,
         );
 
         // Assume the comm name and task name are derived from `cmdline`. Note

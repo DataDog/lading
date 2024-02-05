@@ -44,7 +44,7 @@ impl<'a> Generator<'a> for Fluent {
                     let key = self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("failed to generate string");
+                        .ok_or(Error::StringGenerate)?;
                     let val = record_value(rng, &self.str_pool);
                     rec.insert(key, val);
                 }
@@ -52,7 +52,7 @@ impl<'a> Generator<'a> for Fluent {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("failed to generate string"),
+                        .ok_or(Error::StringGenerate)?,
                     time: rng.gen(),
                     record: rec,
                 }))
@@ -67,7 +67,7 @@ impl<'a> Generator<'a> for Fluent {
                         let key = self
                             .str_pool
                             .of_size_range(rng, 1_u8..16)
-                            .expect("failed to generate string");
+                            .ok_or(Error::StringGenerate)?;
                         let val = record_value(rng, &self.str_pool);
                         rec.insert(key, val);
                     }
@@ -81,7 +81,7 @@ impl<'a> Generator<'a> for Fluent {
                     tag: self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
-                        .expect("failed to generate string"),
+                        .ok_or(Error::StringGenerate)?,
                     entries,
                 }))
             }

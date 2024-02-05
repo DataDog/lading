@@ -146,15 +146,15 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let description = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let unit = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
 
         Ok(Metric(v1::Metric {
             name: String::from(name),

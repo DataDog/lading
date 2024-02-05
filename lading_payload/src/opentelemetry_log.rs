@@ -70,7 +70,7 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
         let body: String = String::from(
             self.str_pool
                 .of_size_range(&mut rng, 1_u16..16_u16)
-                .expect("failed to generate string"),
+                .ok_or(Error::StringGenerate)?,
         );
 
         Ok(

@@ -167,11 +167,11 @@ impl<'a> Generator<'a> for TraceAgent {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let resource = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..8)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
 
         Ok(Span {
             service: SERVICES.choose(rng).expect("failed to choose service"),

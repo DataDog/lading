@@ -79,7 +79,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
 
         Ok(Span(v1::Span {
             trace_id,

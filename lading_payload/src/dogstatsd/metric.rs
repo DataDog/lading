@@ -57,7 +57,7 @@ impl MetricGenerator {
             let name = String::from(
                 str_pool
                     .of_size(&mut rng, name_sz)
-                    .expect("failed to generate string"),
+                    .ok_or(Error::StringGenerate)?,
             );
 
             let res = match metric_weights.sample(rng) {
