@@ -203,7 +203,7 @@ impl UnixStream {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -214,7 +214,7 @@ impl UnixStream {
                     // buffer.
                     let blk_max: usize = total_bytes.get() as usize;
                     let mut blk_offset = 0;
-                    let blk = rcv.next().await.expect("there is no next block in rcv"); // advance to the block that was previously peeked
+                    let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
                     while blk_offset < blk_max {
                         let stream = &socket;
 

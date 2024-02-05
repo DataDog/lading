@@ -230,7 +230,7 @@ impl Http {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
         loop {
-            let blk = rcv.next().await.expect("there is no next block in rcv");
+            let blk = rcv.next().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             let body = Body::from(blk.bytes.clone());

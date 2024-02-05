@@ -145,7 +145,7 @@ impl Udp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("there is no next block in rcv");
+            .expect("block cache has no next block");
 
         Ok(Self {
             addr,
@@ -180,7 +180,7 @@ impl Udp {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,
@@ -206,7 +206,7 @@ impl Udp {
                 }
                 _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
                     let sock = connection.expect("connection failed");
-                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
                             bytes_written.increment(bytes as u64);

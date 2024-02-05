@@ -562,7 +562,10 @@ fn chunk_bytes<const N: usize>(
             break;
         }
         // SAFETY: By construction, the iterator will never terminate.
-        let block_size = iter.next().expect("there is no next block in rcv").get();
+        let block_size = iter
+            .next()
+            .expect("failed to get block size, should not fail")
+            .get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.

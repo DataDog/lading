@@ -144,7 +144,7 @@ impl Tcp {
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("there is no next block in rcv");
+            .expect("could not convert to socket addr");
         Ok(Self {
             addr,
             block_cache,
@@ -193,12 +193,12 @@ impl Tcp {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match connection.write_all(&blk.bytes).await {
                         Ok(()) => {
                             bytes_written.increment(u64::from(blk.total_bytes.get()));

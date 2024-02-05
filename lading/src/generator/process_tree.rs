@@ -451,7 +451,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
         let duration = Duration::from_nanos(sleep_ns.into());
         thread::sleep(duration);
 
-        let process = iter.next().expect("there is no next block in rcv");
+        let process = iter.next().expect("process is not populated properly");
 
         if let Some(exec) = &process.exec {
             let status = std::process::Command::new(&exec.executable)

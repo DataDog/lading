@@ -179,7 +179,7 @@ impl FileTree {
         loop {
             tokio::select! {
                 _ = self.open_throttle.wait() => {
-                    let node = iter.next().expect("there is no next block in rcv");
+                    let node = iter.next().expect("node is not populated properly");
                     if node.exists() {
                         File::open(node.as_path()).await?;
                     } else {
