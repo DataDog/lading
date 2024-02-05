@@ -118,9 +118,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -291,7 +288,7 @@ impl SplunkHec {
                 .next()
                 .expect("there is no next block in rcv")
                 .clone();
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {

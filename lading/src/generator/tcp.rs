@@ -66,9 +66,6 @@ pub enum Error {
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -196,7 +193,7 @@ impl Tcp {
                 continue;
             };
 
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {

@@ -55,9 +55,6 @@ pub enum Error {
     /// Zero value
     #[error("Value provided must not be zero")]
     Zero,
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 /// Config for [`Grpc`]
@@ -303,7 +300,7 @@ impl Grpc {
         let response_bytes = register_counter!("response_bytes", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {

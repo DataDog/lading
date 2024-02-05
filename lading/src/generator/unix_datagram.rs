@@ -87,9 +87,6 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -259,7 +256,7 @@ impl Child {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {

@@ -67,9 +67,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 #[derive(Debug)]
@@ -183,7 +180,7 @@ impl Udp {
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
         loop {
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
             assert!(
                 total_bytes.get() <= 65507,

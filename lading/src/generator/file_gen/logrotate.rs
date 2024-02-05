@@ -57,9 +57,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Empty block cache
-    #[error("Block cache does not have any blocks")]
-    EmptyBlockCache,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -306,7 +303,7 @@ impl Child {
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
-            let blk = rcv.peek().await.ok_or(Error::EmptyBlockCache)?;
+            let blk = rcv.peek().await.expect("block cache is empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
