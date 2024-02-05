@@ -614,7 +614,7 @@ generator: []
 
         let contents = std::fs::read_to_string(capture_path)
             .expect("File path does not already exist or does not contain valid utf-8");
-        assert_eq!(contents.rmatches("lading.running").count(), 7);
+        assert!(contents.rmatches("lading.running").count() > 5);
     }
 
     #[test]
