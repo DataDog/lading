@@ -9,7 +9,7 @@ use std::{collections::VecDeque, num::NonZeroU32};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tracing::{error, info, span, Level};
 
@@ -95,7 +95,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 /// The method for which caching will be configure
 pub enum CacheMethod {

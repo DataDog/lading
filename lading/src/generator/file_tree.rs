@@ -25,7 +25,7 @@ use std::{
 };
 
 use rand::{prelude::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
@@ -81,7 +81,7 @@ fn default_rename_per_name() -> NonZeroU32 {
     NonZeroU32::new(1).expect("default rename per second given was 0")
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileTree`]
 pub struct Config {

@@ -21,7 +21,7 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tonic::{
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
@@ -58,7 +58,7 @@ pub enum Error {
 }
 
 /// Config for [`Grpc`]
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The gRPC URI. Looks like http://host/service.path/endpoint

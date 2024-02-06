@@ -16,7 +16,7 @@ use hyper::{
 };
 use metrics::{register_counter, Counter};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
@@ -46,7 +46,7 @@ fn default_concurrent_requests_max() -> usize {
     100
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Sqs`]
 pub struct Config {

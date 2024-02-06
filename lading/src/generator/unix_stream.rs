@@ -17,14 +17,14 @@ use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{net, sync::mpsc, task::JoinError};
 use tracing::{debug, error, info, warn};
 
 use super::General;
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

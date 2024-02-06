@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
@@ -118,7 +118,7 @@ impl Distribution<Member> for Standard {
 }
 
 ///
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]

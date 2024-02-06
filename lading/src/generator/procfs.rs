@@ -15,7 +15,7 @@ use std::{fs::File, io::Write, num::NonZeroU32, path::PathBuf};
 use lading_payload::procfs;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Phase;
 
@@ -40,7 +40,7 @@ fn default_copy_from_host() -> Vec<PathBuf> {
     ]
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 /// Configuration of [`Procfs`]
 pub struct Config {
     /// Seed for random operations against this target

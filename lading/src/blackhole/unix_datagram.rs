@@ -9,7 +9,7 @@ use std::{io, path::PathBuf};
 
 use futures::TryFutureExt;
 use metrics::register_counter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net;
 use tracing::info;
 
@@ -25,7 +25,7 @@ pub enum Error {
     Io(io::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`UnixDatagram`].
 pub struct Config {
