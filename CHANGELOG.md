@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.7]
+### Fixed
+- Fix panic in memory map reading code
+
 ## [0.20.6]
 ### Added
 - Adds `/proc/<pid>/smap` parsing to add very detailed memory usage.
