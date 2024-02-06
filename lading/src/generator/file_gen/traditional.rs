@@ -277,12 +277,12 @@ impl Child {
         let bytes_written = register_counter!("bytes_written");
 
         loop {
-            let blk = rcv.peek().await.expect("block cache is empty");
+            let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let total_bytes = u64::from(total_bytes.get());
 
                     {

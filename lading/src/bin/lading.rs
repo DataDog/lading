@@ -45,6 +45,8 @@ enum Error {
     LadingBlackhole(#[from] lading::blackhole::Error),
     #[error("Lading inspector returned an error: {0}")]
     LadingInspector(#[from] lading::inspector::Error),
+    #[error("Lading observer returned an error: {0}")]
+    LadingObserver(#[from] lading::observer::Error),
     #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
@@ -419,8 +421,7 @@ async fn inner_main(
     // Observer is not used when there is no target.
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
-        let observer_server = observer::Server::new(config.observer, shutdown.clone())
-            .expect("Path is invalid or path is not executable by this program");
+        let observer_server = observer::Server::new(config.observer, shutdown.clone())?;
         let _osrv = tokio::spawn(observer_server.run(obs_rcv));
 
         //
@@ -563,8 +564,7 @@ fn main() -> Result<(), Error> {
     let runtime = Builder::new_multi_thread()
         .enable_io()
         .enable_time()
-        .build()
-        .expect("Failed to create runtime");
+        .build()?;
     let res = runtime.block_on(inner_main(
         experiment_duration,
         warmup_duration,

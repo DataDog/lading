@@ -13,8 +13,6 @@ use serde::Deserialize;
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tracing::{error, info, span, Level};
 
-use crate::dogstatsd;
-
 const MAX_CHUNKS: usize = 4096;
 
 /// Error for `Cache::spin`
@@ -26,12 +24,15 @@ pub enum SpinError {
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid.")]
     InvalidConfig,
-    /// DogStatsD creation error
-    #[error(transparent)]
-    DogStatsD(#[from] dogstatsd::Error),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// rng slice is Empty
+    #[error("RNG slice is empty")]
+    EmptyRng,
+    /// Error for crate deserialization
+    #[error("Deserialization error: {0}")]
+    Deserialize(#[from] crate::Error),
 }
 
 /// Error for [`Cache`]
@@ -46,15 +47,12 @@ pub enum Error {
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid.")]
     InvalidConfig,
-    /// DogStatsD creation error
-    #[error(transparent)]
-    DogStatsD(#[from] dogstatsd::Error),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
-    /// Error from `next` method
-    #[error("Iterator has no next value")]
-    Next,
+    /// Error for crate deserialization
+    #[error("Deserialization error: {0}")]
+    Deserialize(#[from] crate::Error),
 }
 
 /// Errors for the construction of chunks
@@ -564,7 +562,10 @@ fn chunk_bytes<const N: usize>(
             break;
         }
         // SAFETY: By construction, the iterator will never terminate.
-        let block_size = iter.next().ok_or(Error::Next)?.get();
+        let block_size = iter
+            .next()
+            .expect("failed to get block size, should not fail")
+            .get();
 
         // Determine if the block_size fits in the remaining bytes. If it does,
         // great. If not, we break out of the round-robin.
@@ -665,7 +666,7 @@ where
         // push blocks into the sender until such time as it's full. When that
         // happens we overflow into the cache until such time as that's full.
         'refill: loop {
-            let block_size = block_chunks.choose(&mut rng).expect("rng slice is empty");
+            let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
             if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
                 match snd.try_reserve() {
                     Ok(permit) => permit.send(block),

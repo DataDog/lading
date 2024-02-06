@@ -286,12 +286,9 @@ impl SplunkHec {
         loop {
             let channel: Channel = channels
                 .next()
-                .expect("channel iteration already finished")
+                .expect("channel should never be empty")
                 .clone();
-            let blk = rcv
-                .peek()
-                .await
-                .expect("block cache does not have any blocks");
+            let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
@@ -300,7 +297,7 @@ impl SplunkHec {
                     let labels = labels.clone();
                     let uri = uri.clone();
 
-                    let blk = rcv.next().await.expect("block cache failed to find next value"); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let body = Body::from(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 

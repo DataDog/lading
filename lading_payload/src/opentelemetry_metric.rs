@@ -129,8 +129,9 @@ impl OpentelemetryMetrics {
 
 impl<'a> Generator<'a> for OpentelemetryMetrics {
     type Output = Metric;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -145,22 +146,22 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         let name = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let description = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let unit = self
             .str_pool
             .of_size_range(&mut rng, 1_u8..16)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
 
-        Metric(v1::Metric {
+        Ok(Metric(v1::Metric {
             name: String::from(name),
             description: String::from(description),
             unit: String::from(unit),
             data,
-        })
+        }))
     }
 }
 
@@ -180,7 +181,7 @@ impl crate::Serialize for OpentelemetryMetrics {
 
         let mut acc = ExportMetricsServiceRequest(Vec::new());
         loop {
-            let member: Metric = self.generate(&mut rng);
+            let member: Metric = self.generate(&mut rng)?;
             let len = member.0.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
                 Some(remainder) => {

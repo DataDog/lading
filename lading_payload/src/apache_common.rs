@@ -318,24 +318,25 @@ impl ApacheCommon {
 
 impl<'a> Generator<'a> for ApacheCommon {
     type Output = Member<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
-        Member {
+        Ok(Member {
             host: rng.gen(),
             user: self
                 .str_pool
                 .of_size_range(&mut rng, 1_u16..16_u16)
-                .expect("failed to generate string"),
+                .ok_or(Error::StringGenerate)?,
             timestamp: rng.gen(),
             method: rng.gen(),
             path: rng.gen(),
             protocol: rng.gen(),
             status_code: rng.gen(),
             bytes_out: rng.gen(),
-        }
+        })
     }
 }
 
@@ -347,7 +348,7 @@ impl crate::Serialize for ApacheCommon {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let member: Member = self.generate(&mut rng);
+            let member: Member = self.generate(&mut rng)?;
             let encoding = format!("{member}");
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {

@@ -53,7 +53,7 @@ pub enum Error {
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
     /// Zero value
-    #[error("Value cannot be zero")]
+    #[error("Value provided must not be zero")]
     Zero,
 }
 
@@ -307,7 +307,7 @@ impl Grpc {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
                     requests_sent.increment(1);
-                    let blk = rcv.next().await.expect("there is no next block in rcv"); // actually advance through the blocks
+                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),

@@ -3,7 +3,7 @@ use std::{fmt, ops::Range, rc::Rc};
 
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::{common::strings, Generator};
+use crate::{common::strings, Error, Generator};
 
 use super::{choose_or_not_fn, common, ConfRange};
 
@@ -18,8 +18,9 @@ pub(crate) struct EventGenerator {
 
 impl<'a> Generator<'a> for EventGenerator {
     type Output = Event<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -27,18 +28,18 @@ impl<'a> Generator<'a> for EventGenerator {
         let title = self
             .str_pool
             .of_size(&mut rng, title_sz)
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let text = self
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
-            .expect("failed to generate string");
+            .ok_or(Error::StringGenerate)?;
         let tags = if rng.gen() {
-            Some(self.tags_generator.generate(&mut rng))
+            Some(self.tags_generator.generate(&mut rng)?)
         } else {
             None
         };
 
-        Event {
+        Ok(Event {
             title_utf8_length: title.len(),
             text_utf8_length: text.len(),
             title,
@@ -59,7 +60,7 @@ impl<'a> Generator<'a> for EventGenerator {
             }),
             alert_type: rng.gen(),
             tags,
-        }
+        })
     }
 }
 

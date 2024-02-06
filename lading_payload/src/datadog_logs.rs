@@ -105,12 +105,13 @@ impl DatadogLog {
 
 impl<'a> Generator<'a> for DatadogLog {
     type Output = Member<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
-        Member {
+        Ok(Member {
             message: message(&mut rng, &self.str_pool),
             status: STATUSES.choose(rng).expect("failed to generate status"),
             timestamp: rng.gen(),
@@ -120,7 +121,7 @@ impl<'a> Generator<'a> for DatadogLog {
             ddtags: TAG_OPTIONS
                 .choose(rng)
                 .expect("failed to generate tag options"),
-        }
+        })
     }
 }
 
@@ -144,7 +145,7 @@ impl crate::Serialize for DatadogLog {
         let cap = (max_bytes / approx_member_encoded_size) + 100;
         let mut members: Vec<Member> = Vec::with_capacity(cap);
         for _ in 0..cap {
-            members.push(self.generate(&mut rng));
+            members.push(self.generate(&mut rng)?);
         }
 
         // Search for an encoding that's just right.

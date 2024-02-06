@@ -42,9 +42,6 @@ pub enum Error {
     /// Folder has no parent error
     #[error("Folder has no parent")]
     Parent,
-    /// Iterator has already finished
-    #[error("next failed, node path already finished")]
-    Next,
     /// Error converting path to string
     #[error("Error converting path to string")]
     ToStr,
@@ -182,7 +179,7 @@ impl FileTree {
         loop {
             tokio::select! {
                 _ = self.open_throttle.wait() => {
-                    let node = iter.next().ok_or(Error::Next)?;
+                    let node = iter.next().expect("node is not populated properly");
                     if node.exists() {
                         File::open(node.as_path()).await?;
                     } else {

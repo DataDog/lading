@@ -7,7 +7,7 @@ use rand::{
     Rng,
 };
 
-use crate::{common::strings, dogstatsd::metric::template::Template, Generator};
+use crate::{common::strings, dogstatsd::metric::template::Template, Error, Generator};
 use tracing::debug;
 
 use super::{
@@ -44,7 +44,7 @@ impl MetricGenerator {
         str_pool: &strings::Pool,
         value_conf: ValueConf,
         mut rng: &mut R,
-    ) -> Self
+    ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
@@ -57,22 +57,22 @@ impl MetricGenerator {
             let name = String::from(
                 str_pool
                     .of_size(&mut rng, name_sz)
-                    .expect("failed to generate string"),
+                    .ok_or(Error::StringGenerate)?,
             );
 
             let res = match metric_weights.sample(rng) {
-                0 => Template::Count(template::Count { name, tags }),
-                1 => Template::Gauge(template::Gauge { name, tags }),
-                2 => Template::Timer(template::Timer { name, tags }),
-                3 => Template::Distribution(template::Dist { name, tags }),
-                4 => Template::Set(template::Set { name, tags }),
-                5 => Template::Histogram(template::Histogram { name, tags }),
+                0 => Template::Count(template::Count { name, tags: tags? }),
+                1 => Template::Gauge(template::Gauge { name, tags: tags? }),
+                2 => Template::Timer(template::Timer { name, tags: tags? }),
+                3 => Template::Distribution(template::Dist { name, tags: tags? }),
+                4 => Template::Set(template::Set { name, tags: tags? }),
+                5 => Template::Histogram(template::Histogram { name, tags: tags? }),
                 _ => unreachable!(),
             };
             templates.push(res);
         }
 
-        MetricGenerator {
+        Ok(MetricGenerator {
             container_ids,
             templates,
             multivalue_count,
@@ -80,14 +80,15 @@ impl MetricGenerator {
             sampling,
             sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
-        }
+        })
     }
 }
 
 impl<'a> Generator<'a> for MetricGenerator {
     type Output = Metric<'a>;
+    type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Self::Output
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -111,58 +112,58 @@ impl<'a> Generator<'a> for MetricGenerator {
         };
 
         let mut values = Vec::with_capacity(self.multivalue_count.end() as usize);
-        let value: common::NumValue = self.num_value_generator.generate(&mut rng);
+        let value: common::NumValue = self.num_value_generator.generate(&mut rng)?;
         values.push(value);
 
         let prob: f32 = OpenClosed01.sample(&mut rng);
         if prob < self.multivalue_pack_probability {
             let num_desired_values = self.multivalue_count.sample(&mut rng) as usize;
             for _ in 1..num_desired_values {
-                values.push(self.num_value_generator.generate(&mut rng));
+                values.push(self.num_value_generator.generate(&mut rng)?);
             }
         }
 
         match template {
-            Template::Count(ref count) => Metric::Count(Count {
+            Template::Count(ref count) => Ok(Metric::Count(Count {
                 name: &count.name,
                 values,
                 sample_rate,
                 tags: &count.tags,
                 container_id,
-            }),
-            Template::Gauge(ref gauge) => Metric::Gauge(Gauge {
+            })),
+            Template::Gauge(ref gauge) => Ok(Metric::Gauge(Gauge {
                 name: &gauge.name,
                 values,
                 tags: &gauge.tags,
                 container_id,
-            }),
-            Template::Distribution(ref dist) => Metric::Distribution(Dist {
+            })),
+            Template::Distribution(ref dist) => Ok(Metric::Distribution(Dist {
                 name: &dist.name,
                 values,
                 sample_rate,
                 tags: &dist.tags,
                 container_id,
-            }),
-            Template::Histogram(ref hist) => Metric::Histogram(Histogram {
+            })),
+            Template::Histogram(ref hist) => Ok(Metric::Histogram(Histogram {
                 name: &hist.name,
                 values,
                 sample_rate,
                 tags: &hist.tags,
                 container_id,
-            }),
-            Template::Timer(ref timer) => Metric::Timer(Timer {
+            })),
+            Template::Timer(ref timer) => Ok(Metric::Timer(Timer {
                 name: &timer.name,
                 values,
                 sample_rate,
                 tags: &timer.tags,
                 container_id,
-            }),
-            Template::Set(ref set) => Metric::Set(Set {
+            })),
+            Template::Set(ref set) => Ok(Metric::Set(Set {
                 name: &set.name,
                 value: values.pop().expect("failed to pop value from Vec"),
                 tags: &set.tags,
                 container_id,
-            }),
+            })),
         }
     }
 }
