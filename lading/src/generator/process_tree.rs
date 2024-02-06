@@ -326,7 +326,7 @@ impl ProcessTree {
                         .arg("--config-content")
                         .arg(&self.config_content)
                         .stdin(Stdio::null())
-                        .output().await.expect("process tree generator failed to spawn");
+                        .output().await?;
 
                     if !output.status.success() {
                         error!("process tree generator execution error");
@@ -459,8 +459,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
                 .envs(&exec.envs)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status()
-                .expect("failed to execute process");
+                .status()?;
             exit(status.code().expect("failed to get exit code"));
         }
 

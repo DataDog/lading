@@ -118,12 +118,10 @@ impl Sqs {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .expect("Unable to bind to socket address provided");
+        let addr = AddrIncoming::bind(&self.httpd_addr).map(|mut addr| {
+            addr.set_keepalive(Some(Duration::from_secs(60)));
+            addr
+        })?;
         let server = Server::builder(addr).serve(svc);
         tokio::select! {
             res = server => {

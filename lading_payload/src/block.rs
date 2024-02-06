@@ -33,6 +33,9 @@ pub enum SpinError {
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
+    /// Error for constructing the block cache
+    #[error(transparent)]
+    ConstructBlockCache(#[from] ConstructBlockCacheError),
 }
 
 /// Error for [`Cache`]
@@ -53,6 +56,12 @@ pub enum Error {
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
+    /// Error for constructing the block cache
+    #[error(transparent)]
+    ConstructBlockCache(ConstructBlockCacheError),
+    /// See [`SpinError`]
+    #[error(transparent)]
+    Spin(#[from] SpinError),
 }
 
 /// Errors for the construction of chunks
@@ -619,20 +628,22 @@ fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
     block_chunks: &[u32],
-) -> Result<Vec<Block>, ConstructBlockCacheError>
+) -> Result<Vec<Block>, SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     for block_size in block_chunks {
-        if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
+        if let Some(block) = construct_block(&mut rng, serializer, *block_size)? {
             block_cache.push(block);
         }
     }
     if block_cache.is_empty() {
         error!("Empty block cache, unable to construct blocks!");
-        Err(ConstructBlockCacheError::InsufficientBlockSizes)
+        Err(SpinError::ConstructBlockCache(
+            ConstructBlockCacheError::InsufficientBlockSizes,
+        ))
     } else {
         info!(size = block_cache.len(), "Block cache constructed.");
         Ok(block_cache)
@@ -667,7 +678,7 @@ where
         // happens we overflow into the cache until such time as that's full.
         'refill: loop {
             let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
-            if let Some(block) = construct_block(&mut rng, serializer, *block_size) {
+            if let Some(block) = construct_block(&mut rng, serializer, *block_size)? {
                 match snd.try_reserve() {
                     Ok(permit) => permit.send(block),
                     Err(err) => match err {
@@ -693,15 +704,17 @@ where
 /// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
-fn construct_block<R, S>(mut rng: &mut R, serializer: &S, chunk_size: u32) -> Option<Block>
+fn construct_block<R, S>(
+    mut rng: &mut R,
+    serializer: &S,
+    chunk_size: u32,
+) -> Result<Option<Block>, SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
-    serializer
-        .to_bytes(&mut rng, chunk_size as usize, &mut block)
-        .expect("failed to convert to bytes");
+    serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
         // Blocks may be empty, especially when the amount of bytes
@@ -711,15 +724,16 @@ where
         // approximately from an instance. This does mean that we sometimes
         // waste computation because the size of the block given cannot be
         // serialized into.
-        None
+        Ok(None)
     } else {
         let total_bytes = NonZeroU32::new(
             bytes
                 .len()
                 .try_into()
                 .expect("failed to get length of bytes"),
-        )?;
-        Some(Block { total_bytes, bytes })
+        )
+        .expect("total_bytes must be non-zero");
+        Ok(Some(Block { total_bytes, bytes }))
     }
 }
 

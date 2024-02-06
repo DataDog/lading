@@ -14,7 +14,6 @@ use tokio::{
 use tracing::{debug, info};
 
 use super::{AckSettings, SPLUNK_HEC_CHANNEL_HEADER};
-
 type AckId = u64;
 
 #[derive(thiserror::Error, Debug)]
@@ -22,6 +21,15 @@ pub enum Error {
     /// Wrapper around [`hyper::http::Error`].
     #[error("HTTP error: {0}")]
     Http(#[from] hyper::http::Error),
+    /// receiver dropped unexpectedly
+    #[error("receiver dropped unexpectedly: {0}")]
+    Send(#[from] tokio::sync::mpsc::error::SendError<AckId>),
+    /// Wrapper around [`hyper::Error`].
+    #[error("Hyper error: {0}")]
+    Hyper(#[from] hyper::Error),
+    /// Wrapper around [`serde_json::Error`].
+    #[error("Failed to deserialize: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -39,16 +47,13 @@ impl Channel {
         }
     }
 
-    pub(crate) async fn send<Fut>(&self, msg: Fut)
+    pub(crate) async fn send<Fut>(&self, msg: Fut) -> Result<(), Error>
     where
         Fut: Future<Output = AckId>,
     {
         match self {
-            Self::NoAck { .. } => (),
-            Self::Ack { tx, .. } => tx
-                .send(msg.await)
-                .await
-                .expect("receiver dropped unexpectedly"),
+            Self::NoAck { .. } => Ok(()),
+            Self::Ack { tx, .. } => Ok(tx.send(msg.await).await?),
         }
     }
 }
@@ -191,18 +196,15 @@ async fn ack_request(
     request: Request<Body>,
     channel_id: String,
     ack_ids: &mut FxHashMap<AckId, u64>,
-) {
+) -> Result<(), Error> {
     match client.request(request).await {
         Ok(response) => {
             let (parts, body) = response.into_parts();
             let status = parts.status;
             counter!("ack_status_request_ok", 1, "channel_id" => channel_id.clone(), "status" => status.to_string());
             if status == StatusCode::OK {
-                let body = hyper::body::to_bytes(body)
-                    .await
-                    .expect("failed to convert response body to bytes");
-                let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body)
-                    .expect("failed to deserialize ack status response");
+                let body = hyper::body::to_bytes(body).await?;
+                let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body)?;
 
                 let mut ack_ids_acked: u32 = 0;
                 // Remove successfully acked ack ids
@@ -236,6 +238,7 @@ async fn ack_request(
             counter!("ack_status_request_failure", 1, "channel_id" => channel_id.clone(), "error" => err.to_string());
         }
     }
+    Ok(())
 }
 
 #[derive(Deserialize, Debug)]

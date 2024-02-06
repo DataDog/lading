@@ -118,6 +118,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Wrapper around [`acknowledgements::Error`]
+    #[error(transparent)]
+    Acknowledge(#[from] acknowledgements::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -340,7 +343,7 @@ async fn send_hec_request(
     client: Client<HttpConnector>,
     request: Request<Body>,
     mut shutdown: Phase,
-) {
+) -> Result<(), Error> {
     counter!("requests_sent", 1, &labels);
     let work = client.request(request);
 
@@ -362,7 +365,7 @@ async fn send_hec_request(
                                     serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("unable to parse response body");
                                 hec_ack_response.ack_id
                             })
-                            .await;
+                            .await?;
                     }
                     Err(err) => {
                         let mut error_labels = labels.clone();
@@ -380,6 +383,7 @@ async fn send_hec_request(
         () = shutdown.recv() => {},
     }
     drop(permit);
+    Ok(())
 }
 
 #[derive(Deserialize, Debug)]
