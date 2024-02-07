@@ -732,7 +732,7 @@ where
                 .try_into()
                 .expect("failed to get length of bytes"),
         )
-        .expect("total_bytes must be non-zero");
+        .ok_or(SpinError::InvalidConfig)?;
         Ok(Some(Block { total_bytes, bytes }))
     }
 }

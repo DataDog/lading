@@ -221,7 +221,7 @@ impl UnixStream {
                         let ready = stream
                             .ready(tokio::io::Interest::WRITABLE)
                             .await
-                            .map_err(Error::Io)?; // Cannot ? in a spawned task :<. Mimics UDP generator. Why does this compile????
+                            .map_err(Error::Io)?;
                         if ready.is_writable() {
                             // Try to write data, this may still fail with `WouldBlock`
                             // if the readiness event is a false positive.
