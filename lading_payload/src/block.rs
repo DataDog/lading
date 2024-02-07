@@ -36,6 +36,9 @@ pub enum SpinError {
     /// Error for constructing the block cache
     #[error(transparent)]
     ConstructBlockCache(#[from] ConstructBlockCacheError),
+    /// Zero value
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
 /// Error for [`Cache`]
@@ -729,7 +732,7 @@ where
                 .try_into()
                 .expect("failed to get length of bytes"),
         )
-        .ok_or(SpinError::InvalidConfig)?;
+        .ok_or(SpinError::Zero)?;
         Ok(Some(Block { total_bytes, bytes }))
     }
 }
