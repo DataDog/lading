@@ -59,6 +59,33 @@ enum Error {
     CapturePath,
     #[error("Process tree failed to generate tree")]
     ProcessTree(#[from] process_tree::Error),
+
+    #[error("{inner}\n{backtrace}")]
+    WithBacktrace {
+        inner: Box<Self>,
+        backtrace: Box<std::backtrace::Backtrace>,
+    },
+    #[error(transparent)]
+    Wrapped(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl Error {
+    pub fn wrap(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Wrapped(Box::new(err)).bt()
+    }
+
+    #[must_use]
+    pub fn bt(self) -> Self {
+        let backtrace = std::backtrace::Backtrace::capture();
+        match backtrace.status() {
+            std::backtrace::BacktraceStatus::Disabled
+            | std::backtrace::BacktraceStatus::Unsupported => self,
+            _ => Self::WithBacktrace {
+                inner: Box::new(self),
+                backtrace: Box::new(backtrace),
+            },
+        }
+    }
 }
 
 fn default_config_path() -> String {
@@ -236,7 +263,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
         contents
     };
 
-    let mut config: Config = serde_yaml::from_str(&contents)?;
+    let mut config: Config = serde_yaml::from_str(&contents).map_err(Error::wrap)?;
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit)?;
