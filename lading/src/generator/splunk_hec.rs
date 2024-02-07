@@ -29,7 +29,7 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{prelude::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, Semaphore, SemaphorePermit},
     time::timeout,
@@ -50,7 +50,7 @@ const SPLUNK_HEC_TEXT_PATH: &str = "/services/collector/raw";
 const SPLUNK_HEC_CHANNEL_HEADER: &str = "x-splunk-request-channel";
 
 /// Optional Splunk HEC indexer acknowledgements configuration
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AckSettings {
     /// The time in seconds between queries to /services/collector/ack
@@ -61,7 +61,7 @@ pub struct AckSettings {
 }
 
 /// Configuration for [`SplunkHec`]
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target
@@ -382,7 +382,7 @@ async fn send_hec_request(
     drop(permit);
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 struct HecAckResponse {
     #[allow(dead_code)]

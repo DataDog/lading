@@ -21,7 +21,7 @@ use byte_unit::{Byte, ByteError, ByteUnit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
 use tracing::{info, trace};
 
@@ -30,7 +30,7 @@ use lading_payload::block::{self, Block};
 
 use super::General;
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

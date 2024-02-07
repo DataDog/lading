@@ -5,7 +5,7 @@
 //! as little as possible with them and respond as minimally as possible in
 //! order to avoid overhead.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Phase;
 
@@ -43,7 +43,7 @@ pub enum Error {
     Sqs(sqs::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
@@ -56,7 +56,7 @@ pub struct Config {
     pub inner: Inner,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configurations common to all [`Server`] variants
@@ -65,7 +65,7 @@ pub struct General {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]

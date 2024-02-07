@@ -17,7 +17,7 @@ pub mod traditional;
 
 use std::str;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::signals::Phase;
 
@@ -35,7 +35,7 @@ pub enum Error {
 }
 
 /// Configuration of [`FileGen`]
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum Config {

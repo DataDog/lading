@@ -44,7 +44,7 @@ pub enum Error {
     Hyper(hyper::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`SplunkHec`].
 pub struct Config {

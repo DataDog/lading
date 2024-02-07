@@ -28,7 +28,7 @@ use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{gauge, register_counter};
 use rand::{prelude::StdRng, SeedableRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
@@ -69,7 +69,7 @@ fn default_rotation() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
 pub struct Config {

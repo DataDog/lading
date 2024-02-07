@@ -26,7 +26,7 @@ use std::{
 };
 
 use rand::{distributions::WeightedError, Rng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize as SerdeSerialize};
 
 pub mod block;
 
@@ -98,7 +98,7 @@ pub trait Serialize {
 }
 
 /// Sub-configuration for `TraceAgent` format
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -111,7 +111,7 @@ pub enum Encoding {
 }
 
 /// Configuration for `Payload`
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields)]

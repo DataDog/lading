@@ -10,7 +10,7 @@
 //! indefinitely, paying higher memory and longer startup for better
 //! experimental control.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 use crate::{signals::Phase, target::TargetPidReceiver};
@@ -65,7 +65,7 @@ pub enum Error {
     ProcFs(#[from] procfs::Error),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
@@ -78,7 +78,7 @@ pub struct Config {
     pub inner: Inner,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configurations common to all [`Server`] variants
@@ -87,7 +87,7 @@ pub struct General {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]

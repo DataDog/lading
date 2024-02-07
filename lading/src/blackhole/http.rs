@@ -43,7 +43,7 @@ pub enum Error {
 }
 
 /// Body variant supported by this blackhole.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum BodyVariant {
@@ -76,7 +76,7 @@ fn default_headers() -> HeaderMap {
     map
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Http`]
 pub struct Config {
