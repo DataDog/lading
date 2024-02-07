@@ -35,6 +35,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
     #[error("Target related error: {0}")]
     Target(target::Error),
     #[error(transparent)]
@@ -215,7 +217,7 @@ struct ProcessTreeGen {
     config_content: Option<String>,
 }
 
-fn get_config(ops: &Opts, config: Option<String>) -> anyhow::Result<Config> {
+fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
         config
     } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
@@ -238,8 +240,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> anyhow::Result<Config> {
         contents
     };
 
-    let mut config: Config =
-        serde_yaml::from_str(&contents).map_err(|e| anyhow::Error::new(Error::SerdeYaml(e)))?;
+    let mut config: Config = serde_yaml::from_str(&contents).map_err(anyhow::Error::new)?;
 
     if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
         target::Meta::set_rss_bytes_limit(rss_bytes_limit)?;
@@ -496,7 +497,7 @@ async fn inner_main(
     res
 }
 
-fn run_process_tree(opts: ProcessTreeGen) -> anyhow::Result<()> {
+fn run_process_tree(opts: ProcessTreeGen) -> Result<(), Error> {
     let mut contents = String::new();
 
     if let Some(path) = opts.config_path {
@@ -532,16 +533,14 @@ fn run_process_tree(opts: ProcessTreeGen) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_extra_cmds(cmds: ExtraCommands) -> anyhow::Result<()> {
+fn run_extra_cmds(cmds: ExtraCommands) -> Result<(), Error> {
     match cmds {
         // This command will call fork and the process must be kept fork-safe up to this point.
-        ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts)?,
+        ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts),
     }
-
-    Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)
         .with_ansi(false)
@@ -570,14 +569,12 @@ fn main() -> anyhow::Result<()> {
         .enable_io()
         .enable_time()
         .build()?;
-    let res = runtime
-        .block_on(inner_main(
-            experiment_duration,
-            warmup_duration,
-            disable_inspector,
-            config,
-        ))
-        .map_err(|e| anyhow::Error::new(e));
+    let res = runtime.block_on(inner_main(
+        experiment_duration,
+        warmup_duration,
+        disable_inspector,
+        config,
+    ));
     // The splunk_hec generator spawns long running tasks that are not plugged
     // into the shutdown mechanism we have here. This is a bug and needs to be
     // addressed. However as a workaround we explicitly shutdown the
