@@ -1,5 +1,6 @@
-use std::{collections::VecDeque, io, sync::atomic::Ordering};
+use std::{collections::VecDeque, io, path::Path, sync::atomic::Ordering};
 
+use cgroups_rs::cgroup::Cgroup;
 use metrics::{gauge, register_gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
@@ -25,6 +26,8 @@ pub enum Error {
     /// Wrapper for [`procfs::ProcError`]
     #[error("Unable to read procfs: {0}")]
     Proc(#[from] procfs::ProcError),
+    #[error("Unable to read cgroups: {0}")]
+    CGroups(#[from] cgroups_rs::error::Error),
 }
 
 macro_rules! report_status_field {
@@ -350,6 +353,30 @@ impl Sampler {
                     gauge!("smaps_rollup.pss_shmem", v as f64, &labels);
                 }
             });
+
+            // if possible we compute the working set of the cgroup
+            // using the same heuristic as kubernetes:
+            // total_usage - inactive_file
+            let cgroup = get_cgroup(pid as _)?;
+            if let Some(memory_controller) =
+                cgroup.controller_of::<cgroups_rs::memory::MemController>()
+            {
+                let mem_stat = memory_controller.memory_stat();
+
+                let inactive_file = if cgroup.v2() {
+                    mem_stat.stat.inactive_file
+                } else {
+                    mem_stat.stat.total_inactive_file
+                };
+                let usage = mem_stat.usage_in_bytes;
+                let working_set = if usage < inactive_file {
+                    0
+                } else {
+                    usage - inactive_file
+                };
+
+                gauge!("working_set_bytes", working_set as f64, &labels);
+            }
         }
 
         gauge!("num_processes", total_processes as f64);
@@ -452,4 +479,39 @@ fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
     let overall_percentage = (delta_ticks / delta_time) * 100.0;
 
     overall_percentage.clamp(0.0, 100.0 * num_cores)
+}
+
+#[inline]
+fn get_cgroup(pid: u32) -> Result<Cgroup, Error> {
+    let hierarchies = cgroups_rs::hierarchies::auto();
+    if hierarchies.v2() {
+        // for cgroups v2, we parse `/proc/<pid>/cgroup` looking for the main cgroup
+        // relative path. We then use this to load the correct cgroup.
+        // For unknown reasons, the cgroups_rs lib is not able to do this on its own.
+        // Heavily inspired by
+        // https://github.com/containerd/rust-extensions/blob/3d4de340d83aa06dff24fbf73d7d584ebe77c7ec/crates/shim/src/cgroup.rs#L178
+
+        let eof = || io::Error::from(io::ErrorKind::UnexpectedEof);
+        let path = format!("/proc/{pid}/cgroup");
+        let content = std::fs::read_to_string(path)?;
+
+        let first_line = content.lines().next().ok_or_else(eof)?;
+        let (_, path_part) = first_line.split_once("::").ok_or_else(eof)?;
+
+        let mut path_parts = path_part.split('/').skip(1);
+        let namespace = path_parts.next().ok_or_else(eof)?;
+        let cgroup_name = path_parts.next().ok_or_else(eof)?;
+
+        Ok(Cgroup::load(
+            hierarchies,
+            format!("/sys/fs/cgroup/{namespace}/{cgroup_name}").as_str(),
+        ))
+    } else {
+        let relative_paths = cgroups_rs::cgroup::get_cgroups_relative_paths_by_pid(pid)?;
+        Ok(Cgroup::load_with_relative_paths(
+            hierarchies,
+            Path::new("."),
+            relative_paths,
+        ))
+    }
 }
