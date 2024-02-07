@@ -40,6 +40,9 @@ pub enum Error {
     /// The configured status code was not valid.
     #[error("The configured status code was not valid: {0}")]
     InvalidStatusCode(InvalidStatusCode),
+    /// Failed to deserialize the configuration.
+    #[error("Failed to deserialize the configuration: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 /// Body variant supported by this blackhole.
@@ -188,7 +191,7 @@ impl Http {
                         record_id: "foobar".to_string(),
                     }],
                 };
-                serde_json::to_vec(&response).expect("Unable to serialize response")
+                serde_json::to_vec(&response)?
             }
             BodyVariant::Nothing => vec![],
             BodyVariant::RawBytes => config.raw_bytes.clone(),

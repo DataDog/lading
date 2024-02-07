@@ -41,7 +41,10 @@ fn default_concurrent_requests_max() -> usize {
 pub enum Error {
     /// Wrapper for [`hyper::Error`].
     #[error(transparent)]
-    Hyper(hyper::Error),
+    Hyper(#[from] hyper::Error),
+    /// Deserialization Error
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +91,7 @@ struct HecResponse {
 async fn srv(
     req: Request<Body>,
     labels: Arc<Vec<(String, String)>>,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<Response<Body>, Error> {
     metrics::counter!("requests_received", 1, &*labels);
 
     let (parts, body) = req.into_parts();
@@ -120,16 +123,15 @@ async fn srv(
                         text: "Success",
                         code: 0,
                         ack_id,
-                    })
-                    .expect("Failed to serialize HecResponse");
+                    })?;
                     *okay.body_mut() = Body::from(body_bytes);
                 }
                 // Path for querying indexer acknowledgements
                 (Method::POST, "/services/collector/ack") => {
                     match serde_json::from_slice::<HecAckRequest>(&body) {
                         Ok(ack_request) => {
-                            let body_bytes = serde_json::to_vec(&HecAckResponse::from(ack_request))
-                                .expect("Failed to serialize HecAckResponse");
+                            let body_bytes =
+                                serde_json::to_vec(&HecAckResponse::from(ack_request))?;
                             *okay.body_mut() = Body::from(body_bytes);
                         }
                         Err(_) => {

@@ -40,6 +40,9 @@ pub enum Error {
     /// Wrapper around [`serde_json::Error`].
     #[error("Json serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    /// Error used for invalid capture path
+    #[error("Invalid capture path")]
+    CapturePath,
 }
 
 struct Inner {
@@ -160,7 +163,7 @@ impl CaptureManager {
             self.capture_path
                 .file_name()
                 .and_then(OsStr::to_str)
-                .expect("capture path is not a valid file name")
+                .ok_or(Error::CapturePath)?
         );
         for line in lines.drain(..) {
             let pyld = serde_json::to_string(&line)?;
