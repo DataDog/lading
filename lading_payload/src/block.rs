@@ -56,9 +56,6 @@ pub enum Error {
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
-    /// Error for constructing the block cache
-    #[error(transparent)]
-    ConstructBlockCache(ConstructBlockCacheError),
     /// See [`SpinError`]
     #[error(transparent)]
     Spin(#[from] SpinError),
