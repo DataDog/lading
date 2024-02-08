@@ -11,7 +11,7 @@ use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, error::SendError, Sender};
-use tracing::{error, info, span, Level};
+use tracing::{error, info, span, warn, Level};
 
 const MAX_CHUNKS: usize = 4096;
 
@@ -22,8 +22,8 @@ pub enum SpinError {
     #[error(transparent)]
     Send(#[from] SendError<Block>),
     /// Provided configuration had validation errors
-    #[error("Provided configuration was not valid.")]
-    InvalidConfig,
+    #[error("Provided configuration was not valid: {0}")]
+    InvalidConfig(String),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
@@ -51,8 +51,8 @@ pub enum Error {
     #[error(transparent)]
     Construct(#[from] ConstructBlockCacheError),
     /// Provided configuration had validation errors
-    #[error("Provided configuration was not valid.")]
-    InvalidConfig,
+    #[error("Provided configuration was not valid: {0}")]
+    InvalidConfig(String),
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
@@ -233,45 +233,15 @@ impl Cache {
 
                 construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)?
             }
-            crate::Config::DogStatsD(
-                conf @ crate::dogstatsd::Config {
-                    contexts,
-                    name_length,
-                    tag_key_length,
-                    tag_value_length,
-                    tags_per_msg,
-                    // TODO -- Validate user input for multivalue_pack_probability.
-                    multivalue_pack_probability,
-                    multivalue_count,
-                    sampling_range,
-                    sampling_probability,
-                    kind_weights,
-                    metric_weights,
-                    value,
-                    service_check_names,
-                    length_prefix_framed,
-                },
-            ) => {
-                if !conf.valid() {
-                    return Err(Error::InvalidConfig);
+            crate::Config::DogStatsD(conf) => {
+                match conf.valid() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        warn!("Invalid DogStatsD configuration: {}", e);
+                        return Err(Error::InvalidConfig(e));
+                    }
                 }
-                let serializer = crate::DogStatsD::new(
-                    *contexts,
-                    *service_check_names,
-                    *name_length,
-                    *tag_key_length,
-                    *tag_value_length,
-                    *tags_per_msg,
-                    *multivalue_count,
-                    *multivalue_pack_probability,
-                    *sampling_range,
-                    *sampling_probability,
-                    *kind_weights,
-                    *metric_weights,
-                    *value,
-                    *length_prefix_framed,
-                    &mut rng,
-                )?;
+                let serializer = crate::DogStatsD::new(*conf, &mut rng)?;
 
                 let span = span!(
                     Level::INFO,
@@ -453,45 +423,15 @@ fn stream_inner(
             let pyld = crate::Syslog5424::default();
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
-        crate::Config::DogStatsD(
-            conf @ crate::dogstatsd::Config {
-                contexts,
-                service_check_names,
-                name_length,
-                tag_key_length,
-                tag_value_length,
-                tags_per_msg,
-                // TODO -- Validate user input for multivalue_pack_probability.
-                multivalue_pack_probability,
-                multivalue_count,
-                sampling_range: sampling,
-                sampling_probability,
-                kind_weights,
-                metric_weights,
-                value,
-                length_prefix_framed,
-            },
-        ) => {
-            if !conf.valid() {
-                return Err(SpinError::InvalidConfig);
+        crate::Config::DogStatsD(conf) => {
+            match conf.valid() {
+                Ok(()) => (),
+                Err(e) => {
+                    warn!("Invalid DogStatsD configuration: {}", e);
+                    return Err(SpinError::InvalidConfig(e));
+                }
             }
-            let pyld = crate::DogStatsD::new(
-                *contexts,
-                *service_check_names,
-                *name_length,
-                *tag_key_length,
-                *tag_value_length,
-                *tags_per_msg,
-                *multivalue_count,
-                *multivalue_pack_probability,
-                *sampling,
-                *sampling_probability,
-                *kind_weights,
-                *metric_weights,
-                *value,
-                *length_prefix_framed,
-                &mut rng,
-            )?;
+            let pyld = crate::DogStatsD::new(*conf, &mut rng)?;
 
             stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
