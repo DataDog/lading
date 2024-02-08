@@ -28,61 +28,6 @@ pub mod service_check;
 const MAX_CONTEXTS: u32 = 100_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
 
-fn contexts() -> ConfRange<u32> {
-    ConfRange::Inclusive {
-        min: 5_000,
-        max: 10_000,
-    }
-}
-
-fn service_check_names() -> ConfRange<u16> {
-    ConfRange::Inclusive {
-        min: 1,
-        max: 10_000,
-    }
-}
-
-fn value_config() -> ValueConf {
-    ValueConf::default()
-}
-
-// https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
-fn name_length() -> ConfRange<u16> {
-    ConfRange::Inclusive { min: 1, max: 200 }
-}
-
-fn tag_key_length() -> ConfRange<u8> {
-    ConfRange::Inclusive { min: 1, max: 100 }
-}
-
-fn tag_value_length() -> ConfRange<u8> {
-    ConfRange::Inclusive { min: 1, max: 100 }
-}
-
-fn tags_per_msg() -> ConfRange<u8> {
-    ConfRange::Inclusive { min: 2, max: 50 }
-}
-
-fn multivalue_count() -> ConfRange<u16> {
-    ConfRange::Inclusive { min: 2, max: 32 }
-}
-
-fn multivalue_pack_probability() -> f32 {
-    0.08
-}
-
-fn sampling_range() -> ConfRange<f32> {
-    ConfRange::Inclusive { min: 0.1, max: 1.0 }
-}
-
-fn sampling_probability() -> f32 {
-    0.5
-}
-
-fn length_prefix_framed() -> bool {
-    false
-}
-
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
@@ -174,7 +119,7 @@ pub struct ValueConf {
 }
 
 impl ValueConf {
-    fn valid(&self) -> bool {
+    fn valid(&self) -> (bool, &'static str) {
         self.range.valid()
     }
 }
@@ -217,10 +162,10 @@ where
 {
     /// Returns true if the range provided by the user is valid, false
     /// otherwise.
-    fn valid(&self) -> bool {
+    fn valid(&self) -> (bool, &'static str) {
         match self {
-            Self::Constant(_) => true,
-            Self::Inclusive { min, max } => min < max,
+            Self::Constant(_) => (true, ""),
+            Self::Inclusive { min, max } => (min < max, "min must be less than max"),
         }
     }
 
@@ -257,64 +202,51 @@ where
 /// Configure the `DogStatsD` payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The unique metric contexts to generate. A context is a set of unique
     /// metric name + tags
-    #[serde(default = "contexts")]
     pub contexts: ConfRange<u32>,
 
     /// The range of unique service check names.
-    #[serde(default = "service_check_names")]
     pub service_check_names: ConfRange<u16>,
 
     /// Length for a dogstatsd message name
-    #[serde(default = "name_length")]
     pub name_length: ConfRange<u16>,
 
     /// Length for the 'key' part of a dogstatsd tag
-    #[serde(default = "tag_key_length")]
     pub tag_key_length: ConfRange<u8>,
 
     /// Length for the 'value' part of a dogstatsd tag
-    #[serde(default = "tag_value_length")]
     pub tag_value_length: ConfRange<u8>,
 
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
-    #[serde(default = "tags_per_msg")]
     pub tags_per_msg: ConfRange<u8>,
 
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
-    #[serde(default = "multivalue_pack_probability")]
     pub multivalue_pack_probability: f32,
 
     /// The count of values that will be generated if multi-value is chosen to
     /// be generated
-    #[serde(default = "multivalue_count")]
     pub multivalue_count: ConfRange<u16>,
 
     /// Range of possible values for the sampling rate sent in dogstatsd messages
-    #[serde(default = "sampling_range")]
     pub sampling_range: ConfRange<f32>,
 
     /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
-    #[serde(default = "sampling_probability")]
     pub sampling_probability: f32,
 
     /// Defines the relative probability of each kind of DogStatsD kinds of
     /// payload.
-    #[serde(default)]
     pub kind_weights: KindWeights,
 
     /// Defines the relative probability of each kind of DogStatsD metric.
-    #[serde(default)]
     pub metric_weights: MetricWeights,
 
     /// The configuration of values that appear in all metrics.
-    #[serde(default = "value_config")]
     pub value: ValueConf,
 
     /// Whether completed blocks should use length-prefix framing.
@@ -322,31 +254,100 @@ pub struct Config {
     /// If enabled, each block emitted from this generator will have
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
-    #[serde(default = "length_prefix_framed")]
     pub length_prefix_framed: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            contexts: ConfRange::Inclusive {
+                min: 5_000,
+                max: 10_000,
+            },
+            service_check_names: ConfRange::Inclusive {
+                min: 1,
+                max: 10_000,
+            },
+            // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
+            name_length: ConfRange::Inclusive { min: 1, max: 200 },
+            tag_key_length: ConfRange::Inclusive { min: 1, max: 100 },
+            tag_value_length: ConfRange::Inclusive { min: 1, max: 100 },
+            tags_per_msg: ConfRange::Inclusive { min: 2, max: 50 },
+            multivalue_count: ConfRange::Inclusive { min: 2, max: 32 },
+            multivalue_pack_probability: 0.08,
+            sampling_range: ConfRange::Inclusive { min: 0.1, max: 1.0 },
+            sampling_probability: 0.5,
+            kind_weights: KindWeights::default(),
+            metric_weights: MetricWeights::default(),
+            value: ValueConf::default(),
+            // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
+            length_prefix_framed: false,
+        }
+    }
 }
 
 impl Config {
     /// Determine whether the passed configuration obeys validation criteria
-    pub(crate) fn valid(&self) -> bool {
-        // TODO these constraints need to become part of the type system or parsing runtime errors.
-        self.contexts.valid()
-            && self.contexts.start() > 0
-            && self.contexts.end() <= MAX_CONTEXTS
-            && self.service_check_names.valid()
-            && self.service_check_names.start() > 0
-            && self.service_check_names.end() > 0
-            && self.tag_key_length.start() > 0
-            && self.tag_key_length.end() > 0
-            && self.tag_value_length.start() > 0
-            && self.tag_value_length.end() > 0
-            && self.name_length.valid()
-            && self.name_length.end() <= MAX_NAME_LENGTH
-            && self.tag_key_length.valid()
-            && self.tag_value_length.valid()
-            && self.tags_per_msg.valid()
-            && self.multivalue_count.valid()
-            && self.value.valid()
+    /// # Errors
+    /// Function will error if the configuration is invalid
+    pub fn valid(&self) -> Result<(), String> {
+        let (contexts_valid, reason) = self.contexts.valid();
+        if !contexts_valid {
+            return Result::Err(format!("Contexts value is invalid: {reason}"));
+        }
+        if self.contexts.start() == 0 {
+            return Result::Err("Contexts start value cannot be 0".to_string());
+        }
+        if self.contexts.end() > MAX_CONTEXTS {
+            return Result::Err(format!(
+                "Contexts end value is greater than the maximum allowed value of {MAX_CONTEXTS}"
+            ));
+        }
+        let (service_check_names_valid, reason) = self.service_check_names.valid();
+        if !service_check_names_valid {
+            return Result::Err(format!("Service check names value is invalid: {reason}"));
+        }
+
+        let (tag_key_length_valid, reason) = self.tag_key_length.valid();
+        if !tag_key_length_valid {
+            return Result::Err(format!("Tag key length value is invalid: {reason}"));
+        }
+        if self.tag_key_length.start() == 0 {
+            return Result::Err("Tag key length start value cannot be 0".to_string());
+        }
+        let (tag_value_length_valid, reason) = self.tag_value_length.valid();
+        if !tag_value_length_valid {
+            return Result::Err(format!("Tag value length value is invalid: {reason}"));
+        }
+        if self.tag_value_length.start() == 0 {
+            return Result::Err("Tag value length start value cannot be 0".to_string());
+        }
+        let (name_length_valid, reason) = self.name_length.valid();
+        if !name_length_valid {
+            return Result::Err(format!("Name length value is invalid: {reason}"));
+        }
+        if self.name_length.start() == 0 {
+            return Result::Err("Name length start value cannot be 0".to_string());
+        }
+        if self.name_length.end() > MAX_NAME_LENGTH {
+            return Result::Err("Name length end value cannot be 0".to_string());
+        }
+        let (tags_per_msg_valid, reason) = self.tags_per_msg.valid();
+        if !tags_per_msg_valid {
+            return Result::Err(format!("Tags per msg value is invalid: {reason}"));
+        }
+        if self.tags_per_msg.start() == 0 {
+            return Result::Err("Tags per msg start value cannot be 0".to_string());
+        }
+        let (multivalue_count_valid, reason) = self.multivalue_count.valid();
+        if !multivalue_count_valid {
+            return Result::Err(format!("Multivalue count value is invalid: {reason}"));
+        }
+        let (value_valid, reason) = self.value.valid();
+        if !value_valid {
+            return Result::Err(format!("Value configuration is invalid: {reason}"));
+        }
+        Ok(())
     }
 }
 
@@ -590,23 +591,8 @@ impl DogStatsD {
     where
         R: rand::Rng + ?Sized,
     {
-        let dogstatd = Self::new(
-            contexts(),
-            service_check_names(),
-            name_length(),
-            tag_key_length(),
-            tag_value_length(),
-            tags_per_msg(),
-            multivalue_count(),
-            multivalue_pack_probability(),
-            sampling_range(),
-            sampling_probability(),
-            KindWeights::default(),
-            MetricWeights::default(),
-            value_config(),
-            length_prefix_framed(),
-            rng,
-        )?;
+        let config = Config::default();
+        let dogstatd = Self::new(config, rng)?;
         Ok(dogstatd)
     }
 
@@ -630,46 +616,30 @@ impl DogStatsD {
     ///
     /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
-    pub fn new<R>(
-        contexts: ConfRange<u32>,
-        service_check_names: ConfRange<u16>,
-        name_length: ConfRange<u16>,
-        tag_key_length: ConfRange<u8>,
-        tag_value_length: ConfRange<u8>,
-        tags_per_msg: ConfRange<u8>,
-        multivalue_count: ConfRange<u16>,
-        multivalue_pack_probability: f32,
-        sampling: ConfRange<f32>,
-        sampling_probability: f32,
-        kind_weights: KindWeights,
-        metric_weights: MetricWeights,
-        value_conf: ValueConf,
-        length_prefix_framed: bool,
-        rng: &mut R,
-    ) -> Result<Self, crate::Error>
+    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
         let member_generator = MemberGenerator::new(
-            contexts,
-            service_check_names,
-            name_length,
-            tag_key_length,
-            tag_value_length,
-            tags_per_msg,
-            multivalue_count,
-            multivalue_pack_probability,
-            sampling,
-            sampling_probability,
-            kind_weights,
-            metric_weights,
-            value_conf,
+            config.contexts,
+            config.service_check_names,
+            config.name_length,
+            config.tag_key_length,
+            config.tag_value_length,
+            config.tags_per_msg,
+            config.multivalue_count,
+            config.multivalue_pack_probability,
+            config.sampling_range,
+            config.sampling_probability,
+            config.kind_weights,
+            config.metric_weights,
+            config.value,
             rng,
         )?;
 
         Ok(Self {
             member_generator,
-            length_prefix_framed,
+            length_prefix_framed: config.length_prefix_framed,
         })
     }
 }
@@ -785,17 +755,11 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod test {
+    use super::Config;
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
-    use crate::{
-        dogstatsd::{
-            contexts, multivalue_count, multivalue_pack_probability, name_length,
-            sampling_probability, sampling_range, service_check_names, tag_key_length,
-            tag_value_length, tags_per_msg, value_config, KindWeights, MetricWeights,
-        },
-        DogStatsD,
-    };
+    use crate::DogStatsD;
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -804,16 +768,9 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let multivalue_pack_probability = multivalue_pack_probability();
-            let value_conf = value_config();
 
-            let kind_weights = KindWeights::default();
-            let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
-                                           name_length(), tag_key_length(),
-                                           tag_value_length(), tags_per_msg(),
-                                           multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, false, &mut rng)?;
+            let dogstatsd_config = Config::default();
+            let dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes)?;
@@ -832,16 +789,9 @@ mod test {
         fn payload_not_exceed_max_bytes_with_length_prefix_frames(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let multivalue_pack_probability = multivalue_pack_probability();
-            let value_conf = value_config();
 
-            let kind_weights = KindWeights::default();
-            let metric_weights = MetricWeights::default();
-            let dogstatsd = DogStatsD::new(contexts(), service_check_names(),
-                                           name_length(), tag_key_length(),
-                                           tag_value_length(), tags_per_msg(),
-                                           multivalue_count(), multivalue_pack_probability, sampling_range(), sampling_probability(), kind_weights,
-                                           metric_weights, value_conf, true, &mut rng).expect("failed to create DogStatsD");
+            let dogstatsd_config = Config { length_prefix_framed: true, ..Default::default() };
+            let dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng).expect("failed to create DogStatsD");
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
