@@ -336,9 +336,6 @@ impl Config {
         if !tags_per_msg_valid {
             return Result::Err(format!("Tags per msg value is invalid: {reason}"));
         }
-        if self.tags_per_msg.start() == 0 {
-            return Result::Err("Tags per msg start value cannot be 0".to_string());
-        }
         let (multivalue_count_valid, reason) = self.multivalue_count.valid();
         if !multivalue_count_valid {
             return Result::Err(format!("Multivalue count value is invalid: {reason}"));
