@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [0.20.8-rc1]
+## [0.20.8]
 ### Added
 - Parse working set memory from cgroups on Linux, opens the door to future
   cgroups inspection.
