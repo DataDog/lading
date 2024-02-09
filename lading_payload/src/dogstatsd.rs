@@ -119,6 +119,15 @@ pub struct ValueConf {
 }
 
 impl ValueConf {
+    /// Create a new instance of `ValueConf` according to the args
+    #[must_use]
+    pub fn new(float_probability: f32, range: ConfRange<i64>) -> Self {
+        Self {
+            float_probability,
+            range,
+        }
+    }
+
     fn valid(&self) -> (bool, &'static str) {
         self.range.valid()
     }
