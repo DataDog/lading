@@ -101,9 +101,8 @@ mod test {
 
     proptest! {
         #[test]
-        fn generator_not_exceed_tagset_max(seed: u64, num_tagsets in 0..1_000) {
+        fn generator_not_exceed_tagset_max(seed: u64, num_tagsets in 0..1_000_usize) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let num_tagsets = num_tagsets as usize;
             let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
             let tags_per_msg_max = 255;
