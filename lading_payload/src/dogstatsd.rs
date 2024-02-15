@@ -264,6 +264,13 @@ pub struct Config {
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
     pub length_prefix_framed: bool,
+
+    /// The desired ratio between unique tags and the number of contexts
+    /// If this is 1, then that means every single tag is unique.
+    /// If this is 0, it is highly unlikely that the resulting traffic will
+    /// actually have a ratio of 0, the desired number of contexts will
+    /// _always_ be generated at the expense of this ratio.
+    pub tag_context_ratio: f32,
 }
 
 impl Default for Config {
@@ -291,6 +298,7 @@ impl Default for Config {
             value: ValueConf::default(),
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
+            tag_context_ratio: 0.2,
         }
     }
 }
@@ -449,6 +457,7 @@ impl MemberGenerator {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
+        tag_context_ratio: f32,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -467,6 +476,7 @@ impl MemberGenerator {
             tag_value_length,
             Rc::clone(&pool),
             num_contexts as usize,
+            tag_context_ratio,
         );
 
         // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
@@ -640,6 +650,7 @@ impl DogStatsD {
             config.kind_weights,
             config.metric_weights,
             config.value,
+            config.tag_context_ratio,
             rng,
         )?;
 
