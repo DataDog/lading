@@ -84,7 +84,6 @@ impl<'a> crate::Generator<'a> for Generator {
     where
         R: rand::Rng + ?Sized,
     {
-        info!("Producing a tagset");
         // if we have produced the number of tagsets we are supposed to produce, then reseed the internal RNG
         // this ensures that we generate the same tags in a loop
         if self.tagsets_produced.get() >= self.num_tagsets {
@@ -127,7 +126,6 @@ impl<'a> crate::Generator<'a> for Generator {
         }
 
         self.tagsets_produced.set(self.tagsets_produced.get() + 1);
-        info!("Produced a tagset of {} tags", tagset.len());
         Ok(tagset)
     }
 }
