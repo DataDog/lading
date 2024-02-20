@@ -6,8 +6,9 @@ use std::{
 
 use rand::distributions::Distribution;
 use rand::Rng;
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 
+use crate::dogstatsd::common::delimitedpool::{DelimitedPool, Handle};
 use crate::dogstatsd::common::OpenClosed01;
 use crate::{common::strings, dogstatsd::ConfRange, Error};
 
@@ -28,48 +29,43 @@ pub(crate) struct Generator {
     tagsets_produced: Cell<usize>,
     num_tagsets: usize,
     tags_per_msg: ConfRange<u8>,
-    tag_key_length: ConfRange<u8>,
-    tag_value_length: ConfRange<u8>,
-    str_pool: Rc<strings::Pool>,
+    _tag_key_length: ConfRange<u8>,
+    _tag_value_length: ConfRange<u8>,
+    pool: DelimitedPool,
     tag_context_ratio: f32,
-    unique_tags: RefCell<HashSet<String>>,
+    unique_tags: RefCell<Vec<Handle>>,
 }
 
 impl Generator {
+    #[allow(unreachable_pub)]
+    #[allow(clippy::needless_pass_by_value)] // just until I'm done branch switching to keep api stable
+    #[must_use]
+    /// Creates a new tag generator
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
         tag_key_length: ConfRange<u8>,
         tag_value_length: ConfRange<u8>,
-        str_pool: Rc<strings::Pool>,
+        _str_pool: Rc<strings::Pool>,
         num_tagsets: usize,
         tag_context_ratio: f32,
     ) -> Self {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let tag_length = (tag_key_length.end() + tag_value_length.end()) as usize; // todo make range?
+        let delimited_pool = DelimitedPool::new(&mut rng, 1_000_000, ':', tag_length);
+
         Generator {
             seed: Cell::new(seed),
-            internal_rng: RefCell::new(SmallRng::seed_from_u64(seed)),
+            internal_rng: RefCell::new(rng),
             tags_per_msg,
-            tag_key_length,
-            tag_value_length,
-            str_pool,
+            _tag_key_length: tag_key_length,
+            _tag_value_length: tag_value_length,
+            pool: delimited_pool,
             tagsets_produced: Cell::new(0),
             num_tagsets,
             tag_context_ratio,
-            unique_tags: RefCell::new(HashSet::new()),
+            unique_tags: RefCell::new(Vec::new()),
         }
-    }
-}
-
-impl Generator {
-    fn generate_single_tag(&self, rng: &mut SmallRng) -> String {
-        let key_sz = self.tag_key_length.sample(&mut *rng) as usize;
-        let key = self.str_pool.of_size(&mut *rng, key_sz).unwrap_or_default();
-        let value_sz = self.tag_value_length.sample(&mut *rng) as usize;
-        let value = self
-            .str_pool
-            .of_size(&mut *rng, value_sz)
-            .unwrap_or_default();
-        format!("{key}:{value}")
     }
 }
 
@@ -108,21 +104,21 @@ impl<'a> crate::Generator<'a> for Generator {
             // so we generate a new tag if the ratio is greater than a random number between 0 and 1
             let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
 
-            let existing_tags = unique_tags.len();
-            let attempted_tag =
-                if existing_tags > 1 && choose_existing_prob < self.tag_context_ratio {
-                    unique_tags
-                        .iter()
-                        .nth((*rng).gen_range(0..unique_tags.len()))
+            let attempted_tag = if choose_existing_prob < self.tag_context_ratio {
+                let handle = unique_tags.choose(&mut *rng);
+                if let Some((offset, length)) = handle {
+                    self.pool.from_handle((*offset, *length))
                 } else {
                     None
-                };
-            if let Some(tag) = attempted_tag {
-                tagset.push(tag.clone());
+                }
             } else {
-                let new_tag = self.generate_single_tag(&mut rng);
-                unique_tags.insert(new_tag.clone());
-                tagset.push(new_tag);
+                None
+            };
+            if let Some(tag) = attempted_tag {
+                tagset.push(tag.to_string());
+            } else if let Some((new_tag, handle)) = self.pool.of(&mut *rng) {
+                unique_tags.push(handle);
+                tagset.push(new_tag.to_string());
             };
         }
 
