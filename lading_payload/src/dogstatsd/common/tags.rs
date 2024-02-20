@@ -7,7 +7,6 @@ use std::{
 use rand::distributions::Distribution;
 use rand::Rng;
 use rand::{rngs::SmallRng, SeedableRng};
-use tracing::info;
 
 use crate::dogstatsd::common::OpenClosed01;
 use crate::{common::strings, dogstatsd::ConfRange, Error};
