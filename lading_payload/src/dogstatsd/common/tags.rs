@@ -108,13 +108,15 @@ impl<'a> crate::Generator<'a> for Generator {
             // so we generate a new tag if the ratio is greater than a random number between 0 and 1
             let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
 
-            let attempted_tag = if choose_existing_prob < self.tag_context_ratio {
-                unique_tags
-                    .iter()
-                    .nth((*rng).gen_range(0..unique_tags.len()))
-            } else {
-                None
-            };
+            let existing_tags = unique_tags.len();
+            let attempted_tag =
+                if existing_tags > 1 && choose_existing_prob < self.tag_context_ratio {
+                    unique_tags
+                        .iter()
+                        .nth((*rng).gen_range(0..unique_tags.len()))
+                } else {
+                    None
+                };
             if let Some(tag) = attempted_tag {
                 tagset.push(tag.clone());
             } else {
