@@ -1,3 +1,4 @@
+//! `DogStatsD` common utilities.
 use std::fmt;
 
 use rand::{
@@ -10,11 +11,14 @@ use crate::{Error, Generator};
 
 use super::{ConfRange, ValueConf};
 
-pub(crate) mod tags;
+pub mod tags;
 
+/// The value a dogstatsd metric will contain
 #[derive(Clone, Debug, Copy)]
 pub enum NumValue {
+    /// An integer value
     Int(i64),
+    /// A floating point value
     Float(f64),
 }
 
@@ -95,14 +99,19 @@ impl fmt::Display for NumValue {
     }
 }
 
+/// Describes a value between 0 and 1
 #[derive(Clone, Copy, Debug)]
 pub enum ZeroToOne {
+    /// static 1 value
     One,
+    /// fractional value represented as 1/x
     Frac(u32),
 }
 
+/// Error type for `ZeroToOne`
 #[derive(Debug, Clone, Copy)]
 pub enum ZeroToOneError {
+    /// Value is out of range
     OutOfRange,
 }
 

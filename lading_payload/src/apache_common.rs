@@ -269,8 +269,9 @@ impl fmt::Display for Method {
     }
 }
 
+/// apache common member
 #[derive(Debug)]
-pub(crate) struct Member<'a> {
+pub struct Member<'a> {
     host: IpV4,
     user: &'a str,
     timestamp: Timestamp,

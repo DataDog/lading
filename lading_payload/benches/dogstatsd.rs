@@ -17,7 +17,9 @@ fn dogstatsd_all(c: &mut Criterion) {
     let mb = 1_000_000; // 1 MiB
 
     let mut group = c.benchmark_group("dogstatsd_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    //for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    #[allow(clippy::single_element_loop)]
+    for size in &[mb] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {

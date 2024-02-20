@@ -1,3 +1,4 @@
+//! Tag generation for dogstatsd payloads
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -7,9 +8,8 @@ use rand::{rngs::SmallRng, SeedableRng};
 
 use crate::{common::strings, dogstatsd::ConfRange, Error};
 
-// This represents a list of tags that will be present on a single
-// dogstatsd message.
-pub(crate) type Tagset = Vec<String>;
+/// List of tags that will be present on a dogstatsd message
+pub type Tagset = Vec<String>;
 
 /// Generator for tags
 ///
@@ -18,7 +18,7 @@ pub(crate) type Tagset = Vec<String>;
 /// produce only a limited, deterministic set of tags while avoiding needing to
 /// allocate them all in one shot.
 #[derive(Debug, Clone)]
-pub(crate) struct Generator {
+pub struct Generator {
     seed: Cell<u64>,
     internal_rng: RefCell<SmallRng>,
     tagsets_produced: Cell<usize>,
@@ -30,7 +30,10 @@ pub(crate) struct Generator {
 }
 
 impl Generator {
-    pub(crate) fn new(
+    #[allow(unreachable_pub)]
+    #[must_use]
+    /// Creates a new tag generator
+    pub fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
         tag_key_length: ConfRange<u8>,

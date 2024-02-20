@@ -90,27 +90,34 @@ impl<'a> Generator<'a> for Fluent {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 #[serde(untagged)]
-pub(crate) enum Member<'a> {
+/// Fluentd payload member
+pub enum Member<'a> {
+    /// Fluentd message
     Message(FluentMessage<'a>),
+    /// Fluentd forward
     Forward(FluentForward<'a>),
 }
 
-#[derive(serde::Serialize)]
-pub(crate) struct FluentMessage<'a> {
+/// Fluentd message
+#[derive(serde::Serialize, Debug)]
+#[allow(clippy::module_name_repetitions)]
+pub struct FluentMessage<'a> {
     tag: &'a str,
     time: u32,
     record: FxHashMap<&'a str, RecordValue<'a>>, // always contains 'message' key
 }
 
-#[derive(Serialize_tuple)]
-pub(crate) struct FluentForward<'a> {
+/// Fluentd forward
+#[derive(Serialize_tuple, Debug)]
+#[allow(clippy::module_name_repetitions)]
+pub struct FluentForward<'a> {
     tag: &'a str,
     entries: Vec<Entry<'a>>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 #[serde(untagged)]
 enum RecordValue<'a> {
     String(&'a str),
@@ -143,7 +150,7 @@ where
     }
 }
 
-#[derive(Serialize_tuple)]
+#[derive(Serialize_tuple, Debug)]
 struct Entry<'a> {
     time: u32,
     record: FxHashMap<&'a str, RecordValue<'a>>, // always contains 'message' and 'event' -> object key

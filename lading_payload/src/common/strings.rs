@@ -13,7 +13,7 @@ const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01
 /// `typed_arena` in that there is no insertion, only creation, and the
 /// structure hands out `&str`, randomly.
 #[derive(Debug, Clone)]
-pub(crate) struct Pool {
+pub struct Pool {
     // The approach for the pool is simple. The user provides an alphabet and a
     // maximum size in memory and we stuff a `String` until that size is
     // met. The user calls for a `&str` of a certain size less than the maximum
@@ -24,7 +24,7 @@ pub(crate) struct Pool {
 impl Pool {
     /// Create a new instance of `Pool` with the default alpha-numeric character
     /// set of size `bytes`.
-    pub(crate) fn with_size<R>(rng: &mut R, bytes: usize) -> Self
+    pub fn with_size<R>(rng: &mut R, bytes: usize) -> Self
     where
         R: rand::Rng + ?Sized,
     {
@@ -64,7 +64,7 @@ impl Pool {
 
     /// Return a `&str` from the interior storage with size `bytes`. Result will
     /// be `None` if the request cannot be satisfied.
-    pub(crate) fn of_size<'a, R>(&'a self, rng: &mut R, bytes: usize) -> Option<&'a str>
+    pub fn of_size<'a, R>(&'a self, rng: &mut R, bytes: usize) -> Option<&'a str>
     where
         R: rand::Rng + ?Sized,
     {
@@ -81,11 +81,7 @@ impl Pool {
 
     /// Return a `&str` from the interior storage with size selected from `bytes_range`. Result will
     /// be `None` if the request cannot be satisfied.
-    pub(crate) fn of_size_range<'a, R, T>(
-        &'a self,
-        rng: &mut R,
-        bytes_range: Range<T>,
-    ) -> Option<&'a str>
+    pub fn of_size_range<'a, R, T>(&'a self, rng: &mut R, bytes_range: Range<T>) -> Option<&'a str>
     where
         R: rand::Rng + ?Sized,
         T: Into<usize> + Copy + PartialOrd + SampleUniform,

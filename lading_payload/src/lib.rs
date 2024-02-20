@@ -46,7 +46,7 @@ pub use trace_agent::TraceAgent;
 
 pub mod apache_common;
 pub mod ascii;
-pub(crate) mod common;
+pub mod common;
 pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
@@ -214,10 +214,15 @@ const fn div_ceil(lhs: usize, rhs: usize) -> usize {
 }
 
 /// Generate instance of `I` from source of randomness `S`.
-pub(crate) trait Generator<'a> {
+pub trait Generator<'a> {
+    /// Output type of the generator
     type Output: 'a;
+    /// Error type of the generator
     type Error: 'a;
 
+    /// Generate an instance of `Output` from source of randomness `S`.
+    /// # Errors
+    /// - If the generator fails to generate an instance of `Output`.
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized;

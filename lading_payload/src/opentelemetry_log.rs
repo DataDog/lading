@@ -39,7 +39,9 @@ impl ExportLogsServiceRequest {
     }
 }
 
-pub(crate) struct LogRecord(v1::LogRecord);
+/// v1 log record
+#[derive(Debug)]
+pub struct LogRecord(v1::LogRecord);
 
 #[derive(Debug, Clone)]
 /// OTLP log payload

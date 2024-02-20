@@ -20,7 +20,7 @@ use self::{
 
 use super::Generator;
 
-mod common;
+pub mod common;
 pub mod event;
 pub mod metric;
 pub mod service_check;
