@@ -79,6 +79,7 @@ jobs:
         uses: taiki-e/upload-rust-binary-action@v1
 
         env:
+          # Setting CFLAGS or CXXFLAGS will override the default flags provided by the cc crate
           CFLAGS: ${{ matrix.cflags }}
           CXXFLAGS: ${{ matrix.cxxflags }}
           CC: ${{ matrix.cc }}
