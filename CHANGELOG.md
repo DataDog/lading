@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.20.9-rc0]
+### Fixed
+- Do not crash on prometheus export that includes blank lines.
+
 ## [0.20.8]
 ### Added
 - Parse working set memory from cgroups on Linux, opens the door to future
