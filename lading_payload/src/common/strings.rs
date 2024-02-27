@@ -21,6 +21,9 @@ pub(crate) struct Pool {
     inner: String,
 }
 
+/// Opaque 'str' handle for the pool
+pub type Handle = (usize, usize);
+
 impl Pool {
     /// Create a new instance of `Pool` with the default alpha-numeric character
     /// set of size `bytes`.
@@ -79,6 +82,27 @@ impl Pool {
         Some(&self.inner[lower_idx..upper_idx])
     }
 
+    /// Return a `&str` from the interior storage with size `bytes`. Result will
+    /// be `None` if the request cannot be satisfied.
+    pub fn of_size_with_handle<'a, R>(
+        &'a self,
+        rng: &mut R,
+        bytes: usize,
+    ) -> Option<(&'a str, Handle)>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        if bytes >= self.inner.len() {
+            return None;
+        }
+
+        let max_lower_idx = self.inner.len() - bytes;
+        let lower_idx = rng.gen_range(0..max_lower_idx);
+        let upper_idx = lower_idx + bytes;
+
+        Some((&self.inner[lower_idx..upper_idx], (lower_idx, bytes)))
+    }
+
     /// Return a `&str` from the interior storage with size selected from `bytes_range`. Result will
     /// be `None` if the request cannot be satisfied.
     pub(crate) fn of_size_range<'a, R, T>(
@@ -92,6 +116,18 @@ impl Pool {
     {
         let bytes: usize = rng.gen_range(bytes_range).into();
         self.of_size(rng, bytes)
+    }
+
+    /// Given an opaque handle returned from `*_with_handle`, return the &str it represents
+    #[must_use]
+    pub fn from_handle(&self, handle: Handle) -> Option<&str> {
+        let (offset, length) = handle;
+        if offset + length < self.inner.len() {
+            let str = &self.inner[offset..offset + length];
+            Some(str)
+        } else {
+            None
+        }
     }
 }
 

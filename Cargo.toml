@@ -30,5 +30,18 @@ codegen-units = 1 # Increases compile time but improves optmization alternatives
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
 
+[profile.mybench]
+inherits = "release"
+opt-level = 3
+debug = true
+strip = "none"
+debug-assertions = false
+overflow-checks = false
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 16
+rpath = false
+
 [profile.dev]
 panic = "abort"
