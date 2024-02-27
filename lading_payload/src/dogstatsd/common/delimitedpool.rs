@@ -433,15 +433,10 @@ mod test {
             let spacing = ConfRange::Constant(spacing);
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = match DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
-                Ok(pool) => pool,
-                Err(e) => {
-                    // its okay if the arguments are not valid
-                    return Ok(());
-                }
-            };
-            let delimiter_idx = pool.get_random_delimiter(&mut rng);
-            assert_eq!(pool.delimiter as u8, pool.inner.as_bytes()[delimiter_idx]);
+            if let Ok(pool) = DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
+                let delimiter_idx = pool.get_random_delimiter(&mut rng);
+                assert_eq!(pool.delimiter as u8, pool.inner.as_bytes()[delimiter_idx]);
+            }
         }
     }
 
@@ -452,15 +447,10 @@ mod test {
             let spacing = ConfRange::Constant(spacing);
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = match DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
-                Ok(pool) => pool,
-                Err(e) => {
-                    // its okay if the arguments are not valid
-                    return Ok(());
+            if let Ok(pool) = DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
+                if let Some(s) = pool.of_newnew(&mut rng) {
+                    assert_str!(s, pool, spacing);
                 }
-            };
-            if let Some(s) = pool.of_newnew(&mut rng) {
-                assert_str!(s, pool, spacing);
             }
         }
     }
@@ -472,25 +462,20 @@ mod test {
             let spacing = ConfRange::Inclusive{min: min_spacing, max: max_spacing};
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = match DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
-                Ok(pool) => pool,
-                Err(e) => {
-                    // its okay if the arguments are not valid
-                    return Ok(());
-                }
-            };
-            let mut nones_found = 0;
-            for _ in 0..100 {
-                match pool.of_newnew(&mut rng) {
-                    Some(s) => {
-                        assert_str!(s, pool, spacing);
-                    },
-                    None => {
-                        nones_found += 1;
+            if let Ok(pool) = DelimitedPool::new(&mut rng, max_bytes, ':', spacing) {
+                let mut nones_found = 0;
+                for _ in 0..100 {
+                    match pool.of_newnew(&mut rng) {
+                        Some(s) => {
+                            assert_str!(s, pool, spacing);
+                        },
+                        None => {
+                            nones_found += 1;
+                        }
                     }
                 }
+                assert!(nones_found < 100);
             }
-            assert!(nones_found < 100);
         }
     }
 }
