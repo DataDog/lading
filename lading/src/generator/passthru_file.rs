@@ -150,6 +150,7 @@ impl PassthruFile {
     ///
     /// # Errors
     ///
+    /// If the underlying block cache fails to spin, an error will be returned.
     ///
     /// # Panics
     ///
