@@ -15,7 +15,7 @@ use crate::{
 
 const MIN_UNIQUE_TAG_RATIO: f32 = 0.10;
 const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
-const WARN_UNIQUE_TAG_RATIO: f32 = 0.5;
+const WARN_UNIQUE_TAG_RATIO: f32 = 0.4;
 const MIN_TAG_LENGTH: u16 = 3;
 
 /// List of tags that will be present on a dogstatsd message
@@ -227,7 +227,9 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use crate::common::strings::Pool;
-    use crate::dogstatsd::common::tags::{MAX_UNIQUE_TAG_RATIO, MIN_UNIQUE_TAG_RATIO};
+    use crate::dogstatsd::common::tags::{
+        MAX_UNIQUE_TAG_RATIO, MIN_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO,
+    };
     use crate::dogstatsd::{tags, ConfRange};
     use crate::Generator;
 
@@ -385,7 +387,7 @@ mod test {
         /// The goal of this test is to vary the unique_tag_probability between the WARN and MAX
         /// levels and ensure that we are always able to generate the desired number of contexts
         #[test]
-        fn contexts_respected_with_varying_ratio(seed: u64, desired_num_contexts in 1..100_000_usize, tag_context_ratio in MIN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
+        fn contexts_respected_with_varying_ratio(seed: u64, desired_num_contexts in 1..100_000_usize, tag_context_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 50 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
