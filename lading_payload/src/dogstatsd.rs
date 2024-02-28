@@ -267,7 +267,7 @@ pub struct Config {
     /// If this is 0, it is highly unlikely that the resulting traffic will
     /// actually have a ratio of 0, the desired number of contexts will
     /// _always_ be generated at the expense of this ratio.
-    pub tag_context_ratio: f32,
+    pub unique_tag_ratio: f32,
 }
 
 impl Default for Config {
@@ -294,7 +294,7 @@ impl Default for Config {
             value: ValueConf::default(),
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
-            tag_context_ratio: 0.2,
+            unique_tag_ratio: 0.5,
         }
     }
 }
@@ -445,7 +445,7 @@ impl MemberGenerator {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
-        tag_context_ratio: f32,
+        unique_tag_ratio: f32,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -462,7 +462,7 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            tag_context_ratio,
+            unique_tag_ratio,
         ) {
             Ok(tg) => tg,
             Err(e) => {
@@ -641,7 +641,7 @@ impl DogStatsD {
             config.kind_weights,
             config.metric_weights,
             config.value,
-            config.tag_context_ratio,
+            config.unique_tag_ratio,
             rng,
         )?;
 

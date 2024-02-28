@@ -27,7 +27,7 @@ pub(crate) type Tagset = Vec<String>;
 /// produce only a limited, deterministic set of tags while avoiding needing to
 /// allocate them all in one shot.
 ///
-/// The `tag_context_ratio` is a value between 0.10 and 1.0. It represents the
+/// The `unique_tag_ratio` is a value between 0.10 and 1.0. It represents the
 /// ratio of new tags to existing tags. If the value is 1.0, then all tags will
 /// be new. If the value 0.0 were allowed,
 /// it would conceptually mean "always use an existing tag", however this is a
@@ -49,7 +49,7 @@ pub(crate) struct Generator {
     seed: Cell<u64>,
     internal_rng: RefCell<SmallRng>,
     tagsets_produced: Cell<usize>,
-    desired_num_contexts: usize,
+    num_tagsets: usize,
     tags_per_msg: ConfRange<u8>,
     tag_length: ConfRange<u16>,
     pool: Pool,
@@ -114,7 +114,7 @@ impl Generator {
             tag_length,
             pool,
             tagsets_produced: Cell::new(0),
-            desired_num_contexts,
+            num_tagsets: desired_num_contexts,
             unique_tag_probability,
             unique_tags: RefCell::new(Vec::new()),
         })
@@ -149,14 +149,18 @@ impl<'a> crate::Generator<'a> for Generator {
     type Output = Tagset;
     type Error = crate::Error;
 
-    /// Output here is a list of tags that will be put on a single dogstatsd message
+    /// Return a tagset -- a list of tags, each tag having the format `key:value`
+    /// Note that after `num_tagsets` have been produced, the tagsets will loop and produce
+    /// identical tagsets.
+    /// Each tagset is randomly chosen. There is a very high probability that each tagset
+    /// will be unique, however see the note in the component documentation.
     fn generate<R>(&'a self, _rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
     {
         // if we have produced the number of tagsets we are supposed to produce, then reseed the internal RNG
         // this ensures that we generate the same tags in a loop
-        if self.tagsets_produced.get() >= self.desired_num_contexts {
+        if self.tagsets_produced.get() >= self.num_tagsets {
             // Reseed internal RNG with initial seed
             self.internal_rng
                 .replace(SmallRng::seed_from_u64(self.seed.get()));
