@@ -22,22 +22,18 @@ jobs:
           const label = !!payload.pull_request.labels.find(l => l.name === 'no-changelog');
           core.setOutput('has_label', label.toString());
 
-    - name: Exit if no-changelog label is present
-      if: steps.label-check.outputs.has_label == 'true'
-      run: |
-        echo "No-changelog label is present. Skipping changelog check."
-        exit 0
-
     - name: Check if CHANGELOG.md was modified
       id: changelog-check
+      if: steps.label-check.outputs.has_label == 'false'
       uses: tj-actions/changed-files@v42
       with:
         files: |
           CHANGELOG.md
 
     - name: Assert CHANGELOG.md is modified
-      if: steps.changelog-check.outputs.any_changed != 'true'
-      run: |
-        echo "FAIL: No changes to CHANGELOG.md detected. Add 'no-changelog' label if this is intentional."
-        exit 1
+      uses: actions/github-script@v7
+      if: steps.label-check.outputs.has_label == 'false' && steps.changelog-check.outputs.any_changed != 'true'
+      with:
+        script: |
+          core.setFailed("No changes to CHANGELOG.md detected. Add 'no-changelog' label if this is intentional.")
 
