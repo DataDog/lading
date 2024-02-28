@@ -262,11 +262,11 @@ pub struct Config {
     /// total length of the data block.
     pub length_prefix_framed: bool,
 
-    /// The desired ratio between unique tags and the number of contexts
-    /// If this is 1, then that means every single tag is unique.
-    /// If this is 0, it is highly unlikely that the resulting traffic will
-    /// actually have a ratio of 0, the desired number of contexts will
-    /// _always_ be generated at the expense of this ratio.
+    /// This is a ratio between 0.10 and 1.0 which determines how many
+    /// individual tags are unique vs re-used tags.
+    /// If this is 1, then every single tag will be unique.
+    /// If this is 0.10, then most of the tags (90%) will be sampled
+    /// from existing tags.
     pub unique_tag_ratio: f32,
 }
 
