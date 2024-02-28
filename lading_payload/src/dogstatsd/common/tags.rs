@@ -227,9 +227,7 @@ mod test {
     use rand::{rngs::SmallRng, SeedableRng};
 
     use crate::common::strings::Pool;
-    use crate::dogstatsd::common::tags::{
-        MAX_UNIQUE_TAG_RATIO, MIN_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO,
-    };
+    use crate::dogstatsd::common::tags::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{tags, ConfRange};
     use crate::Generator;
 
