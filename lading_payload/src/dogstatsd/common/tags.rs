@@ -13,8 +13,12 @@ use crate::{
     dogstatsd::ConfRange,
 };
 
-// This represents a list of tags that will be present on a single
-// dogstatsd message.
+const MIN_UNIQUE_TAG_RATIO: f32 = 0.10;
+const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
+const WARN_UNIQUE_TAG_RATIO: f32 = 0.5;
+const MIN_TAG_LENGTH: u16 = 3;
+
+/// List of tags that will be present on a dogstatsd message
 pub(crate) type Tagset = Vec<String>;
 
 /// Generator for tags
@@ -32,9 +36,9 @@ pub(crate) type Tagset = Vec<String>;
 /// therefore a minimum value of 0.10 is enforced.
 /// Despite this minimum, it is possible to not be able to hit the desired number of contexts.
 /// As an example:
-/// unique_tag_probability: 0.10
-/// tags_per_msg: 3
-/// desired_num_contexts: 1000
+/// `unique_tag_probability`: 0.10
+/// `tags_per_msg`: 3
+/// `desired_num_contexts`: 1000
 ///
 /// With 3 tags per message, and a 10% chance of generating a new tag, 1000 calls
 /// to generate will result in 3000 "get new tag" decisions.
@@ -69,6 +73,7 @@ impl Generator {
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
     /// - If `tag_length` is invalid or has minimum value less than 3
+    /// - If `unique_tag_probability` is not between 0.10 and 1.0
     pub(crate) fn new(
         seed: u64,
         tags_per_msg: ConfRange<u8>,
@@ -76,29 +81,32 @@ impl Generator {
         desired_num_contexts: usize,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        let mut rng = SmallRng::seed_from_u64(seed);
-        let pool = Pool::with_size(&mut rng, 1_000_000);
+        let pool = Pool::with_size(&mut SmallRng::seed_from_u64(seed), 1_000_000);
+
         let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
         if !tag_length_valid {
             return Err(Error::InvalidConstruction(format!(
                 "Invalid tag length: {tag_length_valid_msg}"
             )));
         }
-        if tag_length.start() < 3 {
+        if tag_length.start() < MIN_TAG_LENGTH {
+            return Err(Error::InvalidConstruction(format!(
+                "Tag length must be at least {MIN_TAG_LENGTH}, found {start}",
+                start = tag_length.start()
+            )));
+        }
+
+        if !(MIN_UNIQUE_TAG_RATIO..=MAX_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
             return Err(Error::InvalidConstruction(
-                "Tag length must be at least 3".to_string(),
+                format!("Tag context ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"),
             ));
         }
 
-        if !(0.10..=1.0).contains(&unique_tag_probability) {
-            return Err(Error::InvalidConstruction(
-                "Tag context ratio must be between 0.10 and 1.0".to_string(),
-            ));
+        if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
+            warn!("unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in under-generating the desired number of contexts");
         }
 
-        if !(0.10..=0.5).contains(&unique_tag_probability) {
-            warn!("unique_tag_probability is less than 0.5. This may result in under-generating the desired number of contexts");
-        }
+        let rng = SmallRng::seed_from_u64(seed);
 
         Ok(Generator {
             seed: Cell::new(seed),
@@ -248,6 +256,43 @@ mod test {
             *entry += 1;
         }
         context_map.len()
+    }
+
+    proptest! {
+
+        #[test]
+        fn tagsets_repeat_after_reaching_tagset_max(seed: u64, num_tagsets in 1..100_000_usize) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
+            let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+            let generator =
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, 1.0)
+                    .expect("Tag generator to be valid");
+
+            let first_batch = (0..num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            let second_batch = (0..num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(first_batch.len(), second_batch.len());
+            for i in 0..first_batch.len() {
+                let first = &first_batch[i];
+                let second = &second_batch[i];
+                assert_eq!(first, second);
+            }
+        }
     }
 
     proptest! {
