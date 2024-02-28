@@ -11,6 +11,9 @@ guidelines when crafting your change.
    but do please add descriptive commit messages to your PR. We provide a
    template for your convenience.
 
+0. Please include a changelog entry in `CHANGELOG.md` with all non-trivial changes.
+   If a change is trivial, label the PR as `no-changelog` to avoid a CI ding.
+
 0. Do consider tagging reviewers only after CI checks are green.
 
 0. Do consider that the smaller your change the easier it is to review and the
