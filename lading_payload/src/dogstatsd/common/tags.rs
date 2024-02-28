@@ -13,9 +13,9 @@ use crate::{
     dogstatsd::ConfRange,
 };
 
-const MIN_UNIQUE_TAG_RATIO: f32 = 0.10;
+const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
 const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
-const WARN_UNIQUE_TAG_RATIO: f32 = 0.4;
+const WARN_UNIQUE_TAG_RATIO: f32 = 0.10;
 const MIN_TAG_LENGTH: u16 = 3;
 
 /// List of tags that will be present on a dogstatsd message
@@ -33,12 +33,12 @@ pub(crate) type Tagset = Vec<String>;
 /// be new. If the value 0.0 were allowed,
 /// it would conceptually mean "always use an existing tag", however this is a
 /// degenerate case as there would never be a new tag generated.
-/// therefore a minimum value of 0.10 is enforced.
+/// therefore a minimum value is enforced.
 /// Despite this minimum, it is possible to not be able to hit the desired number of contexts.
 /// As an example:
 /// `unique_tag_probability`: 0.10
 /// `tags_per_msg`: 3
-/// `desired_num_contexts`: 1000
+/// `num_tagsets`: 1000
 ///
 /// With 3 tags per message, and a 10% chance of generating a new tag, 1000 calls
 /// to generate will result in 3000 "get new tag" decisions.

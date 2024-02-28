@@ -265,7 +265,7 @@ pub struct Config {
     /// This is a ratio between 0.10 and 1.0 which determines how many
     /// individual tags are unique vs re-used tags.
     /// If this is 1, then every single tag will be unique.
-    /// If this is 0.10, then most of the tags (90%) will be sampled
+    /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
 }
@@ -294,7 +294,7 @@ impl Default for Config {
             value: ValueConf::default(),
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
-            unique_tag_ratio: 0.5,
+            unique_tag_ratio: 0.11,
         }
     }
 }
