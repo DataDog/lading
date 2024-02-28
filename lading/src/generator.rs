@@ -19,6 +19,7 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
+pub mod passthru_file;
 pub mod process_tree;
 pub mod procfs;
 pub mod splunk_hec;
@@ -57,6 +58,9 @@ pub enum Error {
     /// See [`crate::generator::unix_datagram::Error`] for details.
     #[error(transparent)]
     UnixDatagram(#[from] unix_datagram::Error),
+    /// See [`crate::generator::passthru_file::Error`] for details.
+    #[error(transparent)]
+    PassthruFile(#[from] passthru_file::Error),
     /// See [`crate::generator::process_tree::Error`] for details.
     #[error(transparent)]
     ProcessTree(#[from] process_tree::Error),
@@ -110,6 +114,8 @@ pub enum Inner {
     UnixStream(unix_stream::Config),
     /// See [`crate::generator::unix_datagram::Config`] for details.
     UnixDatagram(unix_datagram::Config),
+    /// See [`crate::generator::passthru_file::Config`] for details.
+    PassthruFile(passthru_file::Config),
     /// See [`crate::generator::process_tree::Config`] for details.
     ProcessTree(process_tree::Config),
     /// See [`crate::generator::procfs::Config`] for details.
@@ -140,6 +146,8 @@ pub enum Server {
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
     UnixDatagram(unix_datagram::UnixDatagram),
+    /// See [`crate::generator::passthru_file::PassthruFile`] for details.
+    PassthruFile(passthru_file::PassthruFile),
     /// See [`crate::generator::process_tree::ProcessTree`] for details.
     ProcessTree(process_tree::ProcessTree),
     /// See [`crate::generator::procfs::Procfs`] for details.
@@ -182,6 +190,11 @@ impl Server {
                     shutdown,
                 )?)
             }
+            Inner::PassthruFile(conf) => Self::PassthruFile(passthru_file::PassthruFile::new(
+                config.general,
+                &conf,
+                shutdown,
+            )?),
             Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
                 config.general,
                 &conf,
@@ -221,6 +234,7 @@ impl Server {
             Server::Grpc(inner) => inner.spin().await?,
             Server::UnixStream(inner) => inner.spin().await?,
             Server::UnixDatagram(inner) => inner.spin().await?,
+            Server::PassthruFile(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,
             Server::ProcFs(inner) => inner.spin().await?,
         };
