@@ -462,6 +462,7 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
+            Rc::clone(&pool),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
