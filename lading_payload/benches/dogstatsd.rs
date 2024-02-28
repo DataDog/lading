@@ -36,6 +36,6 @@ fn dogstatsd_all(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().measurement_time(Duration::from_secs(90)).sample_size(20);
+    config = Criterion::default().measurement_time(Duration::from_secs(90));
     targets = dogstatsd_setup, dogstatsd_all
 );
