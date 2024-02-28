@@ -66,7 +66,6 @@ pub(crate) enum Error {
 }
 
 impl Generator {
-    #[allow(unreachable_pub)]
     /// Creates a new tag generator
     ///
     /// # Errors
@@ -175,15 +174,6 @@ impl<'a> crate::Generator<'a> for Generator {
             .tags_per_msg
             .sample(&mut *self.internal_rng.borrow_mut()) as usize;
         for _ in 0..tags_count {
-            // if configured ratio is 1.0, then we always generate a brand-new tag
-            // if the configured ratio is 0.5, then we generate a new tag 50% of the time
-            // if the configured ratio is 0.0, then we never generate a new tag
-            // so generate a random number between 0 and 1
-            // if random < configured_ratio, then generate a new tag
-            // else choose an existing tag
-            // or --
-            // if random > configured ratio, then choose an existing tag
-            // else generate a new tag
             let choose_existing_prob: f32 =
                 OpenClosed01.sample(&mut *(self.internal_rng.borrow_mut()));
 
@@ -235,6 +225,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{rngs::SmallRng, SeedableRng};
 
+    use crate::dogstatsd::common::tags::{MAX_UNIQUE_TAG_RATIO, MIN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{tags, ConfRange};
     use crate::Generator;
 
@@ -261,8 +252,28 @@ mod test {
         context_map.len()
     }
 
-    proptest! {
+    #[test]
+    fn count_contexts_works() {
+        let tagsets = vec![
+            vec!["a:1".to_string(), "b:2".to_string()],
+            vec!["a:1".to_string(), "b:2".to_string()],
+            vec!["a:1".to_string(), "b:2".to_string()],
+            vec!["a:1".to_string(), "b:2".to_string()],
+        ];
+        let num_contexts = count_num_contexts(&tagsets);
+        assert_eq!(num_contexts, 1);
 
+        let tagsets = vec![
+            vec!["a:3".to_string(), "b:2".to_string()],
+            vec!["a:4".to_string(), "b:2".to_string()],
+            vec!["a:5".to_string(), "b:2".to_string()],
+            vec!["a:1".to_string(), "b:2".to_string()],
+        ];
+        let num_contexts = count_num_contexts(&tagsets);
+        assert_eq!(num_contexts, 4);
+    }
+
+    proptest! {
         #[test]
         fn tagsets_repeat_after_reaching_tagset_max(seed: u64, num_tagsets in 1..100_000_usize) {
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -360,20 +371,14 @@ mod test {
     }
 
     proptest! {
-        /// This test varies the unique_tag_probability. This makes it possible to specify inputs
-        /// that will not be able to generate the desired number of contexts.
-        /// As an example:
-        /// unique_tag_probability: 0.10
-        /// tags_per_msg: 3
-        /// desired_num_contexts: 1000
-        ///
-        /// With 3 tags per message, and a 10% chance of generating a new tag, 1000 calls
-        /// to generate will result in 3000 "get new tag" decisions.
-        /// 300 of these will result in new tags and 2700 of these will re-use an existing tag.
-        /// With only 300 chances for new entropy, each individual tagset will likely over-sample
-        /// the existing tags and therefore UNDER-generate the desired number of contexts.
+        /// This test varies the unique_tag_probability. This config option makes it possible
+        /// to specify inputs that will force the tagsets to repeat
+        /// A concern of the dogstatsd consumer is that the tagsets yielded have a cardinality of
+        /// `num_tagsets`
+        /// The goal of this test is to vary the unique_tag_probability between the WARN and MAX
+        /// levels and ensure that we are always able to generate the desired number of contexts
         #[test]
-        fn contexts_respected_with_varying_ratio(seed: u64, desired_num_contexts in 1..100_000_usize, tag_context_ratio in 0.50f32..1.0f32) {
+        fn contexts_respected_with_varying_ratio(seed: u64, desired_num_contexts in 1..100_000_usize, tag_context_ratio in MIN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 50 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -387,7 +392,6 @@ mod test {
             )
             .expect("Tag generator to be valid");
 
-            // need guarantee that calling generate N times will generate N unique contexts
             let tagsets = (0..desired_num_contexts)
                 .map(|_| {
                     generator
