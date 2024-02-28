@@ -1,6 +1,5 @@
 //! Tag generation for dogstatsd payloads
 use std::cell::{Cell, RefCell, RefMut};
-use std::{collections::HashSet, rc::Rc};
 
 use rand::distributions::Distribution;
 use rand::Rng;
@@ -60,7 +59,7 @@ pub(crate) struct Generator {
 
 /// Error type for `TagGenerator`
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub(crate) enum Error {
     /// Invalid construction
     #[error("Invalid construction: {0}")]
     InvalidConstruction(String),
@@ -133,8 +132,8 @@ impl Generator {
         match handles {
             Some((key_handle, value_handle)) => {
                 match (
-                    self.pool.from_handle(*key_handle),
-                    self.pool.from_handle(*value_handle),
+                    self.pool.using_handle(*key_handle),
+                    self.pool.using_handle(*value_handle),
                 ) {
                     (Some(key), Some(value)) => Some(format!("{key}:{value}")),
                     _ => None,

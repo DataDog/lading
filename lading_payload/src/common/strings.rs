@@ -22,7 +22,7 @@ pub(crate) struct Pool {
 }
 
 /// Opaque 'str' handle for the pool
-pub type Handle = (usize, usize);
+pub(crate) type Handle = (usize, usize);
 
 impl Pool {
     /// Create a new instance of `Pool` with the default alpha-numeric character
@@ -84,7 +84,7 @@ impl Pool {
 
     /// Return a `&str` from the interior storage with size `bytes`. Result will
     /// be `None` if the request cannot be satisfied.
-    pub fn of_size_with_handle<'a, R>(
+    pub(crate) fn of_size_with_handle<'a, R>(
         &'a self,
         rng: &mut R,
         bytes: usize,
@@ -120,7 +120,7 @@ impl Pool {
 
     /// Given an opaque handle returned from `*_with_handle`, return the &str it represents
     #[must_use]
-    pub fn from_handle(&self, handle: Handle) -> Option<&str> {
+    pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
         let (offset, length) = handle;
         if offset + length < self.inner.len() {
             let str = &self.inner[offset..offset + length];
