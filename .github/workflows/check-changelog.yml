@@ -1,0 +1,43 @@
+name: Changelog Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  changelog-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 2 # Only need preceeding commit
+
+    - name: Check for no-changelog label
+      id: label-check
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const payload = context.payload;
+          const label = !!payload.pull_request.labels.find(l => l.name === 'no-changelog');
+          core.setOutput('has_label', label.toString());
+
+    - name: Exit if no-changelog label is present
+      if: steps.label-check.outputs.has_label == 'true'
+      run: |
+        echo "No-changelog label is present. Skipping changelog check."
+        exit 0
+
+    - name: Check if CHANGELOG.md was modified
+      id: changelog-check
+      uses: tj-actions/changed-files@v42
+      with:
+        files: |
+          CHANGELOG.md
+
+    - name: Assert CHANGELOG.md is modified
+      if: steps.changelog-check.outputs.any_changed != 'true'
+      run: |
+        echo "FAIL: No changes to CHANGELOG.md detected. Add 'no-changelog' label if this is intentional."
+        exit 1
+

@@ -1,6 +1,0 @@
-# Note: the labeler workflow is configured to skip dependabot PRs
-
-# Label code changes with `needs_changelog` label
-needs_changelog:
-- any: ['!CHANGELOG.md']
-  all: ['**/*.rs', '**/*.toml']
