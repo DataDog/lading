@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforces changelog entries via CI check
 ### Fixed
 - During payload generation, blocks will reliably be filled to the requested amount.
+- During payload generation, block chunks now give more feedback when the
+  requested amount cannot be hit.
 ### Changed
 
 ## [0.20.8]
