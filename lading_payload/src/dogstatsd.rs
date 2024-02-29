@@ -9,7 +9,7 @@ use rand::{
     Rng,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::{common::strings, Serialize};
 
