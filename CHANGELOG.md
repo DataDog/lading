@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Enforces changelog entries via CI check
 ### Fixed
+- During payload generation, blocks will reliably be filled to the requested amount.
 ### Changed
 
 ## [0.20.8]
