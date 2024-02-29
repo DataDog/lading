@@ -575,16 +575,23 @@ where
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
     let mut block_iter = block_chunks.iter().peekable();
-    while block_iter.peek().is_some() {
+    let mut construct_block_failures = 0;
+    let max_construct_block_failures: usize = block_chunks.len() * 5;
+    while let Some(peeked_block) = block_iter.peek() {
+        assert!(construct_block_failures <= max_construct_block_failures, "Block construction failed {construct_block_failures} times consecutively while trying to construct block of size {peeked_block}. Failing the program. Check payload generation parameters.");
         // Consume the block only if a block is successfully constructed
         // otherwise retry the block size until it succeeds.
         block_iter.next_if(|block_size| {
             match construct_block(&mut rng, serializer, **block_size) {
                 Ok(Some(block)) => {
+                    construct_block_failures = 0; // reset failure counter on success
                     block_cache.push(block);
                     true
                 }
-                Ok(None) | Err(_) => false,
+                Ok(None) | Err(_) => {
+                    construct_block_failures += 1;
+                    false
+                }
             }
         });
     }
