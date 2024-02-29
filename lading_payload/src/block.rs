@@ -532,14 +532,15 @@ fn chunk_bytes<const N: usize>(
         }
     }
 
+    let computed_chunk_capacity = total_bytes.get() - bytes_remaining;
+    let total_chunk_capacity = byte_unit::Byte::from_u64(computed_chunk_capacity.into());
+    let total_chunk_capacity_str = total_chunk_capacity
+        .get_appropriate_unit(byte_unit::UnitType::Decimal)
+        .to_string();
+
     if bytes_remaining > 0 {
         let total_requested_bytes = byte_unit::Byte::from_u64(total_bytes.get().into());
         let total_requested_bytes_str = total_requested_bytes
-            .get_appropriate_unit(byte_unit::UnitType::Decimal)
-            .to_string();
-        let computed_chunk_capacity = total_bytes.get() - bytes_remaining;
-        let total_chunk_capacity = byte_unit::Byte::from_u64(computed_chunk_capacity.into());
-        let total_chunk_capacity_str = total_chunk_capacity
             .get_appropriate_unit(byte_unit::UnitType::Decimal)
             .to_string();
 
@@ -554,6 +555,7 @@ fn chunk_bytes<const N: usize>(
         };
         warn!("Failed to construct chunks adding up to {total_requested_bytes_str}. Chunks created have total capacity of {total_chunk_capacity_str}. {bytes_remaining_str} unfulfilled. {extra_advice}");
     }
+    info!("Allocated {total_chunks} chunks with total capacity of {total_chunk_capacity_str}.");
 
     Ok(total_chunks)
 }
@@ -609,11 +611,12 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
-        let sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
+        let capacity_sum = block_chunks.iter().sum::<u32>();
+        let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
         info!(
             num_blocks = block_cache.len(),
-            desired_num_blocks = block_chunks.len(),
-            block_sum_capacity = sum,
+            filled_byte_sum = filled_sum,
+            capacity_sum = capacity_sum,
             "Block cache constructed."
         );
         Ok(block_cache)
