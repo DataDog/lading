@@ -502,6 +502,7 @@ fn chunk_bytes<const N: usize>(
         }
     }
 
+    let mut num_retries = 0;
     let mut total_chunks = 0;
     let mut bytes_remaining = total_bytes.get();
 
@@ -516,34 +517,19 @@ fn chunk_bytes<const N: usize>(
             .expect("failed to get block size, should not fail")
             .get();
 
-        // Determine if the block_size fits in the remaining bytes. If it does,
-        // great. If not, we break out of the round-robin.
+        // Check if the block_size fits in the remaining bytes. If it does,
+        // great. If not, we'll retry each block size one more time before bailing.
         if block_size <= bytes_remaining {
             chunks[total_chunks] = block_size;
             total_chunks += 1;
             bytes_remaining -= block_size;
+            num_retries = 0; // If we filled in a block, reset the retry counter
         } else {
-            break;
-        }
-    }
-    // It's possible at this point that there are still bytes remaining. If
-    // there are, we loop over the block byte sizes one last time just in case
-    // there's space left we can occupy.
-    //
-    // This could theoretically be packed a little tighter if we sorted
-    // `block_byte_sizes` into descending order. I want to avoid additional
-    // allocation in this function and so this is not done.
-    if bytes_remaining > 0 {
-        for block_size in block_byte_sizes {
-            if total_chunks >= N {
+            if num_retries >= block_byte_sizes.len() {
+                warn!("Failed to fill the remaining {bytes_remaining} bytes after attempting each block size again.");
                 break;
             }
-            let block_size = block_size.get();
-            if block_size <= bytes_remaining {
-                chunks[total_chunks] = block_size;
-                total_chunks += 1;
-                bytes_remaining -= block_size;
-            }
+            num_retries += 1;
         }
     }
 
@@ -699,7 +685,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroU32;
+
     use proptest::prelude::*;
+
+    use crate::block::{chunk_bytes, MAX_CHUNKS};
 
     #[test]
     fn construct_block_cache_inner_fills_blocks() {
@@ -727,6 +717,61 @@ mod test {
                 .expect("construct_block_cache_inner should not fail");
 
             assert_eq!(block_cache.len(), block_chunks.len());
+        }
+    }
+    macro_rules! nz_u32 {
+        ($value:expr) => {
+            NonZeroU32::new($value).expect(concat!($value, " is non-zero"))
+        };
+    }
+
+    /// This test ensures that `chunk_bytes` will re-use block sizes if it helps reach
+    /// the desired total bytes.
+    #[test]
+    fn chunk_bytes_fills_using_repeated_blocks_if_needed() {
+        // 10 bytes total, [3 1 9] block sizes, 10 chunks
+        const NUM_CHUNKS: usize = 10;
+        let total_bytes = nz_u32!(10);
+        let block_byte_sizes = [nz_u32!(3), nz_u32!(1), nz_u32!(9)];
+        let mut block_chunks: [u32; NUM_CHUNKS] = [0; NUM_CHUNKS];
+
+        let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+            .expect("chunk_bytes should not fail");
+        let populated_block_chunks = &block_chunks[0..res];
+        let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+        assert_eq!(total_bytes.get(), block_chunk_sum);
+
+        // 35 bytes total, [ 3 1 9 ] block sizes
+        let total_bytes = nz_u32!(35);
+        let block_byte_sizes = [nz_u32!(3), nz_u32!(1), nz_u32!(9)];
+        let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+
+        let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+            .expect("chunk_bytes should not fail");
+        let populated_block_chunks = &block_chunks[0..res];
+        let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+        assert_eq!(total_bytes.get(), block_chunk_sum);
+    }
+
+    proptest! {
+        // This test does not pass! (hence the #[ignore])
+        // It is trivial to find a combination of total_bytes and `block_byte_sizes` where
+        // its not possible to reach the max amount. Consider total_bytes=5 and block_sizes=[4]
+
+        // proptest todo - figure out how to express "block_byte_sizes members must be less than total_bytes"
+        // until then, the strategy is to set the max block size to the min total_bytes
+        #[ignore]
+        #[test]
+        fn chunk_bytes_yields_total_expected_bytes( total_bytes in 1_000..=100_000_000u32, block_byte_sizes in proptest::collection::vec(any::<NonZeroU32>(), 1..1_000)) {
+            let total_bytes = NonZeroU32::new(total_bytes).expect("total_bytes is non-zero");
+            let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+
+            let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+                .expect("chunk_bytes should not fail");
+            let populated_block_chunks = &block_chunks[0..res];
+            let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+            let requested_bytes = total_bytes.get();
+            assert_eq!(requested_bytes, block_chunk_sum, "filled {res} chunks (max allowed is {MAX_CHUNKS}), but couldn't satisfy request for {requested_bytes} bytes");
         }
     }
 }
