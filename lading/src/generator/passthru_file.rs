@@ -170,7 +170,8 @@ impl PassthruFile {
             let Some(ref mut current_file) = current_file else {
                 match tokio::fs::OpenOptions::new()
                     .create(true)
-                    .append(true)
+                    .write(true)
+                    .truncate(true)
                     .open(&self.path)
                     .await
                 {
