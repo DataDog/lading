@@ -690,7 +690,6 @@ impl DogStatsD {
             }
         }
         if bytes_remaining == max_bytes {
-            warn!("Could not fit any messages into the block with requested size {max_bytes}. Omitting this block.");
             return Ok(());
         }
 
@@ -746,7 +745,6 @@ impl DogStatsD {
             }
         }
         if bytes_remaining == max_bytes {
-            warn!("Could not fit any messages into the block with requested size {max_bytes}. Omitting this block.");
             return Ok(());
         }
 

@@ -481,8 +481,7 @@ fn stream_inner(
 /// Construct a vec of block sizes that fit into `total_bytes`.
 ///
 /// We partition `total_bytes` by `block_byte_sizes` via a round-robin method.
-/// Our goal is to terminate, more or less partition the space and do so without
-/// biasing toward any given byte size.
+/// Our goal is to terminate, more or less partition the space.
 ///
 /// # Errors
 ///
@@ -531,6 +530,29 @@ fn chunk_bytes<const N: usize>(
             }
             num_retries += 1;
         }
+    }
+
+    if bytes_remaining > 0 {
+        let total_requested_bytes = byte_unit::Byte::from_u64(total_bytes.get().into());
+        let total_requested_bytes_str = total_requested_bytes
+            .get_appropriate_unit(byte_unit::UnitType::Decimal)
+            .to_string();
+        let computed_chunk_capacity = total_bytes.get() - bytes_remaining;
+        let total_chunk_capacity = byte_unit::Byte::from_u64(computed_chunk_capacity.into());
+        let total_chunk_capacity_str = total_chunk_capacity
+            .get_appropriate_unit(byte_unit::UnitType::Decimal)
+            .to_string();
+
+        let bytes_remaining = byte_unit::Byte::from_u64(bytes_remaining.into());
+        let bytes_remaining_str = bytes_remaining
+            .get_appropriate_unit(byte_unit::UnitType::Decimal)
+            .to_string();
+        let extra_advice = if total_chunks == N {
+            "Max capacity of chunks was hit, consider making block sizes larger to fit more data."
+        } else {
+            "Current block sizes pack inefficiently, consider adding/changing the block sizes to better pack."
+        };
+        warn!("Failed to construct chunks adding up to {total_requested_bytes_str}. Chunks created have total capacity of {total_chunk_capacity_str}. {bytes_remaining_str} unfulfilled. {extra_advice}");
     }
 
     Ok(total_chunks)
@@ -587,9 +609,11 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
+        let sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
         info!(
-            size = block_cache.len(),
-            desired_size = block_chunks.len(),
+            num_blocks = block_cache.len(),
+            desired_num_blocks = block_chunks.len(),
+            block_sum_capacity = sum,
             "Block cache constructed."
         );
         Ok(block_cache)
