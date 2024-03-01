@@ -574,10 +574,26 @@ where
     R: Rng + ?Sized,
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
-    for block_size in block_chunks {
-        if let Some(block) = construct_block(&mut rng, serializer, *block_size)? {
-            block_cache.push(block);
-        }
+    let mut block_iter = block_chunks.iter().peekable();
+    let mut construct_block_failures = 0;
+    let max_construct_block_failures: usize = block_chunks.len() * 5;
+    while let Some(peeked_block) = block_iter.peek() {
+        assert!(construct_block_failures <= max_construct_block_failures, "Block construction failed {construct_block_failures} times consecutively while trying to construct block of size {peeked_block}. Failing the program. Check payload generation parameters.");
+        // Consume the block only if a block is successfully constructed
+        // otherwise retry the block size until it succeeds.
+        block_iter.next_if(|block_size| {
+            match construct_block(&mut rng, serializer, **block_size) {
+                Ok(Some(block)) => {
+                    construct_block_failures = 0; // reset failure counter on success
+                    block_cache.push(block);
+                    true
+                }
+                Ok(None) | Err(_) => {
+                    construct_block_failures += 1;
+                    false
+                }
+            }
+        });
     }
     if block_cache.is_empty() {
         error!("Empty block cache, unable to construct blocks!");
@@ -585,7 +601,11 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
-        info!(size = block_cache.len(), "Block cache constructed.");
+        info!(
+            size = block_cache.len(),
+            desired_size = block_chunks.len(),
+            "Block cache constructed."
+        );
         Ok(block_cache)
     }
 }
@@ -674,6 +694,40 @@ where
         )
         .ok_or(SpinError::Zero)?;
         Ok(Some(Block { total_bytes, bytes }))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+
+    #[test]
+    fn construct_block_cache_inner_fills_blocks() {
+        use crate::block::construct_block_cache_inner;
+        use rand::{rngs::SmallRng, SeedableRng};
+
+        let mut rng = SmallRng::seed_from_u64(0);
+        let block_chunks = [100, 100, 100, 200, 300];
+        let serializer = crate::Json;
+        let block_cache = construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+            .expect("construct_block_cache_inner should not fail");
+
+        assert_eq!(block_cache.len(), block_chunks.len());
+    }
+    proptest! {
+        #[test]
+        fn construct_block_cache_inner_fills_all_blocks(seed: u64, num_chunks in 1..=4096usize) {
+            use crate::block::construct_block_cache_inner;
+            use rand::{rngs::SmallRng, SeedableRng};
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let block_chunks = vec![100; num_chunks];
+            let serializer = crate::Json;
+            let block_cache = construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+                .expect("construct_block_cache_inner should not fail");
+
+            assert_eq!(block_cache.len(), block_chunks.len());
+        }
     }
 }
 
