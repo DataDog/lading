@@ -811,6 +811,7 @@ mod verification {
     /// Function `chunk_bytes` will always fail with an error if the passed
     /// `block_byte_sizes` is empty.
     #[kani::proof]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_empty_sizes_error() {
         let total_bytes: NonZeroU32 = kani::any();
         let block_byte_sizes = [];
@@ -826,6 +827,7 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_sizes_under_under_check() {
         let total_bytes: NonZeroU32 = kani::any_where(|x: &NonZeroU32| x.get() < 64);
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -841,6 +843,7 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_sizes_under_equal_check() {
         let total_bytes: NonZeroU32 = kani::any();
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -857,6 +860,7 @@ mod verification {
     /// Function `chunk_bytes` will fail if any member of `block_byte_sizes` is
     /// larger than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_sizes_under_equal_over_check() {
         let total_bytes: NonZeroU32 = kani::any();
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -873,6 +877,7 @@ mod verification {
 
     /// Function `chunk_bytes` does not fail to return some chunks.
     #[kani::proof]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_never_chunk_empty() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
@@ -895,7 +900,7 @@ mod verification {
     /// Function `chunk_bytes` does not return a chunk that is not present in
     /// the byte sizes.
     #[kani::proof]
-    #[kani::unwind(15)]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_always_present() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
@@ -920,7 +925,7 @@ mod verification {
     /// Function `chunk_bytes` does not populate values above the returned
     /// index, that is, they all remain zero.
     #[kani::proof]
-    #[kani::unwind(15)]
+    #[kani::unwind(101)] // unwind threshold set to block_chunks.len() ^ 2 + 1
     fn chunk_bytes_never_populate_above_index() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
