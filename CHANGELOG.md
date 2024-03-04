@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Enforces changelog entries via CI check
+- `payloadtool` binary useful for developers writing new experiments.
 ### Fixed
 - During payload generation, blocks will reliably be filled to the requested amount.
 - During payload generation, block chunks now give more feedback when the
