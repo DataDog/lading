@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tracing::{error, info, span, warn, Level};
 
-const MAX_CHUNKS: usize = 4096;
+const MAX_CHUNKS: usize = 16_384;
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
