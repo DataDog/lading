@@ -481,8 +481,7 @@ fn stream_inner(
 /// Construct a vec of block sizes that fit into `total_bytes`.
 ///
 /// We partition `total_bytes` by `block_byte_sizes` via a round-robin method.
-/// Our goal is to terminate, more or less partition the space and do so without
-/// biasing toward any given byte size.
+/// Our goal is to terminate, more or less partition the space.
 ///
 /// # Errors
 ///
@@ -510,41 +509,68 @@ fn chunk_bytes<const N: usize>(
         if total_chunks >= N {
             break;
         }
+        let mut attempt_block = |block| {
+            if block <= bytes_remaining {
+                chunks[total_chunks] = block;
+                total_chunks += 1;
+                bytes_remaining -= block;
+                return true;
+            }
+            false
+        };
+
         // SAFETY: By construction, the iterator will never terminate.
         let block_size = iter
             .next()
             .expect("failed to get block size, should not fail")
             .get();
 
-        // Determine if the block_size fits in the remaining bytes. If it does,
-        // great. If not, we break out of the round-robin.
-        if block_size <= bytes_remaining {
-            chunks[total_chunks] = block_size;
-            total_chunks += 1;
-            bytes_remaining -= block_size;
-        } else {
-            break;
-        }
-    }
-    // It's possible at this point that there are still bytes remaining. If
-    // there are, we loop over the block byte sizes one last time just in case
-    // there's space left we can occupy.
-    //
-    // This could theoretically be packed a little tighter if we sorted
-    // `block_byte_sizes` into descending order. I want to avoid additional
-    // allocation in this function and so this is not done.
-    if bytes_remaining > 0 {
-        for block_size in block_byte_sizes {
-            if total_chunks >= N {
+        if !attempt_block(block_size) {
+            // Block size did not fit into the remaining bytes.
+            // Try each block size one more time.
+            let mut found_fitting_block = false;
+            for block_size in block_byte_sizes {
+                if attempt_block(block_size.get()) {
+                    found_fitting_block = true;
+                    break;
+                }
+            }
+            if !found_fitting_block {
+                #[cfg(not(kani))]
+                {
+                    warn!("Failed to fill the remaining {bytes_remaining} bytes after attempting each block size again.");
+                }
                 break;
             }
-            let block_size = block_size.get();
-            if block_size <= bytes_remaining {
-                chunks[total_chunks] = block_size;
-                total_chunks += 1;
-                bytes_remaining -= block_size;
-            }
         }
+    }
+
+    #[cfg(not(kani))]
+    {
+        let computed_chunk_capacity = total_bytes.get() - bytes_remaining;
+        let total_chunk_capacity = byte_unit::Byte::from_u64(computed_chunk_capacity.into());
+        let total_chunk_capacity_str = total_chunk_capacity
+            .get_appropriate_unit(byte_unit::UnitType::Decimal)
+            .to_string();
+
+        if bytes_remaining > 0 {
+            let total_requested_bytes = byte_unit::Byte::from_u64(total_bytes.get().into());
+            let total_requested_bytes_str = total_requested_bytes
+                .get_appropriate_unit(byte_unit::UnitType::Decimal)
+                .to_string();
+
+            let bytes_remaining = byte_unit::Byte::from_u64(bytes_remaining.into());
+            let bytes_remaining_str = bytes_remaining
+                .get_appropriate_unit(byte_unit::UnitType::Decimal)
+                .to_string();
+            let extra_advice = if total_chunks == N {
+                "Max capacity of chunks was hit, consider making block sizes larger to fit more data."
+            } else {
+                "Current block sizes pack inefficiently, consider adding/changing the block sizes to better pack."
+            };
+            warn!("Failed to construct chunks adding up to {total_requested_bytes_str}. Chunks created have total capacity of {total_chunk_capacity_str}. {bytes_remaining_str} unfulfilled. {extra_advice}");
+        }
+        info!("Allocated {total_chunks} chunks with total capacity of {total_chunk_capacity_str}.");
     }
 
     Ok(total_chunks)
@@ -601,9 +627,12 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
+        let capacity_sum = block_chunks.iter().sum::<u32>();
+        let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
         info!(
-            size = block_cache.len(),
-            desired_size = block_chunks.len(),
+            num_blocks = block_cache.len(),
+            filled_byte_sum = filled_sum,
+            capacity_sum = capacity_sum,
             "Block cache constructed."
         );
         Ok(block_cache)
@@ -699,7 +728,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroU32;
+
     use proptest::prelude::*;
+
+    use crate::block::{chunk_bytes, MAX_CHUNKS};
 
     #[test]
     fn construct_block_cache_inner_fills_blocks() {
@@ -729,6 +762,61 @@ mod test {
             assert_eq!(block_cache.len(), block_chunks.len());
         }
     }
+    macro_rules! nz_u32 {
+        ($value:expr) => {
+            NonZeroU32::new($value).expect(concat!($value, " is non-zero"))
+        };
+    }
+
+    /// This test ensures that `chunk_bytes` will re-use block sizes if it helps reach
+    /// the desired total bytes.
+    #[test]
+    fn chunk_bytes_fills_using_repeated_blocks_if_needed() {
+        // 10 bytes total, [3 1 9] block sizes, 10 chunks
+        const NUM_CHUNKS: usize = 10;
+        let total_bytes = nz_u32!(10);
+        let block_byte_sizes = [nz_u32!(3), nz_u32!(1), nz_u32!(9)];
+        let mut block_chunks: [u32; NUM_CHUNKS] = [0; NUM_CHUNKS];
+
+        let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+            .expect("chunk_bytes should not fail");
+        let populated_block_chunks = &block_chunks[0..res];
+        let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+        assert_eq!(total_bytes.get(), block_chunk_sum);
+
+        // 35 bytes total, [ 3 1 9 ] block sizes
+        let total_bytes = nz_u32!(35);
+        let block_byte_sizes = [nz_u32!(3), nz_u32!(1), nz_u32!(9)];
+        let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+
+        let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+            .expect("chunk_bytes should not fail");
+        let populated_block_chunks = &block_chunks[0..res];
+        let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+        assert_eq!(total_bytes.get(), block_chunk_sum);
+    }
+
+    proptest! {
+        // This test does not pass! (hence the #[ignore])
+        // It is trivial to find a combination of total_bytes and `block_byte_sizes` where
+        // its not possible to reach the max amount. Consider total_bytes=5 and block_sizes=[4]
+
+        // proptest todo - figure out how to express "block_byte_sizes members must be less than total_bytes"
+        // until then, the strategy is to set the max block size to the min total_bytes
+        #[ignore]
+        #[test]
+        fn chunk_bytes_yields_total_expected_bytes( total_bytes in 1_000..=100_000_000u32, block_byte_sizes in proptest::collection::vec(any::<NonZeroU32>(), 1..1_000)) {
+            let total_bytes = NonZeroU32::new(total_bytes).expect("total_bytes is non-zero");
+            let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
+
+            let res = chunk_bytes(total_bytes, &block_byte_sizes, &mut block_chunks)
+                .expect("chunk_bytes should not fail");
+            let populated_block_chunks = &block_chunks[0..res];
+            let block_chunk_sum = populated_block_chunks.iter().sum::<u32>();
+            let requested_bytes = total_bytes.get();
+            assert_eq!(requested_bytes, block_chunk_sum, "filled {res} chunks (max allowed is {MAX_CHUNKS}), but couldn't satisfy request for {requested_bytes} bytes");
+        }
+    }
 }
 
 #[cfg(kani)]
@@ -739,6 +827,7 @@ mod verification {
     /// Function `chunk_bytes` will always fail with an error if the passed
     /// `block_byte_sizes` is empty.
     #[kani::proof]
+    #[kani::unwind(11)]
     fn chunk_bytes_empty_sizes_error() {
         let total_bytes: NonZeroU32 = kani::any();
         let block_byte_sizes = [];
@@ -754,6 +843,7 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(11)]
     fn chunk_bytes_sizes_under_under_check() {
         let total_bytes: NonZeroU32 = kani::any_where(|x: &NonZeroU32| x.get() < 64);
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -769,6 +859,7 @@ mod verification {
     /// Function `chunk_bytes` should not fail if no member of block sizes is
     /// large than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(11)]
     fn chunk_bytes_sizes_under_equal_check() {
         let total_bytes: NonZeroU32 = kani::any();
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -785,6 +876,7 @@ mod verification {
     /// Function `chunk_bytes` will fail if any member of `block_byte_sizes` is
     /// larger than `total_bytes`.
     #[kani::proof]
+    #[kani::unwind(11)]
     fn chunk_bytes_sizes_under_equal_over_check() {
         let total_bytes: NonZeroU32 = kani::any();
         let mut block_chunks: [u32; 10] = [0; 10];
@@ -801,6 +893,7 @@ mod verification {
 
     /// Function `chunk_bytes` does not fail to return some chunks.
     #[kani::proof]
+    #[kani::unwind(11)]
     fn chunk_bytes_never_chunk_empty() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
@@ -823,7 +916,7 @@ mod verification {
     /// Function `chunk_bytes` does not return a chunk that is not present in
     /// the byte sizes.
     #[kani::proof]
-    #[kani::unwind(15)]
+    #[kani::unwind(11)]
     fn chunk_bytes_always_present() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
@@ -848,7 +941,7 @@ mod verification {
     /// Function `chunk_bytes` does not populate values above the returned
     /// index, that is, they all remain zero.
     #[kani::proof]
-    #[kani::unwind(15)]
+    #[kani::unwind(11)]
     fn chunk_bytes_never_populate_above_index() {
         let total_bytes: NonZeroU32 = kani::any();
         let byte_sizes: [NonZeroU32; 5] = [
