@@ -536,7 +536,10 @@ fn chunk_bytes<const N: usize>(
                 }
             }
             if !found_fitting_block {
-                warn!("Failed to fill the remaining {bytes_remaining} bytes after attempting each block size again.");
+                #[cfg(not(kani))]
+                {
+                    warn!("Failed to fill the remaining {bytes_remaining} bytes after attempting each block size again.");
+                }
                 break;
             }
         }
