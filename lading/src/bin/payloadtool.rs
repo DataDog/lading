@@ -34,43 +34,6 @@ pub enum Error {
     Deserialize(#[from] serde_yaml::Error),
 }
 
-fn powers_of_two_strategy(start_size: u32) -> Vec<NonZeroU32> {
-    (0..8)
-        .map(|i| NonZeroU32::new(start_size * 2_u32.pow(i)).unwrap())
-        .collect()
-}
-
-fn fibonacci_strategy(start_size: u32) -> Vec<NonZeroU32> {
-    let mut vec = Vec::new();
-    let (mut a, mut b) = (start_size, start_size);
-    vec.push(NonZeroU32::new(a).unwrap());
-    while b < 50_000 {
-        // Adjust this limit as needed
-        vec.push(NonZeroU32::new(b).unwrap());
-        let next = a + b;
-        a = b;
-        b = next;
-    }
-    vec
-}
-
-fn default_blocks() -> Vec<NonZeroU32> {
-    [
-        Byte::from_unit(1.0 / 64.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 8.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 4.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 2.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1_f64, ByteUnit::MB).unwrap(),
-        Byte::from_unit(2_f64, ByteUnit::MB).unwrap(),
-        Byte::from_unit(4_f64, ByteUnit::MB).unwrap(),
-    ]
-    .iter()
-    .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-    .collect()
-}
-
 fn udp_friendly_default_blocks() -> Vec<NonZeroU32> {
     [
         Byte::from_unit(1.0 / 64.0, ByteUnit::MB).unwrap(),
