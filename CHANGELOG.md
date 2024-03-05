@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - During payload generation, block chunks now give more feedback when the
   requested amount cannot be hit.
 ### Changed
+- Increases the amount of blocks available during payload generation.
 
 ## [0.20.8]
 ### Added
