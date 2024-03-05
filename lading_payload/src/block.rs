@@ -625,12 +625,19 @@ where
     } else {
         let capacity_sum = block_chunks.iter().sum::<u32>();
         let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
-        info!(
-            num_blocks = block_cache.len(),
-            filled_byte_sum = filled_sum,
-            capacity_sum = capacity_sum,
-            "Block cache constructed."
-        );
+        if filled_sum == capacity_sum {
+            info!(
+                num_blocks = block_cache.len(),
+                filled_byte_sum = filled_sum,
+                capacity_sum = capacity_sum,
+                "Block cache constructed."
+            );
+        } else {
+            let perc = (filled_sum as f64 / capacity_sum as f64) * 100.0;
+            warn!(
+                "Could not fill block cache, only {perc:.2}% full. Filled: {filled_sum}, Requested: {capacity_sum}."
+            );
+        }
         Ok(block_cache)
     }
 }
@@ -731,7 +738,7 @@ where
 pub fn get_blocks(config_block_sizes: &Option<Vec<byte_unit::Byte>>) -> Vec<NonZeroU32> {
     match config_block_sizes {
         Some(ref sizes) => {
-            info!("Generator using user-specified block sizes: {:#?}", sizes);
+            info!("Generator using user-specified block sizes: {:?}", sizes);
             sizes
                 .iter()
                 .map(|sz| {
