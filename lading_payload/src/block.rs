@@ -623,8 +623,12 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
+        // "Capacity" here refers to how much data the block_chunks can hold.
+        // Note that this may not match the end-user's requested pregen-cache-size.
+        // This function is only concerned with filling up the chunks requested.
         let capacity_sum = block_chunks.iter().sum::<u32>();
         let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
+
         if filled_sum == capacity_sum {
             info!(
                 num_blocks = block_cache.len(),
@@ -633,9 +637,14 @@ where
                 "Block cache constructed."
             );
         } else {
-            let perc = (filled_sum as f64 / capacity_sum as f64) * 100.0;
+            let filled_sum_str = byte_unit::Byte::from_bytes(filled_sum.into())
+                .get_appropriate_unit(false)
+                .to_string();
+            let capacity_sum_str = byte_unit::Byte::from_bytes(capacity_sum.into())
+                .get_appropriate_unit(false)
+                .to_string();
             warn!(
-                "Could not fill block cache, only {perc:.2}% full. Filled: {filled_sum}, Requested: {capacity_sum}."
+                "Filled {filled_sum_str} only. Could not fill up to the chunk capacity of {capacity_sum_str}."
             );
         }
         Ok(block_cache)
