@@ -11,6 +11,7 @@ members = [
 
 [workspace.dependencies]
 bytes = { version = "1.5.0", default-features = false, features = ["std"] }
+byte-unit = { version = "4.0", features = ["serde"] }
 metrics = { version = "0.21" }
 prost = "0.11"
 prost-build = { version = "0.12" }
