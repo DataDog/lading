@@ -56,7 +56,12 @@ pub(crate) fn stdio(behavior: &Behavior) -> Stdio {
     match behavior {
         Behavior::Quiet => Stdio::null(),
         Behavior::Log(path) => {
-            let fp = fs::File::create(path).expect("Full directory path does not exist");
+            let fp = fs::File::create(path).unwrap_or_else(|_| {
+                panic!(
+                    "Full directory path does not exist: {path}",
+                    path = path.display()
+                );
+            });
             Stdio::from(fp)
         }
     }
