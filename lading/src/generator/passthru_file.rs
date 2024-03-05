@@ -13,7 +13,7 @@
 use std::{num::NonZeroU32, path::PathBuf, thread, time::Duration};
 use tokio::io::AsyncWriteExt;
 
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{ByteError};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};

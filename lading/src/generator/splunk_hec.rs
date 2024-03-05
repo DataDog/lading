@@ -19,7 +19,7 @@ mod acknowledgements;
 use std::{num::NonZeroU32, thread, time::Duration};
 
 use acknowledgements::Channels;
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{ByteError};
 use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,

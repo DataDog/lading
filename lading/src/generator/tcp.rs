@@ -17,13 +17,13 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{ByteError};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
-use tracing::{info, trace, warn};
+use tracing::{info, trace};
 
 use crate::{common::PeekableReceiver, signals::Phase};
 use lading_payload::block::{self, Block};
