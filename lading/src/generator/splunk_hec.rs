@@ -19,7 +19,7 @@ mod acknowledgements;
 use std::{num::NonZeroU32, thread, time::Duration};
 
 use acknowledgements::Channels;
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::ByteError;
 use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
@@ -175,24 +175,7 @@ impl SplunkHec {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroU32> = config
-            .block_sizes
-            .map_or(
-                vec![
-                    Byte::from_unit(1.0 / 8.0, ByteUnit::MB),
-                    Byte::from_unit(1.0 / 4.0, ByteUnit::MB),
-                    Byte::from_unit(1.0 / 2.0, ByteUnit::MB),
-                    Byte::from_unit(1_f64, ByteUnit::MB),
-                    Byte::from_unit(2_f64, ByteUnit::MB),
-                    Byte::from_unit(4_f64, ByteUnit::MB),
-                ],
-                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
-            )
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-            .collect();
+        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "splunk_hec".to_string()),

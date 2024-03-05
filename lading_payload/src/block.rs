@@ -548,21 +548,17 @@ fn chunk_bytes<const N: usize>(
     #[cfg(not(kani))]
     {
         let computed_chunk_capacity = total_bytes.get() - bytes_remaining;
-        let total_chunk_capacity = byte_unit::Byte::from_u64(computed_chunk_capacity.into());
-        let total_chunk_capacity_str = total_chunk_capacity
-            .get_appropriate_unit(byte_unit::UnitType::Decimal)
-            .to_string();
+        let total_chunk_capacity = byte_unit::Byte::from_bytes(computed_chunk_capacity.into());
+        let total_chunk_capacity_str = total_chunk_capacity.get_appropriate_unit(false).to_string();
 
         if bytes_remaining > 0 {
-            let total_requested_bytes = byte_unit::Byte::from_u64(total_bytes.get().into());
+            let total_requested_bytes = byte_unit::Byte::from_bytes(total_bytes.get().into());
             let total_requested_bytes_str = total_requested_bytes
-                .get_appropriate_unit(byte_unit::UnitType::Decimal)
+                .get_appropriate_unit(false)
                 .to_string();
 
-            let bytes_remaining = byte_unit::Byte::from_u64(bytes_remaining.into());
-            let bytes_remaining_str = bytes_remaining
-                .get_appropriate_unit(byte_unit::UnitType::Decimal)
-                .to_string();
+            let bytes_remaining = byte_unit::Byte::from_bytes(bytes_remaining.into());
+            let bytes_remaining_str = bytes_remaining.get_appropriate_unit(false).to_string();
             let extra_advice = if total_chunks == N {
                 "Max capacity of chunks was hit, consider making block sizes larger to fit more data."
             } else {
@@ -724,6 +720,58 @@ where
         .ok_or(SpinError::Zero)?;
         Ok(Some(Block { total_bytes, bytes }))
     }
+}
+
+/// Get the block sizes from the configuration.
+/// If none are present, then return the defaults.
+///
+/// # Panics
+/// - Panics if a block size is not representable as a 32bit integer
+/// - Panics if a block size is zero
+pub fn get_blocks(config_block_sizes: &Option<Vec<byte_unit::Byte>>) -> Vec<NonZeroU32> {
+    match config_block_sizes {
+        Some(ref sizes) => {
+            info!("Generator using user-specified block sizes: {:#?}", sizes);
+            sizes
+                .iter()
+                .map(|sz| {
+                    NonZeroU32::new(
+                        u32::try_from(sz.get_bytes())
+                            .expect("Block size not representable as 32bit integer"),
+                    )
+                    .expect("bytes must be non-zero")
+                })
+                .collect()
+        }
+        None => default_blocks(),
+    }
+}
+
+#[must_use]
+/// The default block sizes.
+///
+/// Panics are not possible in practice due to these being static values.
+/// # Panics
+/// - Panics if a block size is not representable as a 32bit integer
+/// - Panics if a block size is zero
+pub fn default_blocks() -> Vec<NonZeroU32> {
+    [
+        byte_unit::Byte::from_unit(1.0 / 32.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(1.0 / 16.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(1.0 / 4.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(1.0 / 2.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(1.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(2.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(4.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+    ]
+    .iter()
+    .map(|sz| {
+        NonZeroU32::new(
+            u32::try_from(sz.get_bytes()).expect("Block size not representable as 32bit integer"),
+        )
+        .expect("Block size is non-zero")
+    })
+    .collect()
 }
 
 #[cfg(test)]
