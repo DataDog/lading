@@ -12,7 +12,7 @@
 //!
 
 use crate::{common::PeekableReceiver, signals::Phase};
-use byte_unit::{ByteError};
+use byte_unit::ByteError;
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;

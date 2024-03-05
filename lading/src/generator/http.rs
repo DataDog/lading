@@ -13,7 +13,7 @@
 
 use std::{num::NonZeroU32, thread};
 
-use byte_unit::{ByteError};
+use byte_unit::ByteError;
 use hyper::{
     client::{Client, HttpConnector},
     header::CONTENT_LENGTH,
