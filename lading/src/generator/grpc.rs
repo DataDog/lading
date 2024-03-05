@@ -160,7 +160,7 @@ impl Grpc {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes);
+        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes, None);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "grpc".to_string()),

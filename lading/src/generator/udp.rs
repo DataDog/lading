@@ -31,6 +31,9 @@ use lading_payload::block::{self, Block};
 
 use super::General;
 
+// https://stackoverflow.com/a/42610200
+const UDP_PACKET_LIMIT_BYTES: u32 = 65_507;
+
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
@@ -95,8 +98,11 @@ impl Udp {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        // TODO pass in datagram_friendly: true
-        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes);
+        let block_size_limit =
+            byte_unit::Byte::from_unit(UDP_PACKET_LIMIT_BYTES.into(), byte_unit::ByteUnit::B)
+                .expect("valid bytes");
+        let block_sizes =
+            lading_payload::block::get_blocks(&config.block_sizes, Some(block_size_limit));
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "udp".to_string()),
@@ -164,8 +170,8 @@ impl Udp {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
             assert!(
-                total_bytes.get() <= 65507,
-                "UDP packet too large (over 65507 B)"
+                total_bytes.get() <= UDP_PACKET_LIMIT_BYTES,
+                "UDP packet too large (over {UDP_PACKET_LIMIT_BYTES} B)"
             );
 
             tokio::select! {
