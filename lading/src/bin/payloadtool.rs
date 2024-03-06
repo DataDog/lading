@@ -34,17 +34,6 @@ pub enum Error {
     Deserialize(#[from] serde_yaml::Error),
 }
 
-fn udp_friendly_default_blocks() -> Vec<NonZeroU32> {
-    [
-        Byte::from_unit(1.0 / 64.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-    ]
-    .iter()
-    .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-    .collect()
-}
-
 fn generate_and_check(
     config: &lading_payload::Config,
     seed: [u8; 32],
@@ -52,21 +41,7 @@ fn generate_and_check(
     total_bytes: NonZeroU32,
 ) -> Result<(), Error> {
     let mut rng = StdRng::from_seed(seed);
-    let block_sizes: Vec<NonZeroU32> = match block_sizes {
-        Some(sizes) => {
-            info!("Using custom block sizes: {:#?}", sizes);
-            sizes
-                .iter()
-                .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-                .collect()
-        }
-        None => {
-            info!("Using default block sizes");
-            //fibonacci_strategy(100)
-            udp_friendly_default_blocks()
-            //powers_of_two_strategy(500)
-        }
-    };
+    let block_sizes = lading_payload::block::get_blocks(&block_sizes);
     info!(
         "Generating {} bytes with block sizes: {:#?}",
         total_bytes, block_sizes
