@@ -34,7 +34,8 @@ pub(crate) type Tagset = Vec<String>;
 /// it would conceptually mean "always use an existing tag", however this is a
 /// degenerate case as there would never be a new tag generated.
 /// therefore a minimum value is enforced.
-/// Despite this minimum, it is possible to not be able to hit the desired number of contexts.
+/// Despite this minimum, if the configuration is overly restrictive, it may
+/// result in non-unique tagsets.
 /// As an example:
 /// `unique_tag_probability`: 0.10
 /// `tags_per_msg`: 3
@@ -44,7 +45,7 @@ pub(crate) type Tagset = Vec<String>;
 /// to generate will result in 3000 "get new tag" decisions.
 /// 300 of these will result in new tags and 2700 of these will re-use an existing tag.
 /// With only 300 chances for new entropy, each individual tagset will likely over-sample
-/// the existing tags and therefore UNDER-generate the desired number of contexts.
+/// the existing tags and therefore UNDER-generate the desired number of unique tagsets.
 #[derive(Debug, Clone)]
 pub(crate) struct Generator {
     seed: Cell<u64>,
@@ -77,7 +78,7 @@ impl Generator {
         seed: u64,
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
-        desired_num_contexts: usize,
+        num_tagsets: usize,
         str_pool: Rc<Pool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
@@ -96,12 +97,12 @@ impl Generator {
 
         if !(MIN_UNIQUE_TAG_RATIO..=MAX_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
             return Err(Error::InvalidConstruction(
-                format!("Tag context ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"),
+                format!("Unique tag ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"),
             ));
         }
 
         if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            warn!("unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in under-generating the desired number of contexts");
+            warn!("unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in non-unique tagsets");
         }
 
         let rng = SmallRng::seed_from_u64(seed);
@@ -113,7 +114,7 @@ impl Generator {
             tag_length,
             str_pool,
             tagsets_produced: Cell::new(0),
-            num_tagsets: desired_num_contexts,
+            num_tagsets,
             unique_tag_probability,
             unique_tags: RefCell::new(Vec::new()),
         })
@@ -314,7 +315,7 @@ mod test {
 
     proptest! {
         #[test]
-        fn generator_yields_valid_tagsets(seed: u64, num_contexts in 1..100_000_usize, tags_per_msg_max in 1..u8::MAX) {
+        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..100_000_usize, tags_per_msg_max in 1..u8::MAX) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let str_pool = Rc::new(Pool::with_size(&mut rng, 8_000_000));
@@ -324,12 +325,12 @@ mod test {
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
-                num_contexts,
+                num_tagsets,
                 str_pool,
                 1.0
             ).expect("Tag generator to be valid");
 
-            for _ in 0..num_contexts {
+            for _ in 0..num_tagsets {
                 let tagset = generator.generate(&mut rng)?;
                 for tag in &tagset {
                     assert!(tag.len() <= tag_size_range.end().into());
@@ -345,9 +346,9 @@ mod test {
 
     proptest! {
         /// This test asserts that when the  is 1.0, we always are able to hit
-        /// the desired number of contexts no matter what.
+        /// the desired number of unique tagsets no matter what.
         #[test]
-        fn contexts_respected_always_unique_tags(seed: u64, desired_num_contexts in 1..100_000_usize) {
+        fn uniquetagsets_respected_always_unique_tags(seed: u64, desired_num_tagsets in 1..100_000_usize) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 50 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -357,14 +358,14 @@ mod test {
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
-                desired_num_contexts,
+                desired_num_tagsets,
                 str_pool,
                 1.0,
             )
             .expect("Tag generator to be valid");
 
-            // need guarantee that calling generate N times will generate N unique contexts
-            let tagsets = (0..desired_num_contexts)
+            // need guarantee that calling generate N times will generate N unique tagsets
+            let tagsets = (0..desired_num_tagsets)
                 .map(|_| {
                     generator
                         .generate(&mut rng)
@@ -373,7 +374,7 @@ mod test {
                 .collect::<Vec<_>>();
 
             let num_contexts = count_num_contexts(&tagsets);
-            assert_eq!(num_contexts, desired_num_contexts);
+            assert_eq!(num_contexts, desired_num_tagsets);
         }
     }
 
@@ -383,9 +384,9 @@ mod test {
         /// A concern of the dogstatsd consumer is that the tagsets yielded have a cardinality of
         /// `num_tagsets`
         /// The goal of this test is to vary the unique_tag_probability between the WARN and MAX
-        /// levels and ensure that we are always able to generate the desired number of contexts
+        /// levels and ensure that we are always able to generate the desired number of unique tagsets
         #[test]
-        fn contexts_respected_with_varying_ratio(seed: u64, desired_num_contexts in 1..100_000_usize, tag_context_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
+        fn uniquetagsets_respected_with_varying_ratio(seed: u64, desired_num_tagsets in 1..100_000_usize, unique_tag_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 50 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -395,13 +396,13 @@ mod test {
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
-                desired_num_contexts,
+                desired_num_tagsets,
                 str_pool,
-                tag_context_ratio
+                unique_tag_ratio
             )
             .expect("Tag generator to be valid");
 
-            let tagsets = (0..desired_num_contexts)
+            let tagsets = (0..desired_num_tagsets)
                 .map(|_| {
                     generator
                         .generate(&mut rng)
@@ -410,7 +411,7 @@ mod test {
                 .collect::<Vec<_>>();
 
             let num_contexts = count_num_contexts(&tagsets);
-            assert_eq!(num_contexts, desired_num_contexts);
+            assert_eq!(num_contexts, desired_num_tagsets);
         }
     }
 }
