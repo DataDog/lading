@@ -744,8 +744,11 @@ where
 /// # Panics
 /// - Panics if a block size is not representable as a 32bit integer
 /// - Panics if a block size is zero
-pub fn get_blocks(config_block_sizes: &Option<Vec<byte_unit::Byte>>) -> Vec<NonZeroU32> {
-    match config_block_sizes {
+pub fn get_blocks(
+    config_block_sizes: &Option<Vec<byte_unit::Byte>>,
+    block_size_limit: Option<byte_unit::Byte>,
+) -> Vec<NonZeroU32> {
+    let block_sizes = match config_block_sizes {
         Some(ref sizes) => {
             info!("Generator using user-specified block sizes: {:?}", sizes);
             sizes
@@ -760,6 +763,16 @@ pub fn get_blocks(config_block_sizes: &Option<Vec<byte_unit::Byte>>) -> Vec<NonZ
                 .collect()
         }
         None => default_blocks(),
+    };
+    if let Some(block_size_limit) = block_size_limit {
+        let limit = NonZeroU32::new(
+            u32::try_from(block_size_limit.get_bytes())
+                .expect("Block size not representable as 32bit integer"),
+        )
+        .expect("block size limit must be non-zero");
+        block_sizes.into_iter().filter(|sz| sz <= &limit).collect()
+    } else {
+        block_sizes
     }
 }
 
@@ -796,7 +809,7 @@ mod test {
 
     use proptest::prelude::*;
 
-    use crate::block::{chunk_bytes, MAX_CHUNKS};
+    use crate::block::{chunk_bytes, get_blocks, MAX_CHUNKS};
 
     #[test]
     fn construct_block_cache_inner_fills_blocks() {
@@ -880,6 +893,32 @@ mod test {
             let requested_bytes = total_bytes.get();
             assert_eq!(requested_bytes, block_chunk_sum, "filled {res} chunks (max allowed is {MAX_CHUNKS}), but couldn't satisfy request for {requested_bytes} bytes");
         }
+    }
+
+    #[test]
+    fn get_blocks_works() {
+        let config_block_sizes = Some(vec![
+            byte_unit::Byte::from_unit(1.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+            byte_unit::Byte::from_unit(2.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        ]);
+        let block_size_limit =
+            Some(byte_unit::Byte::from_unit(3.0, byte_unit::ByteUnit::MB).expect("valid bytes"));
+
+        let result = get_blocks(&config_block_sizes, block_size_limit);
+        assert_eq!(result.len(), 2);
+
+        let block_size_limit =
+            Some(byte_unit::Byte::from_unit(1.0, byte_unit::ByteUnit::MB).expect("valid bytes"));
+        let result = get_blocks(&config_block_sizes, block_size_limit);
+        assert_eq!(result.len(), 1);
+
+        let block_size_limit =
+            Some(byte_unit::Byte::from_unit(0.1, byte_unit::ByteUnit::MB).expect("valid bytes"));
+        let result = get_blocks(&config_block_sizes, block_size_limit);
+        assert_eq!(result.len(), 0);
+
+        let result = get_blocks(&config_block_sizes, None);
+        assert_eq!(result.len(), 2);
     }
 }
 
