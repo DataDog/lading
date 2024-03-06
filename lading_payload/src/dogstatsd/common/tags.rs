@@ -1,5 +1,5 @@
 //! Tag generation for dogstatsd payloads
-use std::cell::{Cell, RefCell, RefMut};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rand::distributions::Distribution;
@@ -120,15 +120,11 @@ impl Generator {
         })
     }
 
-    fn get_existing_tag<R>(
-        &self,
-        unique_tags: &RefMut<Vec<(Handle, Handle)>>,
-        mut rng: RefMut<R>,
-    ) -> Option<String>
+    fn get_existing_tag<R>(&self, unique_tags: &[(Handle, Handle)], rng: &mut R) -> Option<String>
     where
         R: rand::Rng + ?Sized,
     {
-        let handles = unique_tags.choose(&mut *rng);
+        let handles = unique_tags.choose(rng);
         match handles {
             Some((key_handle, value_handle)) => {
                 match (
@@ -171,24 +167,18 @@ impl<'a> crate::Generator<'a> for Generator {
         // this is the return value from this function
         let mut tagset: Tagset = Vec::new();
 
-        let tags_count = self
-            .tags_per_msg
-            .sample(&mut *self.internal_rng.borrow_mut()) as usize;
+        let mut rng = self.internal_rng.borrow_mut();
+        let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
         for _ in 0..tags_count {
-            let choose_existing_prob: f32 =
-                OpenClosed01.sample(&mut *(self.internal_rng.borrow_mut()));
+            let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
 
+            let mut unique_tags = self.unique_tags.borrow_mut();
             let attempted_tag = if choose_existing_prob > self.unique_tag_probability {
-                self.get_existing_tag(
-                    &self.unique_tags.borrow_mut(),
-                    self.internal_rng.borrow_mut(),
-                )
+                self.get_existing_tag(&unique_tags, &mut *rng)
             } else {
                 None
             };
 
-            let mut unique_tags = self.unique_tags.borrow_mut();
-            let mut rng = self.internal_rng.borrow_mut();
             // if a tag was chosen from the existing set, no need to grab a new tag.
             if let Some(tag) = attempted_tag {
                 tagset.push(tag.to_string());
