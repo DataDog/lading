@@ -623,14 +623,30 @@ where
             ConstructBlockCacheError::InsufficientBlockSizes,
         ))
     } else {
+        // "Capacity" here refers to how much data the block_chunks can hold.
+        // Note that this may not match the end-user's requested pregen-cache-size.
+        // This function is only concerned with filling up the chunks requested.
         let capacity_sum = block_chunks.iter().sum::<u32>();
         let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
-        info!(
-            num_blocks = block_cache.len(),
-            filled_byte_sum = filled_sum,
-            capacity_sum = capacity_sum,
-            "Block cache constructed."
-        );
+
+        if filled_sum == capacity_sum {
+            info!(
+                num_blocks = block_cache.len(),
+                filled_byte_sum = filled_sum,
+                capacity_sum = capacity_sum,
+                "Block cache constructed."
+            );
+        } else {
+            let filled_sum_str = byte_unit::Byte::from_bytes(filled_sum.into())
+                .get_appropriate_unit(false)
+                .to_string();
+            let capacity_sum_str = byte_unit::Byte::from_bytes(capacity_sum.into())
+                .get_appropriate_unit(false)
+                .to_string();
+            warn!(
+                "Filled {filled_sum_str} only. Could not fill up to the chunk capacity of {capacity_sum_str}."
+            );
+        }
         Ok(block_cache)
     }
 }
@@ -731,7 +747,7 @@ where
 pub fn get_blocks(config_block_sizes: &Option<Vec<byte_unit::Byte>>) -> Vec<NonZeroU32> {
     match config_block_sizes {
         Some(ref sizes) => {
-            info!("Generator using user-specified block sizes: {:#?}", sizes);
+            info!("Generator using user-specified block sizes: {:?}", sizes);
             sizes
                 .iter()
                 .map(|sz| {
