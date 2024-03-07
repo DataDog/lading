@@ -2,12 +2,14 @@ use std::io::Read;
 use std::time::Instant;
 use std::{io, num::NonZeroU32};
 
-use byte_unit::{Byte, ByteUnit};
 use clap::Parser;
+use lading::generator::http::Method;
 use lading_payload::block;
 use rand::{rngs::StdRng, SeedableRng};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
+
+const UDP_PACKET_LIMIT_BYTES: u32 = 65_507;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -34,39 +36,15 @@ pub enum Error {
     Deserialize(#[from] serde_yaml::Error),
 }
 
-fn udp_friendly_default_blocks() -> Vec<NonZeroU32> {
-    [
-        Byte::from_unit(1.0 / 64.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 32.0, ByteUnit::MB).unwrap(),
-        Byte::from_unit(1.0 / 16.0, ByteUnit::MB).unwrap(),
-    ]
-    .iter()
-    .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-    .collect()
-}
-
 fn generate_and_check(
     config: &lading_payload::Config,
     seed: [u8; 32],
     block_sizes: Option<Vec<byte_unit::Byte>>,
     total_bytes: NonZeroU32,
+    max_block_size: Option<byte_unit::Byte>,
 ) -> Result<(), Error> {
     let mut rng = StdRng::from_seed(seed);
-    let block_sizes: Vec<NonZeroU32> = match block_sizes {
-        Some(sizes) => {
-            info!("Using custom block sizes: {:#?}", sizes);
-            sizes
-                .iter()
-                .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-                .collect()
-        }
-        None => {
-            info!("Using default block sizes");
-            //fibonacci_strategy(100)
-            udp_friendly_default_blocks()
-            //powers_of_two_strategy(500)
-        }
-    };
+    let block_sizes = lading_payload::block::get_blocks(&block_sizes, max_block_size);
     info!(
         "Generating {} bytes with block sizes: {:#?}",
         total_bytes, block_sizes
@@ -105,40 +83,60 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
         }
         lading::generator::Inner::Tcp(g) => {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
         }
         lading::generator::Inner::Udp(g) => {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            let max_block_size =
+                byte_unit::Byte::from_unit(UDP_PACKET_LIMIT_BYTES.into(), byte_unit::ByteUnit::B)
+                    .expect("valid bytes");
+            generate_and_check(
+                &g.variant,
+                g.seed,
+                g.block_sizes.clone(),
+                total_bytes,
+                Some(max_block_size),
+            )?;
         }
-        lading::generator::Inner::Http(_) => unimplemented!("Http not supported"),
+        lading::generator::Inner::Http(g) => {
+            let (variant, max_prebuild_cache_size_bytes) = match &g.method {
+                Method::Post {
+                    variant,
+                    maximum_prebuild_cache_size_bytes,
+                    block_cache_method: _,
+                } => (variant, maximum_prebuild_cache_size_bytes),
+            };
+            let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.get_bytes() as u32)
+                .expect("Non-zero max prebuild cache size");
+            generate_and_check(variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
+        }
         lading::generator::Inner::SplunkHec(_) => unimplemented!("SplunkHec not supported"),
         lading::generator::Inner::FileTree(_) => unimplemented!("FileTree not supported"),
         lading::generator::Inner::Grpc(g) => {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
         }
         lading::generator::Inner::UnixStream(g) => {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
         }
         lading::generator::Inner::PassthruFile(g) => {
             let total_bytes =
                 NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .expect("Non-zero max prebuild cache size");
-            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes)?;
+            generate_and_check(&g.variant, g.seed, g.block_sizes.clone(), total_bytes, None)?;
         }
         lading::generator::Inner::ProcessTree(_) => unimplemented!("ProcessTree not supported"),
         lading::generator::Inner::ProcFs(_) => unimplemented!("ProcFs not supported"),
