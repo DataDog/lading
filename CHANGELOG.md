@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Added
+### Changed
+### Fixed
+
+## [0.20.9]
+### Added
 - Enforces changelog entries via CI check
 - `payloadtool` binary useful for developers writing new experiments.
 - Respects the env var `RUST_LOG` to control logging.
