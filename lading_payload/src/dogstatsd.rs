@@ -9,7 +9,7 @@ use rand::{
     Rng,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{common::strings, Serialize};
 
@@ -223,11 +223,8 @@ pub struct Config {
     /// Length for a dogstatsd message name
     pub name_length: ConfRange<u16>,
 
-    /// Length for the 'key' part of a dogstatsd tag
-    pub tag_key_length: ConfRange<u8>,
-
-    /// Length for the 'value' part of a dogstatsd tag
-    pub tag_value_length: ConfRange<u8>,
+    /// Length for a dogstatsd tag
+    pub tag_length: ConfRange<u16>,
 
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
@@ -264,6 +261,13 @@ pub struct Config {
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
     pub length_prefix_framed: bool,
+
+    /// This is a ratio between 0.10 and 1.0 which determines how many
+    /// individual tags are unique vs re-used tags.
+    /// If this is 1, then every single tag will be unique.
+    /// If this is 0.10, then most of the tags (90%) will be re-used
+    /// from existing tags.
+    pub unique_tag_ratio: f32,
 }
 
 impl Default for Config {
@@ -279,8 +283,7 @@ impl Default for Config {
             },
             // https://docs.datadoghq.com/developers/guide/what-best-practices-are-recommended-for-naming-metrics-and-tags/#rules-and-best-practices-for-naming-metrics
             name_length: ConfRange::Inclusive { min: 1, max: 200 },
-            tag_key_length: ConfRange::Inclusive { min: 1, max: 100 },
-            tag_value_length: ConfRange::Inclusive { min: 1, max: 100 },
+            tag_length: ConfRange::Inclusive { min: 3, max: 100 },
             tags_per_msg: ConfRange::Inclusive { min: 2, max: 50 },
             multivalue_count: ConfRange::Inclusive { min: 2, max: 32 },
             multivalue_pack_probability: 0.08,
@@ -291,6 +294,7 @@ impl Default for Config {
             value: ValueConf::default(),
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
+            unique_tag_ratio: 0.11,
         }
     }
 }
@@ -317,19 +321,12 @@ impl Config {
             return Result::Err(format!("Service check names value is invalid: {reason}"));
         }
 
-        let (tag_key_length_valid, reason) = self.tag_key_length.valid();
-        if !tag_key_length_valid {
-            return Result::Err(format!("Tag key length value is invalid: {reason}"));
+        let (tag_length_valid, reason) = self.tag_length.valid();
+        if !tag_length_valid {
+            return Result::Err(format!("Tag length value is invalid: {reason}"));
         }
-        if self.tag_key_length.start() == 0 {
-            return Result::Err("Tag key length start value cannot be 0".to_string());
-        }
-        let (tag_value_length_valid, reason) = self.tag_value_length.valid();
-        if !tag_value_length_valid {
-            return Result::Err(format!("Tag value length value is invalid: {reason}"));
-        }
-        if self.tag_value_length.start() == 0 {
-            return Result::Err("Tag value length start value cannot be 0".to_string());
+        if self.tag_length.start() == 0 {
+            return Result::Err("Tag length start value cannot be 0".to_string());
         }
         let (name_length_valid, reason) = self.name_length.valid();
         if !name_length_valid {
@@ -439,8 +436,7 @@ impl MemberGenerator {
         contexts: ConfRange<u32>,
         service_check_names: ConfRange<u16>,
         name_length: ConfRange<u16>,
-        tag_key_length: ConfRange<u8>,
-        tag_value_length: ConfRange<u8>,
+        tag_length: ConfRange<u16>,
         tags_per_msg: ConfRange<u8>,
         multivalue_count: ConfRange<u16>,
         multivalue_pack_probability: f32,
@@ -449,6 +445,7 @@ impl MemberGenerator {
         kind_weights: KindWeights,
         metric_weights: MetricWeights,
         value_conf: ValueConf,
+        unique_tag_ratio: f32,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -460,14 +457,20 @@ impl MemberGenerator {
 
         let num_contexts = contexts.sample(rng);
 
-        let mut tags_generator = tags::Generator::new(
+        let mut tags_generator = match tags::Generator::new(
             rng.gen(),
             tags_per_msg,
-            tag_key_length,
-            tag_value_length,
-            Rc::clone(&pool),
+            tag_length,
             num_contexts as usize,
-        );
+            Rc::clone(&pool),
+            unique_tag_ratio,
+        ) {
+            Ok(tg) => tg,
+            Err(e) => {
+                warn!("Encountered error while constructing tag generator: {e}");
+                return Err(crate::Error::StringGenerate);
+            }
+        };
 
         // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
         let service_event_titles = random_strings_with_length_range(
@@ -630,8 +633,7 @@ impl DogStatsD {
             config.contexts,
             config.service_check_names,
             config.name_length,
-            config.tag_key_length,
-            config.tag_value_length,
+            config.tag_length,
             config.tags_per_msg,
             config.multivalue_count,
             config.multivalue_pack_probability,
@@ -640,6 +642,7 @@ impl DogStatsD {
             config.kind_weights,
             config.metric_weights,
             config.value,
+            config.unique_tag_ratio,
             rng,
         )?;
 
