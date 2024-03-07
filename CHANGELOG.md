@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requested amount cannot be hit.
 ### Changed
 - Increases the amount of blocks available during payload generation.
+- DogStatsD tag generation updated to better reflect real DSD traffic.
 
 ## [0.20.8]
 ### Added
