@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Added
+### Changed
+### Fixed
+
+## [0.20.9]
+### Added
 - Enforces changelog entries via CI check
 - `payloadtool` binary useful for developers writing new experiments.
 - Respects the env var `RUST_LOG` to control logging.
@@ -13,9 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - During payload generation, blocks will reliably be filled to the requested amount.
 - During payload generation, block chunks now give more feedback when the
   requested amount cannot be hit.
+- Does not crash on empty line in prometheus exports
 ### Changed
 - Increases the amount of blocks available during payload generation.
 - DogStatsD tag generation updated to better reflect real DSD traffic.
+- Users should avoid setting custom `block_sizes` and rely on the default
+  blocks. `payloadtool` is available to help evaluate block size options.
 
 ## [0.20.8]
 ### Added
