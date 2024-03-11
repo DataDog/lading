@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Added
+- Optional new feature for DogStatsD generation -- metric name prefixing.
 ### Changed
 ### Fixed
 
