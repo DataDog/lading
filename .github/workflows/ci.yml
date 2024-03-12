@@ -33,7 +33,7 @@ jobs:
         with:
           components: ${{matrix.components}}
       - name: Install Protobuf
-        if: matrix.protobuf == 'true'
+        if: matrix.protobuf
         uses: ./.github/actions/install-protobuf
       - name: Run ${{ matrix.tool }}
         run: ${{ matrix.command }}
