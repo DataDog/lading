@@ -1,7 +1,11 @@
 [package]
 name = "lading"
 version = "0.20.9"
-authors = ["Brian L. Troutwine <brian.troutwine@datadoghq.com>", "George Hahn <george.hahn@datadoghq.com"]
+authors = [
+    "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+    "George Hahn <george.hahn@datadoghq.com>",
+    "Scott Opell <scott.opell@datadoghq.com>"
+]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/datadog/lading/"
