@@ -14,11 +14,21 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
+copyleft = "deny"
+default = "deny"
+
 [sources]
 unknown-git = "deny"
 
 [advisories]
-ignore = [ ]
+vulnerability = "deny"
+unmaintained = "deny"
+notice = "deny"
+unsound = "deny"
+ignore = [
+  # atty is unsound for some custom allocators on Windows and is unmaintained
+  "RUSTSEC-2021-0145",
+]
 
 [bans]
 multiple-versions = "allow"
