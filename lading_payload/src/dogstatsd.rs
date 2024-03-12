@@ -268,6 +268,10 @@ pub struct Config {
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
+
+    /// If true, a fixed `smp.` (4 bytes) prefix will be prepended
+    /// to each metric name.
+    pub prefix_metric_names: bool,
 }
 
 impl Default for Config {
@@ -295,6 +299,7 @@ impl Default for Config {
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
+            prefix_metric_names: false,
         }
     }
 }
@@ -446,6 +451,7 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
+        metric_name_prefix: &'static str,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -522,6 +528,7 @@ impl MemberGenerator {
             &mut tags_generator,
             pool.as_ref(),
             value_conf,
+            metric_name_prefix,
             &mut rng,
         );
 
@@ -629,6 +636,11 @@ impl DogStatsD {
     where
         R: rand::Rng + ?Sized,
     {
+        let prefix = if config.prefix_metric_names {
+            "smp."
+        } else {
+            ""
+        };
         let member_generator = MemberGenerator::new(
             config.contexts,
             config.service_check_names,
@@ -643,6 +655,7 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
+            prefix,
             rng,
         )?;
 

@@ -43,6 +43,7 @@ impl MetricGenerator {
         tags_generator: &mut common::tags::Generator,
         str_pool: &strings::Pool,
         value_conf: ValueConf,
+        metric_name_prefix: &'static str,
         mut rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -54,11 +55,16 @@ impl MetricGenerator {
         for _ in 0..num_contexts {
             let tags = tags_generator.generate(&mut rng);
             let name_sz = name_length.sample(&mut rng) as usize;
-            let name = String::from(
+            let strpool_name = String::from(
                 str_pool
                     .of_size(&mut rng, name_sz)
                     .ok_or(Error::StringGenerate)?,
             );
+            let name = if metric_name_prefix.is_empty() {
+                strpool_name
+            } else {
+                format!("{metric_name_prefix}.{strpool_name}")
+            };
 
             let res = match metric_weights.sample(rng) {
                 0 => Template::Count(template::Count { name, tags: tags? }),
