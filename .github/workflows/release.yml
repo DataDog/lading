@@ -62,7 +62,7 @@ jobs:
         if: matrix.os == 'macos-latest'
 
       # Install cross compilation rust toolchain for Arm64 Mac
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
         with:
           target: ${{ matrix.target }}
         if: matrix.target == 'aarch64-apple-darwin'

@@ -29,7 +29,7 @@ jobs:
             command: cargo clippy --all-features
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.8
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
         with:
           components: ${{matrix.components}}
       - name: Install Protobuf
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.8
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install nextest
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.8
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - run: cargo test -p sheepdog
@@ -76,7 +76,7 @@ jobs:
         crate: [lading_throttle, lading_payload]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.8
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install kani
