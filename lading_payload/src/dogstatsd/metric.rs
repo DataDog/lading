@@ -63,7 +63,7 @@ impl MetricGenerator {
             let name = if metric_name_prefix.is_empty() {
                 strpool_name
             } else {
-                format!("{metric_name_prefix}.{strpool_name}")
+                format!("{metric_name_prefix}{strpool_name}")
             };
 
             let res = match metric_weights.sample(rng) {
