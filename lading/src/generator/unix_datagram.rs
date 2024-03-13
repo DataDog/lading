@@ -247,14 +247,11 @@ impl Child {
                     // must cycle back around and try to write the remainder of the
                     // buffer.
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let blk_max: usize = total_bytes.get() as usize;
-                    let mut blk_offset = 0;
-                    while blk_offset < blk_max {
-                        match socket.send(&blk.bytes[blk_offset..]).await {
+                    for sub_block in blk.iter() {
+                        match socket.send(&sub_block.bytes).await {
                             Ok(bytes) => {
                                 bytes_written.increment(bytes as u64);
                                 packets_sent.increment(1);
-                                blk_offset += bytes;
                             }
                             Err(err) => {
                                 debug!("write failed: {}", err);

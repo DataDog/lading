@@ -90,13 +90,80 @@ pub struct Block {
     pub split_strategy: SplitStrategy,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// The strategy to use when splitting a block
 pub enum SplitStrategy {
     /// No splits allowable
     None,
     /// Splittable along newlines
     NewlineDelimited,
+}
+
+#[derive(Debug, Clone)]
+/// An iterator over chunks of a given block
+pub struct IntraBlockIter {
+    idx: usize,
+    bytes: Bytes,
+    strategy: SplitStrategy,
+}
+
+use std::iter::IntoIterator;
+
+impl IntoIterator for &Block {
+    type Item = Block;
+    type IntoIter = IntraBlockIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntraBlockIter {
+            bytes: self.bytes.clone(), // Clone the Bytes instance
+            idx: 0,
+            strategy: self.split_strategy,
+        }
+    }
+}
+
+impl Block {
+    /// Returns an iterator for sub-parts of the block
+    pub fn iter(&self) -> IntraBlockIter {
+        self.into_iter()
+    }
+}
+
+// Implement the Iterator trait for MyBytesIterator.
+impl Iterator for IntraBlockIter {
+    type Item = Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.strategy != SplitStrategy::NewlineDelimited {
+            warn!("Split strategy not supported, iterator will return None");
+            return None;
+        }
+        if self.idx >= self.bytes.len() {
+            None
+        } else {
+            let maybe_newline_pos = self.bytes[self.idx..].iter().position(|&b| b == b'\n');
+
+            let next_block_end = match maybe_newline_pos {
+                Some(pos) => self.idx + pos + 1, // Include the newline in the slice
+                None => self.bytes.len(),
+            };
+
+            let size = next_block_end - self.idx;
+            let total_bytes = NonZeroU32::new(
+                u32::try_from(size).expect("Bytes to be representable as 32 bit int"),
+            )
+            .expect("Non-zero bytes in sub-block");
+            let next_block = Block {
+                bytes: self.bytes.slice(self.idx..next_block_end),
+                total_bytes,
+                split_strategy: SplitStrategy::None,
+            };
+
+            self.idx = next_block_end;
+
+            Some(next_block)
+        }
+    }
 }
 
 /// Errors for the construction of the block cache
