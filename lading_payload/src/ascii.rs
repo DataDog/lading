@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::Rng;
 
-use crate::{common::strings, Error};
+use crate::{block, common::strings, Error};
 
 const MAX_LENGTH: u16 = 6_144; // 6 KiB
 
@@ -29,7 +29,12 @@ impl Ascii {
 }
 
 impl crate::Serialize for Ascii {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> std::result::Result<block::SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -52,7 +57,7 @@ impl crate::Serialize for Ascii {
                 None => break,
             }
         }
-        Ok(())
+        Ok(block::SplitStrategy::NewlineDelimited)
     }
 }
 

@@ -7,7 +7,7 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
-use crate::{common::strings, Error};
+use crate::{block::SplitStrategy, common::strings, Error};
 use opentelemetry_proto::tonic::{
     common::v1::{any_value, AnyValue},
     logs::v1,
@@ -95,7 +95,12 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
 }
 
 impl crate::Serialize for OpentelemetryLogs {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -105,7 +110,7 @@ impl crate::Serialize for OpentelemetryLogs {
         // length field is the max message size divided by 0x7F.
         let bytes_remaining = max_bytes.checked_sub(5 + super::div_ceil(max_bytes, 0x7F));
         let Some(mut bytes_remaining) = bytes_remaining else {
-            return Ok(());
+            return Ok(SplitStrategy::None);
         };
 
         let mut acc = ExportLogsServiceRequest(Vec::new());
@@ -124,7 +129,7 @@ impl crate::Serialize for OpentelemetryLogs {
 
         let buf = acc.into_prost_type().encode_to_vec();
         writer.write_all(&buf)?;
-        Ok(())
+        Ok(SplitStrategy::None)
     }
 }
 

@@ -82,6 +82,21 @@ pub struct Block {
     pub total_bytes: NonZeroU32,
     /// The bytes of this block.
     pub bytes: Bytes,
+    /// If this block needs to be split into multiple parts
+    /// what strategy can be used to safely do this without
+    /// compromising the block's integrity.
+    /// This must be filled in by the generator as it populates the block
+    /// as it is the only entity that knows how to safely split the block.
+    pub split_strategy: SplitStrategy,
+}
+
+#[derive(Debug, Clone, Copy)]
+/// The strategy to use when splitting a block
+pub enum SplitStrategy {
+    /// No splits allowable
+    None,
+    /// Splittable along newlines
+    NewlineDelimited,
 }
 
 /// Errors for the construction of the block cache
@@ -715,7 +730,7 @@ where
     R: Rng + ?Sized,
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
-    serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
+    let split_strategy = serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
         // Blocks may be empty, especially when the amount of bytes
@@ -734,7 +749,11 @@ where
                 .expect("failed to get length of bytes"),
         )
         .ok_or(SpinError::Zero)?;
-        Ok(Some(Block { total_bytes, bytes }))
+        Ok(Some(Block {
+            total_bytes,
+            bytes,
+            split_strategy,
+        }))
     }
 }
 
