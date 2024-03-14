@@ -28,19 +28,22 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
-
-          - target: aarch64-apple-darwin
-            os: macos-latest
+            requires-cross-compilation: true # assuming x86-64 runner
+            os: ubuntu-latest
 
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-latest
 
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-20.04
+            os: ubuntu-latest
 
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-20.04
+            requires-cross-compilation: true # assuming x86-64 runner
+            os: ubuntu-latest
+
+          - target: aarch64-apple-darwin
+            requires-cross-compilation: true # assuming x86-64 runner
+            os: macos-latest
 
           - target: x86_64-apple-darwin
             os: macos-latest
@@ -55,32 +58,17 @@ jobs:
         with:
           tool: cross
 
-      - name: Install protobuf (Apt)
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        if: matrix.os == 'ubuntu-20.04'
-
-      - name: Install protobuf (Brew)
-        run: brew install protobuf
-        if: matrix.os == 'macos-latest'
-
-      - name: Check protobuf
-        run: protoc --version; which protoc; echo "PROTOC IS ${PROTOC}";
+      - name: Install Protobuf
+        if: matrix.requires-cross-compilation == false
+        uses: ./.github/actions/install-protobuf
 
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
         uses: taiki-e/upload-rust-binary-action@v1
 
-        env:
-          # Setting CFLAGS or CXXFLAGS will override the default flags provided by the cc crate
-          CFLAGS: ${{ matrix.cflags }}
-          CXXFLAGS: ${{ matrix.cxxflags }}
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-
         with:
           bin: lading
           no_default_features: true
-          features: ${{ matrix.features || '' }}
           target: ${{ matrix.target }}
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
