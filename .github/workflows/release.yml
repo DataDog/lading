@@ -4,8 +4,9 @@ permissions:
   contents: write
 
 on:
-  workflow_dispatch:
   push:
+    branches:
+      - sopell/musl-builds
     tags:
       - v[0-9]+.*
 
