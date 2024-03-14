@@ -63,7 +63,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: taiki-e/install-action@cargo-cross
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cross
 
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
