@@ -24,6 +24,28 @@ tokio = { version = "1.32" }
 tracing = { version = "0.1" }
 uuid =  { version = "1.6", default-features = false, features = ["v4", "serde"] }
 
+# Ref https://github.com/cross-rs/cross/blob/main/docs/custom_images.md#adding-dependencies-to-existing-images
+[workspace.metadata.cross.target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install protobuf-compiler:$CROSS_DEB_ARCH"
+]
+[workspace.metadata.cross.target.aarch64-unknown-linux-musl]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install protobuf-compiler:$CROSS_DEB_ARCH"
+]
+[workspace.metadata.cross.target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install protobuf-compiler:$CROSS_DEB_ARCH"
+]
+[workspace.metadata.cross.target.x86_64-unknown-linux-musl]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install protobuf-compiler:$CROSS_DEB_ARCH"
+]
+
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
