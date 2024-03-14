@@ -28,7 +28,6 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
-            requires-cross-compilation: true # assuming x86-64 runner
             os: ubuntu-latest
 
           - target: x86_64-unknown-linux-gnu
@@ -38,11 +37,9 @@ jobs:
             os: ubuntu-latest
 
           - target: aarch64-unknown-linux-musl
-            requires-cross-compilation: true # assuming x86-64 runner
             os: ubuntu-latest
 
           - target: aarch64-apple-darwin
-            requires-cross-compilation: true # assuming x86-64 runner
             os: macos-latest
 
           - target: x86_64-apple-darwin
@@ -58,8 +55,11 @@ jobs:
         with:
           tool: cross
 
+      # This installs protobuf on the host (runner)
+      # This is not needed for cross-compiled targets, however there is no
+      # way to check the architecture of the current runner, so this just always
+      # runs.
       - name: Install Protobuf
-        if: matrix.requires-cross-compilation == false
         uses: ./.github/actions/install-protobuf
 
       # Run the build & upload artifacts
