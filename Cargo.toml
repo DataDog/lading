@@ -45,6 +45,14 @@ pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update && apt-get --assume-yes install protobuf-compiler:$CROSS_DEB_ARCH"
 ]
+[workspace.metadata.cross.target.x86_64-apple-darwin]
+pre-build = [
+    "brew install protobuf"
+]
+[workspace.metadata.cross.target.aarch64-apple-darwin]
+pre-build = [
+    "brew install protobuf"
+]
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.

@@ -63,6 +63,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - uses: taiki-e/install-action@cargo-cross
 
       - name: Install protobuf (Apt)
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -71,19 +72,6 @@ jobs:
       - name: Install protobuf (Brew)
         run: brew install protobuf
         if: matrix.os == 'macos-latest'
-
-      # Install cross compilation rust toolchain for Arm64 Mac
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
-        with:
-          target: ${{ matrix.target }}
-        if: matrix.target == 'aarch64-apple-darwin'
-
-      # Run linux aarch64 build in a cross-rs qemu environment
-      - name: Install cross-compilation tools
-        uses: taiki-e/setup-cross-toolchain-action@v1
-        with:
-          target: ${{ matrix.target }}
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
 
       - name: Check protobuf
         run: protoc --version; which protoc; echo "PROTOC IS ${PROTOC}";
