@@ -4,6 +4,7 @@ permissions:
   contents: write
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - v[0-9]+.*
@@ -40,6 +41,14 @@ jobs:
 
           # Normal x86-64 Linux build
           - target: x86_64-unknown-linux-gnu
+            os: ubuntu-20.04
+
+          # Musl x86-64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-20.04
+
+          # Musl aarch64
+          - target: aarch64-unknown-linux-musl
             os: ubuntu-20.04
 
           # Normal Intel Mac build
