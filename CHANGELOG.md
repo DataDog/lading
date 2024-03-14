@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Optional new feature for DogStatsD generation -- metric name prefixing.
+- Musl builds are now available for aarch64 and x86-64
 ### Changed
 ### Fixed
 
