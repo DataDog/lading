@@ -67,17 +67,6 @@ jobs:
         with:
           tool: cross
 
-      - name: Install protobuf (Apt)
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        if: matrix.os == 'ubuntu-20.04'
-
-      - name: Install protobuf (Brew)
-        run: brew install protobuf
-        if: matrix.os == 'macos-latest'
-
-      - name: Check protobuf
-        run: protoc --version; which protoc; echo "PROTOC IS ${PROTOC}";
-
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
         uses: taiki-e/upload-rust-binary-action@v1
