@@ -85,6 +85,9 @@ jobs:
           target: ${{ matrix.target }}
         if: matrix.target == 'aarch64-unknown-linux-gnu'
 
+      - name: Check protobuf
+        run: protoc --version; which protoc; echo "PROTOC IS ${PROTOC}";
+
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
         uses: taiki-e/upload-rust-binary-action@v1
