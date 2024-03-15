@@ -24,25 +24,21 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux Aarch64 cross build.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
-            cc: 'aarch64-linux-gnu-gcc'
-            cxx: 'aarch64-linux-gnu-g++'
+            os: ubuntu-latest
 
-          # Mac M1 cross build. Uses protobuf compiler on the host.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+
           - target: aarch64-apple-darwin
             os: macos-latest
-            cflags: '-target arm64-apple-macos'
-            cxxflags: '-target arm64-apple-macos'
-            cc: 'clang'
-            cxx: 'clang++'
 
-          # Normal x86-64 Linux build
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
-
-          # Normal Intel Mac build
           - target: x86_64-apple-darwin
             os: macos-latest
 
@@ -52,43 +48,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-
-      - name: Install protobuf (Apt)
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        if: matrix.os == 'ubuntu-20.04'
-
-      - name: Install protobuf (Brew)
-        run: brew install protobuf
-        if: matrix.os == 'macos-latest'
-
-      # Install cross compilation rust toolchain for Arm64 Mac
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.3.7
+      - uses: taiki-e/install-action@v2
         with:
-          target: ${{ matrix.target }}
-        if: matrix.target == 'aarch64-apple-darwin'
+          tool: cross
 
-      # Run linux aarch64 build in a cross-rs qemu environment
-      - name: Install cross-compilation tools
-        uses: taiki-e/setup-cross-toolchain-action@v1
-        with:
-          target: ${{ matrix.target }}
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # This installs protobuf on the host (runner)
+      # This is not needed for cross-compiled targets, however there is no
+      # way to check the architecture of the current runner, so this just always
+      # runs.
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
 
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
         uses: taiki-e/upload-rust-binary-action@v1
 
-        env:
-          # Setting CFLAGS or CXXFLAGS will override the default flags provided by the cc crate
-          CFLAGS: ${{ matrix.cflags }}
-          CXXFLAGS: ${{ matrix.cxxflags }}
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-
         with:
           bin: lading
           no_default_features: true
-          features: ${{ matrix.features || '' }}
           target: ${{ matrix.target }}
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
