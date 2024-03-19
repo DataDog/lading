@@ -14,3 +14,7 @@ updates:
     schedule:
       # Check for updates to GitHub Actions every week
       interval: "weekly"
+    labels:
+      - "dependencies"   # needed to preserve default
+      - "github_actions" # needed to preserve default
+      - "no-changelog"   # CI dependencies should not require changelog entry
