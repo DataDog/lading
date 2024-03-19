@@ -28,7 +28,7 @@ jobs:
             components: "clippy"
             command: cargo clippy --all-features
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8
         with:
           components: ${{matrix.components}}
@@ -41,14 +41,14 @@ jobs:
   cargo-deny: # only runs on Linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v1
 
   test:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
@@ -60,7 +60,7 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
@@ -75,7 +75,7 @@ jobs:
       matrix:
         crate: [lading_throttle, lading_payload]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
@@ -90,7 +90,7 @@ jobs:
     steps:
       # Check our protobufs for lint cleanliness and for lack of breaking
       # changes
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: buf-setup
         uses: bufbuild/buf-setup-action@v1.30.0
       - name: buf-lint
