@@ -25,7 +25,7 @@ pub mod event;
 pub mod metric;
 pub mod service_check;
 
-const MAX_CONTEXTS: u32 = 100_000;
+const MAX_CONTEXTS: u32 = 1_000_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
