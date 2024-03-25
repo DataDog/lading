@@ -194,25 +194,6 @@ impl Serialize for Payload {
     }
 }
 
-/// Calculates the quotient of `lhs` and `rhs`, rounding the result towards
-/// positive infinity.
-///
-/// Adapted from rustc `int_roundings` implementation. Replace upon
-/// stabilization: <https://github.com/rust-lang/rust/issues/88581>
-///
-/// # Panics
-///
-/// This function will panic if `rhs` is 0 or the division results in overflow.
-const fn div_ceil(lhs: usize, rhs: usize) -> usize {
-    let d = lhs / rhs;
-    let r = lhs % rhs;
-    if r > 0 && rhs > 0 {
-        d + 1
-    } else {
-        d
-    }
-}
-
 /// Generate instance of `I` from source of randomness `S`.
 pub(crate) trait Generator<'a> {
     type Output: 'a;

@@ -103,7 +103,7 @@ impl crate::Serialize for OpentelemetryLogs {
         // An Export*ServiceRequest message has 5 bytes of fixed values plus
         // a varint-encoded message length field. The worst case for the message
         // length field is the max message size divided by 0x7F.
-        let bytes_remaining = max_bytes.checked_sub(5 + super::div_ceil(max_bytes, 0x7F));
+        let bytes_remaining = max_bytes.checked_sub(5 + max_bytes.div_ceil(0x7F));
         let Some(mut bytes_remaining) = bytes_remaining else {
             return Ok(());
         };
