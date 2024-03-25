@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 ### Changed
+- Increased maximum DogStatsD context limit from 100k to 1M
 ### Fixed
 
 ## [0.20.10]
