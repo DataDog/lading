@@ -122,7 +122,11 @@ impl Prometheus {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     async fn scrape_metrics(&self) {
         let Ok(resp) = self
             .client
@@ -230,12 +234,12 @@ impl Prometheus {
                         warn!("Negative counter value unhandled");
                         continue;
                     } else {
-                        // clippy shows "error: casting `f64` to `u64` may lose the sign of the value". This is
-                        // guarded by the sign check above.
                         if value > u64::MAX as f64 {
                             warn!("Counter value above maximum limit");
                             continue;
                         }
+                        // clippy shows "error: casting `f64` to `u64` may lose the sign of the value".
+                        // This is guarded by the sign check above.
                         value as u64
                     };
 
