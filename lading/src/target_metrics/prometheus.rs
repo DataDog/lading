@@ -142,7 +142,13 @@ impl Prometheus {
 
         // this deserves a real parser, but this will do for now.
         // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
-        for line in text.lines().filter(|l| !l.is_empty()) {
+        for line in text.lines().filter_map(|l| {
+            if l.trim().is_empty() {
+                None
+            } else {
+                Some(l.trim())
+            }
+        }) {
             if line.starts_with("# HELP") {
                 continue;
             }
@@ -208,7 +214,6 @@ impl Prometheus {
                         continue;
                     };
 
-                    trace!("gauge: {name} = {value}");
                     gauge!(format!("target/{name}"), value, &labels.unwrap_or_default());
                 }
                 Some(MetricType::Counter) => {
@@ -234,36 +239,69 @@ impl Prometheus {
                     trace!("counter: {name} = {value}");
                     absolute_counter!(format!("target/{name}"), value, &labels.unwrap_or_default());
                 }
-                Some(_) | None => {
+                Some(_) => {
                     trace!("unsupported metric type: {name} = {value}");
+                }
+                None => {
+                    warn!("Couldn't find metric type for {name}");
                 }
             }
         }
     }
 }
 
+#[allow(clippy::needless_raw_string_hashes)]
+#[allow(clippy::mutable_key_type)]
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+    use metrics::{Key, Label};
+    use metrics_util::{CompositeKey, MetricKind};
     use warp;
     use warp::Filter;
 
-    #[tokio::test]
-    async fn test_scrape_and_parse_metrics() {
-        // Create a mock http server to serve Prometheus metrics
-        let server = warp::serve(warp::path("metrics").map(|| {
-            warp::reply::with_status(
-                "target_metric{label1=\"value1\", label2=\"value2\"} 42.0\n",
-                warp::http::StatusCode::OK,
-            )
-        }));
+    const SINGLE_GAUGE_TWO_SERIES: &str = r#"
+    # HELP workloadmeta_stored_entities Number of entities in the store.
+    # TYPE workloadmeta_stored_entities gauge
+    workloadmeta_stored_entities{kind="container",source="node_orchestrator"} 35
+    workloadmeta_stored_entities{kind="container",source="runtime"} 36
+    "#;
+
+    const COUNT_ZERO_LABELS: &str = r#"
+    # TYPE request_count counter
+    request_count 1027
+    "#;
+
+    const COUNT_ONE_LABEL: &str = r#"
+    # TYPE memory_usage_bytes gauge
+    memory_usage_bytes{process="test"} 5264384
+    "#;
+
+    async fn run_scrape_and_parse_metrics(
+        s: &str,
+    ) -> HashMap<
+        CompositeKey,
+        (
+            Option<metrics::Unit>,
+            Option<metrics::SharedString>,
+            metrics_util::debugging::DebugValue,
+        ),
+    > {
+        let s = s.to_string();
+        let server = warp::serve(
+            warp::path("metrics")
+                .map(move || warp::reply::with_status(s.clone(), warp::http::StatusCode::OK)),
+        );
 
         let (addr, serve_fut) = server.bind_ephemeral(([127, 0, 0, 1], 0));
         let _server_handle = tokio::spawn(serve_fut);
 
+        let server_uri = format!("http://{addr}/metrics");
+
         let shutdown = Phase::new();
         let experiment_started = Phase::new();
-        let server_uri = format!("http://{addr}/metrics");
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
@@ -281,11 +319,94 @@ mod tests {
 
         p.scrape_metrics().await;
 
-        let snapshot = snapshotter.snapshot().into_vec();
+        snapshotter.snapshot().into_hashmap()
+    }
 
-        // todo, better mock data and actual tests
+    #[tokio::test]
+    async fn test_gauge_with_two_series() {
+        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES).await;
+
+        assert_eq!(snapshot.len(), 2);
+
+        let metric_one = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/workloadmeta_stored_entities",
+                    vec![
+                        Label::new("kind", "container"),
+                        Label::new("source", "node_orchestrator"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric_one.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 35.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+
+        let metric_two = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/workloadmeta_stored_entities",
+                    vec![
+                        Label::new("kind", "container"),
+                        Label::new("source", "runtime"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric_two.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 36.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_count_zero_labels() {
+        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS).await;
+
         assert_eq!(snapshot.len(), 1);
 
-        shutdown.signal();
+        let metric_one = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Counter,
+                Key::from_parts("target/request_count", vec![]),
+            ))
+            .expect("metric not found");
+        match metric_one.2 {
+            metrics_util::debugging::DebugValue::Counter(v) => {
+                assert_eq!(v, 1027);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_count_one_labels() {
+        let snapshot = run_scrape_and_parse_metrics(COUNT_ONE_LABEL).await;
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric_one = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Counter,
+                Key::from_parts(
+                    "target/memory_usage_bytes",
+                    vec![Label::new("process", "test")],
+                ),
+            ))
+            .expect("metric not found");
+        match metric_one.2 {
+            metrics_util::debugging::DebugValue::Counter(v) => {
+                assert_eq!(v, 5_264_384);
+            }
+            _ => panic!("unexpected metric type"),
+        }
     }
 }
