@@ -831,7 +831,7 @@ mod test {
             use rand::{rngs::SmallRng, SeedableRng};
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let block_chunks = vec![100; num_chunks];
+            let block_chunks = vec![1000; num_chunks];
             let serializer = crate::Json;
             let block_cache = construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
                 .expect("construct_block_cache_inner should not fail");
