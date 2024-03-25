@@ -63,6 +63,7 @@ impl FromStr for MetricType {
 #[derive(Debug)]
 pub struct Prometheus {
     config: Config,
+    client: reqwest::Client,
     shutdown: Phase,
     experiment_started: Phase,
 }
@@ -74,8 +75,10 @@ impl Prometheus {
     /// Prometheus format.
     ///
     pub(crate) fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+        let client = reqwest::Client::new();
         Self {
             config,
+            client,
             shutdown,
             experiment_started,
         }
@@ -121,8 +124,8 @@ impl Prometheus {
 
     #[allow(clippy::too_many_lines)]
     async fn scrape_metrics(&self) {
-        let client = reqwest::Client::new();
-        let Ok(resp) = client
+        let Ok(resp) = self
+            .client
             .get(&self.config.uri)
             .timeout(Duration::from_secs(1))
             .send()
