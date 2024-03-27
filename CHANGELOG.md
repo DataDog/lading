@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Increased maximum DogStatsD context limit from 100k to 1M
 ### Fixed
+- The capture manager will no longer panic if recording a capture and checking for a shutdown combined takes longer than one second.
 
 ## [0.20.10]
 ### Added

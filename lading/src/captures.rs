@@ -207,7 +207,12 @@ impl CaptureManager {
                 }
                 // Sleep for 1 second minus however long we just spent recording captures
                 // assumption here is that the time spent recording captures is consistent
-                std::thread::sleep(Duration::from_secs(1) - now.elapsed());
+                let delta = now.elapsed();
+                if delta > Duration::from_secs(1) {
+                    warn!("Recording capture took more than 1s (took {delta:?})");
+                    continue;
+                }
+                std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
             })?;
         Ok(())
     }
