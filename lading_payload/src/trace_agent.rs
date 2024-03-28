@@ -6,7 +6,7 @@ use rand::{seq::SliceRandom, Rng};
 use rmp_serde::Serializer;
 use rustc_hash::FxHashMap;
 
-use crate::{common::strings, Error, Generator};
+use crate::{block::SplitStrategy, common::strings, Error, Generator};
 use serde::Serialize;
 
 const SERVICES: [&str; 7] = [
@@ -194,7 +194,12 @@ impl<'a> Generator<'a> for TraceAgent {
 }
 
 impl crate::Serialize for TraceAgent {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -261,7 +266,7 @@ impl crate::Serialize for TraceAgent {
                 break;
             }
         }
-        Ok(())
+        Ok(SplitStrategy::None)
     }
 }
 

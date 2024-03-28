@@ -8,7 +8,7 @@ use rand::Rng;
 use rustc_hash::FxHashMap;
 use serde_tuple::Serialize_tuple;
 
-use crate::{common::strings, Error, Generator};
+use crate::{block::SplitStrategy, common::strings, Error, Generator};
 
 #[derive(Debug, Clone)]
 /// Fluent payload
@@ -150,14 +150,19 @@ struct Entry<'a> {
 }
 
 impl crate::Serialize for Fluent {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         W: Write,
         R: Rng + Sized,
     {
         if max_bytes < 16 {
             // 16 is just an arbitrarily big constant
-            return Ok(());
+            return Ok(SplitStrategy::None);
         }
 
         // We will arbitrarily generate 1_000 Member instances and then
@@ -198,7 +203,7 @@ impl crate::Serialize for Fluent {
                 break;
             }
         }
-        Ok(())
+        Ok(SplitStrategy::None)
     }
 }
 

@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::{common::strings, Error, Generator};
+use crate::{block::SplitStrategy, common::strings, Error, Generator};
 
 const STATUSES: [&str; 3] = ["notice", "info", "warning"];
 const HOSTNAMES: [&str; 4] = ["alpha", "beta", "gamma", "localhost"];
@@ -126,7 +126,12 @@ impl<'a> Generator<'a> for DatadogLog {
 }
 
 impl crate::Serialize for DatadogLog {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         W: Write,
         R: Rng + Sized,
@@ -135,7 +140,7 @@ impl crate::Serialize for DatadogLog {
 
         if max_bytes < approx_member_encoded_size {
             // 'empty' payload  is []
-            return Ok(());
+            return Ok(SplitStrategy::None);
         }
 
         // We will arbitrarily generate Member instances and then serialize. If
@@ -159,7 +164,7 @@ impl crate::Serialize for DatadogLog {
                 break;
             }
         }
-        Ok(())
+        Ok(SplitStrategy::None)
     }
 }
 

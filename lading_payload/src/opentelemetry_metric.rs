@@ -9,7 +9,7 @@
 
 use std::io::Write;
 
-use crate::{common::strings, Error};
+use crate::{block::SplitStrategy, common::strings, Error};
 use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -166,7 +166,12 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
 }
 
 impl crate::Serialize for OpentelemetryMetrics {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -176,7 +181,7 @@ impl crate::Serialize for OpentelemetryMetrics {
         // length field is the max message size divided by 0x7F.
         let bytes_remaining = max_bytes.checked_sub(5 + super::div_ceil(max_bytes, 0x7F));
         let Some(mut bytes_remaining) = bytes_remaining else {
-            return Ok(());
+            return Ok(SplitStrategy::None);
         };
 
         let mut acc = ExportMetricsServiceRequest(Vec::new());
@@ -193,7 +198,7 @@ impl crate::Serialize for OpentelemetryMetrics {
         }
         let buf = acc.into_prost_type().encode_to_vec();
         writer.write_all(&buf)?;
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 

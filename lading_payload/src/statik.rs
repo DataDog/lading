@@ -9,6 +9,8 @@ use std::{
 use rand::{prelude::IteratorRandom, Rng};
 use tracing::debug;
 
+use crate::block::SplitStrategy;
+
 #[derive(Debug)]
 struct Source {
     byte_size: u64,
@@ -73,7 +75,7 @@ impl crate::Serialize for Static {
         mut rng: R,
         max_bytes: usize,
         writer: &mut W,
-    ) -> Result<(), crate::Error>
+    ) -> Result<SplitStrategy, crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -98,6 +100,6 @@ impl crate::Serialize for Static {
             reader.consume(buffer_length);
         }
 
-        Ok(())
+        Ok(SplitStrategy::None)
     }
 }

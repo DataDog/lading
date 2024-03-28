@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 
-use crate::Error;
+use crate::{block::SplitStrategy, Error};
 
 use super::Generator;
 
@@ -57,7 +57,12 @@ impl<'a> Generator<'a> for Json {
 }
 
 impl crate::Serialize for Json {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -77,7 +82,7 @@ impl crate::Serialize for Json {
                 None => break,
             }
         }
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 

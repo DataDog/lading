@@ -5,7 +5,7 @@ use std::{io::Write, time::SystemTime};
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-use crate::Error;
+use crate::{block::SplitStrategy, Error};
 
 #[derive(Debug, Default, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
@@ -100,14 +100,19 @@ impl Member {
 }
 
 impl crate::Serialize for Syslog5424 {
-    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
     {
         if max_bytes < 2 {
             // 'empty' payload  is []
-            return Ok(());
+            return Ok(SplitStrategy::None);
         }
 
         let mut written_bytes = 0;
@@ -124,7 +129,7 @@ impl crate::Serialize for Syslog5424 {
             written_bytes += encoded.len();
         }
 
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 

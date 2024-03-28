@@ -5,7 +5,7 @@ use std::io::Write;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 
-use crate::Error;
+use crate::{block::SplitStrategy, Error};
 
 const PARTITIONS: [&str; 4] = ["eu", "eu2", "ap1", "us1"];
 const STAGES: [&str; 4] = ["production", "performance", "noprod", "staging"];
@@ -152,7 +152,12 @@ impl SplunkHec {
 }
 
 impl crate::Serialize for SplunkHec {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -181,7 +186,7 @@ impl crate::Serialize for SplunkHec {
                 None => break,
             }
         }
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 

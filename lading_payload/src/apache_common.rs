@@ -1,6 +1,6 @@
 //! Apache common payload.
 
-use crate::{common::strings, Error, Generator};
+use crate::{block::SplitStrategy, common::strings, Error, Generator};
 
 use core::fmt;
 use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
@@ -341,7 +341,12 @@ impl<'a> Generator<'a> for ApacheCommon {
 }
 
 impl crate::Serialize for ApacheCommon {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(
+        &self,
+        mut rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -359,7 +364,7 @@ impl crate::Serialize for ApacheCommon {
                 None => break,
             }
         }
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 

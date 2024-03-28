@@ -11,7 +11,7 @@ use rand::{
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use tracing::{debug, warn};
 
-use crate::{common::strings, Serialize};
+use crate::{block::SplitStrategy, common::strings, Serialize};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -667,7 +667,12 @@ impl DogStatsD {
 }
 
 impl Serialize for DogStatsD {
-    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), crate::Error>
+    fn to_bytes<W, R>(
+        &self,
+        rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<SplitStrategy, crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -685,7 +690,7 @@ impl DogStatsD {
         mut rng: R,
         max_bytes: usize,
         writer: &mut W,
-    ) -> Result<(), crate::Error>
+    ) -> Result<SplitStrategy, crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -706,7 +711,7 @@ impl DogStatsD {
             }
         }
         if bytes_remaining == max_bytes {
-            return Ok(());
+            return Ok(SplitStrategy::NewlineDelimited);
         }
 
         let max_bytes: u32 = max_bytes.try_into().unwrap_or_else(|_| {
@@ -735,14 +740,14 @@ impl DogStatsD {
             writeln!(writer, "{member}")?;
         }
 
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
     fn to_bytes<W, R>(
         &self,
         mut rng: R,
         max_bytes: usize,
         writer: &mut W,
-    ) -> Result<(), crate::Error>
+    ) -> Result<SplitStrategy, crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -761,7 +766,7 @@ impl DogStatsD {
             }
         }
         if bytes_remaining == max_bytes {
-            return Ok(());
+            return Ok(SplitStrategy::NewlineDelimited);
         }
 
         let length = max_bytes - bytes_remaining;
@@ -769,7 +774,7 @@ impl DogStatsD {
             "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
             length
         );
-        Ok(())
+        Ok(SplitStrategy::NewlineDelimited)
     }
 }
 
