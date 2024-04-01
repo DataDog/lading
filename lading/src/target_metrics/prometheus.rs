@@ -150,10 +150,11 @@ impl Prometheus {
         // this deserves a real parser, but this will do for now.
         // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
         for line in text.lines().filter_map(|l| {
-            if l.trim().is_empty() {
+            let line = l.trim();
+            if line.is_empty() {
                 None
             } else {
-                Some(l.trim())
+                Some(line)
             }
         }) {
             if line.starts_with("# HELP") {
