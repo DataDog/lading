@@ -282,7 +282,7 @@ mod tests {
     request_count 1027
     "#;
 
-    const COUNT_ONE_LABEL: &str = r#"
+    const GAUGE_ONE_LABEL: &str = r#"
     # TYPE memory_usage_bytes gauge
     memory_usage_bytes{process="test"} 5264384
     "#;
@@ -394,16 +394,15 @@ mod tests {
             _ => panic!("unexpected metric type"),
         }
     }
-
     #[tokio::test]
     async fn test_count_one_labels() {
-        let snapshot = run_scrape_and_parse_metrics(COUNT_ONE_LABEL).await;
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL).await;
 
         assert_eq!(snapshot.len(), 1);
 
         let metric_one = snapshot
             .get(&CompositeKey::new(
-                MetricKind::Counter,
+                MetricKind::Gauge,
                 Key::from_parts(
                     "target/memory_usage_bytes",
                     vec![Label::new("process", "test")],
@@ -411,8 +410,8 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_one.2 {
-            metrics_util::debugging::DebugValue::Counter(v) => {
-                assert_eq!(v, 5_264_384);
+            metrics_util::debugging::DebugValue::Gauge(v) => {
+                assert_eq!(v, 5_264_384_f64);
             }
             _ => panic!("unexpected metric type"),
         }
