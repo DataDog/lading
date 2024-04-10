@@ -1,4 +1,5 @@
 use std::collections::{hash_map::RandomState, BTreeSet, HashMap};
+use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
 
@@ -52,11 +53,23 @@ async fn main() -> Result<(), Error> {
         return Err(Error::InvalidArgs);
     }
 
+    let is_zstd = capture_path
+        .extension()
+        .is_some_and(|ext| ext == OsStr::new(".zstd"));
+
     let mut file = tokio::fs::File::open(capture_path).await?;
 
-    let mut contents = String::with_capacity(file.metadata().await?.len() as usize);
+    let contents = if is_zstd {
+        let mut contents = String::with_capacity(file.metadata().await?.len() as usize);
+        file.read_to_string(&mut contents).await?;
 
-    file.read_to_string(&mut contents).await?;
+        contents
+    } else {
+        let stdfile = file.try_into_std().expect("file can be std");
+        let contents = zstd::stream::decode_all(stdfile).expect("invalid zstd");
+
+        String::from_utf8(contents).expect("Valid utf8")
+    };
 
     let lines: Vec<Line> = serde_json::Deserializer::from_str(&contents)
         .into_iter::<Line>()
