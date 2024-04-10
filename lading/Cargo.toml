@@ -23,7 +23,7 @@ bytes = { workspace = true, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "color", "suggestions", "derive"] }
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
 futures = "0.3.28"
-http = "0.2"
+http = "1.1"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
