@@ -194,6 +194,7 @@ impl CaptureManager {
             .name("capture-manager".into())
             .spawn(move || loop {
                 if self.shutdown.try_recv() {
+                    // TODO - see SMPTNG-340 for details about more synchronization needed here
                     info!("shutdown signal received");
                     return;
                 }
