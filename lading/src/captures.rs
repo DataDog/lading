@@ -193,6 +193,11 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || loop {
+                if self.shutdown.try_recv() {
+                    // TODO - see SMPTNG-340 for details about more synchronization needed here
+                    info!("shutdown signal received");
+                    return;
+                }
                 let now = Instant::now();
                 if let Err(e) = self.record_captures() {
                     warn!(
@@ -201,10 +206,6 @@ impl CaptureManager {
                     );
                 }
                 self.fetch_index += 1;
-                if self.shutdown.try_recv() {
-                    info!("shutdown signal received");
-                    return;
-                }
                 // Sleep for 1 second minus however long we just spent recording captures
                 // assumption here is that the time spent recording captures is consistent
                 let delta = now.elapsed();
