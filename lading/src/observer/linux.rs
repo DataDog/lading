@@ -5,7 +5,7 @@ use metrics::{gauge, register_gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::observer::memory::{Regions, Rollup};
 
@@ -139,7 +139,7 @@ impl Sampler {
         let mut pids: FxHashSet<i32> = FxHashSet::default();
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
         if !self.parent.is_alive() {
-            return Err(Error::ParentDied(self.parent));
+            return Err(Error::ParentDied(self.parent.pid()));
         }
         processes.push_back(Process::new(self.parent.pid())?);
         while let Some(process) = processes.pop_back() {
@@ -156,7 +156,7 @@ impl Sampler {
                         debug!(
                             "Discovered {n} children for PID {parent}",
                             n = children.len(),
-                            parent = self.parent
+                            parent = self.parent.pid()
                         );
                         for child in children
                             .drain(..)
