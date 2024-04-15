@@ -5,7 +5,7 @@ use metrics::{gauge, register_gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::observer::memory::{Regions, Rollup};
 
@@ -28,6 +28,9 @@ pub enum Error {
     Proc(#[from] procfs::ProcError),
     #[error("Unable to read cgroups: {0}")]
     CGroups(#[from] cgroups_rs::error::Error),
+    /// Parent process has died
+    #[error("Parent process has died, cannot sample: {0}")]
+    ParentDied(i32),
 }
 
 macro_rules! report_status_field {
@@ -83,6 +86,7 @@ impl Gauge {
 
 impl Sampler {
     pub(crate) fn new(parent_pid: u32) -> Result<Self, Error> {
+        info!("Monitoring PID: {parent_pid}");
         let parent = Process::new(parent_pid.try_into().expect("PID coercion failed"))?;
 
         Ok(Self {
@@ -134,6 +138,9 @@ impl Sampler {
         // dereferencing the `/proc/<pid>/root` symlink.
         let mut pids: FxHashSet<i32> = FxHashSet::default();
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
+        if !self.parent.is_alive() {
+            return Err(Error::ParentDied(self.parent));
+        }
         processes.push_back(Process::new(self.parent.pid())?);
         while let Some(process) = processes.pop_back() {
             // Search for child processes. This is done by querying for every
@@ -146,6 +153,11 @@ impl Sampler {
                 for task in tasks.filter(std::result::Result::is_ok) {
                     let task = task.expect("failed to read task"); // SAFETY: filter on iterator
                     if let Ok(mut children) = task.children() {
+                        debug!(
+                            "Discovered {n} children for PID {parent}",
+                            n = children.len(),
+                            parent = self.parent
+                        );
                         for child in children
                             .drain(..)
                             .filter_map(|c| Process::new(c as i32).ok())
