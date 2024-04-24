@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The capture manager will no longer panic if recording a capture and checking for a shutdown combined takes longer than one second.
 - A shutdown race was partially fixed in the capture manager which could result in truncated (invalid) json capture files.
-- Unix datagram generator will not longer 'sheer' blocks across datagrams.
+- Unix datagram generator will not longer 'shear' blocks across datagrams.
 
 ## [0.20.10]
 ### Added

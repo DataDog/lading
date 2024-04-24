@@ -254,7 +254,7 @@ impl Child {
                     // NOTE When we write into a unix socket it may be that only
                     // some of the written bytes make it through in which case
                     // we DO NOT cycle back around and try to write the
-                    // remainder of the buffer. To do so would be to sheer the
+                    // remainder of the buffer. To do so would be to shear the
                     // block across multiple datagrams which we cannot do
                     // without cooperation of the client, which we are not
                     // guaranteed.
