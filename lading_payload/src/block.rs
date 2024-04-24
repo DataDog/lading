@@ -785,10 +785,17 @@ pub fn get_blocks(
 /// - Panics if a block size is zero
 pub fn default_blocks() -> Vec<NonZeroU32> {
     [
-        byte_unit::Byte::from_unit(1.0 / 32.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
-        byte_unit::Byte::from_unit(1.0 / 16.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
-        byte_unit::Byte::from_unit(1.0 / 4.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
-        byte_unit::Byte::from_unit(1.0 / 2.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
+        // KB
+        byte_unit::Byte::from_unit(1f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(2f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(4f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(8f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(16f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(32f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(64f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(256f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        byte_unit::Byte::from_unit(512f64, byte_unit::ByteUnit::KB).expect("valid bytes"),
+        // MB
         byte_unit::Byte::from_unit(1.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
         byte_unit::Byte::from_unit(2.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
         byte_unit::Byte::from_unit(4.0, byte_unit::ByteUnit::MB).expect("valid bytes"),
