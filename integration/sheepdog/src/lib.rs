@@ -93,8 +93,8 @@ impl IntegrationTest {
             lading_config_template: lading_config.to_string(),
             ducks_config,
             tempdir,
-            experiment_duration: Duration::from_secs(1),
-            experiment_warmup: Duration::from_secs(0),
+            experiment_duration: Duration::from_secs(60),
+            experiment_warmup: Duration::from_secs(10),
         })
     }
 
