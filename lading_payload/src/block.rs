@@ -117,7 +117,7 @@ pub enum CacheMethod {
 /// The default cache method.
 #[must_use]
 pub fn default_cache_method() -> CacheMethod {
-    CacheMethod::Fixed
+    CacheMethod::Streaming
 }
 
 #[derive(Debug)]
