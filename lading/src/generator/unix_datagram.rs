@@ -33,6 +33,10 @@ fn default_parallel_connections() -> u16 {
     1
 }
 
+// Mimic the belief of Datadog Agent, although correctly we should be reading
+// sysctl values on Linux.
+const UDS_DATAGRAM_LIMIT_BYTES: u32 = 8_192;
+
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
@@ -114,8 +118,13 @@ impl UnixDatagram {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        // TODO pass in datagram_friendly: true
-        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes, None);
+        let block_sizes = lading_payload::block::get_blocks(
+            &config.block_sizes,
+            Some(byte_unit::Byte::from_unit(
+                UDS_DATAGRAM_LIMIT_BYTES.into(),
+                byte_unit::ByteUnit::B,
+            )?),
+        );
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "unix_datagram".to_string()),
@@ -243,27 +252,24 @@ impl Child {
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     // NOTE When we write into a unix socket it may be that only
-                    // some of the written bytes make it through in which case we
-                    // must cycle back around and try to write the remainder of the
-                    // buffer.
+                    // some of the written bytes make it through in which case
+                    // we DO NOT cycle back around and try to write the
+                    // remainder of the buffer. To do so would be to sheer the
+                    // block across multiple datagrams which we cannot do
+                    // without cooperation of the client, which we are not
+                    // guaranteed.
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let blk_max: usize = total_bytes.get() as usize;
-                    let mut blk_offset = 0;
-                    while blk_offset < blk_max {
-                        match socket.send(&blk.bytes[blk_offset..]).await {
-                            Ok(bytes) => {
-                                bytes_written.increment(bytes as u64);
-                                packets_sent.increment(1);
-                                blk_offset += bytes;
-                            }
-                            Err(err) => {
-                                debug!("write failed: {}", err);
+                    match socket.send(&blk.bytes).await {
+                        Ok(bytes) => {
+                            bytes_written.increment(bytes as u64);
+                            packets_sent.increment(1);
+                        }
+                        Err(err) => {
+                            debug!("write failed: {}", err);
 
-                                let mut error_labels = self.metric_labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", 1, &error_labels);
-                                break; // while blk_offset
-                            }
+                            let mut error_labels = self.metric_labels.clone();
+                            error_labels.push(("error".to_string(), err.to_string()));
+                            counter!("request_failure", 1, &error_labels);
                         }
                     }
                 }
