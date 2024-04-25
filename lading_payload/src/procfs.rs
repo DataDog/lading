@@ -1392,7 +1392,7 @@ impl fmt::Display for Stat {
         write!(
             f,
             concat!(
-                "{pid} {comm} {state} {ppid} {pgrp} ",
+                "{pid} ({comm}) {state} {ppid} {pgrp} ",
                 "{session} {tty_nr} {tpgid} {flags} {minflt} ",
                 "{cminflt} {majflt} {cmajflt} {utime} {stime} ",
                 "{cutime} {cstime} {priority} {nice} {num_threads} ",
@@ -1683,7 +1683,7 @@ impl<'a> Generator<'a> for ProcessGenerator {
     {
         // For simplicity, assume the command line is a single string consisting
         // of a single path component and no arguments.
-        let cmdline_size: usize = rng.gen_range(1..NAME_MAX);
+        let cmdline_size: usize = rng.gen_range(1..=NAME_MAX);
 
         // SAFETY: If this call fails, then execution should panic because an
         // inability to generate process command lines is a serious bug.
