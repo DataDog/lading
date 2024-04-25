@@ -346,6 +346,13 @@ async fn main() -> Result<(), anyhow::Error> {
         UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
     let ducks_comm = UnixListenerStream::new(ducks_comm);
 
+    let timeout_seconds = std::env::args()
+        .nth(2)
+        .ok_or(anyhow::anyhow!("ducks timeout argument missing"))?;
+    let timeout_seconds: u64 = timeout_seconds
+        .parse()
+        .context("ducks timeout argument must be a number")?;
+
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
     let server = DucksTarget { shutdown_tx };
@@ -361,7 +368,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
         },
         _ = shutdown_rx.recv() => {},
-        _ = tokio::time::sleep(Duration::from_secs(60)) => { warn!("timed out") }
+        _ = tokio::time::sleep(Duration::from_secs(timeout_seconds)) => { warn!("timed out") }
     }
     debug!("shutting down");
 

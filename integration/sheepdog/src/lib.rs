@@ -12,6 +12,12 @@
 //! - Verify that lading capture outputs are parseable
 //! - Attempt to validate lading's data rate consistency
 //! - Verify that lading generates meaningful data (is entropy a good enough signal?)
+//!
+//! # Development Notes
+//!
+//! Turn up logging when debugging the integration test rig:
+//! `RUST_LOG=trace cargo test -p sheepdog`
+//!
 
 use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
@@ -108,14 +114,20 @@ impl IntegrationTest {
         // Every ducks-sheepdog pair is connected by a unique socket file
         let ducks_comm_file = self.tempdir.path().join("ducks_socket");
 
+        let ducks_timeout =
+            self.experiment_warmup + self.experiment_duration + Duration::from_secs(60);
+        let ducks_timeout = ducks_timeout.as_secs().to_string();
+
         let ducks_process = Command::new(ducks_binary)
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .env("RUST_LOG", "ducks=debug,info")
             .arg(
                 ducks_comm_file
                     .to_str()
                     .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
             )
+            .arg(ducks_timeout)
             .spawn()
             .context("launch ducks")?;
 
@@ -127,13 +139,18 @@ impl IntegrationTest {
             .connect_with_connector(tower::service_fn(move |_| {
                 UnixStream::connect(ducks_comm_file.clone())
             }))
-            .await?;
+            .await
+            .context("Failed to connect to `ducks` integration test target binary")?;
         let mut ducks_rpc = IntegrationTargetClient::new(channel);
         debug!("connected to ducks");
 
         // instruct ducks to start the test (this is currently hardcoded to a
         // http sink test but will be configurable in the future)
-        let test = ducks_rpc.start_test(self.ducks_config).await?.into_inner();
+        let test = ducks_rpc
+            .start_test(self.ducks_config)
+            .await
+            .context("sending start test signal")?
+            .into_inner();
         let port = test.port as u16;
 
         // template & write lading config
@@ -150,6 +167,7 @@ impl IntegrationTest {
         let captures_file = self.tempdir.path().join("captures");
         let lading = Command::new(lading_binary)
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .env("RUST_LOG", "lading=debug,info")
             .arg("--target-pid")
             .arg(
@@ -176,31 +194,52 @@ impl IntegrationTest {
                     .to_str()
                     .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
             )
-            .spawn()?;
+            .spawn()
+            .context("spawn lading")?;
 
         // wait for lading to push some load. It will exit on its own.
         debug!("lading is running");
-        let lading_output = lading.wait_with_output().await?;
+        let lading_output = lading
+            .wait_with_output()
+            .await
+            .context("wait for lading to exit")?;
 
         // get test results from ducks
         let metrics = ducks_rpc.get_metrics(());
-        let metrics = metrics.await?.into_inner();
+        let metrics = metrics
+            .await
+            .context("get metrics from ducks")?
+            .into_inner();
 
         let metrics = Metrics::from(metrics);
 
         // ask ducks to shutdown and wait for its process to exit
         debug!("send shutdown command");
-        ducks_rpc.shutdown(()).await?;
+        ducks_rpc
+            .shutdown(())
+            .await
+            .context("requesting ducks shutdown")?;
         drop(ducks_rpc);
-        let ducks_output = ducks_process.wait_with_output().await?;
+        let ducks_output = ducks_process
+            .wait_with_output()
+            .await
+            .context("wait for ducks to exit")?;
 
         let ducks_stdout = ducks_output.stdout;
         let ducks_stdout = String::from_utf8(ducks_stdout)?;
-        println!("ducks output:\n{}", ducks_stdout);
+        println!("ducks stdout:\n{}", ducks_stdout);
+
+        let ducks_stderr = ducks_output.stderr;
+        let ducks_stderr = String::from_utf8(ducks_stderr)?;
+        println!("ducks stderr:\n{}", ducks_stderr);
 
         let lading_stdout = lading_output.stdout;
         let lading_stdout = String::from_utf8(lading_stdout)?;
-        println!("lading output:\n{}", lading_stdout);
+        println!("lading stdout:\n{}", lading_stdout);
+
+        let lading_stderr = lading_output.stderr;
+        let lading_stderr = String::from_utf8(lading_stderr)?;
+        println!("lading stderr:\n{}", lading_stderr);
 
         // todo: report captures file & provide some utilities for asserting against it
         println!("test result: {:?}", metrics);
