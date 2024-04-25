@@ -6,7 +6,10 @@
 //! the end of warmup phase.
 //! Controlling the order of a phase is the responsibility of this module.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 
 use tokio::sync::Semaphore;
 use tracing::info;
@@ -19,9 +22,15 @@ use tracing::info;
 /// lading that participates in controlled shutdown does so by having a clone of
 /// this struct.
 pub struct Phase {
-    /// The interior semaphore, the mechanism by which we will 'broadcast'
-    /// the current phase has been entered.
+    /// The mechanism by which we will 'broadcast' the current phase has been
+    /// entered.
     sem: Arc<Semaphore>,
+
+    /// The mechanism by which we will 'ack' receipt of phase change to the `Phase` creator.
+    ack_sem: Arc<Semaphore>,
+
+    /// The total number of peers, incremented only by `clone`.
+    peers: Arc<AtomicU32>,
 
     /// `true` if the current phase has been entered.
     phase_entered: bool,
@@ -40,6 +49,8 @@ impl Phase {
     pub fn new() -> Self {
         Self {
             sem: Arc::new(Semaphore::new(0)),
+            ack_sem: Arc::new(Semaphore::new(0)),
+            peers: Arc::new(0.into()),
             phase_entered: false,
         }
     }
@@ -89,13 +100,50 @@ impl Phase {
         info!(permits = fill, "signaling phase entered");
         self.sem.add_permits(fill);
     }
+
+    /// Wait for any registered peers before returning.
+    #[tracing::instrument]
+    pub async fn wait_for_peers(self) {
+        let peers = self.peers.load(Ordering::Acquire);
+        let _ = self.ack_sem.acquire_many(peers).await;
+    }
+
+    /// Register with the `Phase` owner to avoid the call to `signal` from
+    /// proceeding without the token returned here being dropped.
+    #[tracing::instrument]
+    pub fn register(&self) -> Token {
+        // Increment the peers. We are careful to to AcqRel this fetch and store
+        // to avoid the parent from being unable to read the correct number of
+        // peers later.
+        self.peers.fetch_add(1, Ordering::AcqRel);
+        Token {
+            ack_sem: Arc::clone(&self.ack_sem),
+        }
+    }
 }
 
 impl Clone for Phase {
     fn clone(&self) -> Self {
         Self {
+            ack_sem: Arc::clone(&self.ack_sem),
+            peers: Arc::clone(&self.peers),
             phase_entered: self.phase_entered,
             sem: Arc::clone(&self.sem),
         }
+    }
+}
+
+/// Return from [`Phase::signal`]. When this drops phase signal will be presumed
+/// ack'ed whether `recv` is called or not.
+#[derive(Debug)]
+pub struct Token {
+    /// The mechanism by which we will 'ack' receipt of phase change to the
+    /// `Phase` creator.
+    ack_sem: Arc<Semaphore>,
+}
+
+impl Drop for Token {
+    fn drop(&mut self) {
+        self.ack_sem.add_permits(1);
     }
 }

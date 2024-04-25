@@ -192,28 +192,32 @@ impl CaptureManager {
 
         std::thread::Builder::new()
             .name("capture-manager".into())
-            .spawn(move || loop {
-                if self.shutdown.try_recv() {
-                    // TODO - see SMPTNG-340 for details about more synchronization needed here
-                    info!("shutdown signal received");
-                    return;
+            .spawn(move || {
+                let token = self.shutdown.register();
+                loop {
+                    if self.shutdown.try_recv() {
+                        // TODO - see SMPTNG-340 for details about more synchronization needed here
+                        info!("shutdown signal received");
+                        drop(token);
+                        return;
+                    }
+                    let now = Instant::now();
+                    if let Err(e) = self.record_captures() {
+                        warn!(
+                            "failed to record captures for idx {idx}: {e}",
+                            idx = self.fetch_index
+                        );
+                    }
+                    self.fetch_index += 1;
+                    // Sleep for 1 second minus however long we just spent recording captures
+                    // assumption here is that the time spent recording captures is consistent
+                    let delta = now.elapsed();
+                    if delta > Duration::from_secs(1) {
+                        warn!("Recording capture took more than 1s (took {delta:?})");
+                        continue;
+                    }
+                    std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
                 }
-                let now = Instant::now();
-                if let Err(e) = self.record_captures() {
-                    warn!(
-                        "failed to record captures for idx {idx}: {e}",
-                        idx = self.fetch_index
-                    );
-                }
-                self.fetch_index += 1;
-                // Sleep for 1 second minus however long we just spent recording captures
-                // assumption here is that the time spent recording captures is consistent
-                let delta = now.elapsed();
-                if delta > Duration::from_secs(1) {
-                    warn!("Recording capture took more than 1s (took {delta:?})");
-                    continue;
-                }
-                std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
             })?;
         Ok(())
     }
