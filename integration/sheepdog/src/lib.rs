@@ -423,6 +423,7 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_logs"
+            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -459,6 +460,7 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_traces"
+            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -495,6 +497,7 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_metrics"
+            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
