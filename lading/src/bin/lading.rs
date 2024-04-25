@@ -489,7 +489,7 @@ async fn inner_main(
             },
         }
     };
-    drop(shutdown);
+    shutdown.wait_for_peers().await;
     res
 }
 
