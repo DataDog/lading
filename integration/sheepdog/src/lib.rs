@@ -19,7 +19,12 @@
 //! `RUST_LOG=trace cargo test -p sheepdog`
 //!
 
-use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    io::{Read, Write},
+    path::PathBuf,
+    process::Stdio,
+    time::Duration,
+};
 
 use anyhow::Context;
 use shared::{
@@ -29,7 +34,7 @@ use shared::{
 use tempfile::TempDir;
 use tokio::{net::UnixStream, process::Command};
 use tonic::transport::Endpoint;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug)]
 pub struct Metrics {
@@ -76,6 +81,35 @@ pub fn build_lading() -> Result<PathBuf, anyhow::Error> {
     Ok(bin)
 }
 
+enum TakeableTempDir {
+    Owned(TempDir),
+    Borrowed(std::path::PathBuf),
+}
+
+impl TakeableTempDir {
+    fn new() -> Result<Self, anyhow::Error> {
+        Ok(Self::Owned(TempDir::new()?))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        match self {
+            TakeableTempDir::Owned(tempdir) => tempdir.path(),
+            TakeableTempDir::Borrowed(path) => path.as_ref(),
+        }
+    }
+
+    fn take(&mut self) -> Result<TakeableTempDir, anyhow::Error> {
+        match self {
+            TakeableTempDir::Owned(inner) => {
+                let dir = inner.path().to_owned();
+                let tempdir = std::mem::replace(self, TakeableTempDir::Borrowed(dir));
+                Ok(tempdir)
+            }
+            TakeableTempDir::Borrowed(_) => anyhow::bail!("cannot take a borrowed tempdir"),
+        }
+    }
+}
+
 /// Defines an individual integration test
 pub struct IntegrationTest {
     lading_config_template: String,
@@ -83,7 +117,7 @@ pub struct IntegrationTest {
     experiment_warmup: Duration,
     ducks_config: DucksConfig,
 
-    tempdir: TempDir,
+    tempdir: TakeableTempDir,
 }
 
 impl IntegrationTest {
@@ -93,7 +127,7 @@ impl IntegrationTest {
         lading_config: S,
     ) -> Result<Self, anyhow::Error> {
         let _ = tracing_subscriber::fmt::try_init();
-        let tempdir = TempDir::new().context("create tempdir")?;
+        let tempdir = TakeableTempDir::new()?;
 
         Ok(Self {
             lading_config_template: lading_config.to_string(),
@@ -119,8 +153,12 @@ impl IntegrationTest {
         let ducks_timeout = ducks_timeout.as_secs().to_string();
 
         let ducks_process = Command::new(ducks_binary)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::from(std::fs::File::create(
+                self.tempdir.path().join("ducks.stdout"),
+            )?))
+            .stderr(Stdio::from(std::fs::File::create(
+                self.tempdir.path().join("ducks.stderr"),
+            )?))
             .env("RUST_LOG", "ducks=debug,info")
             .arg(
                 ducks_comm_file
@@ -166,8 +204,12 @@ impl IntegrationTest {
         // run lading against the ducks process that was started above
         let captures_file = self.tempdir.path().join("captures");
         let lading = Command::new(lading_binary)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::from(std::fs::File::create(
+                self.tempdir.path().join("lading.stdout"),
+            )?))
+            .stderr(Stdio::from(std::fs::File::create(
+                self.tempdir.path().join("lading.stderr"),
+            )?))
             .env("RUST_LOG", "lading=debug,info")
             .arg("--target-pid")
             .arg(
@@ -204,6 +246,12 @@ impl IntegrationTest {
             .await
             .context("wait for lading to exit")?;
 
+        if lading_output.status.success() {
+            debug!("lading exited successfully");
+        } else {
+            warn!("lading exited with an error: {:?}", lading_output);
+        }
+
         // get test results from ducks
         let metrics = ducks_rpc.get_metrics(());
         let metrics = metrics
@@ -225,32 +273,56 @@ impl IntegrationTest {
             .await
             .context("wait for ducks to exit")?;
 
-        let ducks_stdout = ducks_output.stdout;
-        let ducks_stdout = String::from_utf8(ducks_stdout)?;
-        println!("ducks stdout:\n{}", ducks_stdout);
+        if ducks_output.status.success() {
+            debug!("ducks exited successfully");
+        } else {
+            warn!("ducks exited with an error: {:?}", ducks_output);
+        }
 
-        let ducks_stderr = ducks_output.stderr;
-        let ducks_stderr = String::from_utf8(ducks_stderr)?;
-        println!("ducks stderr:\n{}", ducks_stderr);
-
-        let lading_stdout = lading_output.stdout;
-        let lading_stdout = String::from_utf8(lading_stdout)?;
-        println!("lading stdout:\n{}", lading_stdout);
-
-        let lading_stderr = lading_output.stderr;
-        let lading_stderr = String::from_utf8(lading_stderr)?;
-        println!("lading stderr:\n{}", lading_stderr);
+        IntegrationTest::print_stdio(&self.tempdir);
 
         // todo: report captures file & provide some utilities for asserting against it
         println!("test result: {:?}", metrics);
         Ok(metrics)
     }
 
-    pub async fn run(self) -> Result<Metrics, anyhow::Error> {
-        tokio::select! {
+    fn print_stdio(tempdir: &TakeableTempDir) {
+        let logs = vec![
+            ("ducks.stdout", tempdir.path().join("ducks.stdout")),
+            ("ducks.stderr", tempdir.path().join("ducks.stderr")),
+            ("lading.stdout", tempdir.path().join("lading.stdout")),
+            ("lading.stderr", tempdir.path().join("lading.stderr")),
+        ];
+
+        fn try_print_file(name: &str, path: &std::path::Path) -> Result<(), anyhow::Error> {
+            let mut contents = String::new();
+            std::fs::File::open(path)?.read_to_string(&mut contents)?;
+            if contents.is_empty() {
+                println!("{}: <empty>", name);
+            } else {
+                println!("{}:\n{}", name, contents);
+            }
+            Ok(())
+        }
+
+        for (name, path) in logs {
+            let _ = try_print_file(name, &path);
+        }
+    }
+
+    pub async fn run(mut self) -> Result<Metrics, anyhow::Error> {
+        let test_tempdir = self.tempdir.take()?;
+
+        let res = tokio::select! {
             res = self.run_inner() => { res }
             _ = tokio::time::sleep(Duration::from_secs(30 * 60)) => { panic!("test timed out") }
+        };
+
+        if res.is_err() {
+            IntegrationTest::print_stdio(&test_tempdir);
         }
+
+        res
     }
 }
 
