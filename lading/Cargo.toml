@@ -20,7 +20,7 @@ lading-throttle = { version = "0.1", path = "../lading_throttle" }
 
 byte-unit = {workspace = true }
 bytes = { workspace = true, features = ["std"] }
-clap = { version = "4.5", default-features = false, features = ["std", "suggestions", "derive"] }
+clap = { version = "3.2", default-features = false, features = ["std", "suggestions", "derive"] }
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
 futures = "0.3.28"
 http = "0.2"
