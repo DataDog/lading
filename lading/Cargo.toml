@@ -24,7 +24,7 @@ clap = { version = "3.2", default-features = false, features = ["std", "color", 
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
 futures = "0.3.28"
 http = "0.2"
-http-serde = "1.1"
+http-serde = "2.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
 metrics = { workspace = true }
