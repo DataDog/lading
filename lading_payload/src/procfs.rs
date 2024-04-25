@@ -1683,7 +1683,7 @@ impl<'a> Generator<'a> for ProcessGenerator {
     {
         // For simplicity, assume the command line is a single string consisting
         // of a single path component and no arguments.
-        let cmdline_size: usize = rng.gen_range(1..NAME_MAX); // is this range off by one?
+        let cmdline_size: usize = rng.gen_range(1..=NAME_MAX);
 
         // SAFETY: If this call fails, then execution should panic because an
         // inability to generate process command lines is a serious bug.
