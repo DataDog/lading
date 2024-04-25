@@ -352,6 +352,7 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "apache_common"
+            block_cache_method: Fixed
         "#,
         )?;
 
@@ -387,6 +388,7 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "ascii"
+            block_cache_method: Fixed
         "#,
         )?;
 
