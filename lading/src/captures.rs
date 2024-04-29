@@ -196,7 +196,6 @@ impl CaptureManager {
                 let token = self.shutdown.register();
                 loop {
                     if self.shutdown.try_recv() {
-                        // TODO - see SMPTNG-340 for details about more synchronization needed here
                         info!("shutdown signal received");
                         drop(token);
                         return;
