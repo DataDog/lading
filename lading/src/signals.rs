@@ -29,7 +29,7 @@ pub struct Phase {
     /// The mechanism by which we will 'ack' receipt of phase change to the `Phase` creator.
     ack_sem: Arc<Semaphore>,
 
-    /// The total number of peers, incremented only by `clone`.
+    /// The total number of peers, incremented only by `register`.
     peers: Arc<AtomicU32>,
 
     /// `true` if the current phase has been entered.
@@ -108,11 +108,11 @@ impl Phase {
         let _ = self.ack_sem.acquire_many(peers).await;
     }
 
-    /// Register with the `Phase` owner to avoid the call to `signal` from
+    /// Register with the `Phase` creator to avoid the call to `signal` from
     /// proceeding without the token returned here being dropped.
     #[tracing::instrument]
     pub fn register(&self) -> Token {
-        // Increment the peers. We are careful to to AcqRel this fetch and store
+        // Increment the peers. We are careful to AcqRel this fetch and store
         // to avoid the parent from being unable to read the correct number of
         // peers later.
         self.peers.fetch_add(1, Ordering::AcqRel);
