@@ -9,7 +9,7 @@ use rand::{
     Rng,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{common::strings, Serialize};
 
@@ -725,7 +725,7 @@ impl DogStatsD {
 
         // write prefix
         writer.write_all(&length.to_le_bytes())?;
-        debug!(
+        trace!(
             "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
             length
         );

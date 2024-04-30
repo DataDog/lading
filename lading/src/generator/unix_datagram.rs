@@ -16,7 +16,7 @@ use byte_unit::ByteError;
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
-use metrics::{counter, gauge, register_counter};
+use metrics::{counter, gauge, register_counter, register_gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
@@ -25,7 +25,7 @@ use tokio::{
     sync::{broadcast::Receiver, mpsc},
     task::{JoinError, JoinHandle},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use super::General;
 
@@ -242,12 +242,20 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let max_datagram_size = register_gauge!("max_unix_datagram_bytes", &self.metric_labels);
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
 
+        let mut max_detected_bytes = usize::MAX;
+
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes: NonZeroU32 = blk.total_bytes;
+            if total_bytes.get() as usize > max_detected_bytes {
+                trace!("Skipped block chunk of size {sz}, exceeds detected OS maximum of {max_detected_bytes}", sz = total_bytes.get());
+                let _ = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                continue;
+            }
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
@@ -265,7 +273,9 @@ impl Child {
                             packets_sent.increment(1);
                         }
                         Err(err) => {
-                            debug!("write failed: {}", err);
+                            debug!("write failed: {} | total_bytes: {sz}", err, sz = blk.bytes.len());
+                            max_detected_bytes = blk.bytes.len() - 1;
+                            max_datagram_size.set(max_detected_bytes as f64);
 
                             let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
