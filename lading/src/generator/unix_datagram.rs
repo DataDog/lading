@@ -17,15 +17,17 @@ use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter, register_gauge};
+use nix::sys::socket::{setsockopt, sockopt::SndBuf};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::os::unix::net::UnixDatagram as StdUnixDatagram;
 use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{
     net,
     sync::{broadcast::Receiver, mpsc},
     task::{JoinError, JoinHandle},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 use super::General;
 
@@ -36,6 +38,7 @@ fn default_parallel_connections() -> u16 {
 // Mimic the belief of Datadog Agent, although correctly we should be reading
 // sysctl values on Linux.
 const UDS_DATAGRAM_LIMIT_BYTES: u32 = 8_192;
+const UDS_SNDBUF_MAX_BYTES: usize = (UDS_DATAGRAM_LIMIT_BYTES as usize) * 1_024;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -91,6 +94,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Nix IO error
+    #[error("Low-level error: {0}")]
+    Nix(#[from] nix::errno::Errno),
 }
 
 #[derive(Debug)]
@@ -215,7 +221,11 @@ impl Child {
     async fn spin(mut self, mut startup_receiver: Receiver<()>) -> Result<(), Error> {
         startup_receiver.recv().await?;
         debug!("UnixDatagram generator running");
-        let socket = net::UnixDatagram::unbound().map_err(Error::Io)?;
+        let socket = {
+            let std_socket = StdUnixDatagram::unbound()?;
+            setsockopt(&std_socket, SndBuf, &UDS_SNDBUF_MAX_BYTES)?;
+            net::UnixDatagram::from_std(std_socket)?
+        };
         loop {
             match socket.connect(&self.path).map_err(Error::Io) {
                 Ok(()) => {
@@ -242,20 +252,12 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let max_datagram_size = register_gauge!("max_unix_datagram_bytes", &self.metric_labels);
         let bytes_written = register_counter!("bytes_written", &self.metric_labels);
         let packets_sent = register_counter!("packets_sent", &self.metric_labels);
-
-        let mut max_detected_bytes = usize::MAX;
 
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes: NonZeroU32 = blk.total_bytes;
-            if total_bytes.get() as usize > max_detected_bytes {
-                trace!("Skipped block chunk of size {sz}, exceeds detected OS maximum of {max_detected_bytes}", sz = total_bytes.get());
-                let _ = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                continue;
-            }
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
@@ -273,10 +275,6 @@ impl Child {
                             packets_sent.increment(1);
                         }
                         Err(err) => {
-                            debug!("write failed: {} | total_bytes: {sz}", err, sz = blk.bytes.len());
-                            max_detected_bytes = blk.bytes.len() - 1;
-                            max_datagram_size.set(max_detected_bytes as f64);
-
                             let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
                             counter!("request_failure", 1, &error_labels);
