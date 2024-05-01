@@ -137,7 +137,7 @@ blackhole:
                                 8_f64,
                                 byte_unit::ByteUnit::MB
                             )?,
-                            block_cache_method: block::CacheMethod::Streaming,
+                            block_cache_method: block::CacheMethod::Fixed,
                         },
                         headers: HeaderMap::default(),
                         bytes_per_second: byte_unit::Byte::from_unit(
