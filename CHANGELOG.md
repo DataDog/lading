@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Changed
+- Improved the block cache construction to better fill the pre-defined space.
 
 ### Changed
 - Removed streaming cache method. Fixed is now the only option.
