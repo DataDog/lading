@@ -36,6 +36,9 @@ pub enum SpinError {
     /// Error for constructing the block cache
     #[error(transparent)]
     ConstructBlockCache(#[from] ConstructBlockCacheError),
+    /// Serializer returned and empty block
+    #[error("Serializer returned an empty block")]
+    EmptyBlock,
     /// Zero value
     #[error("Value provided must not be zero")]
     Zero,
@@ -604,16 +607,13 @@ where
         // Consume the block only if a block is successfully constructed
         // otherwise retry the block size until it succeeds.
         block_iter.next_if(|block_size| {
-            match construct_block(&mut rng, serializer, **block_size) {
-                Ok(Some(block)) => {
-                    construct_block_failures = 0; // reset failure counter on success
-                    block_cache.push(block);
-                    true
-                }
-                Ok(None) | Err(_) => {
-                    construct_block_failures += 1;
-                    false
-                }
+            if let Ok(block) = construct_block(&mut rng, serializer, **block_size) {
+                construct_block_failures = 0; // reset failure counter on success
+                block_cache.push(block);
+                true
+            } else {
+                construct_block_failures += 1;
+                false
             }
         });
     }
@@ -679,20 +679,19 @@ where
         // happens we overflow into the cache until such time as that's full.
         'refill: loop {
             let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
-            if let Some(block) = construct_block(&mut rng, serializer, *block_size)? {
-                match snd.try_reserve() {
-                    Ok(permit) => permit.send(block),
-                    Err(err) => match err {
-                        mpsc::error::TrySendError::Full(()) => {
-                            if accum_bytes < total_bytes {
-                                accum_bytes += u64::from(block.total_bytes.get());
-                                cache.push_back(block);
-                                break 'refill;
-                            }
+            let block = construct_block(&mut rng, serializer, *block_size)?;
+            match snd.try_reserve() {
+                Ok(permit) => permit.send(block),
+                Err(err) => match err {
+                    mpsc::error::TrySendError::Full(()) => {
+                        if accum_bytes < total_bytes {
+                            accum_bytes += u64::from(block.total_bytes.get());
+                            cache.push_back(block);
+                            break 'refill;
                         }
-                        mpsc::error::TrySendError::Closed(()) => return Ok(()),
-                    },
-                }
+                    }
+                    mpsc::error::TrySendError::Closed(()) => return Ok(()),
+                },
             }
         }
     }
@@ -709,7 +708,7 @@ fn construct_block<R, S>(
     mut rng: &mut R,
     serializer: &S,
     chunk_size: u32,
-) -> Result<Option<Block>, SpinError>
+) -> Result<Block, SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
@@ -718,14 +717,11 @@ where
     serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
-        // Blocks may be empty, especially when the amount of bytes
-        // requested for the block are relatively low. This is a quirk of
-        // our use of randomness. We do not have the ability to tell that
-        // library that we would like such and such number of bytes
-        // approximately from an instance. This does mean that we sometimes
-        // waste computation because the size of the block given cannot be
-        // serialized into.
-        Ok(None)
+        // Blocks should not be empty and if they are empty this is an
+        // error. Caller may choose to handle this however they wish, often it
+        // means that the specific request could not be satisfied for a given
+        // serializer.
+        Err(SpinError::EmptyBlock)
     } else {
         let total_bytes = NonZeroU32::new(
             bytes
@@ -734,7 +730,7 @@ where
                 .expect("failed to get length of bytes"),
         )
         .ok_or(SpinError::Zero)?;
-        Ok(Some(Block { total_bytes, bytes }))
+        Ok(Block { total_bytes, bytes })
     }
 }
 
