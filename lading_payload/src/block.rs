@@ -5,12 +5,12 @@
 //! from that, decoupling the create/send operations. This module is the
 //! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
 //! -- are created.
-use std::{collections::VecDeque, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
-use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{self, error::SendError, Sender};
+use tokio::sync::mpsc::{error::SendError, Sender};
 use tracing::{error, info, span, warn, Level};
 
 const MAX_CHUNKS: usize = 16_384;
@@ -113,14 +113,12 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
 pub enum CacheMethod {
     /// Create a single fixed size block cache and rotate through it
     Fixed,
-    /// Maintain a fixed sized block cache buffer and stream from it
-    Streaming,
 }
 
 /// The default cache method.
 #[must_use]
 pub fn default_cache_method() -> CacheMethod {
-    CacheMethod::Streaming
+    CacheMethod::Fixed
 }
 
 #[derive(Debug)]
@@ -143,47 +141,9 @@ pub enum Cache {
         /// The store of blocks.
         blocks: Vec<Block>,
     },
-    /// A streaming cache of blocks. Blocks are generated on the fly and
-    /// streamed through a queue.
-    Stream {
-        /// The seed used to construct the `Cache`.
-        seed: [u8; 32],
-        /// The total number of bytes that will be generated.
-        total_bytes: u32,
-        /// The sizes of the blocks that will be generated.
-        block_chunks: Vec<u32>,
-        /// The payload that will be generated.
-        payload: crate::Config,
-    },
 }
 
 impl Cache {
-    /// Construct a streaming `Cache`.
-    ///
-    /// This constructor makes an internal pool of `Block` instances up to
-    /// `total_bytes`, each of which are roughly the size of one of the
-    /// `block_byte_sizes`. Internally, `Blocks` are replaced as they are spun out.
-    ///
-    /// # Errors
-    ///
-    /// Function will return an error if `block_byte_sizes` is empty or if a member
-    /// of `block_byte_sizes` is large than `total_bytes`.
-    pub fn stream(
-        seed: [u8; 32],
-        total_bytes: NonZeroU32,
-        block_byte_sizes: &[NonZeroU32],
-        payload: crate::Config,
-    ) -> Result<Self, Error> {
-        let mut block_chunks: [u32; MAX_CHUNKS] = [0; MAX_CHUNKS];
-        let total_chunks = chunk_bytes(total_bytes, block_byte_sizes, &mut block_chunks)?;
-        Ok(Self::Stream {
-            seed,
-            total_bytes: total_bytes.get(),
-            block_chunks: block_chunks[..total_chunks].to_vec(),
-            payload,
-        })
-    }
-
     /// Construct a `Cache` of fixed size.
     ///
     /// This constructor makes an internal pool of `Block` instances up to
@@ -392,91 +352,6 @@ impl Cache {
                 snd.blocking_send(blocks[idx].clone())?;
                 idx = (idx + 1) % blocks.len();
             },
-            Cache::Stream {
-                seed,
-                total_bytes,
-                block_chunks,
-                payload,
-            } => stream_inner(seed, total_bytes, &block_chunks, &payload, snd),
-        }
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-#[inline]
-fn stream_inner(
-    seed: [u8; 32],
-    total_bytes: u32,
-    block_chunks: &[u32],
-    payload: &crate::Config,
-    snd: Sender<Block>,
-) -> Result<(), SpinError> {
-    let mut rng = StdRng::from_seed(seed);
-
-    match payload {
-        crate::Config::TraceAgent(enc) => {
-            let ta = match enc {
-                crate::Encoding::Json => crate::TraceAgent::json(&mut rng),
-                crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
-            };
-
-            stream_block_inner(&mut rng, total_bytes, &ta, block_chunks, &snd)
-        }
-        crate::Config::Syslog5424 => {
-            let pyld = crate::Syslog5424::default();
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::DogStatsD(conf) => {
-            match conf.valid() {
-                Ok(()) => (),
-                Err(e) => {
-                    warn!("Invalid DogStatsD configuration: {}", e);
-                    return Err(SpinError::InvalidConfig(e));
-                }
-            }
-            let pyld = crate::DogStatsD::new(*conf, &mut rng)?;
-
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::Fluent => {
-            let pyld = crate::Fluent::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::SplunkHec { encoding } => {
-            let pyld = crate::SplunkHec::new(*encoding);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::ApacheCommon => {
-            let pyld = crate::ApacheCommon::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::Ascii => {
-            let pyld = crate::Ascii::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::DatadogLog => {
-            let pyld = crate::DatadogLog::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::Json => {
-            let pyld = crate::Json;
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::Static { ref static_path } => {
-            let pyld = crate::Static::new(static_path)?;
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::OpentelemetryTraces => {
-            let pyld = crate::OpentelemetryTraces::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::OpentelemetryLogs => {
-            let pyld = crate::OpentelemetryLogs::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
-        }
-        crate::Config::OpentelemetryMetrics => {
-            let pyld = crate::OpentelemetryMetrics::new(&mut rng);
-            stream_block_inner(&mut rng, total_bytes, &pyld, block_chunks, &snd)
         }
     }
 }
@@ -648,52 +523,6 @@ where
             );
         }
         Ok(block_cache)
-    }
-}
-
-#[inline]
-fn stream_block_inner<R, S>(
-    mut rng: &mut R,
-    total_bytes: u32,
-    serializer: &S,
-    block_chunks: &[u32],
-    snd: &Sender<Block>,
-) -> Result<(), SpinError>
-where
-    S: crate::Serialize,
-    R: Rng + ?Sized,
-{
-    let total_bytes: u64 = u64::from(total_bytes);
-    let mut accum_bytes: u64 = 0;
-    let mut cache: VecDeque<Block> = VecDeque::new();
-
-    loop {
-        // Attempt to read from the cache first, being sure to subtract the
-        // bytes we send out.
-        if let Some(block) = cache.pop_front() {
-            accum_bytes -= u64::from(block.total_bytes.get());
-            snd.blocking_send(block)?;
-        }
-        // There are no blocks in the cache. In order to minimize latency we
-        // push blocks into the sender until such time as it's full. When that
-        // happens we overflow into the cache until such time as that's full.
-        'refill: loop {
-            let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
-            let block = construct_block(&mut rng, serializer, *block_size)?;
-            match snd.try_reserve() {
-                Ok(permit) => permit.send(block),
-                Err(err) => match err {
-                    mpsc::error::TrySendError::Full(()) => {
-                        if accum_bytes < total_bytes {
-                            accum_bytes += u64::from(block.total_bytes.get());
-                            cache.push_back(block);
-                            break 'refill;
-                        }
-                    }
-                    mpsc::error::TrySendError::Closed(()) => return Ok(()),
-                },
-            }
-        }
     }
 }
 
