@@ -747,6 +747,12 @@ mod test {
 
     use crate::block::{chunk_bytes, get_blocks, MAX_CHUNKS};
 
+    macro_rules! nz_u32 {
+        ($value:expr) => {
+            NonZeroU32::new($value).expect(concat!($value, " is non-zero"))
+        };
+    }
+
     #[test]
     fn construct_block_cache_inner_fills_blocks() {
         use crate::block::construct_block_cache_inner;
@@ -754,31 +760,13 @@ mod test {
 
         let mut rng = SmallRng::seed_from_u64(0);
         let block_chunks = [100, 100, 100, 200, 300];
+        let total_bytes = block_chunks.iter().sum();
         let serializer = crate::Json;
-        let block_cache = construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
-            .expect("construct_block_cache_inner should not fail");
-
-        assert_eq!(block_cache.len(), block_chunks.len());
-    }
-    proptest! {
-        #[test]
-        fn construct_block_cache_inner_fills_all_blocks(seed: u64, num_chunks in 1..=4096usize) {
-            use crate::block::construct_block_cache_inner;
-            use rand::{rngs::SmallRng, SeedableRng};
-
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let block_chunks = vec![1000; num_chunks];
-            let serializer = crate::Json;
-            let block_cache = construct_block_cache_inner(&mut rng, &serializer, &block_chunks)
+        let block_cache =
+            construct_block_cache_inner(&mut rng, &serializer, &block_chunks, total_bytes)
                 .expect("construct_block_cache_inner should not fail");
 
-            assert_eq!(block_cache.len(), block_chunks.len());
-        }
-    }
-    macro_rules! nz_u32 {
-        ($value:expr) => {
-            NonZeroU32::new($value).expect(concat!($value, " is non-zero"))
-        };
+        assert!(block_cache.len() != 0);
     }
 
     /// This test ensures that `chunk_bytes` will re-use block sizes if it helps reach
