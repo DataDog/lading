@@ -183,7 +183,7 @@ impl Cache {
                 );
                 let _guard = span.enter();
 
-                construct_block_cache_inner(&mut rng, &ta, &block_chunks)?
+                construct_block_cache_inner(&mut rng, &ta, &block_chunks, total_bytes.get())?
             }
             crate::Config::Syslog5424 => {
                 let span = span!(
@@ -194,7 +194,12 @@ impl Cache {
                 );
                 let _guard = span.enter();
 
-                construct_block_cache_inner(&mut rng, &crate::Syslog5424::default(), &block_chunks)?
+                construct_block_cache_inner(
+                    &mut rng,
+                    &crate::Syslog5424::default(),
+                    &block_chunks,
+                    total_bytes.get(),
+                )?
             }
             crate::Config::DogStatsD(conf) => {
                 match conf.valid() {
@@ -214,7 +219,12 @@ impl Cache {
                 );
                 let _guard = span.enter();
 
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
+                construct_block_cache_inner(
+                    &mut rng,
+                    &serializer,
+                    &block_chunks,
+                    total_bytes.get(),
+                )?
             }
             crate::Config::Fluent => {
                 let pyld = crate::Fluent::new(&mut rng);
@@ -225,7 +235,7 @@ impl Cache {
                     payload = "fluent"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, total_bytes.get())?
             }
             crate::Config::SplunkHec { encoding } => {
                 let span = span!(
@@ -239,6 +249,7 @@ impl Cache {
                     &mut rng,
                     &crate::SplunkHec::new(*encoding),
                     &block_chunks,
+                    total_bytes.get(),
                 )?
             }
             crate::Config::ApacheCommon => {
@@ -250,7 +261,7 @@ impl Cache {
                     payload = "apache-common"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, total_bytes.get())?
             }
             crate::Config::Ascii => {
                 let pyld = crate::Ascii::new(&mut rng);
@@ -261,7 +272,7 @@ impl Cache {
                     payload = "ascii"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(&mut rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(&mut rng, &pyld, &block_chunks, total_bytes.get())?
             }
             crate::Config::DatadogLog => {
                 let serializer = crate::DatadogLog::new(&mut rng);
@@ -272,7 +283,12 @@ impl Cache {
                     payload = "datadog-log"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(&mut rng, &serializer, &block_chunks)?
+                construct_block_cache_inner(
+                    &mut rng,
+                    &serializer,
+                    &block_chunks,
+                    total_bytes.get(),
+                )?
             }
             crate::Config::Json => {
                 let span = span!(
@@ -282,7 +298,12 @@ impl Cache {
                     payload = "json"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(&mut rng, &crate::Json, &block_chunks)?
+                construct_block_cache_inner(
+                    &mut rng,
+                    &crate::Json,
+                    &block_chunks,
+                    total_bytes.get(),
+                )?
             }
             crate::Config::Static { ref static_path } => {
                 let span = span!(
@@ -296,6 +317,7 @@ impl Cache {
                     &mut rng,
                     &crate::Static::new(static_path)?,
                     &block_chunks,
+                    total_bytes.get(),
                 )?
             }
             crate::Config::OpentelemetryTraces => {
@@ -307,7 +329,7 @@ impl Cache {
                     payload = "otel-traces"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(rng, &pyld, &block_chunks, total_bytes.get())?
             }
             crate::Config::OpentelemetryLogs => {
                 let pyld = crate::OpentelemetryLogs::new(&mut rng);
@@ -318,7 +340,7 @@ impl Cache {
                     payload = "otel-logs"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(rng, &pyld, &block_chunks, total_bytes.get())?
             }
             crate::Config::OpentelemetryMetrics => {
                 let pyld = crate::OpentelemetryMetrics::new(&mut rng);
@@ -329,7 +351,7 @@ impl Cache {
                     payload = "otel-metrics"
                 );
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, &block_chunks)?
+                construct_block_cache_inner(rng, &pyld, &block_chunks, total_bytes.get())?
             }
         };
         Ok(Self::Fixed { idx: 0, blocks })
@@ -463,35 +485,55 @@ fn chunk_bytes<const N: usize>(
 /// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
-#[tracing::instrument(skip(rng, serializer, block_chunks))]
+#[tracing::instrument(skip_all)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
-    block_chunks: &[u32],
+    initial_block_chunks: &[u32],
+    total_bytes: u32,
 ) -> Result<Vec<Block>, SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block_cache: Vec<Block> = Vec::with_capacity(block_chunks.len());
-    let mut block_iter = block_chunks.iter().peekable();
-    let mut construct_block_failures = 0;
-    let max_construct_block_failures: usize = block_chunks.len() * 5;
-    while let Some(peeked_block) = block_iter.peek() {
-        assert!(construct_block_failures <= max_construct_block_failures, "Block construction failed {construct_block_failures} times consecutively while trying to construct block of size {peeked_block}. Failing the program. Check payload generation parameters.");
-        // Consume the block only if a block is successfully constructed
-        // otherwise retry the block size until it succeeds.
-        block_iter.next_if(|block_size| {
-            if let Ok(block) = construct_block(&mut rng, serializer, **block_size) {
-                construct_block_failures = 0; // reset failure counter on success
+    let mut block_cache: Vec<Block> = Vec::new();
+    let mut bytes_remaining = total_bytes;
+    let mut block_sizes = VecDeque::from(initial_block_chunks.to_vec());
+    let mut min_viable_size = 0; // Dynamic "floor" for block sizes
+
+    while bytes_remaining > 0 && !block_sizes.is_empty() {
+        let block_size = block_sizes
+            .pop_front()
+            .expect("impossible condition, catastrophic bug");
+
+        // Skip sizes below the dynamic "floor"
+        if block_size <= min_viable_size {
+            continue;
+        }
+
+        match construct_block(&mut rng, serializer, block_size) {
+            Ok(Some(block)) => {
+                bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
                 block_cache.push(block);
-                true
-            } else {
-                construct_block_failures += 1;
-                false
             }
-        });
+            Ok(None) => {
+                // Update the dynamic "floor" if the block size proves too small
+                min_viable_size = block_size;
+            }
+            Err(_) => {
+                // Adjust the block size and retry if there is space
+                let adjusted_size = adjust_block_size(rng, block_size, min_viable_size);
+                if adjusted_size < bytes_remaining {
+                    block_sizes.push_back(adjusted_size);
+                }
+            }
+        }
+
+        if bytes_remaining < min_viable_size {
+            break;
+        }
     }
+
     if block_cache.is_empty() {
         error!("Empty block cache, unable to construct blocks!");
         Err(SpinError::ConstructBlockCache(
@@ -501,7 +543,7 @@ where
         // "Capacity" here refers to how much data the block_chunks can hold.
         // Note that this may not match the end-user's requested pregen-cache-size.
         // This function is only concerned with filling up the chunks requested.
-        let capacity_sum = block_chunks.iter().sum::<u32>();
+        let capacity_sum = initial_block_chunks.iter().sum::<u32>();
         let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
 
         if filled_sum == capacity_sum {
@@ -523,6 +565,68 @@ where
             );
         }
         Ok(block_cache)
+    }
+}
+
+/// Dynamically adjusts the block size based on discovered limits.
+#[inline]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+fn adjust_block_size<R>(rng: &mut R, current_size: u32, min_viable_size: u32) -> u32
+where
+    R: Rng + ?Sized,
+{
+    // Define an upper and lower bound on new sizes. +/- 20% is arbitrary.
+    let lower_bound = (f64::from(current_size) * 0.8) as u32;
+    let upper_bound = (f64::from(current_size) * 1.2) as u32;
+
+    let adjusted_size = rng.gen_range(lower_bound..=upper_bound);
+    std::cmp::max(adjusted_size, min_viable_size)
+}
+
+#[inline]
+fn stream_block_inner<R, S>(
+    mut rng: &mut R,
+    total_bytes: u32,
+    serializer: &S,
+    block_chunks: &[u32],
+    snd: &Sender<Block>,
+) -> Result<(), SpinError>
+where
+    S: crate::Serialize,
+    R: Rng + ?Sized,
+{
+    let total_bytes: u64 = u64::from(total_bytes);
+    let mut accum_bytes: u64 = 0;
+    let mut cache: VecDeque<Block> = VecDeque::new();
+
+    loop {
+        // Attempt to read from the cache first, being sure to subtract the
+        // bytes we send out.
+        if let Some(block) = cache.pop_front() {
+            accum_bytes -= u64::from(block.total_bytes.get());
+            snd.blocking_send(block)?;
+        }
+        // There are no blocks in the cache. In order to minimize latency we
+        // push blocks into the sender until such time as it's full. When that
+        // happens we overflow into the cache until such time as that's full.
+        'refill: loop {
+            let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
+            let block = construct_block(&mut rng, serializer, *block_size)?;
+            match snd.try_reserve() {
+                Ok(permit) => permit.send(block),
+                Err(err) => match err {
+                    mpsc::error::TrySendError::Full(()) => {
+                        if accum_bytes < total_bytes {
+                            accum_bytes += u64::from(block.total_bytes.get());
+                            cache.push_back(block);
+                            break 'refill;
+                        }
+                    }
+                    mpsc::error::TrySendError::Closed(()) => return Ok(()),
+                },
+            }
+        }
     }
 }
 
