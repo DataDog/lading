@@ -499,7 +499,17 @@ where
     let mut block_cache: Vec<Block> = Vec::new();
     let mut bytes_remaining = total_bytes;
     let mut block_sizes = VecDeque::from(initial_block_chunks.to_vec());
-    let mut min_viable_size = 0; // Dynamic "floor" for block sizes
+    let mut min_viable_size = 0;
+
+    // Build out the blocks.
+    //
+    // Our strategy here is to keep track of the minimal viable size of a block
+    // -- `min_viable_size` -- as the "floor" for block sizes. Because the
+    // serialization format varies we can't know what the floor actually is
+    // until runtime. We take the user-provided blocks and the total byte
+    // objective and iterate over these, dynamically constructing new block
+    // sizes +/- 20% if the block construction fails because of insufficient
+    // space to serialize.
 
     while bytes_remaining > 0 && !block_sizes.is_empty() {
         let block_size = block_sizes
@@ -511,17 +521,26 @@ where
             continue;
         }
 
+        // `construct_block` returns Ok(Some(..)) when the block is
+        // constructed. Easy. `Ok(None)` is returned if a serializer is unable
+        // to fill a block, but only some serializers behave this
+        // way. Technically it's _not_ an error condition and serializers have
+        // historically been allowed to construct empty blocks, although that's
+        // of little use these days. Vestigial, I guess, and we try to avoid
+        // that behavior by bumping the floor. A soft error. _Most_ serializers
+        // emit an error condition if they cannot build a block and in that case
+        // we build our adjusted blocks and pack them into the search space.
+        //
+        // The `Ok(None)` branch should be rarely traversed.
         match construct_block(&mut rng, serializer, block_size) {
             Ok(Some(block)) => {
                 bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
                 block_cache.push(block);
             }
             Ok(None) => {
-                // Update the dynamic "floor" if the block size proves too small
                 min_viable_size = block_size;
             }
             Err(_) => {
-                // Adjust the block size and retry if there is space
                 let adjusted_size = adjust_block_size(rng, block_size, min_viable_size);
                 if adjusted_size < bytes_remaining {
                     block_sizes.push_back(adjusted_size);
@@ -533,6 +552,8 @@ where
             break;
         }
     }
+
+    // Instrument the results of the block construction.
 
     if block_cache.is_empty() {
         error!("Empty block cache, unable to construct blocks!");
