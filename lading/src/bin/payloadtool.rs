@@ -52,7 +52,6 @@ fn generate_and_check(
     let start = Instant::now();
     let blocks = match block::Cache::fixed(&mut rng, total_bytes, &block_sizes, config)? {
         block::Cache::Fixed { blocks, idx: _ } => blocks,
-        _ => unreachable!(),
     };
     info!("Payload generation took {:?}", start.elapsed());
     debug!("Payload: {:#?}", blocks);

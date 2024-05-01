@@ -149,12 +149,6 @@ impl UnixDatagram {
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
-                block::CacheMethod::Streaming => block::Cache::stream(
-                    config.seed,
-                    total_bytes,
-                    &block_sizes,
-                    config.variant.clone(),
-                )?,
                 block::CacheMethod::Fixed => {
                     block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
                 }

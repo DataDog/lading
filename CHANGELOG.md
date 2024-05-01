@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- Removed streaming cache method. Fixed is now the only option.
+
 ## [0.21.0-rc1]
 ### Added
 ### Changed
