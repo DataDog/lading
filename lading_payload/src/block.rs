@@ -498,8 +498,8 @@ where
 {
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
-    let mut min_viable_size = 0;
-    let max_viable_size: u32 = *block_chunks
+    let mut min_block_size = 0;
+    let max_block_size: u32 = *block_chunks
         .iter()
         .max()
         .expect("empty block chunks, catastrophic bug");
@@ -507,14 +507,15 @@ where
     // Build out the blocks.
     //
     // Our strategy here is to keep track of the minimal viable size of a block
-    // -- `min_viable_size` -- as the "floor" for block sizes. Because the
+    // -- `min_block_size` -- as the "floor" for block sizes. Because the
     // serialization format varies we can't know what the floor actually is
     // until runtime. We take the user-provided blocks and the total byte
-    // objective and iterate over these, dynamically constructing new block
-    // sizes +/- 20% if the block construction fails because of insufficient
-    // space to serialize.
+    // objective and iterate over these, choosing random block sizes between the
+    // discovered floor and the maximum user-provided block size.
     while bytes_remaining > 0 {
-        let block_size = rng.gen_range(min_viable_size..=max_viable_size);
+        // A block_size is always in the range [min_block_size,
+        // max_block_size).
+        let block_size = rng.gen_range(min_block_size..max_block_size);
 
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
@@ -522,7 +523,15 @@ where
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
-                min_viable_size = block_size;
+                // It might be that `block_size` could not be constructed
+                // because the size is too small or we just caught a bad
+                // break. We do know that there's some true minimum viable size
+                // out there for each serialization format and user
+                // configuration, but we can only guess at it. To avoid racing
+                // _too_ far off the minimum viable size we scale the block size
+                // by -75% -- an arbitrary figure -- and set that as the new
+                // minimum block size.
+                min_block_size = (f64::from(block_size) * 0.25) as u32;
             }
             Err(e) => {
                 error!("Unexpected error during block construction: {e}");
@@ -530,7 +539,7 @@ where
             }
         }
 
-        if bytes_remaining < min_viable_size {
+        if bytes_remaining < min_block_size {
             break;
         }
     }
@@ -550,7 +559,10 @@ where
         let capacity_sum_str = byte_unit::Byte::from_bytes(total_bytes.into())
             .get_appropriate_unit(false)
             .to_string();
-        info!("Filled {filled_sum_str} of requested {capacity_sum_str}.");
+        let min_block_str = byte_unit::Byte::from_bytes(min_block_size.into())
+            .get_appropriate_unit(false)
+            .to_string();
+        info!("Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}");
 
         Ok(block_cache)
     }
