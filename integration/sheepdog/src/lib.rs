@@ -346,13 +346,11 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "apache_common"
-            block_cache_method: Fixed
         "#,
         )?;
 
@@ -382,13 +380,11 @@ generator:
         headers: {}
         target_uri: "http://localhost:{{port_number}}/"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "ascii"
-            block_cache_method: Fixed
         "#,
         )?;
 
@@ -417,13 +413,11 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         target_uri: "http://localhost:{{port_number}}/v1/logs"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_logs"
-            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -454,13 +448,11 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         target_uri: "http://localhost:{{port_number}}/v1/traces"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_traces"
-            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -491,13 +483,11 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         target_uri: "http://localhost:{{port_number}}/v1/metrics"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         parallel_connections: 5
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 Mb"
             variant: "opentelemetry_metrics"
-            block_cache_method: Fixed
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -529,7 +519,6 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         addr: "127.0.0.1:{{port_number}}"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Mb", "0.5Mb", "0.25Mb", "0.125Mb", "128Kb"]
         variant: fluent
         maximum_prebuild_cache_size_bytes: "8 Mb"
         "#,
@@ -559,7 +548,6 @@ generator:
           59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         addr: "127.0.0.1:{{port_number}}"
         bytes_per_second: "100 Mb"
-        block_sizes: ["1Kb"]
         variant: ascii
         maximum_prebuild_cache_size_bytes: "8 Mb"
         "#,
