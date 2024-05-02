@@ -486,6 +486,8 @@ fn chunk_bytes<const N: usize>(
 /// would like to propagate this error to the caller.
 #[inline]
 #[tracing::instrument(skip_all)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &S,
