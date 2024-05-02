@@ -5,7 +5,7 @@
 //! from that, decoupling the create/send operations. This module is the
 //! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
 //! -- are created.
-use std::num::NonZeroU32;
+use std::{collections::VecDeque, num::NonZeroU32};
 
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::Rng;
@@ -499,7 +499,6 @@ where
     let mut block_cache: Vec<Block> = Vec::new();
     let mut bytes_remaining = total_bytes;
     let mut block_sizes = VecDeque::from(initial_block_chunks.to_vec());
-    let mut min_viable_size = 0;
 
     // Build out the blocks.
     //
@@ -516,40 +515,14 @@ where
             .pop_front()
             .expect("impossible condition, catastrophic bug");
 
-        // Skip sizes below the dynamic "floor"
-        if block_size <= min_viable_size {
-            continue;
-        }
-
-        // `construct_block` returns Ok(Some(..)) when the block is
-        // constructed. Easy. `Ok(None)` is returned if a serializer is unable
-        // to fill a block, but only some serializers behave this
-        // way. Technically it's _not_ an error condition and serializers have
-        // historically been allowed to construct empty blocks, although that's
-        // of little use these days. Vestigial, I guess, and we try to avoid
-        // that behavior by bumping the floor. A soft error. _Most_ serializers
-        // emit an error condition if they cannot build a block and in that case
-        // we build our adjusted blocks and pack them into the search space.
-        //
-        // The `Ok(None)` branch should be rarely traversed.
-        match construct_block(&mut rng, serializer, block_size) {
-            Ok(Some(block)) => {
-                bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
-                block_cache.push(block);
+        if let Ok(block) = construct_block(&mut rng, serializer, block_size) {
+            bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
+            block_cache.push(block);
+        } else {
+            let adjusted_size = adjust_block_size(rng, block_size);
+            if adjusted_size < bytes_remaining {
+                block_sizes.push_back(adjusted_size);
             }
-            Ok(None) => {
-                min_viable_size = block_size;
-            }
-            Err(_) => {
-                let adjusted_size = adjust_block_size(rng, block_size, min_viable_size);
-                if adjusted_size < bytes_remaining {
-                    block_sizes.push_back(adjusted_size);
-                }
-            }
-        }
-
-        if bytes_remaining < min_viable_size {
-            break;
         }
     }
 
@@ -593,7 +566,7 @@ where
 #[inline]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]
-fn adjust_block_size<R>(rng: &mut R, current_size: u32, min_viable_size: u32) -> u32
+fn adjust_block_size<R>(rng: &mut R, current_size: u32) -> u32
 where
     R: Rng + ?Sized,
 {
@@ -601,54 +574,7 @@ where
     let lower_bound = (f64::from(current_size) * 0.8) as u32;
     let upper_bound = (f64::from(current_size) * 1.2) as u32;
 
-    let adjusted_size = rng.gen_range(lower_bound..=upper_bound);
-    std::cmp::max(adjusted_size, min_viable_size)
-}
-
-#[inline]
-fn stream_block_inner<R, S>(
-    mut rng: &mut R,
-    total_bytes: u32,
-    serializer: &S,
-    block_chunks: &[u32],
-    snd: &Sender<Block>,
-) -> Result<(), SpinError>
-where
-    S: crate::Serialize,
-    R: Rng + ?Sized,
-{
-    let total_bytes: u64 = u64::from(total_bytes);
-    let mut accum_bytes: u64 = 0;
-    let mut cache: VecDeque<Block> = VecDeque::new();
-
-    loop {
-        // Attempt to read from the cache first, being sure to subtract the
-        // bytes we send out.
-        if let Some(block) = cache.pop_front() {
-            accum_bytes -= u64::from(block.total_bytes.get());
-            snd.blocking_send(block)?;
-        }
-        // There are no blocks in the cache. In order to minimize latency we
-        // push blocks into the sender until such time as it's full. When that
-        // happens we overflow into the cache until such time as that's full.
-        'refill: loop {
-            let block_size = block_chunks.choose(&mut rng).ok_or(SpinError::EmptyRng)?;
-            let block = construct_block(&mut rng, serializer, *block_size)?;
-            match snd.try_reserve() {
-                Ok(permit) => permit.send(block),
-                Err(err) => match err {
-                    mpsc::error::TrySendError::Full(()) => {
-                        if accum_bytes < total_bytes {
-                            accum_bytes += u64::from(block.total_bytes.get());
-                            cache.push_back(block);
-                            break 'refill;
-                        }
-                    }
-                    mpsc::error::TrySendError::Closed(()) => return Ok(()),
-                },
-            }
-        }
-    }
+    rng.gen_range(lower_bound..=upper_bound)
 }
 
 /// Construct a new block
