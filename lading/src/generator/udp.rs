@@ -98,11 +98,6 @@ impl Udp {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_size_limit =
-            byte_unit::Byte::from_unit(UDP_PACKET_LIMIT_BYTES.into(), byte_unit::ByteUnit::B)
-                .expect("valid bytes");
-        let block_sizes =
-            lading_payload::block::get_blocks(&config.block_sizes, Some(block_size_limit));
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "udp".to_string()),
@@ -123,7 +118,7 @@ impl Udp {
             &mut rng,
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .ok_or(Error::Zero)?,
-            &block_sizes,
+            UDP_PACKET_LIMIT_BYTES.into(),
             &config.variant,
         )?;
 

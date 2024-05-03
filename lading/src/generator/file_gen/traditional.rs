@@ -23,7 +23,7 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{Byte, ByteError};
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{gauge, register_counter};
@@ -95,11 +95,12 @@ pub struct Config {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     bytes_per_second: Byte,
-    /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// Defines the maximum internal cache of this log target. file_gen will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "lading_payload::block::default_block_size")]
+    maximum_block_size: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
@@ -135,26 +136,9 @@ impl Server {
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes: Vec<NonZeroU32> = config
-            .block_sizes
-            .map_or(
-                vec![
-                    Byte::from_unit(1_f64, ByteUnit::MB),
-                    Byte::from_unit(2_f64, ByteUnit::MB),
-                    Byte::from_unit(4_f64, ByteUnit::MB),
-                    Byte::from_unit(8_f64, ByteUnit::MB),
-                    Byte::from_unit(16_f64, ByteUnit::MB),
-                    Byte::from_unit(32_f64, ByteUnit::MB),
-                ],
-                |sizes| sizes.iter().map(|sz| Ok(*sz)).collect::<Vec<_>>(),
-            )
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .map(|sz| NonZeroU32::new(sz.get_bytes() as u32).expect("bytes must be non-zero"))
-            .collect();
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "file_gen".to_string()),
@@ -184,9 +168,12 @@ impl Server {
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => {
-                    block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
-                }
+                block::CacheMethod::Fixed => block::Cache::fixed(
+                    &mut rng,
+                    total_bytes,
+                    config.maximum_block_size.get_bytes(),
+                    &config.variant,
+                )?,
             };
 
             let child = Child {

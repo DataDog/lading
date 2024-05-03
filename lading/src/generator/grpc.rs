@@ -70,10 +70,11 @@ pub struct Config {
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
-    /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "lading_payload::block::default_block_size")]
+    pub maximum_block_size: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
@@ -160,7 +161,6 @@ impl Grpc {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes, None);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "grpc".to_string()),
@@ -181,9 +181,12 @@ impl Grpc {
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .ok_or(Error::Zero)?;
         let block_cache = match config.block_cache_method {
-            block::CacheMethod::Fixed => {
-                block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
-            }
+            block::CacheMethod::Fixed => block::Cache::fixed(
+                &mut rng,
+                total_bytes,
+                config.maximum_block_size.get_bytes(),
+                &config.variant,
+            )?,
         };
 
         let target_uri =

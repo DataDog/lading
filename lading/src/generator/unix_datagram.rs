@@ -12,7 +12,7 @@
 //!
 
 use crate::{common::PeekableReceiver, signals::Phase};
-use byte_unit::ByteError;
+use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
@@ -35,7 +35,9 @@ fn default_parallel_connections() -> u16 {
 
 // Mimic the belief of Datadog Agent, although correctly we should be reading
 // sysctl values on Linux.
-const UDS_DATAGRAM_LIMIT_BYTES: u32 = 8_192;
+fn maximum_block_size() -> Byte {
+    Byte::from_unit(8_192f64, ByteUnit::B).expect("catastrophic programming bug")
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +55,9 @@ pub struct Config {
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "maximum_block_size")]
+    pub maximum_block_size: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
@@ -118,13 +123,6 @@ impl UnixDatagram {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes = lading_payload::block::get_blocks(
-            &config.block_sizes,
-            Some(byte_unit::Byte::from_unit(
-                UDS_DATAGRAM_LIMIT_BYTES.into(),
-                byte_unit::ByteUnit::B,
-            )?),
-        );
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "unix_datagram".to_string()),
@@ -149,9 +147,12 @@ impl UnixDatagram {
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                     .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => {
-                    block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &config.variant)?
-                }
+                block::CacheMethod::Fixed => block::Cache::fixed(
+                    &mut rng,
+                    total_bytes,
+                    config.maximum_block_size.get_bytes(),
+                    &config.variant,
+                )?,
             };
 
             let child = Child {
