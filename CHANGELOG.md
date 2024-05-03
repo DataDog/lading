@@ -7,9 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Changed
 - Improved the block cache construction to better fill the pre-defined space.
-
-### Changed
 - Removed streaming cache method. Fixed is now the only option.
+- Users now configure a maximum block size in generators, not individual blocks.
 
 ## [0.21.0-rc1]
 ### Added

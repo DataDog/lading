@@ -67,8 +67,9 @@ pub struct Config {
     pub headers: HeaderMap,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
-    /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "lading_payload::block::default_block_size")]
+    pub maximum_block_size: byte_unit::Byte,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
@@ -129,7 +130,6 @@ impl Http {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let block_sizes = lading_payload::block::get_blocks(&config.block_sizes, None);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
             ("component_name".to_string(), "http".to_string()),
@@ -156,9 +156,12 @@ impl Http {
                     NonZeroU32::new(maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                         .ok_or(Error::Zero)?;
                 let block_cache = match block_cache_method {
-                    block::CacheMethod::Fixed => {
-                        block::Cache::fixed(&mut rng, total_bytes, &block_sizes, &variant)?
-                    }
+                    block::CacheMethod::Fixed => block::Cache::fixed(
+                        &mut rng,
+                        total_bytes,
+                        config.maximum_block_size.get_bytes(),
+                        &variant,
+                    )?,
                 };
 
                 CONNECTION_SEMAPHORE

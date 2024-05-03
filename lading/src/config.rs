@@ -144,7 +144,7 @@ blackhole:
                             100_f64,
                             byte_unit::ByteUnit::MB
                         )?,
-                        block_sizes: Option::default(),
+                        maximum_block_size: lading_payload::block::default_block_size(),
                         parallel_connections: 5,
                         throttle: lading_throttle::Config::default(),
                     }),
