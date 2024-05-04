@@ -68,7 +68,7 @@ pub struct Config {
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
-    #[serde(default = "lading_payload::block::default_block_size")]
+    #[serde(default = "lading_payload::block::default_maximum_block_size")]
     pub maximum_block_size: byte_unit::Byte,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,

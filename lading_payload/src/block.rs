@@ -129,7 +129,7 @@ pub fn default_cache_method() -> CacheMethod {
 ///
 /// Function will only panic if there is a serious programming mistake.
 #[must_use]
-pub fn default_block_size() -> Byte {
+pub fn default_maximum_block_size() -> Byte {
     Byte::from_unit(1f64, ByteUnit::MiB).expect("should not fail")
 }
 
