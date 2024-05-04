@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use byte_unit::ByteError;
+use byte_unit::{Byte, ByteError, ByteUnit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge, register_counter};
 use rand::{rngs::StdRng, SeedableRng};
@@ -32,7 +32,9 @@ use lading_payload::block::{self, Block};
 use super::General;
 
 // https://stackoverflow.com/a/42610200
-const UDP_PACKET_LIMIT_BYTES: u32 = 65_507;
+fn maximum_block_size() -> Byte {
+    Byte::from_unit(65_507f64, ByteUnit::B).expect("catastrophic programming bug")
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -46,8 +48,9 @@ pub struct Config {
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
     pub bytes_per_second: byte_unit::Byte,
-    /// The block sizes for messages to this target
-    pub block_sizes: Option<Vec<byte_unit::Byte>>,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "maximum_block_size")]
+    pub maximum_block_size: byte_unit::Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The load throttle configuration
@@ -118,7 +121,7 @@ impl Udp {
             &mut rng,
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
                 .ok_or(Error::Zero)?,
-            UDP_PACKET_LIMIT_BYTES.into(),
+            config.maximum_block_size.get_bytes(),
             &config.variant,
         )?;
 
@@ -164,10 +167,6 @@ impl Udp {
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
-            assert!(
-                total_bytes.get() <= UDP_PACKET_LIMIT_BYTES,
-                "UDP packet too large (over {UDP_PACKET_LIMIT_BYTES} B)"
-            );
 
             tokio::select! {
                 conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {

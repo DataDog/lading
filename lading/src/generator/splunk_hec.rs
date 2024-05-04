@@ -78,7 +78,7 @@ pub struct Config {
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
-    #[serde(default = "lading_payload::block::default_block_size")]
+    #[serde(default = "lading_payload::block::default_maximum_block_size")]
     pub maximum_block_size: byte_unit::Byte,
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
