@@ -5,14 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.21.0]
 ### Changed
 - Improved the block cache construction to better fill the pre-defined space.
 - Removed streaming cache method. Fixed is now the only option.
 - Users now configure a maximum block size in generators, not individual blocks.
-
-## [0.21.0-rc1]
-### Added
-### Changed
 - Maximum datagram size in bytes for unix datagram generator is 8,192.
 - Altered default cache construction from 'fixed' to 'streaming'
 - Increased maximum DogStatsD context limit from 100k to 1M
