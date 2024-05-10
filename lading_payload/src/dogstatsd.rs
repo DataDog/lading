@@ -203,7 +203,7 @@ where
     {
         match self {
             ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { min, max } => rng.gen_range(*min..*max),
+            ConfRange::Inclusive { min, max } => rng.gen_range(*min..=*max),
         }
     }
 }
