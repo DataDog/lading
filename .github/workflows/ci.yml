@@ -73,7 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8
-      - run: cargo build --bin smp --release
+      - run: cargo build --bin lading --release
       - run: |
           for config in ./examples/*.yaml; do
             echo "Testing with config $config"
