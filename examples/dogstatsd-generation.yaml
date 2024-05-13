@@ -31,7 +31,6 @@ generator:
             set: 0
             histogram: 0
       bytes_per_second: "80 MiB"
-      block_sizes: ["1Kb", "2Kb", "3Kb"]
       maximum_prebuild_cache_size_bytes: "500 Mb"
 
 blackhole:
