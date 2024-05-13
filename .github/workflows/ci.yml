@@ -67,6 +67,23 @@ jobs:
       - run: cargo test -p sheepdog
         timeout-minutes: 30
 
+  config-smoke-tests:
+    name: Example Config smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8
+      - run: cargo build --bin smp --release
+      - run: |
+        for config in ./examples/*.yaml; do
+          echo "Testing with config $config"
+          timeout 1 ./target/release/lading --no-target --config-path "$config"
+          exit_code=$?
+          if [ $exit_code -ne 124 ]; then
+            echo "Test failed or did not timeout for $config"
+            exit 1
+          fi
+        done
 
   kani:
     name: Kani Proofs
