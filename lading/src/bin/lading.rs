@@ -544,7 +544,8 @@ fn main() -> Result<(), Error> {
         .finish()
         .init();
 
-    info!("Starting lading run.");
+    let version = env!("CARGO_PKG_VERSION");
+    info!("Starting lading {version} run.");
     let opts: Opts = Opts::parse();
 
     // handle extra commands
