@@ -322,9 +322,7 @@ async fn inner_main(
             for (k, v) in global_labels {
                 builder = builder.add_global_label(k, v);
             }
-            let mut prom_experiment_started = experiment_started.clone();
             tokio::spawn(async move {
-                prom_experiment_started.recv().await; // block until experimental phase entered
                 builder
                     .install()
                     .expect("failed to install prometheus recorder");
