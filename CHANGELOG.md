@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Added lading version to initial welcome print msg.
 ### Fixed
+- Prometheus metric exporter did not include some internal metrics (generator
+  metrics)
 - Range values in the dogstatsd payload will now generate the full inclusive
   range. Previously, values were generated up to but not including the `max`
   value.
