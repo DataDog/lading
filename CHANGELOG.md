@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Range values in the dogstatsd payload will now generate the full inclusive
   range. Previously, values were generated up to but not including the `max`
   value.
+- HTTP Blackhole now supports ZSTD encoded requests
 
 ## [0.21.0]
 ### Changed
