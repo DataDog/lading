@@ -49,6 +49,15 @@ pub(crate) fn decode(
                         .map_err(|error| encoding_error_to_response(&encoding, error))?;
                     decoded.into()
                 }
+                "zstd" => {
+                    let mut decoded = Vec::new();
+                    zstd::Decoder::new(body.reader())
+                        .map_err(|error| encoding_error_to_response(&encoding, error))?
+                        .read_to_end(&mut decoded)
+                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
+
+                    decoded.into()
+                }
                 encoding => {
                     return Err(hyper::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
