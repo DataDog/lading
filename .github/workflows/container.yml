@@ -43,7 +43,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image (${{ matrix.platform }})
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           file: Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
