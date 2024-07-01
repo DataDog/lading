@@ -19,6 +19,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 
 byte-unit = {workspace = true }
+bollard ={ version = "0.16", default-features = false, features = [] }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "suggestions", "derive"] }
 flate2 = { version = "1.0.27", default-features = false, features = ["rust_backend" ] }
