@@ -277,7 +277,9 @@ impl Server {
         #[cfg(target_os = "linux")]
         let target_wait = {
             use async_pidfd::AsyncPidFd;
-            let pidfd = AsyncPidFd::from_pid(raw_pid).map_err(Error::PidConversion)?;
+            let pidfd =
+                AsyncPidFd::from_pid(pid.try_into().expect("cannot convert pid to 32 bit type"))
+                    .map_err(Error::PidConversion)?;
             async move {
                 let exit_info = pidfd.wait().await;
                 exit_info.map(|info| info.status()).ok()
