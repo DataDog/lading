@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 
+use bollard::Docker;
 use metrics::gauge;
 use nix::{
     errno::Errno,
@@ -123,6 +124,17 @@ pub enum Error {
     /// Process already finished error
     #[error("Child has already been polled to completion")]
     ProcessFinished,
+    /// Container does not exist
+    #[error(transparent)]
+    Bollard(#[from] bollard::errors::Error),
+}
+
+/// Configuration for Docker target mode
+#[allow(missing_copy_implementations)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DockerConfig {
+    /// Container name to watch
+    pub name: String,
 }
 
 /// Configuration for PID target mode
@@ -153,6 +165,8 @@ pub struct BinaryConfig {
 /// Configuration for [`Server`]
 #[derive(Debug, PartialEq, Eq)]
 pub enum Config {
+    /// A docker managed process
+    Docker(DockerConfig),
     /// An existing process that is managed externally
     Pid(PidConfig),
     /// A binary that will be launched and managed directly
@@ -221,12 +235,92 @@ impl Server {
             Config::Pid(config) => {
                 Self::watch(config, pid_snd, self.shutdown).await?;
             }
+            Config::Docker(config) => {
+                Self::watch_container(config, pid_snd, self.shutdown).await?;
+            }
             Config::Binary(config) => {
                 Self::execute_binary(config, pid_snd, self.shutdown).await?;
             }
         }
 
         Ok(())
+    }
+
+    /// Watch a container running elsewhere on the system. lading will report an
+    /// error if the container exits before the test completes.
+    async fn watch_container(
+        config: DockerConfig,
+        pid_snd: TargetPidSender,
+        mut shutdown: Phase,
+    ) -> Result<(), Error> {
+        let docker = Docker::connect_with_socket_defaults()?;
+
+        let pid: i64 = loop {
+            if let Ok(container) = docker.inspect_container(&config.name, None).await {
+                if let Some(pid) = container.state.and_then(|state| state.pid) {
+                    break pid;
+                }
+            } else {
+                info!(
+                    "Could not find container with name {name}, polling.",
+                    name = config.name
+                );
+                time::sleep(Duration::from_secs(1)).await;
+            }
+        };
+        pid_snd.send(Some(
+            pid.try_into().expect("cannot convert pid to 32 bit type"),
+        ))?;
+        drop(pid_snd);
+
+        // Use PIDfd to watch the target process (linux kernel 5.3 and up)
+        #[cfg(target_os = "linux")]
+        let target_wait = {
+            use async_pidfd::AsyncPidFd;
+            let pidfd = AsyncPidFd::from_pid(raw_pid).map_err(Error::PidConversion)?;
+            async move {
+                let exit_info = pidfd.wait().await;
+                exit_info.map(|info| info.status()).ok()
+            }
+        };
+
+        // Watch the process by polling the PID. This works across unices but
+        // does not give access to the exit code on early termination.
+        #[cfg(not(target_os = "linux"))]
+        let target_wait = async move {
+            let pid = Pid::from_raw(pid.try_into().expect("cannot convert pid to 32 bit type"));
+            loop {
+                let ret = kill(pid, None);
+                if ret.is_err() {
+                    break;
+                }
+                time::sleep(Duration::from_secs(1)).await;
+            }
+            Option::<ExitStatus>::None
+        };
+
+        let mut interval = time::interval(Duration::from_millis(400));
+        tokio::pin!(target_wait);
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    gauge!("target.running", 1.0);
+                },
+                target_exit = &mut target_wait => {
+                    if let Some(code) = target_exit{
+                        error!("target exited unexpectedly with code {}", code);
+                        break Err(Error::TargetExited(Some(code)));
+                    }
+                    error!("target exited unexpectedly; exit code unavailable");
+                    break Err(Error::TargetExited(None));
+                },
+                () = shutdown.recv() => {
+                    info!("shutdown signal received");
+                    break Ok(());
+                }
+            }
+        }
     }
 
     /// Watch a process running elsewhere on the system. lading will report an
