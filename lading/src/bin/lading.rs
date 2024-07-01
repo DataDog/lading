@@ -131,6 +131,11 @@ impl FromStr for CliKeyValues {
         .required(true)
         .args(&["target-path", "target-pid", "no-target"]),
 ))]
+#[clap(group(
+     ArgGroup::new("experiment-duration")
+           .required(true)
+           .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
+))]
 struct Opts {
     /// path on disk to the configuration file
     #[clap(long, default_value_t = default_config_path())]
@@ -180,6 +185,9 @@ struct Opts {
     /// the time, in seconds, to run the target and collect samples about it
     #[clap(long, default_value_t = 120)]
     experiment_duration_seconds: u32,
+    /// flag to allow infinite experiment duration
+    #[clap(long)]
+    experiment_duration_infinite: bool,
     /// the time, in seconds, to allow the target to run without collecting
     /// samples
     #[clap(long, default_value_t = 30)]
@@ -554,7 +562,11 @@ fn main() -> Result<(), Error> {
 
     let config = get_config(&opts, None);
 
-    let experiment_duration = Duration::from_secs(opts.experiment_duration_seconds.into());
+    let experiment_duration = if opts.experiment_duration_infinite {
+        Duration::MAX
+    } else {
+        Duration::from_secs(opts.experiment_duration_seconds.into())
+    };
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
