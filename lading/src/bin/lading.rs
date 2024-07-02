@@ -134,7 +134,7 @@ impl FromStr for CliKeyValues {
 #[clap(group(
      ArgGroup::new("experiment-duration")
            .required(true)
-           .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
+           .args(&["experiment-duration-seconds", "experiment-duration-infinite"]),
 ))]
 struct Opts {
     /// path on disk to the configuration file
