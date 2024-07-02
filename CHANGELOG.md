@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Target observer now allows a docker target, identified by name.
+- Lading experiment duration may now be (effectively) infinite.
 
 ## [0.21.1]
 ### Changed
