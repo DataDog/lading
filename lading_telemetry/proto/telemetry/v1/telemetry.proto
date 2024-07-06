@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package telemetry.v1;
+
+enum ValueKind {
+    VALUE_KIND_UNSPECIFIED = 0;
+    VALUE_KIND_GAUGE = 1;
+    VALUE_KIND_COUNTER = 2;
+}
+
+enum ClientMessageKind {
+    CLIENT_MESSAGE_KIND_UNSPECIFIED = 0;
+    CLIENT_MESSAGE_KIND_CONTEXT_REGISTRATION = 1;
+    CLIENT_MESSAGE_KIND_SIGNAL_MESSAGE = 2;
+}
+
+enum ServerMessageKind {
+    SERVER_MESSAGE_KIND_UNSPECIFIED = 0;
+    SERVER_MESSAGE_KIND_CONTEXT_ACK = 1;
+}
+
+message ClientMessage {
+    ClientMessageKind kind = 1;
+    // context registration 
+    string metric_name = 2;
+    map<string, string> labels = 3;
+    // signal message
+    uint32 context_id = 4;
+    uint64 epoch_second = 5;
+    ValueKind value_kind = 6;
+    double value = 7;
+}
+
+message ServerMessage {
+    ServerMessageKind kind = 1; 
+    // context ack 
+    uint32 context_id = 2;
+}

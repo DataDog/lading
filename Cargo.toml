@@ -6,7 +6,8 @@ members = [
         "lading",
         "lading_capture",
         "lading_payload",
-        "lading_throttle"
+        "lading_throttle",
+        "lading_telemetry"
 ]
 
 [workspace.dependencies]
