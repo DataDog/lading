@@ -209,6 +209,38 @@ impl ContextRegistration {
     }
 }
 
+/// Given an instance of a ContextRegistration return the hash value of it.
+///
+/// Example of use:
+///
+/// ```
+/// use lading_telemetry::protocol::{AsProto, ContextRegistration, ServerMessage};
+/// use std::collections::hash_map::DefaultHasher;
+/// use std::hash::{Hash, Hasher};
+///
+/// let reg = ContextRegistration::builder()
+///    .metric_name("cpu_usage")
+///    .labels(&[("host", "server1")])
+///    .build();
+///
+/// let mut hasher = DefaultHasher::new();
+/// reg.hash(&mut hasher);
+/// let hash = hasher.finish();
+/// ```
+impl std::hash::Hash for ContextRegistration {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.metric_name.hash(state);
+        // Loop over the key, values of the labels -- preserving order -- and
+        // add them to the hash.
+        let mut labels = self.inner.labels.iter().collect::<Vec<_>>();
+        labels.sort_by(|a, b| a.0.cmp(b.0));
+        for (k, v) in labels {
+            k.hash(state);
+            v.hash(state);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ContextRegistrationBuilder {
     metric_name: Option<String>,

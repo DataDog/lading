@@ -13,7 +13,7 @@ description = "Telemetry mechanism for the lading project"
 prost = { version = "0.12" }
 flatbuffers = { version = "24.3", default-features = false }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "io-util"] }
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "io-util", "sync"] }
 tracing = { workspace = true }
 
 [build-dependencies]

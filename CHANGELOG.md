@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Target observer now allows a docker target, identified by name.
+<<<<<<< HEAD
 - Lading experiment duration may be set to (effectively) infinite via `--experiment-duration-infinite`.
+=======
+- Lading experiment duration may now be (effectively) infinite.
+- Added experimental `lading_telemetry` crate. 
+>>>>>>> d83f5d3 (Fiddle with server, fix context ID sync bug. Mostly content.)
 
 ## [0.21.1]
 ### Changed
