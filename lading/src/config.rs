@@ -61,7 +61,15 @@ pub enum Telemetry {
     /// at a prometheus poll endpoint.
     Prometheus {
         /// Address and port for prometheus exporter
-        prometheus_addr: SocketAddr,
+        addr: SocketAddr,
+        /// Additional labels to include in every metric
+        global_labels: FxHashMap<String, String>,
+    },
+    /// In prometheus socket mode lading will emit its internal telemetry for
+    /// scraping on a unix socket.
+    PrometheusSocket {
+        /// Path of the socket for the prometheus exporter
+        path: PathBuf,
         /// Additional labels to include in every metric
         global_labels: FxHashMap<String, String>,
     },
@@ -78,7 +86,7 @@ pub enum Telemetry {
 impl Default for Telemetry {
     fn default() -> Self {
         Self::Prometheus {
-            prometheus_addr: "0.0.0.0:9000"
+            addr: "0.0.0.0:9000"
                 .parse()
                 .expect("Not possible to parse to SocketAddr"),
             global_labels: FxHashMap::default(),
