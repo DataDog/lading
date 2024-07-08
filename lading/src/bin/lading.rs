@@ -133,7 +133,7 @@ impl FromStr for CliKeyValues {
 ))]
 #[clap(group(
      ArgGroup::new("experiment-duration")
-           .required(true)
+           .required(false)
            .args(&["experiment-duration-seconds", "experiment-duration-infinite"]),
 ))]
 struct Opts {
@@ -186,7 +186,7 @@ struct Opts {
     #[clap(long, default_value_t = 120)]
     experiment_duration_seconds: u32,
     /// flag to allow infinite experiment duration
-    #[clap(long)]
+    #[clap(long, default_value_t = false)]
     experiment_duration_infinite: bool,
     /// the time, in seconds, to allow the target to run without collecting
     /// samples
