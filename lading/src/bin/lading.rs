@@ -186,7 +186,7 @@ struct Opts {
     #[clap(long, default_value_t = 120)]
     experiment_duration_seconds: u32,
     /// flag to allow infinite experiment duration
-    #[clap(long, default_value_t = false)]
+    #[clap(long)]
     experiment_duration_infinite: bool,
     /// the time, in seconds, to allow the target to run without collecting
     /// samples
@@ -567,6 +567,7 @@ fn main() -> Result<(), Error> {
     } else {
         Duration::from_secs(opts.experiment_duration_seconds.into())
     };
+
     let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
