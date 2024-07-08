@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Target observer now allows a docker target, identified by name.
 - Lading experiment duration may be set to (effectively) infinite via `--experiment-duration-infinite`.
+- Allow lading to export prometheus over UDS socket.
 
 ## [0.21.1]
 ### Changed
