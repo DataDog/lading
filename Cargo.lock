@@ -1575,7 +1575,7 @@ dependencies = [
 [[package]]
 name = "metrics"
 version = "0.23.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0#c4c4848b7a31adaa7d5b0847017600e7fd8649f0"
+source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
 dependencies = [
  "ahash",
  "portable-atomic",
@@ -1584,7 +1584,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.1"
-source = "git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0#c4c4848b7a31adaa7d5b0847017600e7fd8649f0"
+source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -1592,8 +1592,8 @@ dependencies = [
  "hyper-util",
  "indexmap 2.2.6",
  "ipnet",
- "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0)",
- "metrics-util 0.17.0 (git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0)",
+ "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
+ "metrics-util 0.17.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
  "quanta",
  "thiserror",
  "tokio",
@@ -1622,12 +1622,12 @@ dependencies = [
 [[package]]
 name = "metrics-util"
 version = "0.17.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0#c4c4848b7a31adaa7d5b0847017600e7fd8649f0"
+source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.14.5",
- "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=c4c4848b7a31adaa7d5b0847017600e7fd8649f0)",
+ "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
  "num_cpus",
  "quanta",
  "sketches-ddsketch",

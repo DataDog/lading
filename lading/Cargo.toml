@@ -29,7 +29,7 @@ http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
 metrics = { workspace = true }
-metrics-exporter-prometheus = { git = "https://github.com/scottopell/metrics.git", rev = "c4c4848b7a31adaa7d5b0847017600e7fd8649f0", default-features = false, features = ["http-listener", "uds-listener"]} # tracks https://github.com/scottopell/metrics/tree/sopell/uds-listener
+metrics-exporter-prometheus = { git = "https://github.com/scottopell/metrics.git", rev = "2bf0936eae505b485eff64ce65bb8e7e297315e8", default-features = false, features = ["http-listener", "uds-listener"]} # tracks https://github.com/scottopell/metrics/tree/sopell/uds-listener
 metrics-util = { version = "0.17" }
 nix = { version = "0.27", default-features = false, features = ["process", "signal"] }
 num_cpus = { version = "1.16" }
