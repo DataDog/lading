@@ -17,7 +17,6 @@ use std::{
 };
 
 use lading_capture::json;
-use metrics::SetRecorderError;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
@@ -29,8 +28,8 @@ use crate::signals::Phase;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper around [`SetRecorderError`].
-    #[error("Failed to set recorder: {0}")]
-    SetRecorderError(#[from] SetRecorderError),
+    #[error("Failed to set recorder")]
+    SetRecorderError,
     /// Wrapper around [`io::Error`].
     #[error("Io error: {0}")]
     Io(#[from] io::Error),
@@ -102,7 +101,7 @@ impl CaptureManager {
         let recorder = CaptureRecorder {
             inner: Arc::clone(&self.inner),
         };
-        metrics::set_boxed_recorder(Box::new(recorder))?;
+        metrics::set_global_recorder(recorder).map_err(|_| Error::SetRecorderError)?;
         Ok(())
     }
 
@@ -254,19 +253,23 @@ impl metrics::Recorder for CaptureRecorder {
         // nothing, intentionally
     }
 
-    fn register_counter(&self, key: &metrics::Key) -> metrics::Counter {
+    fn register_counter(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Counter {
         self.inner
             .registry
             .get_or_create_counter(key, |c| c.clone().into())
     }
 
-    fn register_gauge(&self, key: &metrics::Key) -> metrics::Gauge {
+    fn register_gauge(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
         self.inner
             .registry
             .get_or_create_gauge(key, |c| c.clone().into())
     }
 
-    fn register_histogram(&self, _key: &metrics::Key) -> metrics::Histogram {
+    fn register_histogram(
+        &self,
+        _key: &metrics::Key,
+        _: &metrics::Metadata<'_>,
+    ) -> metrics::Histogram {
         // nothing, intentionally
         unimplemented!()
     }

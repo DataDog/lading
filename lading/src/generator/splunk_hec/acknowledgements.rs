@@ -181,7 +181,7 @@ impl AckService {
                         let work = ack_request(self.client.clone(), request, channel_id.clone(), &mut ack_ids);
 
                         if let Err(_err) = timeout(Duration::from_secs(1), work).await {
-                            counter!("ack_request_timeout", 1);
+                            counter!("ack_request_timeout").increment(1);
                         }
 
                     }
@@ -201,7 +201,7 @@ async fn ack_request(
         Ok(response) => {
             let (parts, body) = response.into_parts();
             let status = parts.status;
-            counter!("ack_status_request_ok", 1, "channel_id" => channel_id.clone(), "status" => status.to_string());
+            counter!("ack_status_request_ok", "channel_id" => channel_id.clone(), "status" => status.to_string()).increment(1);
             if status == StatusCode::OK {
                 let body = hyper::body::to_bytes(body).await?;
                 let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body)?;
@@ -217,7 +217,8 @@ async fn ack_request(
                     ack_ids.remove(&acked_ack_id);
                     ack_ids_acked += 1;
                 }
-                counter!("ack_ids_acked", u64::from(ack_ids_acked), "channel_id" => channel_id.clone());
+                counter!("ack_ids_acked", "channel_id" => channel_id.clone())
+                    .increment(u64::from(ack_ids_acked));
 
                 // For all remaining ack ids, decrement the retries count,
                 // removing ack ids with no retries left
@@ -228,14 +229,15 @@ async fn ack_request(
                         Some(r) => *retries = r,
                     }
                 }
-                counter!("ack_ids_dropped", timed_out_ack_ids.len() as u64, "channel_id" => channel_id.clone());
+                counter!("ack_ids_dropped", "channel_id" => channel_id.clone())
+                    .increment(timed_out_ack_ids.len() as u64);
                 for timed_out_ack_id in timed_out_ack_ids {
                     ack_ids.remove(&timed_out_ack_id);
                 }
             }
         }
         Err(err) => {
-            counter!("ack_status_request_failure", 1, "channel_id" => channel_id.clone(), "error" => err.to_string());
+            counter!("ack_status_request_failure", "channel_id" => channel_id.clone(), "error" => err.to_string()).increment(1);
         }
     }
     Ok(())

@@ -29,8 +29,8 @@ http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
 metrics = { workspace = true }
-metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = ["http-listener"]}
-metrics-util = { version = "0.15" }
+metrics-exporter-prometheus = { version = "0.15", default-features = false, features = ["http-listener"]}
+metrics-util = { version = "0.17" }
 nix = { version = "0.27", default-features = false, features = ["process", "signal"] }
 num_cpus = { version = "1.16" }
 once_cell = { version = "1.18" }

@@ -140,11 +140,7 @@ impl Http {
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
             .expect("config bytes per second must be non-zero");
-        gauge!(
-            "bytes_per_second",
-            f64::from(bytes_per_second.get()),
-            &labels
-        );
+        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         match config.method {
             Method::Post {
@@ -235,20 +231,20 @@ impl Http {
 
                     let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
                     tokio::spawn(async move {
-                        counter!("requests_sent", 1, &labels);
+                        counter!("requests_sent", &labels).increment(1);
                         match client.request(request).await {
                             Ok(response) => {
-                                counter!("bytes_written", block_length as u64, &labels);
+                                counter!("bytes_written", &labels).increment(block_length as u64);
                                 let status = response.status();
                                 let mut status_labels = labels.clone();
                                 status_labels
                                     .push(("status_code".to_string(), status.as_u16().to_string()));
-                                counter!("request_ok", 1, &status_labels);
+                                counter!("request_ok", &status_labels).increment(1);
                             }
                             Err(err) => {
                                 let mut error_labels = labels.clone();
                                 error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", 1, &error_labels);
+                                counter!("request_failure", &error_labels).increment(1);
                             }
                         }
                         drop(permit);

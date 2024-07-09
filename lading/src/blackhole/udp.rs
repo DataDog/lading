@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use metrics::register_counter;
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tracing::info;
@@ -79,8 +79,8 @@ impl Udp {
             .map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
-        let packet_received = register_counter!("packet_received", &self.metric_labels);
+        let bytes_received = counter!("bytes_received", &self.metric_labels);
+        let packet_received = counter!("packet_received", &self.metric_labels);
 
         loop {
             tokio::select! {

@@ -8,7 +8,7 @@
 use std::{io, path::PathBuf};
 
 use futures::TryFutureExt;
-use metrics::register_counter;
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use tokio::net;
 use tracing::info;
@@ -79,7 +79,7 @@ impl UnixDatagram {
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
+        let bytes_received = counter!("bytes_received", &self.metric_labels);
 
         loop {
             tokio::select! {

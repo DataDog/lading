@@ -23,7 +23,7 @@ use std::{
 use byte_unit::{Byte, ByteError};
 use futures::future::join_all;
 use lading_throttle::Throttle;
-use metrics::{gauge, register_counter};
+use metrics::{counter, gauge};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -129,11 +129,7 @@ impl Server {
 
         let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
             .expect("Expect: config bytes per second must be non-zero");
-        gauge!(
-            "bytes_per_second",
-            f64::from(bytes_per_second.get()),
-            &labels
-        );
+        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32).ok_or(Error::Zero)?;
@@ -279,7 +275,7 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let bytes_written = register_counter!("bytes_written");
+        let bytes_written = counter!("bytes_written");
 
         loop {
             // SAFETY: By construction the block cache will never be empty

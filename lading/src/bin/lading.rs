@@ -455,7 +455,7 @@ async fn inner_main(
     let res = loop {
         tokio::select! {
             _ = interval.tick() => {
-                gauge!("lading.running", 1.0);
+                gauge!("lading.running").set(1.0);
             },
 
             _ = signal::ctrl_c() => {
