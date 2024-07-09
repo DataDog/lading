@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, io, path::Path, sync::atomic::Ordering};
 
 use cgroups_rs::cgroup::Cgroup;
-use metrics::{gauge, register_gauge};
+use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -262,19 +262,19 @@ impl Sampler {
             ];
 
             // Number of pages that the process has in real memory.
-            let rss_gauge = register_gauge!("rss_bytes", &labels);
+            let rss_gauge = gauge!("rss_bytes", &labels);
             rss_gauge.set(rss as f64);
             self.previous_gauges.push(rss_gauge.into());
             // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
-            let rsslim_gauge = register_gauge!("rsslim_bytes", &labels);
+            let rsslim_gauge = gauge!("rsslim_bytes", &labels);
             rsslim_gauge.set(rsslim as f64);
             self.previous_gauges.push(rsslim_gauge.into());
             // The size in bytes of the process in virtual memory.
-            let vsize_gauge = register_gauge!("vsize_bytes", &labels);
+            let vsize_gauge = gauge!("vsize_bytes", &labels);
             vsize_gauge.set(vsize as f64);
             self.previous_gauges.push(vsize_gauge.into());
             // Number of threads this process has active.
-            let num_threads_gauge = register_gauge!("num_threads", &labels);
+            let num_threads_gauge = gauge!("num_threads", &labels);
             num_threads_gauge.set(stats.num_threads as f64);
             self.previous_gauges.push(num_threads_gauge.into());
 
@@ -309,10 +309,10 @@ impl Sampler {
                         ("cmdline", cmdline.clone()),
                         ("pathname", pathname),
                     ];
-                    gauge!("smaps.rss.by_pathname", measures.rss as f64, &labels);
-                    gauge!("smaps.pss.by_pathname", measures.pss as f64, &labels);
-                    gauge!("smaps.size.by_pathname", measures.size as f64, &labels);
-                    gauge!("smaps.swap.by_pathname", measures.swap as f64, &labels);
+                    gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
+                    gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
+                    gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
+                    gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
                 }
 
                 let measures = memory_regions.aggregate();
@@ -322,10 +322,10 @@ impl Sampler {
                     ("cmdline", cmdline.clone()),
                 ];
 
-                gauge!("smaps.rss.sum", measures.rss as f64, &labels);
-                gauge!("smaps.pss.sum", measures.pss as f64, &labels);
-                gauge!("smaps.size.sum", measures.size as f64, &labels);
-                gauge!("smaps.swap.sum", measures.swap as f64, &labels);
+                gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
+                gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
+                gauge!("smaps.size.sum", &labels).set(measures.size as f64);
+                gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
 
                 let rollup = match Rollup::from_pid(pid) {
                     Ok(rollup) => rollup,
@@ -338,19 +338,19 @@ impl Sampler {
                     }
                 };
 
-                gauge!("smaps_rollup.rss", rollup.rss as f64, &labels);
-                gauge!("smaps_rollup.pss", rollup.pss as f64, &labels);
+                gauge!("smaps_rollup.rss", &labels).set(rollup.rss as f64);
+                gauge!("smaps_rollup.pss", &labels).set(rollup.pss as f64);
                 if let Some(v) = rollup.pss_dirty {
-                    gauge!("smaps_rollup.pss_dirty", v as f64, &labels);
+                    gauge!("smaps_rollup.pss_dirty", &labels).set(v as f64);
                 }
                 if let Some(v) = rollup.pss_anon {
-                    gauge!("smaps_rollup.pss_anon", v as f64, &labels);
+                    gauge!("smaps_rollup.pss_anon", &labels).set(v as f64);
                 }
                 if let Some(v) = rollup.pss_file {
-                    gauge!("smaps_rollup.pss_file", v as f64, &labels);
+                    gauge!("smaps_rollup.pss_file", &labels).set(v as f64);
                 }
                 if let Some(v) = rollup.pss_shmem {
-                    gauge!("smaps_rollup.pss_shmem", v as f64, &labels);
+                    gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
                 }
             });
 
@@ -375,11 +375,11 @@ impl Sampler {
                     usage - inactive_file
                 };
 
-                gauge!("working_set_bytes", working_set as f64, &labels);
+                gauge!("working_set_bytes", &labels).set(working_set as f64);
             }
         }
 
-        gauge!("num_processes", total_processes as f64);
+        gauge!("num_processes").set(total_processes as f64);
         RSS_BYTES.store(total_rss, Ordering::Relaxed); // stored for the purposes of throttling
 
         // Now we loop through our just collected samples and calculate CPU
@@ -396,13 +396,13 @@ impl Sampler {
                 ("cmdline", key.2.clone()),
             ];
 
-            let cpu_gauge = register_gauge!("cpu_percentage", &labels);
+            let cpu_gauge = gauge!("cpu_percentage", &labels);
             cpu_gauge.set(calc.cpu);
             self.previous_gauges.push(cpu_gauge.into());
-            let kernel_gauge = register_gauge!("kernel_cpu_percentage", &labels);
+            let kernel_gauge = gauge!("kernel_cpu_percentage", &labels);
             kernel_gauge.set(calc.kernel);
             self.previous_gauges.push(kernel_gauge.into());
-            let user_cpu_gauge = register_gauge!("user_cpu_percentage", &labels);
+            let user_cpu_gauge = gauge!("user_cpu_percentage", &labels);
             user_cpu_gauge.set(calc.user);
             self.previous_gauges.push(user_cpu_gauge.into());
         }
@@ -425,13 +425,13 @@ impl Sampler {
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
 
-        gauge!("total_rss_bytes", total_rss as f64);
-        gauge!("total_utime", total_sample.utime as f64);
-        gauge!("total_stime", total_sample.stime as f64);
+        gauge!("total_rss_bytes").set(total_rss as f64);
+        gauge!("total_utime").set(total_sample.utime as f64);
+        gauge!("total_stime").set(total_sample.stime as f64);
 
-        gauge!("total_cpu_percentage", totals.cpu);
-        gauge!("total_kernel_cpu_percentage", totals.kernel);
-        gauge!("total_user_cpu_percentage", totals.user);
+        gauge!("total_cpu_percentage").set(totals.cpu);
+        gauge!("total_kernel_cpu_percentage").set(totals.kernel);
+        gauge!("total_user_cpu_percentage").set(totals.user);
 
         self.previous_totals = total_sample;
         self.previous_samples = samples;
