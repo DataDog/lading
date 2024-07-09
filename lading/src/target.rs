@@ -76,7 +76,7 @@ impl Meta {
             return Err(MetaError::ByteLimitTooLarge);
         }
 
-        gauge!("rss_bytes_limit", raw_limit as f64);
+        gauge!("rss_bytes_limit").set(raw_limit as f64);
 
         RSS_BYTES_LIMIT.store(raw_limit as u64, Ordering::Relaxed);
         Ok(())
@@ -88,10 +88,7 @@ impl Meta {
         let limit: u64 = RSS_BYTES_LIMIT.load(Ordering::Relaxed);
         let current: u64 = RSS_BYTES.load(Ordering::Relaxed);
 
-        gauge!(
-            "rss_bytes_limit_overage",
-            current.saturating_sub(limit) as f64
-        );
+        gauge!("rss_bytes_limit_overage").set(current.saturating_sub(limit) as f64);
 
         current > limit
     }
@@ -307,7 +304,7 @@ impl Server {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    gauge!("target.running", 1.0);
+                    gauge!("target.running").set( 1.0);
                 },
                 target_exit = &mut target_wait => {
                     if let Some(code) = target_exit{
@@ -382,7 +379,7 @@ impl Server {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    gauge!("target.running", 1.0);
+                    gauge!("target.running").set(1.0);
                 },
                 target_exit = &mut target_wait => {
                     if let Some(code) = target_exit{
@@ -428,7 +425,7 @@ impl Server {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    gauge!("target.running", 1.0);
+                    gauge!("target.running").set( 1.0);
                 },
                 res = target_child.wait() => {
                     match res {

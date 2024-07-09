@@ -6,7 +6,7 @@
 
 use std::{str::FromStr, time::Duration};
 
-use metrics::{absolute_counter, gauge};
+use metrics::{counter, gauge};
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
@@ -222,7 +222,8 @@ impl Prometheus {
                         continue;
                     };
 
-                    gauge!(format!("target/{name}"), value, &labels.unwrap_or_default());
+                    let handle = gauge!(format!("target/{name}"), &labels.unwrap_or_default());
+                    handle.set(value);
                 }
                 Some(MetricType::Counter) => {
                     let Ok(value): Result<f64, _> = value.parse() else {
@@ -245,7 +246,8 @@ impl Prometheus {
                     };
 
                     trace!("counter: {name} = {value}");
-                    absolute_counter!(format!("target/{name}"), value, &labels.unwrap_or_default());
+                    let handle = counter!(format!("target/{name}"), &labels.unwrap_or_default());
+                    handle.absolute(value);
                 }
                 Some(_) => {
                     trace!("unsupported metric type: {name} = {value}");

@@ -93,7 +93,8 @@ impl Expvar {
                     let val = json.pointer(var_name).and_then(serde_json::Value::as_f64);
                     if let Some(val) = val {
                         trace!("expvar: {} = {}", var_name, val);
-                        gauge!(format!("target/{name}", name = var_name.trim_start_matches('/')), val, "source" => "target_metrics/expvar");
+                        let handle = gauge!(format!("target/{name}", name = var_name.trim_start_matches('/')), "source" => "target_metrics/expvar");
+                        handle.set(val);
                     }
                 }
             }

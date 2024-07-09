@@ -18,7 +18,7 @@ use byte_unit::ByteError;
 use bytes::{Buf, BufMut, Bytes};
 use http::{uri::PathAndQuery, Uri};
 use lading_throttle::Throttle;
-use metrics::{counter, gauge, register_counter};
+use metrics::{counter, gauge};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
@@ -171,11 +171,7 @@ impl Grpc {
 
         let bytes_per_second =
             NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
-        gauge!(
-            "bytes_per_second",
-            f64::from(bytes_per_second.get()),
-            &labels
-        );
+        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
@@ -269,10 +265,10 @@ impl Grpc {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let rpc_path = self.rpc_path;
 
-        let requests_sent = register_counter!("requests_sent", &self.metric_labels);
-        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
-        let request_ok = register_counter!("request_ok", &self.metric_labels);
-        let response_bytes = register_counter!("response_bytes", &self.metric_labels);
+        let requests_sent = counter!("requests_sent", &self.metric_labels);
+        let bytes_written = counter!("bytes_written", &self.metric_labels);
+        let request_ok = counter!("request_ok", &self.metric_labels);
+        let response_bytes = counter!("response_bytes", &self.metric_labels);
 
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
@@ -299,7 +295,7 @@ impl Grpc {
                         Err(err) => {
                             let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("request_failure", 1, &error_labels);
+                            counter!("request_failure",  &error_labels).increment(1);
                         }
                     }
                 },

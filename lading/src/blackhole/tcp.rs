@@ -10,7 +10,7 @@
 use std::{io, net::SocketAddr};
 
 use futures::stream::StreamExt;
-use metrics::register_counter;
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
@@ -65,8 +65,8 @@ impl Tcp {
 
     async fn handle_connection(socket: TcpStream, labels: &'static [(String, String)]) {
         let mut stream = ReaderStream::new(socket);
-        let bytes_received = register_counter!("bytes_received", labels);
-        let message_received = register_counter!("message_received", labels);
+        let bytes_received = counter!("bytes_received", labels);
+        let message_received = counter!("message_received", labels);
 
         while let Some(msg) = stream.next().await {
             message_received.increment(1);
@@ -93,7 +93,7 @@ impl Tcp {
             .await
             .map_err(Error::Io)?;
 
-        let connection_accepted = register_counter!("connection_accepted", &self.metric_labels);
+        let connection_accepted = counter!("connection_accepted", &self.metric_labels);
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
         loop {

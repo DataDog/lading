@@ -15,7 +15,7 @@ use crate::{common::PeekableReceiver, signals::Phase};
 use byte_unit::ByteError;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
-use metrics::{counter, gauge, register_counter};
+use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
@@ -106,11 +106,7 @@ impl UnixStream {
 
         let bytes_per_second =
             NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
-        gauge!(
-            "bytes_per_second",
-            f64::from(bytes_per_second.get()),
-            &labels
-        );
+        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
@@ -152,8 +148,8 @@ impl UnixStream {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
-        let bytes_written = register_counter!("bytes_written", &self.metric_labels);
-        let packets_sent = register_counter!("packets_sent", &self.metric_labels);
+        let bytes_written = counter!("bytes_written", &self.metric_labels);
+        let packets_sent = counter!("packets_sent", &self.metric_labels);
 
         let mut current_connection = None;
 
@@ -172,7 +168,7 @@ impl UnixStream {
 
                         let mut error_labels = self.metric_labels.clone();
                         error_labels.push(("error".to_string(), err.to_string()));
-                        counter!("connection_failure", 1, &error_labels);
+                        counter!("connection_failure", &error_labels).increment(1);
 
                         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                     }
@@ -225,7 +221,7 @@ impl UnixStream {
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
-                                    counter!("request_failure", 1, &error_labels);
+                                    counter!("request_failure", &error_labels).increment(1);
                                 }
                             }
                         }

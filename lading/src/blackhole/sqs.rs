@@ -14,7 +14,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use metrics::{register_counter, Counter};
+use metrics::{counter, Counter};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
@@ -99,8 +99,8 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(mut self) -> Result<(), Error> {
-        let bytes_received = register_counter!("bytes_received", &self.metric_labels);
-        let requests_received = register_counter!("requests_received", &self.metric_labels);
+        let bytes_received = counter!("bytes_received", &self.metric_labels);
+        let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
             let bytes_received = bytes_received.clone();
             let requests_received = requests_received.clone();

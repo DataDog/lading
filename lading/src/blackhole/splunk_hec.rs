@@ -92,7 +92,7 @@ async fn srv(
     req: Request<Body>,
     labels: Arc<Vec<(String, String)>>,
 ) -> Result<Response<Body>, Error> {
-    metrics::counter!("requests_received", 1, &*labels);
+    metrics::counter!("requests_received", &*labels).increment(1);
 
     let (parts, body) = req.into_parts();
     let bytes = body::to_bytes(body).await?;
@@ -100,7 +100,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            metrics::counter!("bytes_received", body.len() as u64, &*labels);
+            metrics::counter!("bytes_received", &*labels).increment(body.len() as u64);
 
             let mut okay = Response::default();
             *okay.status_mut() = StatusCode::OK;
