@@ -33,11 +33,8 @@ pub enum Error {
 macro_rules! report_status_field {
     ($status:expr, $labels:expr, $field:tt) => {
         if let Some(value) = $status.$field {
-            gauge!(
-                concat!("status.", stringify!($field), "_bytes"),
-                (value * BYTES_PER_KIBIBYTE) as f64,
-                &$labels
-            );
+            gauge!(concat!("status.", stringify!($field), "_bytes"), &$labels)
+                .set((value * BYTES_PER_KIBIBYTE) as f64);
         }
     };
 }
