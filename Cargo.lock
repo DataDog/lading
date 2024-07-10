@@ -1409,9 +1409,9 @@ dependencies = [
  "lading-capture",
  "lading-payload",
  "lading-throttle",
- "metrics 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "metrics",
  "metrics-exporter-prometheus",
- "metrics-util 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "metrics-util",
  "nix 0.27.1",
  "num_cpus",
  "once_cell",
@@ -1480,7 +1480,7 @@ name = "lading-throttle"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "metrics 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "metrics",
  "proptest",
  "proptest-derive",
  "serde",
@@ -1565,17 +1565,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "metrics"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
-dependencies = [
- "ahash",
- "portable-atomic",
-]
-
-[[package]]
-name = "metrics"
-version = "0.23.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
+source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
 dependencies = [
  "ahash",
  "portable-atomic",
@@ -1584,7 +1574,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.1"
-source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
+source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -1592,8 +1582,8 @@ dependencies = [
  "hyper-util",
  "indexmap 2.2.6",
  "ipnet",
- "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
- "metrics-util 0.17.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
+ "metrics",
+ "metrics-util",
  "quanta",
  "thiserror",
  "tokio",
@@ -1603,33 +1593,18 @@ dependencies = [
 [[package]]
 name = "metrics-util"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
+source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
 dependencies = [
  "aho-corasick",
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
- "metrics 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "metrics",
  "num_cpus",
  "ordered-float",
  "quanta",
  "radix_trie",
- "sketches-ddsketch",
-]
-
-[[package]]
-name = "metrics-util"
-version = "0.17.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8#2bf0936eae505b485eff64ce65bb8e7e297315e8"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
- "hashbrown 0.14.5",
- "metrics 0.23.0 (git+https://github.com/scottopell/metrics.git?rev=2bf0936eae505b485eff64ce65bb8e7e297315e8)",
- "num_cpus",
- "quanta",
  "sketches-ddsketch",
 ]
 

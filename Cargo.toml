@@ -12,7 +12,9 @@ members = [
 [workspace.dependencies]
 bytes = { version = "1.5.0", default-features = false, features = ["std"] }
 byte-unit = { version = "4.0", features = ["serde"] }
-metrics = { version = "0.23" }
+metrics = { git = "https://github.com/scottopell/metrics.git", rev = "c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"} # tracks https://github.com/scottopell/metrics/tree/sopell/uds-listener
+metrics-util = { git = "https://github.com/scottopell/metrics.git", rev = "c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"} # tracks https://github.com/scottopell/metrics/tree/sopell/uds-listener
+metrics-exporter-prometheus = { git = "https://github.com/scottopell/metrics.git", rev = "c1e14d5e65c7bcef67930a91dd2b1e5504eba77a", default-features = false, features = ["http-listener", "uds-listener"]} # tracks https://github.com/scottopell/metrics/tree/sopell/uds-listener
 prost = "0.11"
 prost-build = { version = "0.12" }
 rand = { version = "0.8", default-features = false }
