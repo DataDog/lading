@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.21.1"
+version = "0.22.0-rc0"
 authors = [
     "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
     "George Hahn <george.hahn@datadoghq.com>",
@@ -30,8 +30,8 @@ http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
 is_executable = "1.0.1"
 metrics = { workspace = true }
-metrics-exporter-prometheus = { version = "0.15", default-features = false, features = ["http-listener"]}
-metrics-util = { version = "0.17" }
+metrics-exporter-prometheus = { workspace = true }
+metrics-util = { workspace = true}
 nix = { version = "0.29", default-features = false, features = ["process", "signal"] }
 num_cpus = { version = "1.16" }
 once_cell = { version = "1.18" }

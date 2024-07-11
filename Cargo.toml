@@ -12,7 +12,11 @@ members = [
 [workspace.dependencies]
 bytes = { version = "1.5", default-features = false, features = ["std"] }
 byte-unit = { version = "4.0", features = ["serde"] }
-metrics = { version = "0.23" }
+# Metrics-rs crates are pinned to a65dde95476558b862245d2bd7089de91f33a1bd until
+# a release is cut that contains https://github.com/metrics-rs/metrics/pull/498
+metrics = { git = "https://github.com/metrics-rs/metrics.git", rev = "a65dde95476558b862245d2bd7089de91f33a1bd" }
+metrics-util = { git = "https://github.com/metrics-rs/metrics.git", rev = "a65dde95476558b862245d2bd7089de91f33a1bd" }
+metrics-exporter-prometheus = { git = "https://github.com/metrics-rs/metrics.git", rev = "a65dde95476558b862245d2bd7089de91f33a1bd", default-features = false, features = ["http-listener", "uds-listener"]}
 prost = "0.11"
 prost-build = { version = "0.12" }
 rand = { version = "0.8", default-features = false }

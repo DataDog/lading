@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.21.1"
+version = "0.22.0-rc0"
 dependencies = [
  "async-pidfd",
  "average",
@@ -1561,8 +1561,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "metrics"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "ahash",
  "portable-atomic",
@@ -1571,8 +1570,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0af7a0d7ced10c0151f870e5e3f3f8bc9ffc5992d32873566ca1f9169ae776"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -1591,8 +1589,7 @@ dependencies = [
 [[package]]
 name = "metrics-util"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "aho-corasick",
  "crossbeam-epoch",

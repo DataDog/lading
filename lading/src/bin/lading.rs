@@ -57,6 +57,8 @@ enum Error {
     PrometheusAddr(#[from] std::net::AddrParseError),
     #[error("Invalid capture path")]
     CapturePath,
+    #[error("Invalid path for prometheus socket")]
+    PrometheusPath,
     #[error("Process tree failed to generate tree")]
     ProcessTree(#[from] process_tree::Error),
 }
@@ -132,6 +134,11 @@ impl FromStr for CliKeyValues {
         .args(&["target-path", "target-pid", "no-target"]),
 ))]
 #[clap(group(
+    ArgGroup::new("telemetry")
+        .required(true)
+        .args(&["capture-path", "prometheus-addr", "prometheus-path"]),
+))]
+#[clap(group(
      ArgGroup::new("experiment-duration")
            .required(false)
            .args(&["experiment-duration-seconds", "experiment-duration-infinite"]),
@@ -171,12 +178,16 @@ struct Opts {
     /// the maximum amount of RSS bytes the target may consume before lading backs off load
     #[clap(long)]
     target_rss_bytes_limit: Option<byte_unit::Byte>,
-    /// path on disk to write captures, will override prometheus-addr if both
-    /// are set
+    /// path on disk to write captures, exclusive of prometheus-path and
+    /// prometheus-addr
     #[clap(long)]
     capture_path: Option<String>,
-    /// address to bind prometheus exporter to, will be overridden by
-    /// capture-path if both are set
+    /// address to bind prometheus exporter to, exclusive of prometheus-path and
+    /// promtheus-addr
+    #[clap(long)]
+    prometheus_path: Option<String>,
+    /// socket to bind prometheus exporter to, exclusive of prometheus-addr and
+    /// capture-path
     #[clap(long)]
     prometheus_addr: Option<String>,
     /// the maximum time to wait, in seconds, for controlled shutdown
@@ -276,7 +287,12 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let options_global_labels = ops.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = ops.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
-            prometheus_addr: prom_addr.parse()?,
+            addr: prom_addr.parse()?,
+            global_labels: options_global_labels.inner,
+        };
+    } else if let Some(ref prom_path) = ops.prometheus_path {
+        config.telemetry = Telemetry::PrometheusSocket {
+            path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
@@ -287,6 +303,14 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     } else {
         match config.telemetry {
             Telemetry::Prometheus {
+                ref mut global_labels,
+                ..
+            } => {
+                for (k, v) in options_global_labels.inner {
+                    global_labels.insert(k, v);
+                }
+            }
+            Telemetry::PrometheusSocket {
                 ref mut global_labels,
                 ..
             } => {
@@ -322,11 +346,25 @@ async fn inner_main(
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
     match config.telemetry {
-        Telemetry::Prometheus {
-            prometheus_addr,
+        Telemetry::PrometheusSocket {
+            path,
             global_labels,
         } => {
-            let mut builder = PrometheusBuilder::new().with_http_listener(prometheus_addr);
+            let mut builder = PrometheusBuilder::new().with_http_uds_listener(path);
+            for (k, v) in global_labels {
+                builder = builder.add_global_label(k, v);
+            }
+            tokio::spawn(async move {
+                builder
+                    .install()
+                    .expect("failed to install prometheus recorder");
+            });
+        }
+        Telemetry::Prometheus {
+            addr,
+            global_labels,
+        } => {
+            let mut builder = PrometheusBuilder::new().with_http_listener(addr);
             for (k, v) in global_labels {
                 builder = builder.add_global_label(k, v);
             }

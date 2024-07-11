@@ -19,6 +19,9 @@ default = "deny"
 
 [sources]
 unknown-git = "deny"
+allow-git = [
+  "http://github.com/metrics-rs/metrics",
+]
 
 [advisories]
 vulnerability = "deny"
