@@ -1561,7 +1561,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "metrics"
 version = "0.23.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "ahash",
  "portable-atomic",
@@ -1570,7 +1570,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.1"
-source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -1589,7 +1589,7 @@ dependencies = [
 [[package]]
 name = "metrics-util"
 version = "0.17.0"
-source = "git+https://github.com/scottopell/metrics.git?rev=c1e14d5e65c7bcef67930a91dd2b1e5504eba77a#c1e14d5e65c7bcef67930a91dd2b1e5504eba77a"
+source = "git+https://github.com/metrics-rs/metrics.git?rev=a65dde95476558b862245d2bd7089de91f33a1bd#a65dde95476558b862245d2bd7089de91f33a1bd"
 dependencies = [
  "aho-corasick",
  "crossbeam-epoch",
