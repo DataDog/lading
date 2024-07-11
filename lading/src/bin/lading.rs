@@ -428,7 +428,12 @@ async fn inner_main(
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown.clone())?;
-        let _osrv = tokio::spawn(observer_server.run(obs_rcv));
+        let _osrv = tokio::spawn(async {
+            match observer_server.run(obs_rcv).await {
+                Ok(()) => debug!("observer shut down successfully"),
+                Err(err) => warn!("observer failed with {:?}", err),
+            }
+        });
 
         //
         // TARGET
