@@ -131,7 +131,7 @@ impl FromStr for CliKeyValues {
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
-        .args(&["target-path", "target-pid", "no-target"]),
+        .args(&["target-path", "target-pid", "target-container", "no-target"]),
 ))]
 #[clap(group(
     ArgGroup::new("telemetry")
@@ -153,6 +153,9 @@ struct Opts {
     /// measure an externally-launched process by PID
     #[clap(long)]
     target_pid: Option<NonZeroU32>,
+    /// measure an externally-launched container by name
+    #[clap(long)]
+    target_container: Option<String>,
     /// disable target measurement
     #[clap(long)]
     no_target: bool,
@@ -264,6 +267,10 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
         None
     } else if let Some(pid) = ops.target_pid {
         Some(target::Config::Pid(target::PidConfig { pid }))
+    } else if let Some(name) = &ops.target_container {
+        Some(target::Config::Docker(target::DockerConfig {
+            name: name.clone(),
+        }))
     } else if let Some(path) = &ops.target_path {
         Some(target::Config::Binary(target::BinaryConfig {
             command: path.clone(),
