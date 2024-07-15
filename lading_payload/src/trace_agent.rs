@@ -100,7 +100,7 @@ pub(crate) struct Span<'a> {
     /// type is the type of the service with which this span is associated.  Example values: web, db, lambda.
     #[serde(alias = "type")]
     kind: &'a str,
-    /// meta_struct is a registry of structured "other" data used by, e.g., AppSec.
+    /// `meta_struct` is a registry of structured "other" data used by, e.g., `AppSec`.
     meta_struct: FxHashMap<&'a str, Vec<u8>>,
 }
 
@@ -108,9 +108,9 @@ pub(crate) struct Span<'a> {
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 /// Encoding options for the trace-agent
 pub enum Encoding {
-    /// Encode TraceAgent payload in JSON format
+    /// Encode `TraceAgent` payload in JSON format
     Json,
-    /// Encode TraceAgent payload in MsgPack format
+    /// Encode `TraceAgent` payload in `MsgPack` format
     #[default]
     MsgPack,
 }

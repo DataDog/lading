@@ -52,7 +52,7 @@ type TargetPidSender = tokio::sync::broadcast::Sender<Option<u32>>;
 /// Errors produced by [`Meta`]
 #[derive(thiserror::Error, Debug, Clone, Copy)]
 pub enum MetaError {
-    /// Unable to support byte limits greater than u64::MAX
+    /// Unable to support byte limits greater than `u64::MAX`
     #[error("unable to support bytes greater than u64::MAX")]
     ByteLimitTooLarge,
 }
@@ -103,7 +103,7 @@ pub enum Error {
     /// Unable to await target exit
     #[error("unable to wait for target exit: {0}")]
     TargetWait(io::Error),
-    /// Unable to create PidFd from raw PID
+    /// Unable to create `PidFd` from raw PID
     #[error("unable to create PidFd: {0}")]
     PidConversion(io::Error),
     /// SIGTERM error

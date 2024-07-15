@@ -81,14 +81,14 @@ const ASSUMED_NGROUPS_MAX: usize = 32;
 /// are ignored for ease of implementation.
 #[derive(Debug, Clone, Copy)]
 pub struct Statm {
-    /// Total program size (pages). Same as VmSize in
+    /// Total program size (pages). Same as `VmSize` in
     /// `/proc/{pid}/status`.
     size: u64,
-    /// Size of memory portions (pages). Same as VmRSS in
+    /// Size of memory portions (pages). Same as `VmRSS` in
     /// `/proc/{pid}/status`.
     resident: u64,
     /// Number of pages that are shared (i.e., backed by a file, same as
-    /// `RssFile` + `RssShmem`` in `/proc/{pid}/status`).
+    /// `RssFile` + `RssShmem` in `/proc/{pid}/status`).
     shared: u64,
     /// Number of pages that are 'code' (not including libs; broken,
     /// includes data segment). Looks to be the same as `VmExe` + `VmLib` in
@@ -765,7 +765,7 @@ pub struct Status {
     /// Peak resident set size (in bytes). Present only if task has non-null
     /// memory management pointer.
     vm_hwm: MemSize,
-    /// Resident set size (in bytes) = rss_anon + rss_file + rss_shmem. Present
+    /// Resident set size (in bytes) = `rss_anon` + `rss_file` + `rss_shmem`. Present
     /// only if task has non-null memory management pointer.
     vm_rss: MemSize,
     /// Resident anonymous memory size (in bytes). Present only if task has
@@ -774,7 +774,7 @@ pub struct Status {
     /// Resident file mappings size (in bytes). Present only if task has
     /// non-null memory management pointer.
     rss_file: MemSize,
-    /// Resident shmem memory size (in bytes; includes SysV shm, tmpfs mapping,
+    /// Resident shmem memory size (in bytes; includes `SysV` shm, tmpfs mapping,
     /// shared anonymous mappings). Present only if task has non-null memory
     /// management pointer.
     rss_shmem: MemSize,

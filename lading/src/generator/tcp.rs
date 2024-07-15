@@ -36,7 +36,7 @@ use super::General;
 pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
-    /// The address for the target, must be a valid SocketAddr
+    /// The address for the target, must be a valid `SocketAddr`
     pub addr: String,
     /// The payload variant
     pub variant: lading_payload::Config,

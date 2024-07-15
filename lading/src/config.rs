@@ -43,7 +43,7 @@ pub struct Config {
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub blackhole: Option<Vec<blackhole::Config>>,
-    /// The target_metrics to scrape from the target
+    /// The `target_metrics` to scrape from the target
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub target_metrics: Option<Vec<target_metrics::Config>>,

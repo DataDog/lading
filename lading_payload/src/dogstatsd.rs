@@ -245,11 +245,11 @@ pub struct Config {
     /// The sampling rate is chosen from `sampling_range`
     pub sampling_probability: f32,
 
-    /// Defines the relative probability of each kind of DogStatsD kinds of
+    /// Defines the relative probability of each kind of `DogStatsD` kinds of
     /// payload.
     pub kind_weights: KindWeights,
 
-    /// Defines the relative probability of each kind of DogStatsD metric.
+    /// Defines the relative probability of each kind of `DogStatsD` metric.
     pub metric_weights: MetricWeights,
 
     /// The configuration of values that appear in all metrics.
