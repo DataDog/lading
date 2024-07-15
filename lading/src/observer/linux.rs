@@ -57,8 +57,8 @@ pub(crate) struct Sampler {
     previous_samples: FxHashMap<(i32, String, String), Sample>,
     previous_totals: Sample,
     previous_gauges: Vec<Gauge>,
-    perf_counter_cycles: Counter,
-    perf_counter_instructions: Counter,
+    perf_counter_cycles: Option<Counter>,
+    perf_counter_instructions: Option<Counter>,
 }
 
 struct Gauge(metrics::Gauge);
@@ -82,21 +82,43 @@ impl Gauge {
     }
 }
 
+/// Attempts to initialize perf_event counters.
+/// If either fail, then (None, None) is returned and errors are logged.
+fn init_perf_counters(parent_pid: i32) -> (Option<Counter>, Option<Counter>) {
+    let mut cycles = match Builder::new(Hardware::CPU_CYCLES)
+        .observe_pid(parent_pid)
+        .read_format(ReadFormat::GROUP)
+        .build()
+    {
+        Ok(counter) => counter,
+        Err(e) => {
+            warn!("Failed to create CPU_CYCLES counter: {}", e);
+            return (None, None);
+        }
+    };
+    let instructions = match Builder::new(Hardware::INSTRUCTIONS)
+        .observe_pid(parent_pid)
+        .read_format(ReadFormat::GROUP)
+        .build_with_group(&mut cycles)
+    {
+        Ok(counter) => counter,
+        Err(e) => {
+            warn!("Failed to create INSTRUCTIONS counter: {}", e);
+            return (None, None);
+        }
+    };
+
+    (Some(cycles), Some(instructions))
+}
+
 impl Sampler {
     pub(crate) fn new(parent_pid: u32) -> Result<Self, Error> {
         info!("Constructing observer for {parent_pid}");
         let parent_pid: i32 = parent_pid.try_into().expect("PID coercion failed");
         let parent = Process::new(parent_pid)?;
+
         // TODO Once the observer is cgroup based, swap out `observe_pid` for `observe_cgroup`
-        let mut cycles = Builder::new(Hardware::CPU_CYCLES)
-            .observe_pid(parent_pid)
-            .read_format(ReadFormat::GROUP)
-            .build()?; // group leader
-        let instructions = Builder::new(Hardware::INSTRUCTIONS)
-            .observe_pid(parent_pid)
-            // TODO is the following necessary? Syscalls succeed without it
-            .read_format(ReadFormat::GROUP)
-            .build_with_group(&mut cycles)?;
+        let (cycles, instructions) = init_perf_counters(parent_pid);
 
         info!("init success for observer for {parent_pid}");
         Ok(Self {
@@ -124,7 +146,9 @@ impl Sampler {
         // Thought here is that some of this work (eg, requesting smaps) may be
         // done "on behalf" of the process.
         // However the counts should exclude kernel by default, so maybe this is not necessary
-        self.perf_counter_cycles.disable_group()?;
+        if let Some(cycles) = &mut self.perf_counter_cycles {
+            cycles.disable_group()?;
+        }
 
         let mut joinset = tokio::task::JoinSet::new();
         // Key for this map is (pid, basename/exe, cmdline)
@@ -400,23 +424,28 @@ impl Sampler {
             }
         }
 
-        let data = self.perf_counter_cycles.read_group()?;
-        let cpu_cycles = data[&self.perf_counter_cycles];
-        let instructions = data[&self.perf_counter_instructions];
+        if let (Some(cycles), Some(instructions)) = (
+            &mut self.perf_counter_cycles,
+            &self.perf_counter_instructions,
+        ) {
+            let data = cycles.read_group()?;
+            let cpu_cycles = data[cycles];
+            let instructions = data[instructions];
 
-        let cpi = if instructions > 0 {
-            cpu_cycles as f64 / instructions as f64
-        } else {
-            0.0
+            let cpi = if instructions > 0 {
+                cpu_cycles as f64 / instructions as f64
+            } else {
+                0.0
+            };
+
+            gauge!("cpi").set(cpi);
+            gauge!("cpu_cycles").set(cpu_cycles as f64);
+            gauge!("instructions").set(instructions as f64);
+
+            // Since data has been read, lets reset and enable to collect more data
+            cycles.reset_group()?;
+            cycles.enable_group()?;
         };
-
-        gauge!("cpi").set(cpi);
-        gauge!("cpu_cycles").set(cpu_cycles as f64);
-        gauge!("instructions").set(instructions as f64);
-
-        // Since data has been read, lets reset and enable to collect more data
-        self.perf_counter_cycles.reset_group()?;
-        self.perf_counter_cycles.enable_group()?;
 
         gauge!("num_processes").set(total_processes as f64);
         RSS_BYTES.store(total_rss, Ordering::Relaxed); // stored for the purposes of throttling
