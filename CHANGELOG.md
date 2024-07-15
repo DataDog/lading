@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ## [0.22.0-rc0]
+### Changed
+- Now built using rust 1.79.0
 ### Added
 - Target observer now allows a docker target, identified by name.
 - Lading experiment duration may be set to (effectively) infinite via `--experiment-duration-infinite`.
