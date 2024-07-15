@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.22.0-rc0"
+version = "0.22.0-rc1"
 dependencies = [
  "async-pidfd",
  "average",

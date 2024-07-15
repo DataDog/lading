@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.22.0-rc1]
+### Fixed
+- Target observer was not exposed through CLI.
+
 ## [0.22.0-rc0]
 ### Added
 - Target observer now allows a docker target, identified by name.
