@@ -357,6 +357,9 @@ impl Sampler {
             if let Some(memory_controller) =
                 cgroup.controller_of::<cgroups_rs::memory::MemController>()
             {
+                let mut labels = Vec::from(labels);
+                labels.push(("cgroup", String::from(cgroup.path())));
+
                 let mem_stat = memory_controller.memory_stat();
 
                 let inactive_file = if cgroup.v2() {
@@ -372,7 +375,17 @@ impl Sampler {
                 };
 
                 gauge!("working_set_bytes", &labels).set(working_set as f64);
+
+                gauge!("fail_cnt", &labels).set(mem_stat.fail_cnt as f64);
+                gauge!("limit_bytes", &labels).set(mem_stat.limit_in_bytes as f64);
+                gauge!("usage_in_bytes", &labels).set(mem_stat.usage_in_bytes as f64);
+                gauge!("max_usage_in_bytes", &labels).set(mem_stat.max_usage_in_bytes as f64);
+                gauge!("soft_limit_in_bytes", &labels).set(mem_stat.soft_limit_in_bytes as f64);
             }
+            // TODO load the CPU controller and parse
+            // https://docs.rs/cgroups/latest/cgroups/cpu/struct.Cpu.html#structfield.stat.
+            // What information is tucked in there varies by kernel version et
+            // al but it's valuable information.
         }
 
         gauge!("num_processes").set(total_processes as f64);
