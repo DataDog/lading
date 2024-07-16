@@ -82,7 +82,7 @@ impl Gauge {
     }
 }
 
-/// Attempts to initialize perf_event counters.
+/// Attempts to initialize `perf_event` counters.
 /// If either fail, then (None, None) is returned and errors are logged.
 fn init_perf_counters(parent_pid: i32) -> (Option<Counter>, Option<Counter>) {
     let mut cycles = match Builder::new(Hardware::CPU_CYCLES)
