@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.22.0-rc1"
+version = "0.22.0-rc2"
 authors = [
     "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
     "George Hahn <george.hahn@datadoghq.com>",
@@ -52,12 +52,12 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
 zstd = "0.13.1"
-perf-event2 = "0.7.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cgroups-rs = "0.3"
 procfs = { version = "0.15", default-features = false, features = [] }
 async-pidfd = "0.1"
+perf-event2 = "0.7.4"
 
 [dev-dependencies]
 proptest = "1.4"
