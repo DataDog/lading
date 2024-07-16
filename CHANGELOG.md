@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.22.0-rc2]
+### Added
+- Incorporate perf-event telemetry on Linux for CPU data.
+
 ## [0.22.0-rc1]
 ### Fixed
-- Target observer was not exposed through CLI.
+- Target observer was not exposed through CLI, eg `--target-container my-container-name`
 
 ## [0.22.0-rc0]
 ### Changed
