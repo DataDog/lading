@@ -1,4 +1,5 @@
-FROM docker.io/rust:1.75.0-bullseye as builder
+# Update the rust version in-sync with the version in rust-toolchain.toml
+FROM docker.io/rust:1.79.0-bullseye as builder
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
@@ -8,7 +9,7 @@ WORKDIR /app
 COPY . /app
 RUN cargo build --release --locked --bin lading
 
-FROM docker.io/debian:bullseye-20240211-slim
+FROM docker.io/debian:bullseye-20240701-slim
 COPY --from=builder /app/target/release/lading /usr/bin/lading
 
 # smoke test

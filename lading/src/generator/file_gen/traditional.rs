@@ -95,7 +95,7 @@ pub struct Config {
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
     bytes_per_second: Byte,
-    /// Defines the maximum internal cache of this log target. file_gen will
+    /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.

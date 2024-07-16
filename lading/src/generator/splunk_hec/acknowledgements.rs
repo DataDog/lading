@@ -34,7 +34,7 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Channel {
-    /// Variant that communicates acks to underlying AckService.
+    /// Variant that communicates acks to underlying `AckService`.
     Ack { id: String, tx: Sender<AckId> },
     /// Variant that does no ack'ing.
     NoAck { id: String },

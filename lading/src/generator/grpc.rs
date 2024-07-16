@@ -61,7 +61,7 @@ pub enum Error {
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The gRPC URI. Looks like http://host/service.path/endpoint
+    /// The gRPC URI. Looks like `http://<host>/<service path>/<endpoint>`
     pub target_uri: String,
     /// The seed for random operations against this target
     pub seed: [u8; 32],

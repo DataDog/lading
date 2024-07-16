@@ -140,8 +140,7 @@ impl Sampler {
             // itself as a child so we reference the pid hashset above to avoid
             // infinite loops.
             if let Ok(tasks) = process.tasks() {
-                for task in tasks.filter(std::result::Result::is_ok) {
-                    let task = task.expect("failed to read task"); // SAFETY: filter on iterator
+                for task in tasks.flatten() {
                     if let Ok(mut children) = task.children() {
                         for child in children
                             .drain(..)

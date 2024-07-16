@@ -63,7 +63,7 @@ pub mod trace_agent;
 /// Errors related to serialization
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// MsgPack payload could not be encoded
+    /// `MsgPack` payload could not be encoded
     #[error("MsgPack payload could not be encoded: {0}")]
     MsgPack(#[from] rmp_serde::encode::Error),
     /// Json payload could not be encoded
@@ -105,7 +105,7 @@ pub trait Serialize {
 pub enum Encoding {
     /// Use JSON format
     Json,
-    /// Use MsgPack binary format
+    /// Use `MsgPack` binary format
     #[serde(alias = "msgpack")]
     MsgPack,
 }
@@ -145,10 +145,10 @@ pub enum Config {
     OpentelemetryLogs,
     /// Generates OpenTelemetry metrics
     OpentelemetryMetrics,
-    /// Generates DogStatsD
+    /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
-    /// Generates TraceAgent payloads in JSON format
+    /// Generates `TraceAgent` payloads in JSON format
     TraceAgent(Encoding),
 }
 

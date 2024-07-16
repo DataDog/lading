@@ -97,7 +97,7 @@ pub struct Config {
     /// the content-type header to respond with, defaults to 200
     #[serde(default = "default_status_code")]
     pub status: u16,
-    /// raw array of bytes if the raw_bytes body variant is selected
+    /// raw array of bytes if the `raw_bytes` body variant is selected
     #[serde(default)]
     pub raw_bytes: Vec<u8>,
 }

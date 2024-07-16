@@ -117,7 +117,7 @@ impl Distribution<Member> for Standard {
     }
 }
 
-///
+/// Encoding to be used
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
