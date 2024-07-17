@@ -376,11 +376,13 @@ impl Sampler {
 
                 gauge!("working_set_bytes", &labels).set(working_set as f64);
 
-                gauge!("fail_cnt", &labels).set(mem_stat.fail_cnt as f64);
-                gauge!("limit_bytes", &labels).set(mem_stat.limit_in_bytes as f64);
-                gauge!("usage_in_bytes", &labels).set(mem_stat.usage_in_bytes as f64);
-                gauge!("max_usage_in_bytes", &labels).set(mem_stat.max_usage_in_bytes as f64);
-                gauge!("soft_limit_in_bytes", &labels).set(mem_stat.soft_limit_in_bytes as f64);
+                gauge!("memory.fail_cnt", &labels).set(mem_stat.fail_cnt as f64);
+                gauge!("memory.limit_bytes", &labels).set(mem_stat.limit_in_bytes as f64);
+                gauge!("memory.usage_in_bytes", &labels).set(mem_stat.usage_in_bytes as f64);
+                gauge!("memory.max_usage_in_bytes", &labels)
+                    .set(mem_stat.max_usage_in_bytes as f64);
+                gauge!("memory.soft_limit_in_bytes", &labels)
+                    .set(mem_stat.soft_limit_in_bytes as f64);
             }
             // Load the CPU controller and get the cpu.stat String out of the
             // cgroup, parse whatever fields are present and report them back
@@ -394,17 +396,17 @@ impl Sampler {
                     let mut fields = line.split_whitespace();
                     let metric_name = fields.next().unwrap_or_default();
                     let value = fields.next().unwrap_or_default();
-                    gauge!(String::from(metric_name), &labels)
+                    gauge!(format!("cpu.{metric_name}"), &labels)
                         .set(value.parse::<f64>().unwrap_or_default());
                 }
                 if let Ok(shares) = cpu_controller.shares() {
-                    gauge!("shares", &labels).set(shares as f64);
+                    gauge!("cpu.shares", &labels).set(shares as f64);
                 }
                 if let Ok(cfs_period) = cpu_controller.cfs_period() {
-                    gauge!("cfs_period", &labels).set(cfs_period as f64);
+                    gauge!("cpu.cfs_period", &labels).set(cfs_period as f64);
                 }
                 if let Ok(cfs_quota) = cpu_controller.cfs_quota() {
-                    gauge!("cfs_quota", &labels).set(cfs_quota as f64);
+                    gauge!("cpu.cfs_quota", &labels).set(cfs_quota as f64);
                 }
             }
         }
