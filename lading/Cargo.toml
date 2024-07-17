@@ -54,7 +54,7 @@ uuid = { workspace = true }
 zstd = "0.13.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-cgroups-rs = "0.3"
+cgroups-rs = { version = "0.3", default-features = false, features = [] }
 procfs = { version = "0.15", default-features = false, features = [] }
 async-pidfd = "0.1"
 
