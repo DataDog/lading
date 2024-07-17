@@ -375,6 +375,7 @@ impl Sampler {
                 };
 
                 gauge!("working_set_bytes", &labels).set(working_set as f64);
+                gauge!("memory.working_set_bytes", &labels).set(working_set as f64);
 
                 gauge!("memory.fail_cnt", &labels).set(mem_stat.fail_cnt as f64);
                 gauge!("memory.limit_bytes", &labels).set(mem_stat.limit_in_bytes as f64);
