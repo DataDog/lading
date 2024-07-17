@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 ### Added
-- Retrieve memory information from cgroup controller for every pid observed on Linux.
+- Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
 
 ## [0.22.0-rc1]
 ### Fixed
