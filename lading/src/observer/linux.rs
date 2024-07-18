@@ -357,9 +357,6 @@ impl Sampler {
             if let Some(memory_controller) =
                 cgroup.controller_of::<cgroups_rs::memory::MemController>()
             {
-                let mut labels = Vec::from(&labels);
-                labels.push(("cgroup", String::from(cgroup.path())));
-
                 let mem_stat = memory_controller.memory_stat();
 
                 let inactive_file = if cgroup.v2() {
@@ -389,9 +386,6 @@ impl Sampler {
             // cgroup, parse whatever fields are present and report them back
             // out as metrics.
             if let Some(cpu_controller) = cgroup.controller_of::<cgroups_rs::cpu::CpuController>() {
-                let mut labels = Vec::from(&labels);
-                labels.push(("cgroup", String::from(cgroup.path())));
-
                 let cpu = cpu_controller.cpu();
                 for line in cpu.stat.lines() {
                     let mut fields = line.split_whitespace();
