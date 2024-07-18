@@ -18,7 +18,7 @@ shared = { path = "../shared" }
 sketches-ddsketch = "0.2"
 tokio = { version = "1.32", features = ["rt", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.9", default-features = false, features = ["transport", "prost"] }
+tonic = { version = "0.12", default-features = false, features = ["transport", "prost"] }
 tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
