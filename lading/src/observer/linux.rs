@@ -371,16 +371,55 @@ impl Sampler {
                     usage - inactive_file
                 };
 
-                gauge!("working_set_bytes", &labels).set(working_set as f64);
-                gauge!("memory.working_set_bytes", &labels).set(working_set as f64);
+                gauge!("working_set_bytes").set(working_set as f64);
+                gauge!("memory.working_set_bytes").set(working_set as f64);
 
-                gauge!("memory.fail_cnt", &labels).set(mem_stat.fail_cnt as f64);
-                gauge!("memory.limit_bytes", &labels).set(mem_stat.limit_in_bytes as f64);
-                gauge!("memory.usage_in_bytes", &labels).set(mem_stat.usage_in_bytes as f64);
-                gauge!("memory.max_usage_in_bytes", &labels)
-                    .set(mem_stat.max_usage_in_bytes as f64);
-                gauge!("memory.soft_limit_in_bytes", &labels)
-                    .set(mem_stat.soft_limit_in_bytes as f64);
+                gauge!("memory.fail_cnt").set(mem_stat.fail_cnt as f64);
+                gauge!("memory.limit_bytes").set(mem_stat.limit_in_bytes as f64);
+                gauge!("memory.usage_in_bytes").set(mem_stat.usage_in_bytes as f64);
+                gauge!("memory.max_usage_in_bytes").set(mem_stat.max_usage_in_bytes as f64);
+                gauge!("memory.soft_limit_in_bytes").set(mem_stat.soft_limit_in_bytes as f64);
+
+                gauge!("memory.stat.cache").set(mem_stat.stat.cache as f64);
+                gauge!("memory.stat.rss").set(mem_stat.stat.rss as f64);
+                gauge!("memory.stat.rss_huge").set(mem_stat.stat.rss_huge as f64);
+                gauge!("memory.stat.shmem").set(mem_stat.stat.shmem as f64);
+                gauge!("memory.stat.mapped_file").set(mem_stat.stat.mapped_file as f64);
+                gauge!("memory.stat.dirty").set(mem_stat.stat.dirty as f64);
+                gauge!("memory.stat.writeback").set(mem_stat.stat.writeback as f64);
+                gauge!("memory.stat.swap").set(mem_stat.stat.swap as f64);
+                gauge!("memory.stat.pgpgin").set(mem_stat.stat.pgpgin as f64);
+                gauge!("memory.stat.pgpgout").set(mem_stat.stat.pgpgout as f64);
+                gauge!("memory.stat.pgfault").set(mem_stat.stat.pgfault as f64);
+                gauge!("memory.stat.pgmajfault").set(mem_stat.stat.pgmajfault as f64);
+                gauge!("memory.stat.inactive_anon").set(mem_stat.stat.inactive_anon as f64);
+                gauge!("memory.stat.active_anon").set(mem_stat.stat.active_anon as f64);
+                gauge!("memory.stat.inactive_file").set(mem_stat.stat.inactive_file as f64);
+                gauge!("memory.stat.active_file").set(mem_stat.stat.active_file as f64);
+                gauge!("memory.stat.unevictable").set(mem_stat.stat.unevictable as f64);
+                gauge!("memory.stat.hierarchical_memory_limit")
+                    .set(mem_stat.stat.hierarchical_memory_limit as f64);
+                gauge!("memory.stat.hierarchical_memsw_limit")
+                    .set(mem_stat.stat.hierarchical_memsw_limit as f64);
+                gauge!("memory.stat.total_cache").set(mem_stat.stat.total_cache as f64);
+                gauge!("memory.stat.total_rss").set(mem_stat.stat.total_rss as f64);
+                gauge!("memory.stat.total_rss_huge").set(mem_stat.stat.total_rss_huge as f64);
+                gauge!("memory.stat.total_shmem").set(mem_stat.stat.total_shmem as f64);
+                gauge!("memory.stat.total_mapped_file").set(mem_stat.stat.total_mapped_file as f64);
+                gauge!("memory.stat.total_dirty").set(mem_stat.stat.total_dirty as f64);
+                gauge!("memory.stat.total_writeback").set(mem_stat.stat.total_writeback as f64);
+                gauge!("memory.stat.total_swap").set(mem_stat.stat.total_swap as f64);
+                gauge!("memory.stat.total_pgpgin").set(mem_stat.stat.total_pgpgin as f64);
+                gauge!("memory.stat.total_pgpgout").set(mem_stat.stat.total_pgpgout as f64);
+                gauge!("memory.stat.total_pgfault").set(mem_stat.stat.total_pgfault as f64);
+                gauge!("memory.stat.total_pgmajfault").set(mem_stat.stat.total_pgmajfault as f64);
+                gauge!("memory.stat.total_inactive_anon")
+                    .set(mem_stat.stat.total_inactive_anon as f64);
+                gauge!("memory.stat.total_active_anon").set(mem_stat.stat.total_active_anon as f64);
+                gauge!("memory.stat.total_inactive_file")
+                    .set(mem_stat.stat.total_inactive_file as f64);
+                gauge!("memory.stat.total_active_file").set(mem_stat.stat.total_active_file as f64);
+                gauge!("memory.stat.total_unevictable").set(mem_stat.stat.total_unevictable as f64);
             }
             // Load the CPU controller and get the cpu.stat String out of the
             // cgroup, parse whatever fields are present and report them back
@@ -391,17 +430,17 @@ impl Sampler {
                     let mut fields = line.split_whitespace();
                     let metric_name = fields.next().unwrap_or_default();
                     let value = fields.next().unwrap_or_default();
-                    gauge!(format!("cpu.{metric_name}"), &labels)
+                    gauge!(format!("cpu.{metric_name}"))
                         .set(value.parse::<f64>().unwrap_or_default());
                 }
                 if let Ok(shares) = cpu_controller.shares() {
-                    gauge!("cpu.shares", &labels).set(shares as f64);
+                    gauge!("cpu.shares").set(shares as f64);
                 }
                 if let Ok(cfs_period) = cpu_controller.cfs_period() {
-                    gauge!("cpu.cfs_period", &labels).set(cfs_period as f64);
+                    gauge!("cpu.cfs_period").set(cfs_period as f64);
                 }
                 if let Ok(cfs_quota) = cpu_controller.cfs_quota() {
-                    gauge!("cpu.cfs_quota", &labels).set(cfs_quota as f64);
+                    gauge!("cpu.cfs_quota").set(cfs_quota as f64);
                 }
             }
         }
