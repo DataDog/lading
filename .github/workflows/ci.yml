@@ -92,7 +92,7 @@ jobs:
       # changes
       - uses: actions/checkout@v4
       - name: buf-setup
-        uses: bufbuild/buf-setup-action@v1.34.0
+        uses: bufbuild/buf-setup-action@v1.35.1
       - name: buf-lint
         uses: bufbuild/buf-lint-action@v1.1.1
       - name: buf-breaking
