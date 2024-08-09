@@ -1,3 +1,5 @@
+use perf_event::events::Hardware;
+use perf_event::{Builder, Counter, ReadFormat};
 use std::{collections::VecDeque, io, path::Path, sync::atomic::Ordering};
 
 use cgroups_rs::cgroup::Cgroup;
@@ -5,7 +7,7 @@ use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::observer::memory::{Regions, Rollup};
 
@@ -55,6 +57,8 @@ pub(crate) struct Sampler {
     previous_samples: FxHashMap<(i32, String, String), Sample>,
     previous_totals: Sample,
     previous_gauges: Vec<Gauge>,
+    perf_counter_cycles: Option<Counter>,
+    perf_counter_instructions: Option<Counter>,
 }
 
 struct Gauge(metrics::Gauge);
@@ -78,10 +82,45 @@ impl Gauge {
     }
 }
 
+/// Attempts to initialize `perf_event` counters.
+/// If either fail, then (None, None) is returned and errors are logged.
+fn init_perf_counters(parent_pid: i32) -> (Option<Counter>, Option<Counter>) {
+    let mut cycles = match Builder::new(Hardware::CPU_CYCLES)
+        .observe_pid(parent_pid)
+        .read_format(ReadFormat::GROUP)
+        .build()
+    {
+        Ok(counter) => counter,
+        Err(e) => {
+            warn!("Failed to create CPU_CYCLES counter: {}", e);
+            return (None, None);
+        }
+    };
+    let instructions = match Builder::new(Hardware::INSTRUCTIONS)
+        .observe_pid(parent_pid)
+        .read_format(ReadFormat::GROUP)
+        .build_with_group(&mut cycles)
+    {
+        Ok(counter) => counter,
+        Err(e) => {
+            warn!("Failed to create INSTRUCTIONS counter: {}", e);
+            return (None, None);
+        }
+    };
+
+    (Some(cycles), Some(instructions))
+}
+
 impl Sampler {
     pub(crate) fn new(parent_pid: u32) -> Result<Self, Error> {
-        let parent = Process::new(parent_pid.try_into().expect("PID coercion failed"))?;
+        info!("Constructing observer for {parent_pid}");
+        let parent_pid: i32 = parent_pid.try_into().expect("PID coercion failed");
+        let parent = Process::new(parent_pid)?;
 
+        // TODO Once the observer is cgroup based, swap out `observe_pid` for `observe_cgroup`
+        let (cycles, instructions) = init_perf_counters(parent_pid);
+
+        info!("init success for observer for {parent_pid}");
         Ok(Self {
             parent,
             num_cores: num_cpus::get(), // Cores, logical on Linux, obeying cgroup limits if present
@@ -90,6 +129,8 @@ impl Sampler {
             previous_samples: FxHashMap::default(),
             previous_totals: Sample::default(),
             previous_gauges: Vec::default(),
+            perf_counter_cycles: cycles,
+            perf_counter_instructions: instructions,
         })
     }
 
@@ -101,6 +142,14 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) async fn sample(&mut self) -> Result<(), Error> {
+        // Disable perf counters before making observations
+        // Thought here is that some of this work (eg, requesting smaps) may be
+        // done "on behalf" of the process.
+        // However the counts should exclude kernel by default, so maybe this is not necessary
+        if let Some(cycles) = &mut self.perf_counter_cycles {
+            cycles.disable_group()?;
+        }
+
         let mut joinset = tokio::task::JoinSet::new();
         // Key for this map is (pid, basename/exe, cmdline)
         let mut samples: FxHashMap<(i32, String, String), Sample> = FxHashMap::default();
@@ -444,6 +493,29 @@ impl Sampler {
                 }
             }
         }
+
+        if let (Some(cycles), Some(instructions)) = (
+            &mut self.perf_counter_cycles,
+            &self.perf_counter_instructions,
+        ) {
+            let data = cycles.read_group()?;
+            let cpu_cycles = data[cycles];
+            let instructions = data[instructions];
+
+            let cpi = if instructions > 0 {
+                cpu_cycles as f64 / instructions as f64
+            } else {
+                0.0
+            };
+
+            gauge!("cpi").set(cpi);
+            gauge!("cpu_cycles").set(cpu_cycles as f64);
+            gauge!("instructions").set(instructions as f64);
+
+            // Since data has been read, lets reset and enable to collect more data
+            cycles.reset_group()?;
+            cycles.enable_group()?;
+        };
 
         gauge!("num_processes").set(total_processes as f64);
         RSS_BYTES.store(total_rss, Ordering::Relaxed); // stored for the purposes of throttling
