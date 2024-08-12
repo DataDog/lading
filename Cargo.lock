@@ -684,7 +684,7 @@ dependencies = [
  "once_cell",
  "serde_json",
  "shared",
- "sketches-ddsketch",
+ "sketches-ddsketch 0.3.0",
  "tokio",
  "tokio-stream",
  "tonic 0.9.2",
@@ -1604,7 +1604,7 @@ dependencies = [
  "ordered-float",
  "quanta",
  "radix_trie",
- "sketches-ddsketch",
+ "sketches-ddsketch 0.2.2",
 ]
 
 [[package]]
@@ -2683,6 +2683,12 @@ name = "sketches-ddsketch"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85636c14b73d81f541e525f585c0a2109e6744e1565b5c1668e31c70c10ed65c"
+
+[[package]]
+name = "sketches-ddsketch"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1e9a774a6c28142ac54bb25d25562e6bcf957493a184f15ad4eebccb23e410a"
 
 [[package]]
 name = "slab"
