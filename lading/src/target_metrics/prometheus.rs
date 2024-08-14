@@ -30,6 +30,8 @@ pub struct Config {
     uri: String,
     /// Metric names to scrape. Leave unset to scrape all metrics.
     metrics: Option<Vec<String>>,
+    /// Sub-agent label to tag metrics from this endpoint
+    sub_agent_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +207,19 @@ impl Prometheus {
                 }
             };
 
+            // Add lading labels including user defined for this endpoint
+            let all_labels: Option<Vec<(String,String)>>;
+            if let Some(sub_agent) = &self.config.sub_agent_label {
+                let additional_labels = vec![("sub_agent".to_string(),sub_agent.clone())];
+                if let Some(labels) = labels {
+                    all_labels = Some([labels,additional_labels].concat());
+                }else{
+                    all_labels = Some(additional_labels);
+                }
+            }else{
+                all_labels = labels;
+            }
+
             let metric_type = typemap.get(name);
             let name = name.replace("__", ".");
 
@@ -222,7 +237,7 @@ impl Prometheus {
                         continue;
                     };
 
-                    let handle = gauge!(format!("target/{name}"), &labels.unwrap_or_default());
+                    let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
                     handle.set(value);
                 }
                 Some(MetricType::Counter) => {
@@ -246,7 +261,7 @@ impl Prometheus {
                     };
 
                     trace!("counter: {name} = {value}");
-                    let handle = counter!(format!("target/{name}"), &labels.unwrap_or_default());
+                    let handle = counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
                     handle.absolute(value);
                 }
                 Some(_) => {
@@ -316,6 +331,51 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
+                sub_agent_label: None,
+            },
+            shutdown.clone(),
+            experiment_started.clone(),
+        );
+
+        let dr = metrics_util::debugging::DebuggingRecorder::new();
+        let snapshotter = dr.snapshotter();
+        dr.install().expect("failed to install recorder");
+
+        experiment_started.signal();
+
+        p.scrape_metrics().await;
+
+        snapshotter.snapshot().into_hashmap()
+    }
+
+    async fn run_scrape_and_parse_metrics_with_sub_agent_label(
+        s: &str,
+    ) -> HashMap<
+        CompositeKey,
+        (
+            Option<metrics::Unit>,
+            Option<metrics::SharedString>,
+            metrics_util::debugging::DebugValue,
+        ),
+    > {
+        let s = s.to_string();
+        let server = warp::serve(
+            warp::path("metrics")
+                .map(move || warp::reply::with_status(s.clone(), warp::http::StatusCode::OK)),
+        );
+
+        let (addr, serve_fut) = server.bind_ephemeral(([127, 0, 0, 1], 0));
+        let _server_handle = tokio::spawn(serve_fut);
+
+        let server_uri = format!("http://{addr}/metrics");
+
+        let shutdown = Phase::new();
+        let experiment_started = Phase::new();
+        let p = Prometheus::new(
+            Config {
+                uri: server_uri,
+                metrics: None,
+                sub_agent_label: Some("testing-agent".to_string()),
             },
             shutdown.clone(),
             experiment_started.clone(),
@@ -408,6 +468,30 @@ mod tests {
                 Key::from_parts(
                     "target/memory_usage_bytes",
                     vec![Label::new("process", "test")],
+                ),
+            ))
+            .expect("metric not found");
+        match metric_one.2 {
+            metrics_util::debugging::DebugValue::Gauge(v) => {
+                assert_eq!(v, 5_264_384_f64);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_count_one_labels_with_sub_agent_label() {
+        let snapshot = run_scrape_and_parse_metrics_with_sub_agent_label(GAUGE_ONE_LABEL).await;
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric_one = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/memory_usage_bytes",
+                    vec![Label::new("process", "test"),
+                    Label::new("sub_agent", "testing-agent"),],
                 ),
             ))
             .expect("metric not found");
