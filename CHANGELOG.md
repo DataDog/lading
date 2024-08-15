@@ -5,17 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
-### Added
-- Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
+
+## [0.22.0]
 ### Fixed
 - Fixes bugs in `smaps` parsing code that can result in under-counting RSS in
   the smaps view of the data.
-
-## [0.22.0-rc1]
-### Fixed
 - Target observer was not exposed through CLI.
-
-## [0.22.0-rc0]
 ### Changed
 - Now built using rust 1.79.0
 ### Added
