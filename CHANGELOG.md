@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
+### Changed
+- Linux observer is more resilient to scenarios where lading lacks ptrace permission.
 
 ## [0.22.0-rc1]
 ### Fixed
