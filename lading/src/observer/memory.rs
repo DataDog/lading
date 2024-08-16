@@ -1,7 +1,6 @@
 use regex::Regex;
 use std::{collections::HashMap, io::Read};
 
-const SMAP_SIZE_HINT: usize = 128 * 1024; // 128 kB
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
 #[derive(thiserror::Error, Debug)]
@@ -56,7 +55,7 @@ impl Rollup {
     pub(crate) fn from_file(path: &str) -> Result<Self, Error> {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
-        let mut contents = String::with_capacity(SMAP_SIZE_HINT);
+        let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
         Self::from_str(&contents)
@@ -354,7 +353,7 @@ impl Regions {
     fn from_file(path: &str) -> Result<Self, Error> {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
-        let mut contents = String::with_capacity(SMAP_SIZE_HINT);
+        let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
         Self::from_str(&contents)
