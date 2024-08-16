@@ -30,8 +30,8 @@ pub struct Config {
     uri: String,
     /// Metric names to scrape. Leave unset to scrape all metrics.
     metrics: Option<Vec<String>>,
-    /// Sub-agent label to tag metrics from this endpoint
-    sub_agent_label: Option<String>,
+    /// Optional additional tags to label target metrics
+    tags: Option<FxHashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,15 +208,19 @@ impl Prometheus {
             };
 
             // Add lading labels including user defined for this endpoint
-            let all_labels: Option<Vec<(String,String)>>;
-            if let Some(sub_agent) = &self.config.sub_agent_label {
-                let additional_labels = vec![("sub_agent".to_string(),sub_agent.clone())];
+            let all_labels: Option<Vec<(String, String)>>;
+            if let Some(tags) = &self.config.tags {
+                //let additional_labels = vec![("t".to_string(), "t".to_string())];
+                let mut additional_labels = Vec::new();
+                for (tag_name, tag_val) in tags.iter() {
+                    additional_labels.push((tag_name.clone(), tag_val.clone()));
+                }
                 if let Some(labels) = labels {
-                    all_labels = Some([labels,additional_labels].concat());
-                }else{
+                    all_labels = Some([labels, additional_labels].concat());
+                } else {
                     all_labels = Some(additional_labels);
                 }
-            }else{
+            } else {
                 all_labels = labels;
             }
 
@@ -261,7 +265,8 @@ impl Prometheus {
                     };
 
                     trace!("counter: {name} = {value}");
-                    let handle = counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
+                    let handle =
+                        counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
                     handle.absolute(value);
                 }
                 Some(_) => {
@@ -331,7 +336,7 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
-                sub_agent_label: None,
+                tags: None,
             },
             shutdown.clone(),
             experiment_started.clone(),
@@ -375,7 +380,7 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
-                sub_agent_label: Some("testing-agent".to_string()),
+                tags: None,
             },
             shutdown.clone(),
             experiment_started.clone(),
@@ -490,8 +495,10 @@ mod tests {
                 MetricKind::Gauge,
                 Key::from_parts(
                     "target/memory_usage_bytes",
-                    vec![Label::new("process", "test"),
-                    Label::new("sub_agent", "testing-agent"),],
+                    vec![
+                        Label::new("process", "test"),
+                        Label::new("sub_agent", "testing-agent"),
+                    ],
                 ),
             ))
             .expect("metric not found");
