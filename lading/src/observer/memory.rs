@@ -1,7 +1,6 @@
 use regex::Regex;
 use std::{collections::HashMap, io::Read};
 
-const SMAP_SIZE_HINT: usize = 128 * 1024; // 128 kB
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
 #[derive(thiserror::Error, Debug)]
@@ -56,7 +55,7 @@ impl Rollup {
     pub(crate) fn from_file(path: &str) -> Result<Self, Error> {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
-        let mut contents = String::with_capacity(SMAP_SIZE_HINT);
+        let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
         Self::from_str(&contents)
@@ -203,8 +202,11 @@ impl Region {
             };
 
             if let (None, None) = (start, end) {
-                let start_str = &token[0..12];
-                let end_str = &token[13..25];
+                let dash_loc = token.find('-').ok_or(Error::Parsing(format!(
+                    "Could not find dash in addr: {token}"
+                )))?;
+                let start_str = &token[0..dash_loc];
+                let end_str = &token[dash_loc+1..];
                 start = Some(u64::from_str_radix(start_str, 16)?);
                 end = Some(u64::from_str_radix(end_str, 16)?);
             } else if perms.is_none() {
@@ -354,19 +356,19 @@ impl Regions {
     fn from_file(path: &str) -> Result<Self, Error> {
         let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
 
-        let mut contents = String::with_capacity(SMAP_SIZE_HINT);
+        let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
         Self::from_str(&contents)
     }
 
-    fn from_str(contents: &str) -> Result<Self, Error> {
+    fn into_region_strs(contents: &str) -> Vec<&str> {
         let mut str_regions = Vec::new();
         // split this smaps file into regions
         // regions are separated by a line like this:
         // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
         let region_start_regex =
-            Regex::new("[[:xdigit:]]{12}-[[:xdigit:]]{12}").expect("Regex to be valid");
+            Regex::new("(?m)^[[:xdigit:]]+-[[:xdigit:]]+").expect("Regex to be valid");
         let mut start_indices = region_start_regex.find_iter(contents).map(|m| m.start());
 
         if let Some(mut start_index) = start_indices.next() {
@@ -378,6 +380,11 @@ impl Regions {
             str_regions.push(&contents[start_index..]);
         };
 
+        str_regions
+    }
+
+    fn from_str(contents: &str) -> Result<Self, Error> {
+        let str_regions = Self::into_region_strs(contents);
         let regions = str_regions
             .iter()
             .map(|s| Region::from_str(s))
@@ -687,5 +694,103 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(rollup.pss_anon, None);
         assert_eq!(rollup.pss_file, None);
         assert_eq!(rollup.pss_shmem, None);
+    }
+
+    #[test]
+    fn test_varying_hex_len_mappings() {
+        let region =
+            " 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
+        Size:                  8 kB
+        KernelPageSize:        4 kB
+        MMUPageSize:           4 kB
+        Rss:                   8 kB
+        Pss:                   2 kB
+        Pss_Dirty:             0 kB
+        Shared_Clean:          8 kB
+        Shared_Dirty:          0 kB
+        Private_Clean:         0 kB
+        Private_Dirty:         0 kB
+        Referenced:            8 kB
+        Anonymous:             0 kB
+        LazyFree:              0 kB
+        AnonHugePages:         0 kB
+        ShmemPmdMapped:        0 kB
+        FilePmdMapped:         0 kB
+        Shared_Hugetlb:        0 kB
+        Private_Hugetlb:       0 kB
+        Swap:                  0 kB
+        SwapPss:               0 kB
+        Locked:                0 kB
+        THPeligible:    0
+        ProtectionKey:         0
+        VmFlags: rd ex mr mw me de sd";
+        let region = Region::from_str(region).expect("Parsing failed");
+
+        assert_eq!(region.start, 0x7fffa9f39000);
+        assert_eq!(region.end, 0x7fffa9f3b000);
+
+        let region =
+            "00400000-0e8dd000 r-xp 00000000 00:00 0                          [vdso]
+        Size:                  8 kB
+        KernelPageSize:        4 kB
+        MMUPageSize:           4 kB
+        Rss:                   8 kB
+        Pss:                   2 kB
+        Pss_Dirty:             0 kB
+        Shared_Clean:          8 kB
+        Shared_Dirty:          0 kB
+        Private_Clean:         0 kB
+        Private_Dirty:         0 kB
+        Referenced:            8 kB
+        Anonymous:             0 kB
+        LazyFree:              0 kB
+        AnonHugePages:         0 kB
+        ShmemPmdMapped:        0 kB
+        FilePmdMapped:         0 kB
+        Shared_Hugetlb:        0 kB
+        Private_Hugetlb:       0 kB
+        Swap:                  0 kB
+        SwapPss:               0 kB
+        Locked:                0 kB
+        THPeligible:    0
+        ProtectionKey:         0
+        VmFlags: rd ex mr mw me de sd";
+
+        let region = Region::from_str(region).expect("Parsing failed");
+
+        assert_eq!(region.start, 0x00400000);
+        assert_eq!(region.end, 0x0e8dd000);
+
+        let region =
+            "ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                          [vdso]
+        Size:                  8 kB
+        KernelPageSize:        4 kB
+        MMUPageSize:           4 kB
+        Rss:                   8 kB
+        Pss:                   2 kB
+        Pss_Dirty:             0 kB
+        Shared_Clean:          8 kB
+        Shared_Dirty:          0 kB
+        Private_Clean:         0 kB
+        Private_Dirty:         0 kB
+        Referenced:            8 kB
+        Anonymous:             0 kB
+        LazyFree:              0 kB
+        AnonHugePages:         0 kB
+        ShmemPmdMapped:        0 kB
+        FilePmdMapped:         0 kB
+        Shared_Hugetlb:        0 kB
+        Private_Hugetlb:       0 kB
+        Swap:                  0 kB
+        SwapPss:               0 kB
+        Locked:                0 kB
+        THPeligible:    0
+        ProtectionKey:         0
+        VmFlags: rd ex mr mw me de sd";
+
+        let region = Region::from_str(region).expect("Parsing failed");
+
+        assert_eq!(region.start, 0xffffffffff600000);
+        assert_eq!(region.end, 0xffffffffff601000);
     }
 }
