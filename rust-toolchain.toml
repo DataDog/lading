@@ -1,4 +1,4 @@
 [toolchain]
 # Update the rust version in-sync with the version in Dockerfile
-channel = "1.79.0"
+channel = "1.80.0"
 profile = "minimal"

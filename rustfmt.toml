@@ -1,6 +1,6 @@
 edition = "2021"
 normalize_comments = true
-newline_style = "unix"
+newline_style = "Unix"
 
 # Nightly only features
 # unstable_features = true
