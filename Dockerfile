@@ -1,5 +1,5 @@
 # Update the rust version in-sync with the version in rust-toolchain.toml
-FROM docker.io/rust:1.80.0-bullseye as builder
+FROM docker.io/rust:1.80.1-bullseye as builder
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
