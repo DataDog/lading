@@ -92,8 +92,7 @@ impl Expvar {
                     continue;
                 };
 
-                // Add lading labels including user defined for this endpoint
-
+                // Add lading labels including user defined tags for this endpoint
                 let mut all_labels =
                     vec![("source".to_string(), "target_metrics/expvar".to_string())];
                 if let Some(tags) = &self.config.tags {
