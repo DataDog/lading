@@ -93,14 +93,14 @@ impl Expvar {
                 };
 
                 // Add lading labels including user defined for this endpoint
+
                 let mut all_labels =
                     vec![("source".to_string(), "target_metrics/expvar".to_string())];
                 if let Some(tags) = &self.config.tags {
                     for (tag_name, tag_val) in tags.iter() {
-                        all_labels.push((tag_name.to_owned(), tag_val.to_owned()));
+                        all_labels.push((tag_name.clone(), tag_val.clone()));
                     }
                 }
-                let labels = Some(all_labels);
 
                 for var_name in &self.config.vars {
                     let val = json.pointer(var_name).and_then(serde_json::Value::as_f64);
@@ -108,7 +108,7 @@ impl Expvar {
                         trace!("expvar: {} = {}", var_name, val);
                         let handle = gauge!(
                             format!("target/{name}", name = var_name.trim_start_matches('/'),),
-                            all_labels
+                            &all_labels
                         );
                         handle.set(val);
                     }
