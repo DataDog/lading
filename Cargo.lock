@@ -1439,7 +1439,7 @@ dependencies = [
 name = "lading-capture"
 version = "0.1.1"
 dependencies = [
- "prost 0.11.9",
+ "prost 0.12.6",
  "prost-build 0.12.6",
  "rustc-hash",
  "serde",
@@ -1458,7 +1458,7 @@ dependencies = [
  "opentelemetry-proto",
  "proptest",
  "proptest-derive",
- "prost 0.11.9",
+ "prost 0.12.6",
  "rand",
  "rmp-serde",
  "rustc-hash",
