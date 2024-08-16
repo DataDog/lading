@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Added
 - Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
+### Fixed
+- Fixes bugs in `smaps` parsing code that can result in under-counting RSS in
+  the smaps view of the data.
 
 ## [0.22.0-rc1]
 ### Fixed
