@@ -207,12 +207,11 @@ impl Prometheus {
                 }
             };
 
-            // Add lading labels including user defined for this endpoint
+            // Add lading labels including user defined tags for this endpoint
             let all_labels: Option<Vec<(String, String)>>;
             if let Some(tags) = &self.config.tags {
-                //let additional_labels = vec![("t".to_string(), "t".to_string())];
                 let mut additional_labels = Vec::new();
-                for (tag_name, tag_val) in tags.iter() {
+                for (tag_name, tag_val) in tags {
                     additional_labels.push((tag_name.clone(), tag_val.clone()));
                 }
                 if let Some(labels) = labels {

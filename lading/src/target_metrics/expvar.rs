@@ -96,7 +96,7 @@ impl Expvar {
                 let mut all_labels =
                     vec![("source".to_string(), "target_metrics/expvar".to_string())];
                 if let Some(tags) = &self.config.tags {
-                    for (tag_name, tag_val) in tags.iter() {
+                    for (tag_name, tag_val) in tags {
                         all_labels.push((tag_name.clone(), tag_val.clone()));
                     }
                 }
