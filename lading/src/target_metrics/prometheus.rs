@@ -288,6 +288,8 @@ mod tests {
     use super::*;
     use metrics::{Key, Label};
     use metrics_util::{CompositeKey, MetricKind};
+    use rustc_hash::FxHasher;
+    use std::hash::BuildHasherDefault;
     use warp;
     use warp::Filter;
 
@@ -310,6 +312,7 @@ mod tests {
 
     async fn run_scrape_and_parse_metrics(
         s: &str,
+        tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
     ) -> HashMap<
         CompositeKey,
         (
@@ -335,51 +338,7 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
-                tags: None,
-            },
-            shutdown.clone(),
-            experiment_started.clone(),
-        );
-
-        let dr = metrics_util::debugging::DebuggingRecorder::new();
-        let snapshotter = dr.snapshotter();
-        dr.install().expect("failed to install recorder");
-
-        experiment_started.signal();
-
-        p.scrape_metrics().await;
-
-        snapshotter.snapshot().into_hashmap()
-    }
-
-    async fn run_scrape_and_parse_metrics_with_sub_agent_label(
-        s: &str,
-    ) -> HashMap<
-        CompositeKey,
-        (
-            Option<metrics::Unit>,
-            Option<metrics::SharedString>,
-            metrics_util::debugging::DebugValue,
-        ),
-    > {
-        let s = s.to_string();
-        let server = warp::serve(
-            warp::path("metrics")
-                .map(move || warp::reply::with_status(s.clone(), warp::http::StatusCode::OK)),
-        );
-
-        let (addr, serve_fut) = server.bind_ephemeral(([127, 0, 0, 1], 0));
-        let _server_handle = tokio::spawn(serve_fut);
-
-        let server_uri = format!("http://{addr}/metrics");
-
-        let shutdown = Phase::new();
-        let experiment_started = Phase::new();
-        let p = Prometheus::new(
-            Config {
-                uri: server_uri,
-                metrics: None,
-                tags: None,
+                tags: tags,
             },
             shutdown.clone(),
             experiment_started.clone(),
@@ -398,7 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_gauge_with_two_series() {
-        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
 
         assert_eq!(snapshot.len(), 2);
 
@@ -443,7 +403,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_zero_labels() {
-        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS, tags).await;
 
         assert_eq!(snapshot.len(), 1);
 
@@ -462,7 +423,8 @@ mod tests {
     }
     #[tokio::test]
     async fn test_count_one_labels() {
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, tags).await;
 
         assert_eq!(snapshot.len(), 1);
 
@@ -485,7 +447,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_one_labels_with_sub_agent_label() {
-        let snapshot = run_scrape_and_parse_metrics_with_sub_agent_label(GAUGE_ONE_LABEL).await;
+        let mut tags: FxHashMap<String, String> = FxHashMap::default();
+        tags.insert("sub-agent".to_string(), "testing-agent".to_string());
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, Some(tags)).await;
 
         assert_eq!(snapshot.len(), 1);
 
@@ -496,7 +460,7 @@ mod tests {
                     "target/memory_usage_bytes",
                     vec![
                         Label::new("process", "test"),
-                        Label::new("sub_agent", "testing-agent"),
+                        Label::new("sub-agent", "testing-agent"),
                     ],
                 ),
             ))
