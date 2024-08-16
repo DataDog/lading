@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use metrics::gauge;
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, trace};
@@ -29,6 +30,8 @@ pub struct Config {
     uri: String,
     /// Variable names to scrape
     vars: Vec<String>,
+    /// Optional additional tags to label target metrics
+    tags: Option<FxHashMap<String, String>>,
 }
 
 /// The `Expvar` target metrics implementation.
@@ -89,11 +92,24 @@ impl Expvar {
                     continue;
                 };
 
+                // Add lading labels including user defined for this endpoint
+                let mut all_labels =
+                    vec![("source".to_string(), "target_metrics/expvar".to_string())];
+                if let Some(tags) = &self.config.tags {
+                    for (tag_name, tag_val) in tags.iter() {
+                        all_labels.push((tag_name.to_owned(), tag_val.to_owned()));
+                    }
+                }
+                let labels = Some(all_labels);
+
                 for var_name in &self.config.vars {
                     let val = json.pointer(var_name).and_then(serde_json::Value::as_f64);
                     if let Some(val) = val {
                         trace!("expvar: {} = {}", var_name, val);
-                        let handle = gauge!(format!("target/{name}", name = var_name.trim_start_matches('/')), "source" => "target_metrics/expvar");
+                        let handle = gauge!(
+                            format!("target/{name}", name = var_name.trim_start_matches('/'),),
+                            all_labels
+                        );
                         handle.set(val);
                     }
                 }
