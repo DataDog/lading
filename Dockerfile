@@ -9,7 +9,7 @@ WORKDIR /app
 COPY . /app
 RUN cargo build --release --locked --bin lading
 
-FROM docker.io/debian:bullseye-20240701-slim
+FROM docker.io/debian:bullseye-20240812-slim
 COPY --from=builder /app/target/release/lading /usr/bin/lading
 
 # smoke test
