@@ -368,7 +368,7 @@ impl Regions {
         // regions are separated by a line like this:
         // 7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
         let region_start_regex =
-            Regex::new("[[:xdigit:]]+-[[:xdigit:]]+[[:space:]]").expect("Regex to be valid");
+            Regex::new("(?m)^[[:xdigit:]]+-[[:xdigit:]]+").expect("Regex to be valid");
         let mut start_indices = region_start_regex.find_iter(contents).map(|m| m.start());
 
         if let Some(mut start_index) = start_indices.next() {
