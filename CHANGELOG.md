@@ -5,11 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Added
+- Added ability to create tags for both expvar and prometheus target metrics specific to a single target_metrics configuration (example below shows prometheus metrics collected from the core agent and two additional tags created)
+  ```yaml
+  target_metrics:      
+    - prometheus: #core agent telemetry
+        uri: "http://127.0.0.1:5000/telemetry"
+        tags:
+          sub-agent: "core-agent"
+          any-label: "any-string-value"
+  ```
 
 ## [0.22.0]
 ### Fixed
 - Fixes bugs in `smaps` parsing code that can result in under-counting RSS in
   the smaps view of the data.
+### Added
+- Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
+
+## [0.22.0-rc1]
+### Fixed
 - Target observer was not exposed through CLI.
 ### Changed
 - Now built using rust 1.79.0
