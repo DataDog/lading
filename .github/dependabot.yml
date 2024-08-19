@@ -9,6 +9,10 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
+    labels:
+      - "dependencies"   # needed to preserve default
+      - "github_actions" # needed to preserve default
+      - "no-changelog"   # CI dependencies should not require changelog entry
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
