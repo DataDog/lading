@@ -1,10 +1,11 @@
 [package]
 name = "lading"
-version = "0.22.0-rc1"
+version = "0.22.0-rc4"
 authors = [
     "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
     "George Hahn <george.hahn@datadoghq.com>",
-    "Scott Opell <scott.opell@datadoghq.com>"
+    "Scott Opell <scott.opell@datadoghq.com>",
+    "Caleb Metz <caleb.metz@datadoghq.com>"
 ]
 edition = "2021"
 license = "MIT"

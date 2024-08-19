@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.22.0-rc4]
 ### Added
 - Retrieve memory, CPU information from cgroup controller for every pid observed on Linux.
 - Added ability to create tags for both expvar and prometheus target metrics specific to a single target_metrics configuration (example below shows prometheus metrics collected from the core agent and two additional tags created)
@@ -16,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
           sub-agent: "core-agent"
           any-label: "any-string-value"
   ```
-  
+
 ### Fixed
 - Fixes bugs in `smaps` parsing code that can result in under-counting RSS in
   the smaps view of the data.
