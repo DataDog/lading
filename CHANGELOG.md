@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+## [0.23.0-rc0]
 ### Added
 - Added ability to create tags for both expvar and prometheus target metrics specific to a single target_metrics configuration (example below shows prometheus metrics collected from the core agent and two additional tags created)
   ```yaml
