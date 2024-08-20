@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - prometheus: #core agent telemetry
         uri: "http://127.0.0.1:5000/telemetry"
         tags:
-          sub-agent: "core-agent"
-          any-label: "any-string-value"
+          sub_agent: "core"
+          any_label: "any-string-value"
   ```
 
 ## [0.22.0]
