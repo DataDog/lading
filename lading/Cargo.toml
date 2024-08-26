@@ -19,7 +19,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 
 average = { version = "0.15", default-features = false, features = [] }
-bollard ={ version = "0.16", default-features = false, features = [] }
+bollard ={ version = "0.17", default-features = false, features = [] }
 byte-unit = {workspace = true }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "3.2", default-features = false, features = ["std", "suggestions", "derive"] }
