@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.dependencies]
-bytes = { version = "1.5", default-features = false, features = ["std"] }
+bytes = { version = "1.7", default-features = false, features = ["std"] }
 byte-unit = { version = "4.0", features = ["serde"] }
 metrics = { version = "0.23.0" }
 metrics-util = { version = "0.17.0" }
