@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, trace};
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Expvar`]

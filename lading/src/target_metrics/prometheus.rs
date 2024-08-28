@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]

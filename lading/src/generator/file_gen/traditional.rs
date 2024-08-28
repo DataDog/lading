@@ -37,11 +37,12 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use lading_payload::{
     self,
     block::{self, Block},
 };
+use lading_signal::Phase;
 
 use super::General;
 

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 static FILE_EXTENSION: &str = "txt";
 
@@ -141,8 +141,10 @@ impl FileTree {
         let mut rng = StdRng::from_seed(config.seed);
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config)?;
 
-        let _labels = [("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "file_tree".to_string())];
+        let _labels = [
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "file_tree".to_string()),
+        ];
 
         let open_throttle = Throttle::new_with_config(config.throttle, config.open_per_second);
         let rename_throttle = Throttle::new_with_config(config.throttle, config.rename_per_second);

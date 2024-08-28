@@ -17,7 +17,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 #[derive(::thiserror::Error, Debug)]
 /// Errors emitted by [`Procfs`]

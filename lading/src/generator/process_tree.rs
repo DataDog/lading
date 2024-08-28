@@ -10,8 +10,8 @@
 //! configured [throttle].
 //!
 
-use crate::signals::Phase;
 use is_executable::IsExecutable;
+use lading_signal::Phase;
 use lading_throttle::Throttle;
 use nix::{
     sys::wait::{waitpid, WaitPidFlag, WaitStatus},
@@ -284,8 +284,10 @@ impl ProcessTree {
             Err(e) => return Err(Error::from(e)),
         };
 
-        let _labels = [("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "process_tree".to_string())];
+        let _labels = [
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "process_tree".to_string()),
+        ];
 
         let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
         match serde_yaml::to_string(config) {

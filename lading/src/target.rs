@@ -36,7 +36,8 @@ use tokio::{process::Command, time};
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, observer::RSS_BYTES, signals::Phase};
+use crate::{common::stdio, observer::RSS_BYTES};
+use lading_signal::Phase;
 
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.

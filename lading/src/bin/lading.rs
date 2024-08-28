@@ -14,10 +14,10 @@ use lading::{
     config::{Config, Telemetry},
     generator::{self, process_tree},
     inspector, observer,
-    signals::Phase,
     target::{self, Behavior, Output},
     target_metrics,
 };
+use lading_signal::Phase;
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 pub mod http;
 pub mod splunk_hec;

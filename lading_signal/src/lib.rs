@@ -6,12 +6,14 @@
 //! the end of warmup phase.
 //! Controlling the order of a phase is the responsibility of this module.
 
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
-};
-
+use std::sync::Arc;
 use tokio::sync::Semaphore;
+
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU32, Ordering};
+#[cfg(not(loom))]
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use tracing::info;
 
 #[derive(Debug)]
@@ -145,5 +147,116 @@ pub struct Token {
 impl Drop for Token {
     fn drop(&mut self) {
         self.ack_sem.add_permits(1);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Phase;
+
+    #[cfg(loom)]
+    #[test]
+    fn test_simple_phase_change() {
+        use loom::thread;
+        use tokio::runtime::Builder;
+
+        loom::model(|| {
+            // Main thread -- current thread -- will create a Phase and then
+            // signal its change. Child-thread will spin up a tokio runtime and
+            // recv on the phase.
+
+            let phase = Phase::new(); // will be used to signal
+
+            // Thread to receive phase change
+            let mut rcv_phase = phase.clone();
+            let rcv_thread = thread::spawn(move || {
+                let rt = Builder::new_current_thread().enable_all().build().unwrap();
+                rt.block_on(async {
+                    rcv_phase.recv().await;
+                })
+            });
+
+            // Signal, then what for the child thread.
+            phase.signal();
+
+            rcv_thread.join().unwrap();
+
+            // // After signaling, the phase should be entered
+            // let mut phase_clone = phase.clone();
+            // assert!(phase_clone.try_recv(), "Phase should be entered");
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn test_signal_twice() {
+        use loom::thread;
+        use tokio::runtime::Builder;
+
+        loom::model(|| {
+            // Main thread -- current thread -- will create a Phase and then
+            // signal its change. Child-thread will spin up a tokio runtime and
+            // recv on the phase.
+
+            let phase = Phase::new(); // will be used to signal
+
+            // Thread to receive phase change
+            let mut rcv_phase = phase.clone();
+            let rcv_thread = thread::spawn(move || {
+                let rt = Builder::new_current_thread().enable_all().build().unwrap();
+                rt.block_on(async {
+                    rcv_phase.recv().await;
+                })
+            });
+
+            // Signal, then what for the child thread and then signal again.
+            phase.signal();
+            rcv_thread.join().unwrap();
+            phase.signal();
+
+            // // After signaling, the phase should be entered
+            // let mut phase_clone = phase.clone();
+            // assert!(phase_clone.try_recv(), "Phase should be entered");
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn test_signal_and_wait() {
+        use loom::thread;
+        use tokio::runtime::Builder;
+
+        loom::model(|| {
+            let phase = Phase::new(); // will be used to signal
+
+            // Thread to receive phase change
+            let mut rcv_handles = Vec::new();
+            for _ in 0..10 {
+                let mut rcv_phase = phase.clone();
+                let handle = thread::spawn(move || {
+                    let rt = Builder::new_current_thread().enable_all().build().unwrap();
+                    rt.block_on(async {
+                        let _token = rcv_phase.register();
+                        rcv_phase.recv().await;
+                    })
+                });
+                rcv_handles.push(handle);
+            }
+
+            // Thread to wait
+            let wait_phase = phase.clone();
+            let wait_handle = thread::spawn(move || {
+                let rt = Builder::new_current_thread().enable_all().build().unwrap();
+                rt.block_on(async {
+                    wait_phase.wait_for_peers().await;
+                })
+            });
+
+            phase.signal();
+            for handle in rcv_handles.drain(..) {
+                handle.join().unwrap();
+            }
+            wait_handle.join().unwrap();
+        });
     }
 }

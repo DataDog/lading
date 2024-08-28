@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]

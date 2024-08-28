@@ -13,7 +13,7 @@ use std::{io, sync::atomic::AtomicU64};
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 #[cfg(target_os = "linux")]
 mod linux;

@@ -16,7 +16,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 use super::General;
 
