@@ -13,7 +13,8 @@
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::{signals::Phase, target::TargetPidReceiver};
+use crate::target::TargetPidReceiver;
+use lading_signal::Phase;
 
 pub mod file_gen;
 pub mod file_tree;

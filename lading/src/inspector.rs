@@ -26,9 +26,9 @@ use tracing::{error, info};
 
 use crate::{
     common::{stdio, Output},
-    signals::Phase,
     target::TargetPidReceiver,
 };
+use lading_signal::Phase;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]

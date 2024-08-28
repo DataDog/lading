@@ -1,0 +1,17 @@
+[package]
+name = "lading-signal"
+version = "0.1.0"
+authors = ["Brian L. Troutwine <brian.troutwine@datadoghq.com>", "George Hahn <george.hahn@datadoghq.com"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::profiling"]
+description = "A tool for load testing daemons."
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing = { workspace = true }
+
+[lib]
+doctest = false

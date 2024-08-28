@@ -31,6 +31,5 @@ pub mod config;
 pub mod generator;
 pub mod inspector;
 pub mod observer;
-pub mod signals;
 pub mod target;
 pub mod target_metrics;

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net;
 use tracing::info;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 use super::General;
 

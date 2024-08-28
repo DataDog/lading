@@ -36,10 +36,9 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
-    common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel, signals::Phase,
-};
+use crate::{common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel};
 use lading_payload::block::{self, Block};
+use lading_signal::Phase;
 
 use super::General;
 

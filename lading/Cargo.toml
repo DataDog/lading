@@ -18,6 +18,7 @@ description = "A tool for load testing daemons."
 lading-capture = { version = "0.1", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
+lading-signal = { version = "0.1", path = "../lading_signal" }
 
 average = { version = "0.15", default-features = false, features = [] }
 bollard ={ version = "0.17", default-features = false, features = [] }

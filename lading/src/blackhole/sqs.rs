@@ -21,7 +21,7 @@ use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 use super::General;
 

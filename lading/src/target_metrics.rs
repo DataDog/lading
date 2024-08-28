@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use crate::signals::Phase;
+use lading_signal::Phase;
 
 pub mod expvar;
 pub mod prometheus;

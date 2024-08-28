@@ -1404,6 +1404,7 @@ dependencies = [
  "is_executable",
  "lading-capture",
  "lading-payload",
+ "lading-signal",
  "lading-throttle",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1467,6 +1468,14 @@ dependencies = [
  "serde_tuple",
  "thiserror",
  "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "lading-signal"
+version = "0.1.0"
+dependencies = [
  "tokio",
  "tracing",
 ]

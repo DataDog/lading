@@ -11,10 +11,11 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
+use lading_signal::Phase;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
