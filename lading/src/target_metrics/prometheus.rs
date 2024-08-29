@@ -30,6 +30,8 @@ pub struct Config {
     uri: String,
     /// Metric names to scrape. Leave unset to scrape all metrics.
     metrics: Option<Vec<String>>,
+    /// Optional additional tags to label target metrics
+    tags: Option<FxHashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +207,22 @@ impl Prometheus {
                 }
             };
 
+            // Add lading labels including user defined tags for this endpoint
+            let all_labels: Option<Vec<(String, String)>>;
+            if let Some(tags) = &self.config.tags {
+                let mut additional_labels = Vec::new();
+                for (tag_name, tag_val) in tags {
+                    additional_labels.push((tag_name.clone(), tag_val.clone()));
+                }
+                if let Some(labels) = labels {
+                    all_labels = Some([labels, additional_labels].concat());
+                } else {
+                    all_labels = Some(additional_labels);
+                }
+            } else {
+                all_labels = labels;
+            }
+
             let metric_type = typemap.get(name);
             let name = name.replace("__", ".");
 
@@ -222,7 +240,7 @@ impl Prometheus {
                         continue;
                     };
 
-                    let handle = gauge!(format!("target/{name}"), &labels.unwrap_or_default());
+                    let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
                     handle.set(value);
                 }
                 Some(MetricType::Counter) => {
@@ -246,7 +264,8 @@ impl Prometheus {
                     };
 
                     trace!("counter: {name} = {value}");
-                    let handle = counter!(format!("target/{name}"), &labels.unwrap_or_default());
+                    let handle =
+                        counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
                     handle.absolute(value);
                 }
                 Some(_) => {
@@ -269,6 +288,8 @@ mod tests {
     use super::*;
     use metrics::{Key, Label};
     use metrics_util::{CompositeKey, MetricKind};
+    use rustc_hash::FxHasher;
+    use std::hash::BuildHasherDefault;
     use warp;
     use warp::Filter;
 
@@ -291,6 +312,7 @@ mod tests {
 
     async fn run_scrape_and_parse_metrics(
         s: &str,
+        tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
     ) -> HashMap<
         CompositeKey,
         (
@@ -316,6 +338,7 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
+                tags: tags,
             },
             shutdown.clone(),
             experiment_started.clone(),
@@ -334,7 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_gauge_with_two_series() {
-        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
 
         assert_eq!(snapshot.len(), 2);
 
@@ -379,7 +403,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_zero_labels() {
-        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS, tags).await;
 
         assert_eq!(snapshot.len(), 1);
 
@@ -398,7 +423,8 @@ mod tests {
     }
     #[tokio::test]
     async fn test_count_one_labels() {
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL).await;
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, tags).await;
 
         assert_eq!(snapshot.len(), 1);
 
@@ -408,6 +434,34 @@ mod tests {
                 Key::from_parts(
                     "target/memory_usage_bytes",
                     vec![Label::new("process", "test")],
+                ),
+            ))
+            .expect("metric not found");
+        match metric_one.2 {
+            metrics_util::debugging::DebugValue::Gauge(v) => {
+                assert_eq!(v, 5_264_384_f64);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_count_one_labels_with_sub_agent_label() {
+        let mut tags: FxHashMap<String, String> = FxHashMap::default();
+        tags.insert("sub-agent".to_string(), "testing-agent".to_string());
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, Some(tags)).await;
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric_one = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/memory_usage_bytes",
+                    vec![
+                        Label::new("process", "test"),
+                        Label::new("sub-agent", "testing-agent"),
+                    ],
                 ),
             ))
             .expect("metric not found");
