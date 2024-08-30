@@ -13,8 +13,18 @@
 //!
 //! There is only one `Broadcaster` and potentially many `Watcher` instances.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+#[cfg(not(loom))]
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+};
+
+#[cfg(loom)]
+use loom::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+};
+
 use tokio::sync::Notify;
 
 /// Construct a `Watcher` and `Broadcaster` pair.
@@ -194,5 +204,31 @@ impl Watcher {
             watcher: Arc::clone(&self.watcher),
             signaled: Arc::clone(&self.signaled),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn basic_signal() {
+        use loom::future::block_on;
+        use loom::thread;
+
+        use crate::signal;
+
+        loom::model(|| {
+            let (watcher, broadcaster) = signal();
+
+            // Spawn a thread to simulate the watcher.
+            let watcher_handle = thread::spawn(move || {
+                block_on(watcher.recv());
+            });
+
+            // Simulate the broadcaster signaling.
+            broadcaster.signal();
+
+            watcher_handle.join().unwrap();
+        });
     }
 }
