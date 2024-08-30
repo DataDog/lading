@@ -345,8 +345,8 @@ async fn inner_main(
     disable_inspector: bool,
     config: Config,
 ) -> Result<(), Error> {
-    let (mut shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
-    let (mut experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
+    let (shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
+    let (experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
 
     // Set up the telemetry sub-system.
     //
@@ -495,6 +495,7 @@ async fn inner_main(
         tgt_snd.send(None)?;
     };
 
+    let (mut timer_watcher, timer_broadcast) = lading_signal::signal();
     tokio::spawn(async move {
         info!("target is running, now sleeping for warmup");
         sleep(warmup_duration).await;
@@ -502,9 +503,13 @@ async fn inner_main(
         info!("warmup completed, collecting samples");
         sleep(experiment_duration).await;
         info!("experiment duration exceeded, signaling for shutdown");
-        shutdown_broadcast.signal();
+        timer_broadcast.signal();
     });
 
+    // We must be sure to drop any unused watcher at this point. Below in
+    // `signal_and_wait` if a watcher remains derived from `shutdown_watcher` the run will not shut down.
+    drop(shutdown_watcher);
+    drop(experiment_started_watcher);
     let mut interval = time::interval(Duration::from_millis(400));
     let res = loop {
         tokio::select! {
@@ -516,7 +521,7 @@ async fn inner_main(
                 info!("received ctrl-c");
                 break Ok(());
             },
-            _ = shutdown_watcher.recv() => {
+            _ = timer_watcher.recv() => {
                 info!("shutdown signal received.");
                 break Ok(());
             }
