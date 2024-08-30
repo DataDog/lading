@@ -15,38 +15,35 @@
 
 #[cfg(not(loom))]
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicU32, Ordering},
     Arc,
 };
 
 #[cfg(loom)]
 use loom::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicU32, Ordering},
     Arc,
 };
 
-use tokio::sync::Notify;
+use tokio::sync::{broadcast, Notify};
 
 /// Construct a `Watcher` and `Broadcaster` pair.
 pub fn signal() -> (Watcher, Broadcaster) {
+    let (sender, receiver) = broadcast::channel(1);
     let peers = Arc::new(AtomicU32::new(1));
-    let watcher = Arc::new(Notify::new());
-    let broadcaster = Arc::new(Notify::new());
-    let signaled = Arc::new(AtomicBool::new(false));
+    let notify = Arc::new(Notify::new());
 
     let w = Watcher {
         peers: Arc::clone(&peers),
+        receiver,
         signal_received: false,
-        signaled: Arc::clone(&signaled),
-        broadcaster: Arc::clone(&broadcaster),
-        watcher: Arc::clone(&watcher),
+        notify: Arc::clone(&notify),
     };
 
     let b = Broadcaster {
         peers,
-        signaled,
-        broadcaster,
-        watcher,
+        sender,
+        notify,
     };
 
     (w, b)
@@ -58,14 +55,10 @@ pub fn signal() -> (Watcher, Broadcaster) {
 pub struct Broadcaster {
     /// The total number of peers subscribed to this `Broadcaster`.
     peers: Arc<AtomicU32>,
-    /// Used by `Watcher` instances to wake the `Broadcaster` while it waits for
-    /// `Watcher` instances to shut down.
-    broadcaster: Arc<Notify>,
-    /// Used by `Broadcaster` to wake `Watcher` instances when the signal is
-    /// transmitted.
-    watcher: Arc<Notify>,
-    /// Whether the signal has been sent or not.
-    signaled: Arc<AtomicBool>,
+    /// Transmission point for the signal to `Watcher` instances.
+    sender: broadcast::Sender<()>,
+    /// Allow the `Watchers` to notify `Broadcaster` that they have logged off.
+    notify: Arc<Notify>,
 }
 
 impl Broadcaster {
@@ -74,8 +67,7 @@ impl Broadcaster {
     /// Function will NOT block until all peers have ack'ed the signal.
     #[tracing::instrument(skip(self))]
     pub fn signal(self) {
-        self.signaled.store(true, Ordering::SeqCst);
-        self.watcher.notify_waiters();
+        drop(self.sender);
     }
 
     /// Send the signal through to any `Watcher` instances.
@@ -83,13 +75,11 @@ impl Broadcaster {
     /// Function WILL block until all peers have ack'ed the signal.
     #[tracing::instrument(skip(self))]
     pub async fn signal_and_wait(self) {
-        self.signaled.store(true, Ordering::SeqCst);
-        self.broadcaster.notify_waiters();
+        drop(self.sender);
 
         // Wait for all peers to drop off.
         while self.peers.load(Ordering::SeqCst) > 0 {
-            // Wake the `Watchers` so that they'll drop off.
-            self.broadcaster.notified().await;
+            self.notify.notified().await;
         }
     }
 }
@@ -111,16 +101,12 @@ enum RegisterError {
 pub struct Watcher {
     /// Used to track if the signal has been received without synchronization.
     signal_received: bool,
-    /// Whether the signal has been sent or not.
-    signaled: Arc<AtomicBool>,
     /// The total number of peers subscribed to the `Broadcaster`.
     peers: Arc<AtomicU32>,
-    /// Used by `Watcher` instances to wake the `Broadcaster` while it waits for
-    /// `Watcher` instances to shut down.
-    broadcaster: Arc<Notify>,
-    /// Used by `Broadcaster` to wake `Watcher` instances when the signal is
-    /// transmitted.
-    watcher: Arc<Notify>,
+    /// Transmission point for the signal from `Broadcaster`.
+    receiver: broadcast::Receiver<()>,
+    /// Allow the `Watchers` to notify `Broadcaster` that they have logged off.
+    notify: Arc<Notify>,
 }
 
 impl Watcher {
@@ -139,7 +125,7 @@ impl Watcher {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    self.broadcaster.notify_waiters();
+                    self.notify.notify_waiters();
                     break;
                 }
                 Err(x) => old = x,
@@ -156,14 +142,17 @@ impl Watcher {
     pub async fn recv(mut self) {
         if self.signal_received {
             return;
-        } else if self.signaled.load(Ordering::SeqCst) {
-            self.decrease_peer_count();
-            return;
         }
 
-        self.watcher.notified().await; // Wait for signal
-        self.signal_received = true;
-        self.decrease_peer_count();
+        match self.receiver.recv().await {
+            Ok(_) | Err(broadcast::error::RecvError::Closed) => {
+                self.decrease_peer_count();
+                self.signal_received = true;
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                panic!("Catastrophic programming error: lagged behind");
+            }
+        }
     }
 
     /// Check if a shutdown notice has been sent without blocking.
@@ -177,19 +166,23 @@ impl Watcher {
             return Err(TryRecvError::SignalReceived);
         }
 
-        if self.signaled.load(Ordering::SeqCst) {
-            self.signal_received = true;
-            self.decrease_peer_count();
-            Ok(true)
-        } else {
-            Ok(false)
+        match self.receiver.try_recv() {
+            Ok(_) | Err(broadcast::error::TryRecvError::Closed) => {
+                self.decrease_peer_count();
+                self.signal_received = true;
+                Ok(true)
+            }
+            Err(broadcast::error::TryRecvError::Empty) => Ok(false),
+            Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                panic!("Catastrophic programming error: lagged behind")
+            }
         }
     }
 
     /// Register with the `Broadcaster`, returning a new instance of `Watcher`.
     #[tracing::instrument(skip(self))]
     pub async fn register(&self) -> Result<Self, RegisterError> {
-        if self.signaled.load(Ordering::SeqCst) {
+        if self.signal_received {
             // If the shutdown signal has already been received, return with
             // error.
             return Err(RegisterError::SignalReceived);
@@ -198,11 +191,10 @@ impl Watcher {
         self.peers.fetch_add(1, Ordering::SeqCst);
 
         Ok(Self {
-            signal_received: self.signal_received,
             peers: Arc::clone(&self.peers),
-            broadcaster: Arc::clone(&self.broadcaster),
-            watcher: Arc::clone(&self.watcher),
-            signaled: Arc::clone(&self.signaled),
+            receiver: self.receiver.resubscribe(),
+            signal_received: self.signal_received,
+            notify: Arc::clone(&self.notify),
         })
     }
 }

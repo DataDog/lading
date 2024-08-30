@@ -10,7 +10,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["time", "sync"] }
 tracing = { workspace = true }
 
 [target.'cfg(loom)'.dependencies]
