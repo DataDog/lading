@@ -17,7 +17,6 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
-use lading_signal::Phase;
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;
@@ -61,6 +60,8 @@ enum Error {
     PrometheusPath,
     #[error("Process tree failed to generate tree")]
     ProcessTree(#[from] process_tree::Error),
+    #[error(transparent)]
+    Registration(#[from] lading_signal::RegisterError),
 }
 
 fn default_config_path() -> String {
@@ -344,8 +345,8 @@ async fn inner_main(
     disable_inspector: bool,
     config: Config,
 ) -> Result<(), Error> {
-    let mut shutdown = Phase::new();
-    let experiment_started = Phase::new();
+    let (mut shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
+    let (mut experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
 
     // Set up the telemetry sub-system.
     //
@@ -385,8 +386,12 @@ async fn inner_main(
             path,
             global_labels,
         } => {
-            let mut capture_manager =
-                CaptureManager::new(path, shutdown.clone(), experiment_started.clone()).await?;
+            let mut capture_manager = CaptureManager::new(
+                path,
+                shutdown_watcher.register()?,
+                experiment_started_watcher.register()?,
+            )
+            .await?;
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
@@ -419,7 +424,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown.clone())?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.register()?)?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -429,7 +434,8 @@ async fn inner_main(
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())?;
+            let inspector_server =
+                inspector::Server::new(inspector_conf, shutdown_watcher.register()?)?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -439,7 +445,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())?;
+            let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.register()?)?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -454,8 +460,11 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.target_metrics {
         for cfg in cfgs {
-            let metrics_server =
-                target_metrics::Server::new(cfg, shutdown.clone(), experiment_started.clone());
+            let metrics_server = target_metrics::Server::new(
+                cfg,
+                shutdown_watcher.register()?,
+                experiment_started_watcher.register()?,
+            );
             tokio::spawn(async {
                 match metrics_server.run().await {
                     Ok(()) => debug!("target_metrics shut down successfully"),
@@ -473,20 +482,20 @@ async fn inner_main(
     // Observer is not used when there is no target.
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
-        let observer_server = observer::Server::new(config.observer, shutdown.clone())?;
+        let observer_server = observer::Server::new(config.observer, shutdown_watcher.register()?)?;
         osrv_joinset.spawn(observer_server.run(obs_rcv));
 
         //
         // TARGET
         //
-        let target_server = target::Server::new(target, shutdown.clone());
+        let target_server = target::Server::new(target, shutdown_watcher.register()?);
         tsrv_joinset.spawn(target_server.run(tgt_snd));
     } else {
         // Many lading servers synchronize on target startup.
         tgt_snd.send(None)?;
     };
 
-    let experiment_completed_shutdown = shutdown.clone();
+    let experiment_completed_shutdown = shutdown_watcher.register()?;
     tokio::spawn(async move {
         info!("target is running, now sleeping for warmup");
         sleep(warmup_duration).await;
