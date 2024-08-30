@@ -495,15 +495,14 @@ async fn inner_main(
         tgt_snd.send(None)?;
     };
 
-    let experiment_completed_shutdown = shutdown_watcher.register()?;
     tokio::spawn(async move {
         info!("target is running, now sleeping for warmup");
         sleep(warmup_duration).await;
-        experiment_started.signal();
+        experiment_started_broadcast.signal();
         info!("warmup completed, collecting samples");
         sleep(experiment_duration).await;
         info!("experiment duration exceeded, signaling for shutdown");
-        experiment_completed_shutdown.signal();
+        shutdown_broadcast.signal();
     });
 
     let mut interval = time::interval(Duration::from_millis(400));
@@ -515,9 +514,9 @@ async fn inner_main(
 
             _ = signal::ctrl_c() => {
                 info!("received ctrl-c");
-                shutdown.signal();
+                break Ok(());
             },
-            _ = shutdown.recv() => {
+            _ = shutdown_watcher.recv() => {
                 info!("shutdown signal received.");
                 break Ok(());
             }
@@ -527,7 +526,6 @@ async fn inner_main(
                         Ok(()) => { /* Observer shut down successfully */ }
                         Err(err) => {
                             error!("Observer shut down unexpectedly: {err}");
-                            shutdown.signal();
                             break Err(Error::LadingObserver(err));
                         }
                     }
@@ -538,7 +536,10 @@ async fn inner_main(
                 match res {
                     Ok(generator_result) => match generator_result {
                         Ok(()) => { /* Generator shut down successfully */ }
-                        Err(err) => error!("Generator shut down unexpectedly: {}", err),
+                        Err(err) => {
+                            error!("Generator shut down unexpectedly: {}", err);
+                            break Err(Error::LadingGenerator(err));
+                        }
                     }
                     Err(err) => error!("Could not join the spawned generator task: {}", err),
                 }
@@ -549,12 +550,10 @@ async fn inner_main(
                     Ok(target_result) => match target_result {
                         Ok(_) => {
                             debug!("Target shut down successfully");
-                            shutdown.signal();
                             break Ok(());
                         }
                         Err(err) => {
                             error!("Target shut down unexpectedly: {}", err);
-                            shutdown.signal();
                             break Err(Error::Target(err));
                         }
                     }
@@ -563,7 +562,7 @@ async fn inner_main(
             },
         }
     };
-    shutdown.wait_for_peers().await;
+    shutdown_broadcast.signal_and_wait().await;
     res
 }
 
