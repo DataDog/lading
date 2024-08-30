@@ -38,6 +38,7 @@ pub fn signal() -> (Watcher, Broadcaster) {
         receiver,
         signal_received: false,
         notify: Arc::clone(&notify),
+        peer_count_decreased: false,
     };
 
     let b = Broadcaster {
@@ -101,6 +102,8 @@ enum RegisterError {
 pub struct Watcher {
     /// Used to track if the signal has been received without synchronization.
     signal_received: bool,
+    /// Record whether the peer count of this Watcher has been decreased.
+    peer_count_decreased: bool,
     /// The total number of peers subscribed to the `Broadcaster`.
     peers: Arc<AtomicU32>,
     /// Transmission point for the signal from `Broadcaster`.
@@ -113,7 +116,7 @@ impl Watcher {
     /// Decrease the peer count in the `Broadcaster`, allowing the `Broadcaster` to
     /// unblock if waiting for peers.
     #[tracing::instrument(skip(self))]
-    fn decrease_peer_count(&self) {
+    fn decrease_peer_count(&mut self) {
         // Why not use fetch_sub? That function overflows at the zero boundary
         // and we don't want the peer count to suddenly be u32::MAX.
         let mut old = self.peers.load(Ordering::Relaxed);
@@ -131,6 +134,7 @@ impl Watcher {
                 Err(x) => old = x,
             }
         }
+        self.peer_count_decreased = true;
     }
 
     /// Receive the shutdown notice. This function will block if a notice has
@@ -195,7 +199,18 @@ impl Watcher {
             receiver: self.receiver.resubscribe(),
             signal_received: self.signal_received,
             notify: Arc::clone(&self.notify),
+            // Do not copy existing peer count decreased state as this new peer
+            // is independent.
+            peer_count_decreased: false,
         })
+    }
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        if !self.peer_count_decreased {
+            self.decrease_peer_count();
+        }
     }
 }
 
@@ -211,17 +226,185 @@ mod tests {
         loom::model(|| {
             let (watcher, broadcaster) = signal();
 
-            // Spawn a thread to simulate the watcher.
+            // In a thread we have a singular watcher that blocks on recv.
             let watcher_handle = thread::spawn(move || {
                 block_on(watcher.recv());
             });
 
-            // Ensure the watcher thread has started.
-            loom::thread::yield_now();
-
-            // Simulate the broadcaster signaling.
+            // In our main thread we signal and then wait.
             block_on(broadcaster.signal_and_wait());
 
+            // Now, assert that the watcher has received the signal and its
+            // thread has shut down.
+            watcher_handle.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn multiple_watchers() {
+        use loom::future::block_on;
+        use loom::thread;
+
+        use crate::signal;
+
+        loom::model(|| {
+            let (watcher1, broadcaster) = signal();
+            let watcher2 = block_on(watcher1.register()).unwrap();
+
+            // Create two watchers in two threads, blocking on recv.
+            let watcher_handle1 = thread::spawn(move || {
+                block_on(watcher1.recv());
+            });
+            let watcher_handle2 = thread::spawn(move || {
+                block_on(watcher2.recv());
+            });
+
+            // In our main thread we signal and then wait.
+            block_on(broadcaster.signal_and_wait());
+
+            // Now, assert that the watchers have received the signal and shut
+            // down.
+            watcher_handle1.join().unwrap();
+            watcher_handle2.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn try_receive_before_signal() {
+        use crate::signal;
+
+        loom::model(|| {
+            let (mut watcher, broadcaster) = signal();
+
+            // Call try_recv before signaling
+            assert_eq!(watcher.try_recv().unwrap(), false);
+
+            // Signal without blocking and then we should see that the watcher
+            // gets the signal.
+            broadcaster.signal();
+
+            assert_eq!(watcher.try_recv().unwrap(), true);
+        });
+    }
+
+    #[test]
+    fn try_receive_after_signal() {
+        use crate::signal;
+
+        loom::model(|| {
+            let (mut watcher, broadcaster) = signal();
+
+            // Signal before calling try_recv
+            broadcaster.signal();
+
+            // Call try_recv after signaling
+            assert_eq!(watcher.try_recv().unwrap(), true);
+
+            // From this point every call to try_recv errors.
+            assert!(matches!(
+                watcher.try_recv(),
+                Err(crate::TryRecvError::SignalReceived)
+            ));
+        });
+    }
+
+    #[test]
+    fn register_after_signal_before_recv() {
+        use crate::signal;
+        use loom::future::block_on;
+
+        loom::model(|| {
+            let (mut watcher1, broadcaster) = signal();
+
+            // Signal before attempting to register a new watcher. Registration
+            // after this point fails.
+            broadcaster.signal();
+
+            // The signal is sent but it has not been received by watcher yet as we've
+            // not called `recv` or similar. Registration should succeed.
+            let mut watcher2 = block_on(watcher1.register()).unwrap();
+
+            // The signal should be received by both watchers and then never again.
+            assert_eq!(watcher1.try_recv().unwrap(), true);
+            assert_eq!(watcher2.try_recv().unwrap(), true);
+
+            assert_eq!(
+                matches!(
+                    watcher1.try_recv(),
+                    Err(crate::TryRecvError::SignalReceived)
+                ),
+                true
+            );
+            assert_eq!(
+                matches!(
+                    watcher2.try_recv(),
+                    Err(crate::TryRecvError::SignalReceived)
+                ),
+                true
+            );
+        });
+    }
+
+    #[test]
+    fn register_after_signal_after_recv() {
+        use crate::signal;
+        use loom::future::block_on;
+
+        loom::model(|| {
+            let (mut watcher1, broadcaster) = signal();
+
+            // Signal before attempting to register a new watcher. Registration
+            // after this point fails.
+            broadcaster.signal();
+
+            // Recv the signal in watcher1, assert failure on a second recv.
+            // Then register watcher2.
+            assert_eq!(watcher1.try_recv().unwrap(), true);
+            assert_eq!(
+                matches!(
+                    watcher1.try_recv(),
+                    Err(crate::TryRecvError::SignalReceived)
+                ),
+                true
+            );
+
+            // The signal is sent and received by watcher1. Registration should
+            // fail.
+            let result = block_on(watcher1.register());
+            assert!(matches!(result, Err(crate::RegisterError::SignalReceived)));
+        });
+    }
+
+    #[test]
+    fn signal_without_watchers() {
+        use crate::signal;
+
+        loom::model(|| {
+            let (watcher, broadcaster) = signal();
+
+            drop(watcher);
+            // Signal without any watcher waiting.
+            broadcaster.signal();
+        });
+    }
+
+    #[test]
+    fn watcher_drops_before_signal_and_wait() {
+        use crate::signal;
+        use loom::future::block_on;
+        use loom::thread;
+
+        loom::model(|| {
+            let (watcher, broadcaster) = signal();
+
+            // In a thread drop the watcher. While we can't directly observe the
+            // number of peers in a broadcaster we can assert that the broadcaster
+            // does not hang if its watchers exit.
+            let watcher_handle = thread::spawn(move || {
+                drop(watcher);
+            });
+
+            block_on(broadcaster.signal_and_wait());
             watcher_handle.join().unwrap();
         });
     }
