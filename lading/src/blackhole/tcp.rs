@@ -16,8 +16,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use lading_signal::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -40,14 +38,14 @@ pub struct Config {
 /// The TCP blackhole.
 pub struct Tcp {
     binding_addr: SocketAddr,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Tcp {
     /// Create a new [`Tcp`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "tcp".to_string()),

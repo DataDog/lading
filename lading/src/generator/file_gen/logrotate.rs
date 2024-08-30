@@ -36,7 +36,6 @@ use tracing::info;
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
-use lading_signal::Phase;
 
 use super::General;
 
@@ -58,6 +57,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Unable to register `Watcher`
+    #[error(transparent)]
+    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -102,7 +104,7 @@ pub struct Config {
 /// this without coordination to the target.
 pub struct Server {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
@@ -118,7 +120,11 @@ impl Server {
     /// set.
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -167,7 +173,7 @@ impl Server {
                 maximum_bytes_per_file,
                 block_cache,
                 throttle,
-                shutdown.clone(),
+                shutdown.register()?,
             );
 
             handles.push(tokio::spawn(child.spin()));
@@ -210,7 +216,7 @@ struct Child {
     maximum_bytes_per_log: NonZeroU32,
     block_cache: block::Cache,
     throttle: Throttle,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Child {
@@ -221,7 +227,7 @@ impl Child {
         maximum_bytes_per_log: NonZeroU32,
         block_cache: block::Cache,
         throttle: Throttle,
-        shutdown: Phase,
+        shutdown: lading_signal::Watcher,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));

@@ -21,8 +21,6 @@ use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use lading_signal::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -62,14 +60,14 @@ pub struct Config {
 pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Sqs {
     /// Create a new [`Sqs`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "sqs".to_string()),

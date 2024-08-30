@@ -15,7 +15,6 @@ use crate::common::PeekableReceiver;
 use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
-use lading_signal::Phase;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{rngs::StdRng, SeedableRng};
@@ -97,6 +96,9 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
+    /// Unable to register `Watcher`
+    #[error(transparent)]
+    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug)]
@@ -106,7 +108,7 @@ pub enum Error {
 /// datagrams.
 pub struct UnixDatagram {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     startup: tokio::sync::broadcast::Sender<()>,
 }
 
@@ -122,7 +124,11 @@ impl UnixDatagram {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: &Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -157,7 +163,7 @@ impl UnixDatagram {
                 block_cache,
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
-                shutdown: shutdown.clone(),
+                shutdown: shutdown.register()?,
             };
 
             handles.push(tokio::spawn(child.spin(startup.subscribe())));
@@ -200,7 +206,7 @@ struct Child {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Child {

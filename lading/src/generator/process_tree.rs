@@ -11,7 +11,6 @@
 //!
 
 use is_executable::IsExecutable;
-use lading_signal::Phase;
 use lading_throttle::Throttle;
 use nix::{
     sys::wait::{waitpid, WaitPidFlag, WaitStatus},
@@ -268,7 +267,7 @@ pub struct ProcessTree {
     lading_path: PathBuf,
     config_content: String,
     throttle: Throttle,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl ProcessTree {
@@ -278,7 +277,7 @@ impl ProcessTree {
     ///
     /// Return an error if the config can be serialized.
     ///
-    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let lading_path = match env::current_exe() {
             Ok(path) => path,
             Err(e) => return Err(Error::from(e)),

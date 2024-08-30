@@ -85,15 +85,19 @@ impl Broadcaster {
     }
 }
 
-#[derive(Debug)]
-enum TryRecvError {
+/// Errors for `Watcher::try_recv`.
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum TryRecvError {
     /// The signal has been received and yet `try_recv` was called.
+    #[error("signal has been received")]
     SignalReceived,
 }
 
-#[derive(Debug)]
-enum RegisterError {
+/// Errors for `Watcher::register`.
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum RegisterError {
     /// The signal has been received and yet `register` was called.
+    #[error("signal has been received")]
     SignalReceived,
 }
 
@@ -143,7 +147,7 @@ impl Watcher {
     /// If `recv` is called multiple times after the signal has been received
     /// this function will return immediately.
     #[tracing::instrument(skip(self))]
-    pub async fn recv(mut self) {
+    pub async fn recv(&mut self) {
         if self.signal_received {
             return;
         }
@@ -185,7 +189,7 @@ impl Watcher {
 
     /// Register with the `Broadcaster`, returning a new instance of `Watcher`.
     #[tracing::instrument(skip(self))]
-    pub async fn register(&self) -> Result<Self, RegisterError> {
+    pub fn register(&self) -> Result<Self, RegisterError> {
         if self.signal_received {
             // If the shutdown signal has already been received, return with
             // error.

@@ -28,7 +28,6 @@ use crate::{
     common::{stdio, Output},
     target::TargetPidReceiver,
 };
-use lading_signal::Phase;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]
@@ -73,7 +72,7 @@ pub struct Config {
 /// there are no protections for that.
 pub struct Server {
     config: Config,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
@@ -86,7 +85,7 @@ impl Server {
     ///
     /// Function will error if the path to the sub-process is not valid or if
     /// the path is valid but is not to file executable by this program.
-    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         Ok(Self { config, shutdown })
     }
 

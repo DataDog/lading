@@ -1490,6 +1490,7 @@ name = "lading-signal"
 version = "0.1.0"
 dependencies = [
  "loom",
+ "thiserror",
  "tokio",
  "tracing",
 ]
