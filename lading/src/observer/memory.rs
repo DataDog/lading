@@ -206,7 +206,7 @@ impl Region {
                     "Could not find dash in addr: {token}"
                 )))?;
                 let start_str = &token[0..dash_loc];
-                let end_str = &token[dash_loc+1..];
+                let end_str = &token[dash_loc + 1..];
                 start = Some(u64::from_str_radix(start_str, 16)?);
                 end = Some(u64::from_str_radix(end_str, 16)?);
             } else if perms.is_none() {
@@ -729,8 +729,7 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region.start, 0x7fffa9f39000);
         assert_eq!(region.end, 0x7fffa9f3b000);
 
-        let region =
-            "00400000-0e8dd000 r-xp 00000000 00:00 0                          [vdso]
+        let region = "00400000-0e8dd000 r-xp 00000000 00:00 0                          [vdso]
         Size:                  8 kB
         KernelPageSize:        4 kB
         MMUPageSize:           4 kB
