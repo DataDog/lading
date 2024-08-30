@@ -161,7 +161,7 @@ impl Watcher {
             return;
         }
 
-        self.broadcaster.notified().await; // Wait for signal
+        self.watcher.notified().await; // Wait for signal
         self.signal_received = true;
         self.decrease_peer_count();
     }
@@ -209,7 +209,6 @@ impl Watcher {
 
 #[cfg(test)]
 mod tests {
-
     #[test]
     fn basic_signal() {
         use loom::future::block_on;
@@ -225,8 +224,11 @@ mod tests {
                 block_on(watcher.recv());
             });
 
+            // Ensure the watcher thread has started.
+            loom::thread::yield_now();
+
             // Simulate the broadcaster signaling.
-            broadcaster.signal();
+            block_on(broadcaster.signal_and_wait());
 
             watcher_handle.join().unwrap();
         });
