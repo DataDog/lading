@@ -11,14 +11,15 @@ use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
-use crate::signals::Phase;
-
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
 pub enum Error {
     /// Prometheus scraper shut down unexpectedly
     #[error("Unexpected shutdown")]
     EarlyShutdown,
+    /// Unable to register `Watcher`
+    #[error(transparent)]
+    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -66,8 +67,8 @@ impl FromStr for MetricType {
 pub struct Prometheus {
     config: Config,
     client: reqwest::Client,
-    shutdown: Phase,
-    experiment_started: Phase,
+    shutdown: lading_signal::Watcher,
+    experiment_started: lading_signal::Watcher,
 }
 
 impl Prometheus {
@@ -76,7 +77,11 @@ impl Prometheus {
     /// This is responsible for scraping metrics from the target process in the
     /// Prometheus format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+    pub(crate) fn new(
+        config: Config,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+    ) -> Self {
         let client = reqwest::Client::new();
         Self {
             config,
@@ -101,10 +106,10 @@ impl Prometheus {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(mut self) -> Result<(), Error> {
-        let mut shutdown = self.shutdown.clone();
+        let mut shutdown = self.shutdown.register()?;
         let server = async {
             info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
-            self.experiment_started.recv().await; // block until experimental phase entered
+            self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered
             info!("Prometheus target metrics scraper starting collection");
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -332,23 +337,23 @@ mod tests {
 
         let server_uri = format!("http://{addr}/metrics");
 
-        let shutdown = Phase::new();
-        let experiment_started = Phase::new();
+        let (shutdown_watcher, _) = lading_signal::signal();
+        let (experiment_started_watcher, experiment_started_broadcaster) = lading_signal::signal();
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
                 metrics: None,
-                tags: tags,
+                tags,
             },
-            shutdown.clone(),
-            experiment_started.clone(),
+            shutdown_watcher,
+            experiment_started_watcher,
         );
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
         dr.install().expect("failed to install recorder");
 
-        experiment_started.signal();
+        experiment_started_broadcaster.signal();
 
         p.scrape_metrics().await;
 

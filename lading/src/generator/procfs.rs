@@ -17,8 +17,6 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
-use crate::signals::Phase;
-
 #[derive(::thiserror::Error, Debug)]
 /// Errors emitted by [`Procfs`]
 pub enum Error {
@@ -60,7 +58,7 @@ pub struct Config {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct ProcFs {
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl ProcFs {
@@ -73,7 +71,7 @@ impl ProcFs {
     /// # Panics
     ///
     /// Function should never panic.
-    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
 
         let total_processes = config.total_processes.get();

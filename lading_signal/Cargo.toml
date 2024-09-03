@@ -1,5 +1,5 @@
 [package]
-name = "lading-throttle"
+name = "lading-signal"
 version = "0.1.0"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
@@ -13,16 +13,12 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-async-trait = { version = "0.1", default-features = false, features = [] }
-metrics = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "sync"] }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 
-[dev-dependencies]
-proptest = "1.4"
-proptest-derive = "0.5.0"
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7", features = ["futures", "checkpoint"] }
 
 [lib]
 doctest = false

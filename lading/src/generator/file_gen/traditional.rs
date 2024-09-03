@@ -37,7 +37,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use lading_payload::{
     self,
     block::{self, Block},
@@ -63,6 +63,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Unable to register `Watcher`
+    #[error(transparent)]
+    Watcher(#[from] lading_signal::RegisterError),
 }
 
 fn default_rotation() -> bool {
@@ -121,7 +124,7 @@ pub struct Config {
 /// this without coordination to the target.
 pub struct Server {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
@@ -137,7 +140,11 @@ impl Server {
     /// set.
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -180,7 +187,7 @@ impl Server {
                 block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
-                shutdown: shutdown.clone(),
+                shutdown: shutdown.register()?,
             };
 
             handles.push(tokio::spawn(child.spin()));
@@ -223,7 +230,7 @@ struct Child {
     block_cache: block::Cache,
     rotate: bool,
     file_index: Arc<AtomicU32>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Child {

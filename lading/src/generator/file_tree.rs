@@ -29,8 +29,6 @@ use serde::{Deserialize, Serialize};
 use tokio::{fs::create_dir, fs::rename, fs::File};
 use tracing::info;
 
-use crate::signals::Phase;
-
 static FILE_EXTENSION: &str = "txt";
 
 #[derive(thiserror::Error, Debug)]
@@ -127,7 +125,7 @@ pub struct FileTree {
     total_folder: usize,
     nodes: VecDeque<PathBuf>,
     rng: StdRng,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl FileTree {
@@ -137,12 +135,14 @@ impl FileTree {
     ///
     /// Creation will fail if the target file/folder cannot be opened for writing.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let (nodes, _total_files, total_folder) = generate_tree(&mut rng, config)?;
 
-        let _labels = [("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "file_tree".to_string())];
+        let _labels = [
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "file_tree".to_string()),
+        ];
 
         let open_throttle = Throttle::new_with_config(config.throttle, config.open_per_second);
         let rename_throttle = Throttle::new_with_config(config.throttle, config.rename_per_second);

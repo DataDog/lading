@@ -11,8 +11,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::{error, info, trace};
 
-use crate::signals::Phase;
-
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Expvar`]
 pub enum Error {
@@ -38,8 +36,8 @@ pub struct Config {
 #[derive(Debug)]
 pub struct Expvar {
     config: Config,
-    shutdown: Phase,
-    experiment_started: Phase,
+    shutdown: lading_signal::Watcher,
+    experiment_started: lading_signal::Watcher,
 }
 
 impl Expvar {
@@ -48,7 +46,11 @@ impl Expvar {
     /// This is responsible for scraping metrics from the target process
     /// using Go's expvar format.
     ///
-    pub(crate) fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+    pub(crate) fn new(
+        config: Config,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+    ) -> Self {
         Self {
             config,
             shutdown,
@@ -69,7 +71,7 @@ impl Expvar {
     /// None are known.
     pub(crate) async fn run(mut self) -> Result<(), Error> {
         info!("Expvar target metrics scraper running, but waiting for warmup to complete");
-        self.experiment_started.recv().await; // block until experimental phase entered
+        self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered
         info!("Expvar target metrics scraper starting collection");
 
         let client = reqwest::Client::new();

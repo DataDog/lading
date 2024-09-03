@@ -10,7 +10,6 @@
 //! configured [throttle].
 //!
 
-use crate::signals::Phase;
 use is_executable::IsExecutable;
 use lading_throttle::Throttle;
 use nix::{
@@ -268,7 +267,7 @@ pub struct ProcessTree {
     lading_path: PathBuf,
     config_content: String,
     throttle: Throttle,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl ProcessTree {
@@ -278,14 +277,16 @@ impl ProcessTree {
     ///
     /// Return an error if the config can be serialized.
     ///
-    pub fn new(config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: &Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let lading_path = match env::current_exe() {
             Ok(path) => path,
             Err(e) => return Err(Error::from(e)),
         };
 
-        let _labels = [("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "process_tree".to_string())];
+        let _labels = [
+            ("component".to_string(), "generator".to_string()),
+            ("component_name".to_string(), "process_tree".to_string()),
+        ];
 
         let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
         match serde_yaml::to_string(config) {

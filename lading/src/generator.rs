@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::{signals::Phase, target::TargetPidReceiver};
+use crate::target::TargetPidReceiver;
 
 pub mod file_gen;
 pub mod file_tree;
@@ -164,7 +164,7 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
-    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let srv = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),

@@ -22,8 +22,6 @@ use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::signals::Phase;
-
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -59,8 +57,8 @@ pub struct CaptureManager {
     run_id: Uuid,
     capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
-    shutdown: Phase,
-    _experiment_started: Phase,
+    shutdown: lading_signal::Watcher,
+    _experiment_started: lading_signal::Watcher,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -73,8 +71,8 @@ impl CaptureManager {
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
-        shutdown: Phase,
-        experiment_started: Phase,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
@@ -194,7 +192,7 @@ impl CaptureManager {
             .spawn(move || {
                 let token = self.shutdown.register();
                 loop {
-                    if self.shutdown.try_recv() {
+                    if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
                         drop(token);
                         return;
