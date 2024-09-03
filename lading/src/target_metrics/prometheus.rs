@@ -337,23 +337,23 @@ mod tests {
 
         let server_uri = format!("http://{addr}/metrics");
 
-        let shutdown = lading_signal::Watcher::new();
-        let experiment_started = lading_signal::Watcher::new();
+        let (shutdown_watcher, _) = lading_signal::signal();
+        let (experiment_started_watcher, experiment_started_broadcaster) = lading_signal::signal();
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
                 metrics: None,
                 tags: tags,
             },
-            shutdown.clone(),
-            experiment_started.clone(),
+            shutdown_watcher,
+            experiment_started_watcher,
         );
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
         dr.install().expect("failed to install recorder");
 
-        experiment_started.signal();
+        experiment_started_broadcaster.signal();
 
         p.scrape_metrics().await;
 

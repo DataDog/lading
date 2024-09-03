@@ -239,6 +239,7 @@ impl Drop for Watcher {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(loom)]
     #[test]
     fn basic_signal() {
         use loom::future::block_on;
@@ -263,6 +264,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn multiple_watchers() {
         use loom::future::block_on;
@@ -292,6 +294,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn try_receive_before_signal() {
         use crate::signal;
@@ -310,6 +313,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn try_receive_after_signal() {
         use crate::signal;
@@ -331,6 +335,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn register_after_signal_before_recv() {
         use crate::signal;
@@ -367,6 +372,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn register_after_signal_after_recv() {
         use crate::signal;
@@ -397,6 +403,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn signal_without_watchers() {
         use crate::signal;
@@ -410,6 +417,7 @@ mod tests {
         });
     }
 
+    #[cfg(loom)]
     #[test]
     fn watcher_drops_before_signal_and_wait() {
         use crate::signal;
