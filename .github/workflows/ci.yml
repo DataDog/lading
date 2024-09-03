@@ -96,6 +96,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1.9
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
       - run: RUSTFLAGS="--cfg loom" cargo nextest run --release
         working-directory: ${{ matrix.crate }}
         timeout-minutes: 30
