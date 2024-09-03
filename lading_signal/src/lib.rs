@@ -242,8 +242,7 @@ mod tests {
     #[cfg(loom)]
     #[test]
     fn basic_signal() {
-        use loom::future::block_on;
-        use loom::thread;
+        use loom::{future::block_on, thread};
 
         use crate::signal;
 
@@ -267,8 +266,7 @@ mod tests {
     #[cfg(loom)]
     #[test]
     fn multiple_watchers() {
-        use loom::future::block_on;
-        use loom::thread;
+        use loom::{future::block_on, thread};
 
         use crate::signal;
 
@@ -376,7 +374,6 @@ mod tests {
     #[test]
     fn register_after_signal_after_recv() {
         use crate::signal;
-        use loom::future::block_on;
 
         loom::model(|| {
             let (mut watcher1, broadcaster) = signal();
@@ -421,7 +418,7 @@ mod tests {
     #[test]
     fn watcher_drops_before_signal_and_wait() {
         use crate::signal;
-        use loom::thread;
+        use loom::{future::block_on, thread};
 
         loom::model(|| {
             let (watcher, broadcaster) = signal();
