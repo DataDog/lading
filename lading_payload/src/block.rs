@@ -445,17 +445,13 @@ where
 /// Function will panic if the `serializer` signals an error. In the future we
 /// would like to propagate this error to the caller.
 #[inline]
-fn construct_block<R, S>(
-    mut rng: &mut R,
-    serializer: &S,
-    chunk_size: u32,
-) -> Result<Block, SpinError>
+fn construct_block<R, S>(rng: &mut R, serializer: &S, chunk_size: u32) -> Result<Block, SpinError>
 where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
-    serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
+    serializer.to_bytes(rng, chunk_size as usize, &mut block)?;
     let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
         // Blocks should not be empty and if they are empty this is an
