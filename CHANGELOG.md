@@ -6,11 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.23.1]
+### Fixed
+- Fixes a panic in the signal mechanism that appeared when using the file
+  generator most prominately.
+
 ## [0.23.0]
 ### Added
 - Added ability to create tags for both expvar and prometheus target metrics specific to a single target_metrics configuration (example below shows prometheus metrics collected from the core agent and two additional tags created)
   ```yaml
-  target_metrics:      
+  target_metrics:
     - prometheus: #core agent telemetry
         uri: "http://127.0.0.1:5000/telemetry"
         tags:
