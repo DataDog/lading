@@ -29,6 +29,13 @@ use tokio::sync::{broadcast, Notify};
 
 /// Construct a `Watcher` and `Broadcaster` pair.
 pub fn signal() -> (Watcher, Broadcaster) {
+    // NOTE why use a broadcast channel and not a barrier to synchronize the
+    // watchers/broadcaster? Or an AtomicBool and a Condvar? Well, it's a good
+    // question. I think we could potentially do away with the broadcast channel
+    // entirely -- we don't use it except for its reliable shutdown signal
+    // semantics -- but we run up again loom 0.7's surface area. In the future
+    // we can reconsider the implementation here but not at the expense of proof
+    // tools.
     let (sender, receiver) = broadcast::channel(1);
     let peers = Arc::new(AtomicU32::new(1));
     let notify = Arc::new(Notify::new());
@@ -54,7 +61,8 @@ pub fn signal() -> (Watcher, Broadcaster) {
 /// Mechanism to notify one or more `Watcher` instances that a phase has been
 /// achieved.
 pub struct Broadcaster {
-    /// The total number of peers subscribed to this `Broadcaster`.
+    /// The total number of peers subscribed to this `Broadcaster`. Used by this
+    /// struct to understand when all `Watcher` instances have dropped off.
     peers: Arc<AtomicU32>,
     /// Transmission point for the signal to `Watcher` instances.
     sender: broadcast::Sender<()>,
@@ -78,7 +86,9 @@ impl Broadcaster {
     pub async fn signal_and_wait(self) {
         drop(self.sender);
 
-        // Wait for all peers to drop off.
+        // Wait for all peers to drop off. The opposite to
+        // `decrease_peer_count`: loop will not consume CPU until a `Watcher`
+        // has signaled that it has received the transmitted signal.
         while self.peers.load(Ordering::SeqCst) > 0 {
             self.notify.notified().await;
         }
@@ -108,7 +118,9 @@ pub struct Watcher {
     signal_received: bool,
     /// Record whether the peer count of this Watcher has been decreased.
     peer_count_decreased: bool,
-    /// The total number of peers subscribed to the `Broadcaster`.
+    /// The total number of peers subscribed to the `Broadcaster`. Used by this
+    /// struct not to observe other `Watcher` instances but to inform
+    /// `Broadcaster` of the existence/lack-of of this instance.
     peers: Arc<AtomicU32>,
     /// Transmission point for the signal from `Broadcaster`.
     receiver: broadcast::Receiver<()>,
@@ -118,7 +130,7 @@ pub struct Watcher {
 
 impl Watcher {
     /// Decrease the peer count in the `Broadcaster`, allowing the `Broadcaster` to
-    /// unblock if waiting for peers.
+    /// unblock if waiting for peers. See `Broadcaster::signal_and_wait`.
     #[tracing::instrument(skip(self))]
     fn decrease_peer_count(&mut self) {
         // Why not use fetch_sub? That function overflows at the zero boundary
@@ -149,6 +161,13 @@ impl Watcher {
     #[tracing::instrument(skip(self))]
     pub async fn recv(&mut self) {
         if self.signal_received {
+            // Once the signal is received if this function were called in a
+            // `select!` it might drown out every other arm. May indicate the
+            // semantics of this should be like `try_recv`.
+            #[cfg(not(loom))]
+            {
+                tokio::task::yield_now().await;
+            }
             return;
         }
 
@@ -228,7 +247,7 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (watcher, broadcaster) = signal();
+            let (mut watcher, broadcaster) = signal();
 
             // In a thread we have a singular watcher that blocks on recv.
             let watcher_handle = thread::spawn(move || {
@@ -252,8 +271,8 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (watcher1, broadcaster) = signal();
-            let watcher2 = block_on(watcher1.register()).unwrap();
+            let (mut watcher1, broadcaster) = signal();
+            let mut watcher2 = watcher1.register().unwrap();
 
             // Create two watchers in two threads, blocking on recv.
             let watcher_handle1 = thread::spawn(move || {
@@ -315,7 +334,6 @@ mod tests {
     #[test]
     fn register_after_signal_before_recv() {
         use crate::signal;
-        use loom::future::block_on;
 
         loom::model(|| {
             let (mut watcher1, broadcaster) = signal();
@@ -326,7 +344,7 @@ mod tests {
 
             // The signal is sent but it has not been received by watcher yet as we've
             // not called `recv` or similar. Registration should succeed.
-            let mut watcher2 = block_on(watcher1.register()).unwrap();
+            let mut watcher2 = watcher1.register().unwrap();
 
             // The signal should be received by both watchers and then never again.
             assert_eq!(watcher1.try_recv().unwrap(), true);
@@ -374,7 +392,7 @@ mod tests {
 
             // The signal is sent and received by watcher1. Registration should
             // fail.
-            let result = block_on(watcher1.register());
+            let result = watcher1.register();
             assert!(matches!(result, Err(crate::RegisterError::SignalReceived)));
         });
     }
@@ -395,7 +413,6 @@ mod tests {
     #[test]
     fn watcher_drops_before_signal_and_wait() {
         use crate::signal;
-        use loom::future::block_on;
         use loom::thread;
 
         loom::model(|| {
