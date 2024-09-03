@@ -29,7 +29,7 @@ clap = { version = "3.2", default-features = false, features = [
   "suggestions",
   "derive",
 ] }
-flate2 = { version = "1.0.31", default-features = false, features = [
+flate2 = { version = "1.0.33", default-features = false, features = [
   "rust_backend",
 ] }
 futures = "0.3.28"
