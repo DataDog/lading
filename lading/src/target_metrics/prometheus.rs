@@ -343,7 +343,7 @@ mod tests {
             Config {
                 uri: server_uri,
                 metrics: None,
-                tags: tags,
+                tags,
             },
             shutdown_watcher,
             experiment_started_watcher,
