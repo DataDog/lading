@@ -253,6 +253,10 @@ impl Server {
         let docker = Docker::connect_with_socket_defaults()?;
 
         let pid: i64 = loop {
+            if shutdown.try_recv().is_ok() {
+                info!("shutdown signal received");
+                return Ok(());
+            }
             if let Ok(container) = docker.inspect_container(&config.name, None).await {
                 if let Some(pid) = container.state.and_then(|state| state.pid) {
                     break pid;

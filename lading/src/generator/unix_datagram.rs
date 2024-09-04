@@ -108,7 +108,7 @@ pub enum Error {
 /// datagrams.
 pub struct UnixDatagram {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: lading_signal::Watcher,
+    shutdown: tokio::sync::watch::Receiver<()>,
     startup: tokio::sync::broadcast::Sender<()>,
 }
 
@@ -127,7 +127,7 @@ impl UnixDatagram {
     pub fn new(
         general: General,
         config: &Config,
-        shutdown: lading_signal::Watcher,
+        shutdown: tokio::sync::watch::Receiver<()>,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
@@ -163,7 +163,7 @@ impl UnixDatagram {
                 block_cache,
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
-                shutdown: shutdown.register()?,
+                shutdown: shutdown.clone(),
             };
 
             handles.push(tokio::spawn(child.spin(startup.subscribe())));
@@ -187,7 +187,7 @@ impl UnixDatagram {
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
         self.startup.send(())?;
-        self.shutdown.recv().await;
+        self.shutdown.changed().await.expect("watch failed");
         info!("shutdown signal received");
         for res in join_all(self.handles.drain(..)).await {
             match res {
@@ -206,7 +206,7 @@ struct Child {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: lading_signal::Watcher,
+    shutdown: tokio::sync::watch::Receiver<()>,
 }
 
 impl Child {
@@ -271,7 +271,7 @@ impl Child {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                Ok(_) = self.shutdown.changed() => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

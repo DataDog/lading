@@ -11,6 +11,7 @@
 //! experimental control.
 
 use serde::{Deserialize, Serialize};
+use tokio::select;
 use tracing::{error, warn};
 
 use crate::target::TargetPidReceiver;
@@ -165,6 +166,17 @@ impl Server {
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
+        // create sync::watch adapter for shutdown watcher
+        let (tx, mut rx) = tokio::sync::watch::channel(());
+        let mut watch = shutdown.register().expect("Register failed");
+        tokio::spawn(async move {
+            select! {
+                _ = watch.recv() => {
+                    let _ = tx.send(());
+                }
+            }
+        });
+
         let srv = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
@@ -198,7 +210,7 @@ impl Server {
             Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
                 config.general,
                 &conf,
-                shutdown,
+                rx,
             )?),
             Inner::ProcessTree(conf) => {
                 Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
