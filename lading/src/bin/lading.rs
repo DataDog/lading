@@ -389,7 +389,7 @@ async fn inner_main(
             let mut capture_manager = CaptureManager::new(
                 path,
                 shutdown_watcher.register()?,
-                experiment_started_watcher.register()?,
+                experiment_started_watcher.clone(),
             )
             .await?;
             for (k, v) in global_labels {
@@ -424,7 +424,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown_watcher.register()?)?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone())?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -435,7 +435,7 @@ async fn inner_main(
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
             let inspector_server =
-                inspector::Server::new(inspector_conf, shutdown_watcher.register()?)?;
+                inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -445,7 +445,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.register()?)?;
+            let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -462,8 +462,8 @@ async fn inner_main(
         for cfg in cfgs {
             let metrics_server = target_metrics::Server::new(
                 cfg,
-                shutdown_watcher.register()?,
-                experiment_started_watcher.register()?,
+                shutdown_watcher.clone(),
+                experiment_started_watcher.clone(),
             );
             tokio::spawn(async {
                 match metrics_server.run().await {
@@ -482,13 +482,13 @@ async fn inner_main(
     // Observer is not used when there is no target.
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
-        let observer_server = observer::Server::new(config.observer, shutdown_watcher.register()?)?;
+        let observer_server = observer::Server::new(config.observer, shutdown_watcher.clone())?;
         osrv_joinset.spawn(observer_server.run(obs_rcv));
 
         //
         // TARGET
         //
-        let target_server = target::Server::new(target, shutdown_watcher.register()?);
+        let target_server = target::Server::new(target, shutdown_watcher.clone());
         tsrv_joinset.spawn(target_server.run(tgt_snd));
     } else {
         // Many lading servers synchronize on target startup.

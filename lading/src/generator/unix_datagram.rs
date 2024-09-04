@@ -96,9 +96,6 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),
-    /// Unable to register `Watcher`
-    #[error(transparent)]
-    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug)]
@@ -163,7 +160,7 @@ impl UnixDatagram {
                 block_cache,
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
-                shutdown: shutdown.register()?,
+                shutdown: shutdown.clone(),
             };
 
             handles.push(tokio::spawn(child.spin(startup.subscribe())));

@@ -17,9 +17,6 @@ pub enum Error {
     /// Prometheus scraper shut down unexpectedly
     #[error("Unexpected shutdown")]
     EarlyShutdown,
-    /// Unable to register `Watcher`
-    #[error(transparent)]
-    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -106,7 +103,7 @@ impl Prometheus {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(mut self) -> Result<(), Error> {
-        let mut shutdown = self.shutdown.register()?;
+        let mut shutdown = self.shutdown.clone();
         let server = async {
             info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
             self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered

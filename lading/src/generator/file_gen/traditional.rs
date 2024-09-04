@@ -63,9 +63,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Unable to register `Watcher`
-    #[error(transparent)]
-    Watcher(#[from] lading_signal::RegisterError),
 }
 
 fn default_rotation() -> bool {
@@ -187,7 +184,7 @@ impl Server {
                 block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
-                shutdown: shutdown.register()?,
+                shutdown: shutdown.clone(),
             };
 
             handles.push(tokio::spawn(child.spin()));
