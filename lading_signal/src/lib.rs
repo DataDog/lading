@@ -164,7 +164,6 @@ impl Watcher {
     ///
     /// If `recv` is called multiple times after the signal has been received
     /// this function will return immediately.
-    #[tracing::instrument(skip(self))]
     pub async fn recv(&mut self) {
         if self.signal_received {
             // Once the signal is received if this function were called in a
