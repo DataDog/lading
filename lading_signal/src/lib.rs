@@ -26,6 +26,7 @@ use loom::sync::{
 };
 
 use tokio::sync::{broadcast, Notify};
+use tracing::info;
 
 /// Construct a `Watcher` and `Broadcaster` pair.
 pub fn signal() -> (Watcher, Broadcaster) {
@@ -89,7 +90,12 @@ impl Broadcaster {
         // Wait for all peers to drop off. The opposite to
         // `decrease_peer_count`: loop will not consume CPU until a `Watcher`
         // has signaled that it has received the transmitted signal.
-        while self.peers.load(Ordering::SeqCst) > 0 {
+        loop {
+            let peers = self.peers.load(Ordering::SeqCst);
+            if peers == 0 {
+                break;
+            }
+            info!("Waiting for {peers} peers");
             self.notify.notified().await;
         }
     }
