@@ -47,6 +47,7 @@ pub fn signal() -> (Watcher, Broadcaster) {
         signal_received: false,
         notify: Arc::clone(&notify),
         peer_count_decreased: false,
+        registered: true,
     };
 
     let b = Broadcaster {
@@ -132,6 +133,9 @@ pub struct Watcher {
     receiver: broadcast::Receiver<()>,
     /// Allow the `Watchers` to notify `Broadcaster` that they have logged off.
     notify: Arc<Notify>,
+    /// Whether the `Broadcaster` is aware of this instance's existence and will
+    /// wait via `signal_and_wait` for it to terminate.
+    registered: bool,
 }
 
 impl Watcher {
@@ -139,7 +143,18 @@ impl Watcher {
     /// unblock if waiting for peers. See `Broadcaster::signal_and_wait`.
     #[tracing::instrument(skip(self))]
     fn decrease_peer_count(&mut self) {
+        if !self.registered {
+            // If this instance is not registered the `Broadcaster` will not
+            // wait for its dropping. As a result this function has no work.
+            return;
+        }
+
         if self.peer_count_decreased {
+            // If this instance is registered but the `Broadcaster` has already
+            // been informed the peer intends to drop off, there is no work to
+            // be done.
+            //
+            // Only set if this function is previously called.
             return;
         }
 
@@ -234,6 +249,7 @@ impl Watcher {
             // Do not copy existing peer count decreased state as this new peer
             // is independent.
             peer_count_decreased: false,
+            registered: true,
         })
     }
 }

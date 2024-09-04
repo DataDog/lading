@@ -13,7 +13,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-tokio = { workspace = true, features = ["time", "sync"] }
+tokio = { workspace = true, features = ["time", "sync", "rt"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
