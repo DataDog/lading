@@ -139,6 +139,10 @@ impl Watcher {
     /// unblock if waiting for peers. See `Broadcaster::signal_and_wait`.
     #[tracing::instrument(skip(self))]
     fn decrease_peer_count(&mut self) {
+        if self.peer_count_decreased {
+            return;
+        }
+
         // Why not use fetch_sub? That function overflows at the zero boundary
         // and we don't want the peer count to suddenly be u32::MAX.
         let mut old = self.peers.load(Ordering::Relaxed);
@@ -237,9 +241,7 @@ impl Watcher {
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        if !self.peer_count_decreased {
-            self.decrease_peer_count();
-        }
+        self.decrease_peer_count();
     }
 }
 
