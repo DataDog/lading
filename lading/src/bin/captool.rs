@@ -59,7 +59,7 @@ async fn main() -> Result<(), Error> {
 
     let mut file = tokio::fs::File::open(capture_path).await?;
 
-    let contents = if is_zstd {
+    let contents = if !is_zstd {
         let mut contents = String::with_capacity(file.metadata().await?.len() as usize);
         file.read_to_string(&mut contents).await?;
 
