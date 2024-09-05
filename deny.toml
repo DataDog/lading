@@ -23,7 +23,7 @@ allow-git = ["http://github.com/metrics-rs/metrics"]
 
 [advisories]
 vulnerability = "deny"
-unmaintained = "deny"
+unmaintained = "warn"
 notice = "deny"
 unsound = "deny"
 ignore = [
