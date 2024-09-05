@@ -1,5 +1,10 @@
 name: Security Audit
 
+
+# The clippy-check job requires this permission to properly surface failures
+permissions:
+  checks: write
+
 on:
   pull_request:
   push:
