@@ -260,6 +260,21 @@ impl Drop for Watcher {
     }
 }
 
+impl Clone for Watcher {
+    fn clone(&self) -> Self {
+        Self {
+            peers: Arc::clone(&self.peers),
+            receiver: self.receiver.resubscribe(),
+            signal_received: self.signal_received,
+            notify: Arc::clone(&self.notify),
+            // Do not copy existing peer count decreased state as this new peer
+            // is independent.
+            peer_count_decreased: false,
+            registered: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(loom)]
@@ -288,6 +303,56 @@ mod tests {
 
     #[cfg(loom)]
     #[test]
+    fn basic_signal_one_unregistered() {
+        use loom::{future::block_on, thread};
+
+        use crate::signal;
+
+        loom::model(|| {
+            let (mut watcher, broadcaster) = signal();
+            let _unregistered_watcher = watcher.clone();
+
+            // In a thread we have a singular watcher that blocks on recv.
+            let watcher_handle = thread::spawn(move || {
+                block_on(watcher.recv());
+            });
+
+            // Note that _unregistered_watcher is not dropped and has not called
+            // recv, but because it is not registered signal_and_wait must not
+            // deadlock.
+
+            // In our main thread we signal and then wait.
+            block_on(broadcaster.signal_and_wait());
+
+            // Now, assert that the watcher has received the signal and its
+            // thread has shut down.
+            watcher_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn basic_signal_only_unregistered() {
+        use loom::future::block_on;
+
+        use crate::signal;
+
+        loom::model(|| {
+            let (watcher, broadcaster) = signal();
+            let _unregistered_watcher = watcher.clone();
+            drop(watcher);
+
+            // Note that _unregistered_watcher is not dropped and has not called
+            // recv, but because it is not registered signal_and_wait must not
+            // deadlock.
+
+            // In our main thread we signal and then wait.
+            block_on(broadcaster.signal_and_wait());
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
     fn multiple_watchers() {
         use loom::{future::block_on, thread};
 
@@ -304,6 +369,40 @@ mod tests {
             let watcher_handle2 = thread::spawn(move || {
                 block_on(watcher2.recv());
             });
+
+            // In our main thread we signal and then wait.
+            block_on(broadcaster.signal_and_wait());
+
+            // Now, assert that the watchers have received the signal and shut
+            // down.
+            watcher_handle1.join().unwrap();
+            watcher_handle2.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn multiple_watchers_one_unregistered() {
+        use loom::{future::block_on, thread};
+
+        use crate::signal;
+
+        loom::model(|| {
+            let (mut watcher1, broadcaster) = signal();
+            let mut watcher2 = watcher1.register().unwrap();
+            let _unregistered_watcher = watcher2.clone();
+
+            // Create two watchers in two threads, blocking on recv.
+            let watcher_handle1 = thread::spawn(move || {
+                block_on(watcher1.recv());
+            });
+            let watcher_handle2 = thread::spawn(move || {
+                block_on(watcher2.recv());
+            });
+
+            // Note that _unregistered_watcher is not dropped and has not called
+            // recv, but because it is not registered signal_and_wait must not
+            // deadlock.
 
             // In our main thread we signal and then wait.
             block_on(broadcaster.signal_and_wait());
