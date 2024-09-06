@@ -274,6 +274,8 @@ impl Grpc {
         let request_ok = counter!("request_ok", &self.metric_labels);
         let response_bytes = counter!("response_bytes", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
@@ -303,7 +305,7 @@ impl Grpc {
                         }
                     }
                 },
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break;
                 },

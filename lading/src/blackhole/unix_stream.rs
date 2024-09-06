@@ -73,12 +73,14 @@ impl UnixStream {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let listener = net::UnixListener::bind(&self.path).map_err(Error::Io)?;
 
         let connection_accepted = counter!("connection_accepted", &self.metric_labels);
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 conn = listener.accept() => {
@@ -88,7 +90,7 @@ impl UnixStream {
                         Self::handle_connection(socket, labels)
                     );
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(())
                 }

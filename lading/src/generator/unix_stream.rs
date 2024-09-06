@@ -157,6 +157,8 @@ impl UnixStream {
 
         let mut current_connection = None;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let Some(ref socket) = current_connection else {
                 match net::UnixStream::connect(&self.path).await {
@@ -231,7 +233,7 @@ impl UnixStream {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

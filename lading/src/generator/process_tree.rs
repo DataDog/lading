@@ -315,6 +315,8 @@ impl ProcessTree {
     pub async fn spin(mut self) -> Result<(), Error> {
         let lading_path = self.lading_path.to_str().ok_or(Error::ToStr)?;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = self.throttle.wait() => {
@@ -335,7 +337,7 @@ impl ProcessTree {
                     }
                 },
 
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break;
                 },

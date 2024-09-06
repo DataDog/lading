@@ -102,180 +102,192 @@ impl Prometheus {
     #[allow(clippy::cast_sign_loss)]
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn run(mut self) -> Result<(), Error> {
-        let mut shutdown = self.shutdown.clone();
-        let server = async {
-            info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
-            self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered
-            info!("Prometheus target metrics scraper starting collection");
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                self.scrape_metrics().await;
-            }
-        };
+    pub(crate) async fn run(self) -> Result<(), Error> {
+        info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
+        self.experiment_started.recv().await;
+        info!("Prometheus target metrics scraper starting collection");
 
-        tokio::select! {
-            _res = server => {
-                error!("server shutdown unexpectedly");
-                 Err(Error::EarlyShutdown)
-            }
-            () = shutdown.recv() => {
-                info!("shutdown signal received");
-                 Ok(())
+        let client = self.client;
+        let uri = self.config.uri;
+        let tags = self.config.tags;
+        let metrics = self.config.metrics;
+
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
+
+        let mut poll = tokio::time::interval(Duration::from_secs(1));
+
+        loop {
+            tokio::select! {
+                _ = poll.tick() => {
+                    scrape_metrics(&client, &uri, &tags, &metrics).await;
+                }
+                () = &mut shutdown_wait => {
+                    info!("shutdown signal received");
+                    return Ok(());
+                }
             }
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
-    async fn scrape_metrics(&self) {
-        let Ok(resp) = self
-            .client
-            .get(&self.config.uri)
-            .timeout(Duration::from_secs(1))
-            .send()
-            .await
-        else {
-            info!("failed to get Prometheus uri");
-            return;
+    #[cfg(test)]
+    pub(crate) async fn scrape_metrics(&self) {
+        scrape_metrics(
+            &self.client,
+            &self.config.uri,
+            &self.config.tags,
+            &self.config.metrics,
+        )
+        .await;
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+pub(crate) async fn scrape_metrics(
+    client: &reqwest::Client,
+    uri: &str,
+    tags: &Option<FxHashMap<String, String>>,
+    metrics: &Option<Vec<String>>,
+) {
+    let Ok(resp) = client.get(uri).timeout(Duration::from_secs(1)).send().await else {
+        info!("failed to get Prometheus uri");
+        return;
+    };
+
+    let Ok(text) = resp.text().await else {
+        info!("failed to read Prometheus response");
+        return;
+    };
+
+    // remember the type for each metric across lines
+    let mut typemap = FxHashMap::default();
+
+    // this deserves a real parser, but this will do for now.
+    // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
+    for line in text.lines().filter_map(|l| {
+        let line = l.trim();
+        if line.is_empty() {
+            None
+        } else {
+            Some(line)
+        }
+    }) {
+        if line.starts_with("# HELP") {
+            continue;
+        }
+
+        if line.starts_with("# TYPE") {
+            let mut parts = line.split_ascii_whitespace().skip(2);
+            let name = parts.next().expect("parts iterator is missing name");
+            let metric_type = parts.next().expect("parts iterator is missing metric type");
+            let metric_type: MetricType = metric_type.parse().expect("failed to parse metric type");
+            // summary and histogram metrics additionally report names suffixed with _sum, _count, _bucket
+            if matches!(metric_type, MetricType::Histogram | MetricType::Summary) {
+                typemap.insert(format!("{name}_sum"), metric_type);
+                typemap.insert(format!("{name}_count"), metric_type);
+                typemap.insert(format!("{name}_bucket"), metric_type);
+            }
+            typemap.insert(name.to_owned(), metric_type);
+            continue;
+        }
+
+        let mut parts = line.split_ascii_whitespace();
+        let name_and_labels = parts
+            .next()
+            .expect("parts iterator is missing name and labels");
+        let value = parts.next().expect("parts iterator is missing value");
+
+        if value.contains('#') {
+            trace!("Unknown format: {value}");
+            continue;
+        }
+
+        let (name, labels) = {
+            if let Some((name, labels)) = name_and_labels.split_once('{') {
+                let labels = labels.trim_end_matches('}');
+                let labels = labels.split(',').map(|label| {
+                    let (label_name, label_value) = label
+                        .split_once('=')
+                        .expect("label failed to split on first =");
+                    let label_value = label_value.trim_matches('\"');
+                    (label_name.to_owned(), label_value.to_owned())
+                });
+                let labels = labels.collect::<Vec<_>>();
+                (name, Some(labels))
+            } else {
+                (name_and_labels, None)
+            }
         };
 
-        let Ok(text) = resp.text().await else {
-            info!("failed to read Prometheus response");
-            return;
-        };
-
-        // remember the type for each metric across lines
-        let mut typemap = FxHashMap::default();
-
-        // this deserves a real parser, but this will do for now.
-        // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
-        for line in text.lines().filter_map(|l| {
-            let line = l.trim();
-            if line.is_empty() {
-                None
+        // Add lading labels including user defined tags for this endpoint
+        let all_labels: Option<Vec<(String, String)>>;
+        if let Some(tags) = tags {
+            let mut additional_labels = Vec::new();
+            for (tag_name, tag_val) in tags {
+                additional_labels.push((tag_name.clone(), tag_val.clone()));
+            }
+            if let Some(labels) = labels {
+                all_labels = Some([labels, additional_labels].concat());
             } else {
-                Some(line)
+                all_labels = Some(additional_labels);
             }
-        }) {
-            if line.starts_with("# HELP") {
+        } else {
+            all_labels = labels;
+        }
+
+        let metric_type = typemap.get(name);
+        let name = name.replace("__", ".");
+
+        if let Some(metrics) = metrics {
+            if !metrics.contains(&name) {
                 continue;
             }
+        }
 
-            if line.starts_with("# TYPE") {
-                let mut parts = line.split_ascii_whitespace().skip(2);
-                let name = parts.next().expect("parts iterator is missing name");
-                let metric_type = parts.next().expect("parts iterator is missing metric type");
-                let metric_type: MetricType =
-                    metric_type.parse().expect("failed to parse metric type");
-                // summary and histogram metrics additionally report names suffixed with _sum, _count, _bucket
-                if matches!(metric_type, MetricType::Histogram | MetricType::Summary) {
-                    typemap.insert(format!("{name}_sum"), metric_type);
-                    typemap.insert(format!("{name}_count"), metric_type);
-                    typemap.insert(format!("{name}_bucket"), metric_type);
-                }
-                typemap.insert(name.to_owned(), metric_type);
-                continue;
-            }
-
-            let mut parts = line.split_ascii_whitespace();
-            let name_and_labels = parts
-                .next()
-                .expect("parts iterator is missing name and labels");
-            let value = parts.next().expect("parts iterator is missing value");
-
-            if value.contains('#') {
-                trace!("Unknown format: {value}");
-                continue;
-            }
-
-            let (name, labels) = {
-                if let Some((name, labels)) = name_and_labels.split_once('{') {
-                    let labels = labels.trim_end_matches('}');
-                    let labels = labels.split(',').map(|label| {
-                        let (label_name, label_value) = label
-                            .split_once('=')
-                            .expect("label failed to split on first =");
-                        let label_value = label_value.trim_matches('\"');
-                        (label_name.to_owned(), label_value.to_owned())
-                    });
-                    let labels = labels.collect::<Vec<_>>();
-                    (name, Some(labels))
-                } else {
-                    (name_and_labels, None)
-                }
-            };
-
-            // Add lading labels including user defined tags for this endpoint
-            let all_labels: Option<Vec<(String, String)>>;
-            if let Some(tags) = &self.config.tags {
-                let mut additional_labels = Vec::new();
-                for (tag_name, tag_val) in tags {
-                    additional_labels.push((tag_name.clone(), tag_val.clone()));
-                }
-                if let Some(labels) = labels {
-                    all_labels = Some([labels, additional_labels].concat());
-                } else {
-                    all_labels = Some(additional_labels);
-                }
-            } else {
-                all_labels = labels;
-            }
-
-            let metric_type = typemap.get(name);
-            let name = name.replace("__", ".");
-
-            if let Some(metrics) = &self.config.metrics {
-                if !metrics.contains(&name) {
+        match metric_type {
+            Some(MetricType::Gauge) => {
+                let Ok(value): Result<f64, _> = value.parse() else {
+                    let e = value.parse::<f64>().expect("failed to parse gauge value");
+                    warn!("{e}: {name} = {value}");
                     continue;
-                }
+                };
+
+                let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
+                handle.set(value);
             }
+            Some(MetricType::Counter) => {
+                let Ok(value): Result<f64, _> = value.parse() else {
+                    let e = value.parse::<f64>().expect("failed to parse counter value");
+                    warn!("{e}: {name} = {value}");
+                    continue;
+                };
 
-            match metric_type {
-                Some(MetricType::Gauge) => {
-                    let Ok(value): Result<f64, _> = value.parse() else {
-                        let e = value.parse::<f64>().expect("failed to parse gauge value");
-                        warn!("{e}: {name} = {value}");
+                let value = if value < 0.0 {
+                    warn!("Negative counter value unhandled");
+                    continue;
+                } else {
+                    if value > u64::MAX as f64 {
+                        warn!("Counter value above maximum limit");
                         continue;
-                    };
+                    }
+                    // clippy shows "error: casting `f64` to `u64` may lose the sign of the value".
+                    // This is guarded by the sign check above.
+                    value as u64
+                };
 
-                    let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
-                    handle.set(value);
-                }
-                Some(MetricType::Counter) => {
-                    let Ok(value): Result<f64, _> = value.parse() else {
-                        let e = value.parse::<f64>().expect("failed to parse counter value");
-                        warn!("{e}: {name} = {value}");
-                        continue;
-                    };
-
-                    let value = if value < 0.0 {
-                        warn!("Negative counter value unhandled");
-                        continue;
-                    } else {
-                        if value > u64::MAX as f64 {
-                            warn!("Counter value above maximum limit");
-                            continue;
-                        }
-                        // clippy shows "error: casting `f64` to `u64` may lose the sign of the value".
-                        // This is guarded by the sign check above.
-                        value as u64
-                    };
-
-                    trace!("counter: {name} = {value}");
-                    let handle =
-                        counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
-                    handle.absolute(value);
-                }
-                Some(_) => {
-                    trace!("unsupported metric type: {name} = {value}");
-                }
-                None => {
-                    warn!("Couldn't find metric type for {name}");
-                }
+                trace!("counter: {name} = {value}");
+                let handle = counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
+                handle.absolute(value);
+            }
+            Some(_) => {
+                trace!("unsupported metric type: {name} = {value}");
+            }
+            None => {
+                warn!("Couldn't find metric type for {name}");
             }
         }
     }

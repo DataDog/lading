@@ -155,6 +155,8 @@ impl Tcp {
         let packets_sent = counter!("packets_sent", &self.metric_labels);
         let mut current_connection = None;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let Some(ref mut connection) = current_connection else {
                 match TcpStream::connect(self.addr).await {
@@ -194,7 +196,7 @@ impl Tcp {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

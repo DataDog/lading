@@ -281,6 +281,8 @@ impl Child {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let bytes_written = counter!("bytes_written");
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
@@ -331,7 +333,7 @@ impl Child {
                         total_bytes_written = 0;
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     fp.flush().await?;
                     info!("shutdown signal received");
                     return Ok(());

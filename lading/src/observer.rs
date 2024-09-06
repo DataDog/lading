@@ -98,7 +98,7 @@ impl Server {
         clippy::cast_sign_loss
     )]
     #[cfg(target_os = "linux")]
-    pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
+    pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         use std::time::Duration;
 
         use crate::observer::linux::Sampler;
@@ -114,12 +114,14 @@ impl Server {
         let mut sample_delay = tokio::time::interval(Duration::from_secs(1));
         let mut sampler = Sampler::new(target_pid)?;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = sample_delay.tick() => {
                     sampler.sample().await?;
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     tracing::info!("shutdown signal received");
                     return Ok(());
                 }

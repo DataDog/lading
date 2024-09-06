@@ -220,7 +220,7 @@ impl Http {
     ///
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let bytes_received = counter!("bytes_received", &self.metric_labels);
         let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
