@@ -186,7 +186,7 @@ impl SplunkHec {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let labels = Arc::new(self.metric_labels.clone());
         let service = make_service_fn(|_: &AddrStream| {
             let labels = labels.clone();

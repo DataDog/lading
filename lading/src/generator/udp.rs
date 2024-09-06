@@ -164,6 +164,8 @@ impl Udp {
         let bytes_written = counter!("bytes_written", &self.metric_labels);
         let packets_sent = counter!("packets_sent", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
@@ -204,7 +206,7 @@ impl Udp {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

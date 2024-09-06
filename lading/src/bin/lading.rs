@@ -495,7 +495,7 @@ async fn inner_main(
         tgt_snd.send(None)?;
     };
 
-    let (mut timer_watcher, timer_broadcast) = lading_signal::signal();
+    let (timer_watcher, timer_broadcast) = lading_signal::signal();
     tokio::spawn(async move {
         info!("target is running, now sleeping for warmup");
         sleep(warmup_duration).await;
@@ -510,6 +510,8 @@ async fn inner_main(
     // `signal_and_wait` if a watcher remains derived from `shutdown_watcher` the run will not shut down.
     drop(shutdown_watcher);
     drop(experiment_started_watcher);
+    let timer_watcher_wait = timer_watcher.recv();
+    tokio::pin!(timer_watcher_wait);
     let mut interval = time::interval(Duration::from_millis(400));
     let res = loop {
         tokio::select! {
@@ -521,7 +523,7 @@ async fn inner_main(
                 info!("received ctrl-c");
                 break Ok(());
             },
-            _ = timer_watcher.recv() => {
+            _ = &mut timer_watcher_wait => {
                 info!("shutdown signal received.");
                 break Ok(());
             }

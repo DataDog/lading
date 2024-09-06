@@ -69,7 +69,7 @@ impl Expvar {
     /// # Panics
     ///
     /// None are known.
-    pub(crate) async fn run(mut self) -> Result<(), Error> {
+    pub(crate) async fn run(self) -> Result<(), Error> {
         info!("Expvar target metrics scraper running, but waiting for warmup to complete");
         self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered
         info!("Expvar target metrics scraper starting collection");

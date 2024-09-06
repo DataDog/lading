@@ -183,7 +183,7 @@ impl Watcher {
     ///
     /// If `recv` is called multiple times after the signal has been received
     /// this function will return immediately.
-    pub async fn recv(&mut self) {
+    pub async fn recv(mut self) {
         if self.signal_received {
             // Once the signal is received if this function were called in a
             // `select!` it might drown out every other arm. May indicate the
@@ -210,7 +210,6 @@ impl Watcher {
     ///
     /// If the signal has not been received returns Ok(false). If it has been
     /// received Ok(true). All calls after will return `TryRecvError::SignalReceived`.
-    #[tracing::instrument(skip(self))]
     pub fn try_recv(&mut self) -> Result<bool, TryRecvError> {
         // If the shutdown signal has already been received, return with error.
         if self.signal_received {
@@ -285,7 +284,7 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (mut watcher, broadcaster) = signal();
+            let (watcher, broadcaster) = signal();
 
             // In a thread we have a singular watcher that blocks on recv.
             let watcher_handle = thread::spawn(move || {
@@ -309,7 +308,7 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (mut watcher, broadcaster) = signal();
+            let (watcher, broadcaster) = signal();
             let _unregistered_watcher = watcher.clone();
 
             // In a thread we have a singular watcher that blocks on recv.
@@ -359,8 +358,8 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (mut watcher1, broadcaster) = signal();
-            let mut watcher2 = watcher1.register().unwrap();
+            let (watcher1, broadcaster) = signal();
+            let watcher2 = watcher1.register().unwrap();
 
             // Create two watchers in two threads, blocking on recv.
             let watcher_handle1 = thread::spawn(move || {
@@ -388,8 +387,8 @@ mod tests {
         use crate::signal;
 
         loom::model(|| {
-            let (mut watcher1, broadcaster) = signal();
-            let mut watcher2 = watcher1.register().unwrap();
+            let (watcher1, broadcaster) = signal();
+            let watcher2 = watcher1.register().unwrap();
             let _unregistered_watcher = watcher2.clone();
 
             // Create two watchers in two threads, blocking on recv.

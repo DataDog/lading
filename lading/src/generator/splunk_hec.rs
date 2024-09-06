@@ -263,6 +263,9 @@ impl SplunkHec {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let mut channels = self.channels.iter().cycle();
 
+        let request_shutdown = self.shutdown.clone();
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let channel: Channel = channels
                 .next()
@@ -295,9 +298,9 @@ impl SplunkHec {
                     // the AckID, meaning we could just keep the channel logic
                     // in this main loop here and avoid the AckService entirely.
                     let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
-                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.clone()));
+                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     // When we shut down we may leave dangling, active
                     // requests. This is acceptable. As we do not today
@@ -319,7 +322,7 @@ async fn send_hec_request(
     channel: Channel,
     client: Client<HttpConnector>,
     request: Request<Body>,
-    mut shutdown: lading_signal::Watcher,
+    shutdown: lading_signal::Watcher,
 ) -> Result<(), Error> {
     counter!("requests_sent", &labels).increment(1);
     let work = client.request(request);

@@ -174,6 +174,8 @@ impl FileTree {
         let mut iter = self.nodes.iter().cycle();
         let mut folders = Vec::with_capacity(self.total_folder);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = self.open_throttle.wait() => {
@@ -193,7 +195,7 @@ impl FileTree {
                         rename_folder(&mut self.rng, folder, self.name_len.get()).await?;
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break;
                 },

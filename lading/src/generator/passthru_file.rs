@@ -145,6 +145,8 @@ impl PassthruFile {
 
         let bytes_written = counter!("bytes_written", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         let mut current_file = None;
         loop {
             let Some(ref mut current_file) = current_file else {
@@ -189,7 +191,7 @@ impl PassthruFile {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

@@ -107,7 +107,7 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<ExitStatus, Error> {
+    pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<ExitStatus, Error> {
         let target_pid = pid_snd.recv().await?;
         drop(pid_snd);
 

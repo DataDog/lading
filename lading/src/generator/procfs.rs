@@ -165,7 +165,7 @@ impl ProcFs {
     /// This function will terminate with an error if files cannot be written to
     /// the directory tree rooted at `self.root`. Any error from
     /// `std::io::Error` is possible.
-    pub async fn spin(mut self) -> Result<(), Error> {
+    pub async fn spin(self) -> Result<(), Error> {
         self.shutdown.recv().await;
         tracing::info!("shutdown signal received");
         Ok(())

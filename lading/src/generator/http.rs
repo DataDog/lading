@@ -209,6 +209,8 @@ impl Http {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let blk = rcv.next().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
@@ -254,7 +256,7 @@ impl Http {
                         drop(permit);
                     });
                 },
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.

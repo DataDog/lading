@@ -248,7 +248,7 @@ impl Server {
     async fn watch_container(
         config: DockerConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: lading_signal::Watcher,
+        shutdown: lading_signal::Watcher,
     ) -> Result<(), Error> {
         let docker = Docker::connect_with_socket_defaults()?;
 
@@ -300,6 +300,8 @@ impl Server {
 
         let mut interval = time::interval(Duration::from_millis(400));
         tokio::pin!(target_wait);
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
 
         loop {
             tokio::select! {
@@ -314,7 +316,7 @@ impl Server {
                     error!("target exited unexpectedly; exit code unavailable");
                     break Err(Error::TargetExited(None));
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break Ok(());
                 }
@@ -327,7 +329,7 @@ impl Server {
     async fn watch(
         config: PidConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: lading_signal::Watcher,
+        shutdown: lading_signal::Watcher,
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
@@ -375,6 +377,8 @@ impl Server {
 
         let mut interval = time::interval(Duration::from_millis(400));
         tokio::pin!(target_wait);
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
 
         loop {
             tokio::select! {
@@ -389,7 +393,7 @@ impl Server {
                     error!("target exited unexpectedly; exit code unavailable");
                     break Err(Error::TargetExited(None));
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break Ok(());
                 }
@@ -402,7 +406,7 @@ impl Server {
     async fn execute_binary(
         config: BinaryConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: lading_signal::Watcher,
+        shutdown: lading_signal::Watcher,
     ) -> Result<ExitStatus, Error> {
         let mut target_cmd = Command::new(config.command);
         target_cmd
@@ -422,6 +426,8 @@ impl Server {
         drop(pid_snd);
 
         let mut interval = time::interval(Duration::from_secs(400));
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = interval.tick() => {
@@ -439,7 +445,7 @@ impl Server {
                         },
                     }
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     // Note that `Child::kill` sends SIGKILL which is not what we
                     // want. We instead send SIGTERM so that the child has a chance

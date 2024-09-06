@@ -71,7 +71,7 @@ impl Udp {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
             .map_err(Error::Io)?;
@@ -80,6 +80,8 @@ impl Udp {
         let bytes_received = counter!("bytes_received", &self.metric_labels);
         let packet_received = counter!("packet_received", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 packet = socket.recv_from(&mut buf) => {
@@ -87,7 +89,7 @@ impl Udp {
                     packet_received.increment(1);
                     bytes_received.increment(bytes as u64);
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(())
                 }
