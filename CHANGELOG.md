@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+###
+- Now built using rust 1.81.0.
+
 ## [0.23.1]
 ### Fixed
 - Fixes a panic in the signal mechanism that appeared when using the file
