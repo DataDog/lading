@@ -190,11 +190,9 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || {
-                let token = self.shutdown.register();
                 loop {
                     if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
-                        drop(token);
                         return;
                     }
                     let now = Instant::now();

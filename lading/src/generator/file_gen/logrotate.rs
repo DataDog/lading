@@ -57,9 +57,6 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Unable to register `Watcher`
-    #[error(transparent)]
-    Watcher(#[from] lading_signal::RegisterError),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -173,7 +170,7 @@ impl Server {
                 maximum_bytes_per_file,
                 block_cache,
                 throttle,
-                shutdown.register()?,
+                shutdown.clone(),
             );
 
             handles.push(tokio::spawn(child.spin()));

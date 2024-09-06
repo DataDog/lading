@@ -120,9 +120,6 @@ pub enum Error {
     /// Wrapper around [`acknowledgements::Error`]
     #[error(transparent)]
     Acknowledge(#[from] acknowledgements::Error),
-    /// Unable to register `Watcher`
-    #[error(transparent)]
-    Watcher(#[from] lading_signal::RegisterError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -298,7 +295,7 @@ impl SplunkHec {
                     // the AckID, meaning we could just keep the channel logic
                     // in this main loop here and avoid the AckService entirely.
                     let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
-                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.register()?));
+                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, self.shutdown.clone()));
                 }
                 () = self.shutdown.recv() => {
                     info!("shutdown signal received");
