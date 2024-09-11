@@ -29,7 +29,7 @@ use tokio::{
     sync::broadcast,
     time::{self, sleep, Duration},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt, EnvFilter};
 
 #[derive(thiserror::Error, Debug)]
@@ -474,6 +474,8 @@ async fn inner_main(
         }
     }
 
+    let mut sequence_tgt_recv = tgt_snd.subscribe();
+
     let mut tsrv_joinset = tokio::task::JoinSet::new();
     let mut osrv_joinset = tokio::task::JoinSet::new();
     //
@@ -496,15 +498,23 @@ async fn inner_main(
     };
 
     let (timer_watcher, timer_broadcast) = lading_signal::signal();
-    tokio::spawn(async move {
-        info!("target is running, now sleeping for warmup");
-        sleep(warmup_duration).await;
-        experiment_started_broadcast.signal();
-        info!("warmup completed, collecting samples");
-        sleep(experiment_duration).await;
-        info!("experiment duration exceeded, signaling for shutdown");
-        timer_broadcast.signal();
-    });
+
+    tokio::spawn(
+        async move {
+            info!("waiting for target startup");
+            if let Err(e) = sequence_tgt_recv.recv().await {
+                warn!("failed to wait: {:?}", e);
+            }
+            info!("target is running, now sleeping for warmup");
+            sleep(warmup_duration).await;
+            experiment_started_broadcast.signal();
+            info!("warmup completed, collecting samples");
+            sleep(experiment_duration).await;
+            info!("experiment duration exceeded, signaling for shutdown");
+            timer_broadcast.signal();
+        }
+        .instrument(info_span!("experiment_sequence")),
+    );
 
     // We must be sure to drop any unused watcher at this point. Below in
     // `signal_and_wait` if a watcher remains derived from `shutdown_watcher` the run will not shut down.
