@@ -143,7 +143,7 @@ async fn main() -> Result<(), Error> {
                 .iter()
                 .filter(|line| &line.metric_name == metric)
                 .for_each(|line| {
-                    println!("{}", line.value);
+                    println!("{}: {}", line.fetch_index, line.value);
                 });
         } else {
             error!("--dump-values requires --metric");
