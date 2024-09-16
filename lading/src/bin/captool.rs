@@ -55,7 +55,7 @@ async fn main() -> Result<(), Error> {
 
     let is_zstd = capture_path
         .extension()
-        .is_some_and(|ext| ext == OsStr::new(".zstd"));
+        .is_some_and(|ext| ext == OsStr::new("zstd"));
 
     let mut file = tokio::fs::File::open(capture_path).await?;
 
