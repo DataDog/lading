@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Warmup period is now respected when container targeting is in use.
+- Capture manager waits for the target to start running before recording data.
 
 ## [0.23.1]
 ### Fixed
