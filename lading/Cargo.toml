@@ -46,11 +46,7 @@ nix = { version = "0.29", default-features = false, features = [
   "signal",
 ] }
 num_cpus = { version = "1.16" }
-<<<<<<< HEAD
-once_cell = { version = "1.18" }
-=======
 once_cell = { workspace = true }
->>>>>>> 3d9f30b (security audit ding)
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
   "std",
