@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
 
-use average::{concatenate, Estimate, Variance};
+use average::{concatenate, Estimate, Max, Min, Variance};
 use clap::Parser;
 use futures::io;
 use lading_capture::json::Line;
@@ -119,13 +119,15 @@ async fn main() -> Result<(), Error> {
                 entry.1.push(line.value.as_f64());
             });
 
-        concatenate!(Estimator, [Variance, variance, mean]);
+        concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
 
         for (_, (labels, values)) in context_map.iter() {
             let s: Estimator = values.iter().copied().collect();
             info!(
-                "{metric}[{labels}]: mean: {}",
+                "{metric}[{labels}]: min: {}, mean: {}, max: {}",
+                s.min(),
                 s.mean(),
+                s.max(),
                 labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
             );
         }
