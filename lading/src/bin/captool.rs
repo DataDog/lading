@@ -22,6 +22,10 @@ struct Args {
     #[clap(short, long)]
     metric: Option<String>,
 
+    /// dump a metric's values. Requires --metric.
+    #[clap(short, long)]
+    dump_values: bool,
+
     /// Path to line-delimited capture file
     capture_path: String,
 }
@@ -88,7 +92,7 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    if let Some(metric) = args.metric {
+    if let Some(metric) = &args.metric {
         // key is hash of the metric name and all the sorted, concatenated labels
         // value is a tuple of
         // - hashset of "key:value" strings (aka, concatenated labels)
@@ -100,7 +104,7 @@ async fn main() -> Result<(), Error> {
         // Use a BTreeSet to ensure that the tags are sorted
         lines
             .iter()
-            .filter(|line| line.metric_name == metric)
+            .filter(|line| &line.metric_name == metric)
             .for_each(|line| {
                 let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
                 for (key, value) in line.labels.iter() {
@@ -130,6 +134,20 @@ async fn main() -> Result<(), Error> {
                 s.max(),
                 labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
             );
+        }
+    }
+
+    if args.dump_values {
+        if let Some(metric) = &args.metric {
+            lines
+                .iter()
+                .filter(|line| &line.metric_name == metric)
+                .for_each(|line| {
+                    println!("{}", line.value);
+                });
+        } else {
+            error!("--dump-values requires --metric");
+            return Err(Error::InvalidArgs);
         }
     }
 
