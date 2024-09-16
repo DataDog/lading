@@ -493,8 +493,10 @@ async fn inner_main(
         let target_server = target::Server::new(target, shutdown_watcher.clone());
         tsrv_joinset.spawn(target_server.run(tgt_snd, target_running_broadcast));
     } else {
-        // Many lading servers synchronize on target startup.
+        // Many lading servers synchronize on target startup using the PID sender. Some by necessity, others by legacy.
         tgt_snd.send(None)?;
+        // Newer usage prefers the `target_running` signal where the PID isn't needed.
+        target_running_broadcast.signal();
     };
 
     let (timer_watcher, timer_broadcast) = lading_signal::signal();
