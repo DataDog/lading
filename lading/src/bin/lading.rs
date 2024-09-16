@@ -347,6 +347,7 @@ async fn inner_main(
 ) -> Result<(), Error> {
     let (shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
     let (experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
+    let (target_running_watcher, target_running_broadcast) = lading_signal::signal();
 
     // Set up the telemetry sub-system.
     //
@@ -390,6 +391,7 @@ async fn inner_main(
                 path,
                 shutdown_watcher.register()?,
                 experiment_started_watcher.clone(),
+                target_running_watcher.clone(),
             )
             .await?;
             for (k, v) in global_labels {
@@ -474,8 +476,6 @@ async fn inner_main(
         }
     }
 
-    let mut sequence_tgt_recv = tgt_snd.subscribe();
-
     let mut tsrv_joinset = tokio::task::JoinSet::new();
     let mut osrv_joinset = tokio::task::JoinSet::new();
     //
@@ -491,10 +491,12 @@ async fn inner_main(
         // TARGET
         //
         let target_server = target::Server::new(target, shutdown_watcher.clone());
-        tsrv_joinset.spawn(target_server.run(tgt_snd));
+        tsrv_joinset.spawn(target_server.run(tgt_snd, target_running_broadcast));
     } else {
-        // Many lading servers synchronize on target startup.
+        // Many lading servers synchronize on target startup using the PID sender. Some by necessity, others by legacy.
         tgt_snd.send(None)?;
+        // Newer usage prefers the `target_running` signal where the PID isn't needed.
+        target_running_broadcast.signal();
     };
 
     let (timer_watcher, timer_broadcast) = lading_signal::signal();
@@ -502,9 +504,7 @@ async fn inner_main(
     tokio::spawn(
         async move {
             info!("waiting for target startup");
-            if let Err(e) = sequence_tgt_recv.recv().await {
-                warn!("failed to wait: {:?}", e);
-            }
+            target_running_watcher.recv().await;
             info!("target is running, now sleeping for warmup");
             sleep(warmup_duration).await;
             experiment_started_broadcast.signal();

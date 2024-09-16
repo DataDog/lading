@@ -59,6 +59,7 @@ pub struct CaptureManager {
     capture_path: PathBuf,
     shutdown: lading_signal::Watcher,
     _experiment_started: lading_signal::Watcher,
+    target_running: lading_signal::Watcher,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -73,6 +74,7 @@ impl CaptureManager {
         capture_path: PathBuf,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
@@ -83,6 +85,7 @@ impl CaptureManager {
             capture_path,
             shutdown,
             _experiment_started: experiment_started,
+            target_running,
             inner: Arc::new(Inner {
                 registry: Registry::atomic(),
             }),
@@ -190,6 +193,9 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || {
+                while let Ok(false) = self.target_running.try_recv() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
                 loop {
                     if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
