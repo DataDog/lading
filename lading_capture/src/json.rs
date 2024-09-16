@@ -38,6 +38,15 @@ impl LineValue {
     }
 }
 
+impl std::fmt::Display for LineValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LineValue::Int(int) => write!(f, "{int}"),
+            LineValue::Float(float) => write!(f, "{float}"),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 /// The structure of a capture file line.
 pub struct Line<'a> {
