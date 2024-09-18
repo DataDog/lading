@@ -20,6 +20,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
+async-compression = { version = "0.4.6", features = ["tokio", "zstd"] }
 average = { version = "0.15", default-features = false, features = [] }
 bollard = { version = "0.17", default-features = false, features = [] }
 byte-unit = { workspace = true }
@@ -70,6 +71,7 @@ tokio = { workspace = true, features = [
   "time",
   "net",
 ] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
 tower = { version = "0.4", default-features = false, features = [

@@ -8,7 +8,6 @@
 //! that same crate.
 
 use std::{
-    borrow::Cow,
     ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
@@ -127,7 +126,7 @@ impl CaptureManager {
                     labels.insert(lbl.key().into(), lbl.value().into());
                 }
                 let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
+                    run_id: self.run_id,
                     time: now_ms,
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
@@ -147,7 +146,7 @@ impl CaptureManager {
                 }
                 let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
                 let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
+                    run_id: self.run_id,
                     time: now_ms,
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
