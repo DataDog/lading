@@ -109,6 +109,12 @@ async fn main() -> Result<(), Error> {
             .collect()
             .await;
 
+        if let Some(point) = filtered.first() {
+            info!("Metric kind: {:?}", point.metric_kind);
+        } else {
+            error!("No data found for metric {}", metric);
+        }
+
         for line in &filtered {
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
             for (key, value) in line.labels.iter() {
