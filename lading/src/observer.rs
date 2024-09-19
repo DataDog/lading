@@ -13,8 +13,6 @@ use std::{io, sync::atomic::AtomicU64};
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
-use crate::signals::Phase;
-
 #[cfg(target_os = "linux")]
 mod linux;
 
@@ -59,7 +57,7 @@ pub struct Server {
     #[allow(dead_code)] // config is not actively used, left as a stub
     config: Config,
     #[allow(dead_code)] // this field is unused when target_os is not "linux"
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
@@ -72,7 +70,7 @@ impl Server {
     ///
     /// Function will error if the path to the sub-process is not valid or if
     /// the path is valid but is not to file executable by this program.
-    pub fn new(config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         Ok(Self { config, shutdown })
     }
 
@@ -100,7 +98,7 @@ impl Server {
         clippy::cast_sign_loss
     )]
     #[cfg(target_os = "linux")]
-    pub async fn run(mut self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
+    pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         use std::time::Duration;
 
         use crate::observer::linux::Sampler;
@@ -116,12 +114,14 @@ impl Server {
         let mut sample_delay = tokio::time::interval(Duration::from_secs(1));
         let mut sampler = Sampler::new(target_pid)?;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = sample_delay.tick() => {
                     sampler.sample().await?;
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     tracing::info!("shutdown signal received");
                     return Ok(());
                 }

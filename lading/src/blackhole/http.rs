@@ -20,8 +20,6 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use crate::signals::Phase;
-
 use super::General;
 
 fn default_concurrent_requests_max() -> usize {
@@ -153,7 +151,7 @@ pub struct Http {
     httpd_addr: SocketAddr,
     body_bytes: Vec<u8>,
     concurrency_limit: usize,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     headers: HeaderMap,
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
@@ -169,7 +167,11 @@ impl Http {
     /// # Panics
     ///
     /// None known.
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: &Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
         let mut metric_labels = vec![
@@ -218,7 +220,7 @@ impl Http {
     ///
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let bytes_received = counter!("bytes_received", &self.metric_labels);
         let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {

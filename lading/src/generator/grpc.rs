@@ -29,7 +29,7 @@ use tonic::{
 };
 use tracing::{debug, info};
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -141,7 +141,7 @@ pub struct Grpc {
     config: Config,
     target_uri: Uri,
     rpc_path: PathAndQuery,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
@@ -159,7 +159,11 @@ impl Grpc {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -270,6 +274,8 @@ impl Grpc {
         let request_ok = counter!("request_ok", &self.metric_labels);
         let response_bytes = counter!("response_bytes", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
@@ -299,7 +305,7 @@ impl Grpc {
                         }
                     }
                 },
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break;
                 },

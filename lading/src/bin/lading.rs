@@ -14,7 +14,6 @@ use lading::{
     config::{Config, Telemetry},
     generator::{self, process_tree},
     inspector, observer,
-    signals::Phase,
     target::{self, Behavior, Output},
     target_metrics,
 };
@@ -30,7 +29,7 @@ use tokio::{
     sync::broadcast,
     time::{self, sleep, Duration},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt, EnvFilter};
 
 #[derive(thiserror::Error, Debug)]
@@ -61,6 +60,8 @@ enum Error {
     PrometheusPath,
     #[error("Process tree failed to generate tree")]
     ProcessTree(#[from] process_tree::Error),
+    #[error(transparent)]
+    Registration(#[from] lading_signal::RegisterError),
 }
 
 fn default_config_path() -> String {
@@ -344,8 +345,9 @@ async fn inner_main(
     disable_inspector: bool,
     config: Config,
 ) -> Result<(), Error> {
-    let mut shutdown = Phase::new();
-    let experiment_started = Phase::new();
+    let (shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
+    let (experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
+    let (target_running_watcher, target_running_broadcast) = lading_signal::signal();
 
     // Set up the telemetry sub-system.
     //
@@ -385,8 +387,13 @@ async fn inner_main(
             path,
             global_labels,
         } => {
-            let mut capture_manager =
-                CaptureManager::new(path, shutdown.clone(), experiment_started.clone()).await?;
+            let mut capture_manager = CaptureManager::new(
+                path,
+                shutdown_watcher.register()?,
+                experiment_started_watcher.clone(),
+                target_running_watcher.clone(),
+            )
+            .await?;
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
@@ -419,7 +426,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown.clone())?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone())?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -429,7 +436,8 @@ async fn inner_main(
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
             let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server = inspector::Server::new(inspector_conf, shutdown.clone())?;
+            let inspector_server =
+                inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
             let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
         }
     }
@@ -439,7 +447,7 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.blackhole {
         for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown.clone())?;
+            let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
             let _bsrv = tokio::spawn(async {
                 match blackhole_server.run().await {
                     Ok(()) => debug!("blackhole shut down successfully"),
@@ -454,8 +462,11 @@ async fn inner_main(
     //
     if let Some(cfgs) = config.target_metrics {
         for cfg in cfgs {
-            let metrics_server =
-                target_metrics::Server::new(cfg, shutdown.clone(), experiment_started.clone());
+            let metrics_server = target_metrics::Server::new(
+                cfg,
+                shutdown_watcher.clone(),
+                experiment_started_watcher.clone(),
+            );
             tokio::spawn(async {
                 match metrics_server.run().await {
                     Ok(()) => debug!("target_metrics shut down successfully"),
@@ -473,30 +484,44 @@ async fn inner_main(
     // Observer is not used when there is no target.
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
-        let observer_server = observer::Server::new(config.observer, shutdown.clone())?;
+        let observer_server = observer::Server::new(config.observer, shutdown_watcher.clone())?;
         osrv_joinset.spawn(observer_server.run(obs_rcv));
 
         //
         // TARGET
         //
-        let target_server = target::Server::new(target, shutdown.clone());
-        tsrv_joinset.spawn(target_server.run(tgt_snd));
+        let target_server = target::Server::new(target, shutdown_watcher.clone());
+        tsrv_joinset.spawn(target_server.run(tgt_snd, target_running_broadcast));
     } else {
-        // Many lading servers synchronize on target startup.
+        // Many lading servers synchronize on target startup using the PID sender. Some by necessity, others by legacy.
         tgt_snd.send(None)?;
+        // Newer usage prefers the `target_running` signal where the PID isn't needed.
+        target_running_broadcast.signal();
     };
 
-    let experiment_completed_shutdown = shutdown.clone();
-    tokio::spawn(async move {
-        info!("target is running, now sleeping for warmup");
-        sleep(warmup_duration).await;
-        experiment_started.signal();
-        info!("warmup completed, collecting samples");
-        sleep(experiment_duration).await;
-        info!("experiment duration exceeded, signaling for shutdown");
-        experiment_completed_shutdown.signal();
-    });
+    let (timer_watcher, timer_broadcast) = lading_signal::signal();
 
+    tokio::spawn(
+        async move {
+            info!("waiting for target startup");
+            target_running_watcher.recv().await;
+            info!("target is running, now sleeping for warmup");
+            sleep(warmup_duration).await;
+            experiment_started_broadcast.signal();
+            info!("warmup completed, collecting samples");
+            sleep(experiment_duration).await;
+            info!("experiment duration exceeded, signaling for shutdown");
+            timer_broadcast.signal();
+        }
+        .instrument(info_span!("experiment_sequence")),
+    );
+
+    // We must be sure to drop any unused watcher at this point. Below in
+    // `signal_and_wait` if a watcher remains derived from `shutdown_watcher` the run will not shut down.
+    drop(shutdown_watcher);
+    drop(experiment_started_watcher);
+    let timer_watcher_wait = timer_watcher.recv();
+    tokio::pin!(timer_watcher_wait);
     let mut interval = time::interval(Duration::from_millis(400));
     let res = loop {
         tokio::select! {
@@ -506,9 +531,9 @@ async fn inner_main(
 
             _ = signal::ctrl_c() => {
                 info!("received ctrl-c");
-                shutdown.signal();
+                break Ok(());
             },
-            _ = shutdown.recv() => {
+            _ = &mut timer_watcher_wait => {
                 info!("shutdown signal received.");
                 break Ok(());
             }
@@ -518,7 +543,6 @@ async fn inner_main(
                         Ok(()) => { /* Observer shut down successfully */ }
                         Err(err) => {
                             error!("Observer shut down unexpectedly: {err}");
-                            shutdown.signal();
                             break Err(Error::LadingObserver(err));
                         }
                     }
@@ -529,7 +553,10 @@ async fn inner_main(
                 match res {
                     Ok(generator_result) => match generator_result {
                         Ok(()) => { /* Generator shut down successfully */ }
-                        Err(err) => error!("Generator shut down unexpectedly: {}", err),
+                        Err(err) => {
+                            error!("Generator shut down unexpectedly: {}", err);
+                            break Err(Error::LadingGenerator(err));
+                        }
                     }
                     Err(err) => error!("Could not join the spawned generator task: {}", err),
                 }
@@ -540,12 +567,10 @@ async fn inner_main(
                     Ok(target_result) => match target_result {
                         Ok(_) => {
                             debug!("Target shut down successfully");
-                            shutdown.signal();
                             break Ok(());
                         }
                         Err(err) => {
                             error!("Target shut down unexpectedly: {}", err);
-                            shutdown.signal();
                             break Err(Error::Target(err));
                         }
                     }
@@ -554,7 +579,7 @@ async fn inner_main(
             },
         }
     };
-    shutdown.wait_for_peers().await;
+    shutdown_broadcast.signal_and_wait().await;
     res
 }
 

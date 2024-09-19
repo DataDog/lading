@@ -1,10 +1,11 @@
 [package]
 name = "lading"
-version = "0.22.0"
+version = "0.23.2"
 authors = [
-    "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
-    "George Hahn <george.hahn@datadoghq.com>",
-    "Scott Opell <scott.opell@datadoghq.com>"
+  "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+  "George Hahn <george.hahn@datadoghq.com>",
+  "Scott Opell <scott.opell@datadoghq.com>",
+  "Caleb Metz <caleb.metz@datadoghq.com>",
 ]
 edition = "2021"
 license = "MIT"
@@ -17,37 +18,67 @@ description = "A tool for load testing daemons."
 lading-capture = { version = "0.1", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
+lading-signal = { version = "0.1", path = "../lading_signal" }
 
+async-compression = { version = "0.4.6", features = ["tokio", "zstd"] }
 average = { version = "0.15", default-features = false, features = [] }
-bollard ={ version = "0.16", default-features = false, features = [] }
-byte-unit = {workspace = true }
+bollard = { version = "0.17", default-features = false, features = [] }
+byte-unit = { workspace = true }
 bytes = { workspace = true, features = ["std"] }
-clap = { version = "3.2", default-features = false, features = ["std", "suggestions", "derive"] }
-flate2 = { version = "1.0.31", default-features = false, features = ["rust_backend" ] }
+clap = { version = "3.2", default-features = false, features = [
+  "std",
+  "suggestions",
+  "derive",
+] }
+flate2 = { version = "1.0.33", default-features = false, features = [
+  "rust_backend",
+] }
 futures = "0.3.28"
 http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
-is_executable = "1.0.1"
+is_executable = "1.0.3"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
-metrics-util = { workspace = true}
-nix = { version = "0.29", default-features = false, features = ["process", "signal"] }
+metrics-util = { workspace = true }
+nix = { version = "0.29", default-features = false, features = [
+  "process",
+  "signal",
+] }
 num_cpus = { version = "1.16" }
 once_cell = { version = "1.18" }
-rand = { workspace = true, default-features = false, features = ["small_rng", "std", "std_rng" ]}
+rand = { workspace = true, default-features = false, features = [
+  "small_rng",
+  "std",
+  "std_rng",
+] }
 regex = { version = "1.10" }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
-serde_json = {workspace = true }
+serde_json = { workspace = true }
 serde_qs = { version = "0.13", default-features = false }
 serde_yaml = { version = "0.9" }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "process", "signal", "time", "net"] }
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "macros",
+  "fs",
+  "io-util",
+  "process",
+  "signal",
+  "time",
+  "net",
+] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
-tower = { version = "0.4", default-features = false, features = ["timeout", "limit", "load-shed"] }
+tower = { version = "0.4", default-features = false, features = [
+  "timeout",
+  "limit",
+  "load-shed",
+] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
@@ -60,7 +91,7 @@ async-pidfd = "0.1"
 
 [dev-dependencies]
 proptest = "1.4"
-proptest-derive = "0.4.0"
+proptest-derive = "0.5.0"
 tempfile = "3.12.0"
 warp = "0.3"
 

@@ -11,7 +11,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use byte_unit::{Byte, ByteError, ByteUnit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
@@ -105,7 +105,7 @@ pub enum Error {
 /// datagrams.
 pub struct UnixDatagram {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     startup: tokio::sync::broadcast::Sender<()>,
 }
 
@@ -121,7 +121,11 @@ impl UnixDatagram {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: &Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -199,7 +203,7 @@ struct Child {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Child {
@@ -236,6 +240,8 @@ impl Child {
         let bytes_written = counter!("bytes_written", &self.metric_labels);
         let packets_sent = counter!("packets_sent", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let blk = rcv.peek().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
@@ -264,7 +270,7 @@ impl Child {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

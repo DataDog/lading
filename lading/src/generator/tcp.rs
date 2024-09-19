@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
 use tracing::{info, trace};
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -78,7 +78,7 @@ pub struct Tcp {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Tcp {
@@ -93,7 +93,11 @@ impl Tcp {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: &Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -151,6 +155,8 @@ impl Tcp {
         let packets_sent = counter!("packets_sent", &self.metric_labels);
         let mut current_connection = None;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let Some(ref mut connection) = current_connection else {
                 match TcpStream::connect(self.addr).await {
@@ -190,7 +196,7 @@ impl Tcp {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

@@ -85,6 +85,23 @@ jobs:
         working-directory: ${{ matrix.crate }}
         timeout-minutes: 30
 
+  loom:
+    name: Loom Proofs
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [lading_signal]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.9
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - run: RUSTFLAGS="--cfg loom" cargo nextest run --release
+        working-directory: ${{ matrix.crate }}
+        timeout-minutes: 30
+
   buf:
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +109,7 @@ jobs:
       # changes
       - uses: actions/checkout@v4
       - name: buf-setup
-        uses: bufbuild/buf-setup-action@v1.37.0
+        uses: bufbuild/buf-setup-action@v1.41.0
       - name: buf-lint
         uses: bufbuild/buf-lint-action@v1.1.1
       - name: buf-breaking

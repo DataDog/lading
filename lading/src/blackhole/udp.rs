@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tracing::info;
 
-use crate::signals::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -38,14 +36,14 @@ pub struct Config {
 /// The UDP blackhole.
 pub struct Udp {
     binding_addr: SocketAddr,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Udp {
     /// Create a new [`Udp`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "udp".to_string()),
@@ -73,7 +71,7 @@ impl Udp {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
             .map_err(Error::Io)?;
@@ -82,6 +80,8 @@ impl Udp {
         let bytes_received = counter!("bytes_received", &self.metric_labels);
         let packet_received = counter!("packet_received", &self.metric_labels);
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 packet = socket.recv_from(&mut buf) => {
@@ -89,7 +89,7 @@ impl Udp {
                     packet_received.increment(1);
                     bytes_received.increment(bytes as u64);
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(())
                 }

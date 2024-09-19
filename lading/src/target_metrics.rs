@@ -6,8 +6,6 @@
 
 use serde::Deserialize;
 
-use crate::signals::Phase;
-
 pub mod expvar;
 pub mod prometheus;
 
@@ -47,7 +45,11 @@ impl Server {
     /// the target process.
     ///
     #[must_use]
-    pub fn new(config: Config, shutdown: Phase, experiment_started: Phase) -> Self {
+    pub fn new(
+        config: Config,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+    ) -> Self {
         match config {
             Config::Expvar(conf) => {
                 Self::Expvar(expvar::Expvar::new(conf, shutdown, experiment_started))

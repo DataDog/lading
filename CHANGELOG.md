@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Linux observer is more resilient to scenarios where lading lacks ptrace permission.
 
+## [0.23.2]
+### Changed
+- Now built using rust 1.81.0.
+
+### Fixed
+- Warmup period is now respected when container targeting is in use.
+- Capture manager waits for the target to start running before recording data.
+
+## [0.23.1]
+### Fixed
+- Fixes a panic in the signal mechanism that appeared when using the file
+  generator most prominately.
+
+## [0.23.0]
+### Added
+- Added ability to create tags for both expvar and prometheus target metrics specific to a single target_metrics configuration (example below shows prometheus metrics collected from the core agent and two additional tags created)
+  ```yaml
+  target_metrics:
+    - prometheus: #core agent telemetry
+        uri: "http://127.0.0.1:5000/telemetry"
+        tags:
+          sub_agent: "core"
+          any_label: "any-string-value"
+  ```
+
 ## [0.22.0]
 ### Fixed
 - Fixes bugs in `smaps` parsing code that can result in under-counting RSS in

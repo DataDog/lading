@@ -11,7 +11,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use byte_unit::ByteError;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
@@ -79,7 +79,7 @@ pub struct UnixStream {
     throttle: Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl UnixStream {
@@ -94,7 +94,11 @@ impl UnixStream {
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -153,6 +157,8 @@ impl UnixStream {
 
         let mut current_connection = None;
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             let Some(ref socket) = current_connection else {
                 match net::UnixStream::connect(&self.path).await {
@@ -227,7 +233,7 @@ impl UnixStream {
                         }
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(());
                 },

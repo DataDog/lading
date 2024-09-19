@@ -8,7 +8,6 @@
 //! that same crate.
 
 use std::{
-    borrow::Cow,
     ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
@@ -21,8 +20,6 @@ use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-
-use crate::signals::Phase;
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -59,8 +56,9 @@ pub struct CaptureManager {
     run_id: Uuid,
     capture_fp: BufWriter<std::fs::File>,
     capture_path: PathBuf,
-    shutdown: Phase,
-    _experiment_started: Phase,
+    shutdown: lading_signal::Watcher,
+    _experiment_started: lading_signal::Watcher,
+    target_running: lading_signal::Watcher,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
 }
@@ -73,8 +71,9 @@ impl CaptureManager {
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
-        shutdown: Phase,
-        experiment_started: Phase,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
@@ -85,6 +84,7 @@ impl CaptureManager {
             capture_path,
             shutdown,
             _experiment_started: experiment_started,
+            target_running,
             inner: Arc::new(Inner {
                 registry: Registry::atomic(),
             }),
@@ -126,7 +126,7 @@ impl CaptureManager {
                     labels.insert(lbl.key().into(), lbl.value().into());
                 }
                 let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
+                    run_id: self.run_id,
                     time: now_ms,
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
@@ -146,7 +146,7 @@ impl CaptureManager {
                 }
                 let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
                 let line = json::Line {
-                    run_id: Cow::Borrowed(&self.run_id),
+                    run_id: self.run_id,
                     time: now_ms,
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
@@ -192,11 +192,12 @@ impl CaptureManager {
         std::thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || {
-                let token = self.shutdown.register();
+                while let Ok(false) = self.target_running.try_recv() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
                 loop {
-                    if self.shutdown.try_recv() {
+                    if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
-                        drop(token);
                         return;
                     }
                     let now = Instant::now();

@@ -3,11 +3,14 @@ use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
 
-use average::{concatenate, Estimate, Variance};
+use async_compression::tokio::bufread::ZstdDecoder;
+use average::{concatenate, Estimate, Max, Min, Variance};
 use clap::Parser;
 use futures::io;
 use lading_capture::json::Line;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio_stream::wrappers::LinesStream;
+use tokio_stream::StreamExt;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -21,6 +24,10 @@ struct Args {
     /// show details about a metric
     #[clap(short, long)]
     metric: Option<String>,
+
+    /// dump a metric's values. Requires --metric.
+    #[clap(short, long)]
+    dump_values: bool,
 
     /// Path to line-delimited capture file
     capture_path: String,
@@ -55,31 +62,30 @@ async fn main() -> Result<(), Error> {
 
     let is_zstd = capture_path
         .extension()
-        .is_some_and(|ext| ext == OsStr::new(".zstd"));
+        .is_some_and(|ext| ext == OsStr::new("zstd"));
 
-    let mut file = tokio::fs::File::open(capture_path).await?;
+    let file = tokio::fs::File::open(capture_path).await?;
 
-    let contents = if is_zstd {
-        let mut contents = String::with_capacity(file.metadata().await?.len() as usize);
-        file.read_to_string(&mut contents).await?;
-
-        contents
+    let lines = if !is_zstd {
+        let reader = BufReader::new(file);
+        tokio_util::either::Either::Left(LinesStream::new(reader.lines()))
     } else {
-        let stdfile = file.try_into_std().expect("file can be std");
-        let contents = zstd::stream::decode_all(stdfile).expect("invalid zstd");
-
-        String::from_utf8(contents).expect("Valid utf8")
+        let reader = BufReader::new(file);
+        let decoder = ZstdDecoder::new(reader);
+        let reader = BufReader::new(decoder);
+        tokio_util::either::Either::Right(LinesStream::new(reader.lines()))
     };
 
-    let lines: Vec<Line> = serde_json::Deserializer::from_str(&contents)
-        .into_iter::<Line>()
-        .map(|line| line.expect("failed to deserialize line"))
-        .collect();
+    let lines = lines.map(|l| {
+        let line_str = l.expect("failed to read line");
+        let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
+        line
+    });
 
     // Print out available metrics if user asked for it
     // or if they didn't specify a specific metric
     if args.list_metrics || args.metric.is_none() {
-        let mut names: Vec<String> = lines.iter().map(|line| line.metric_name.clone()).collect();
+        let mut names: Vec<String> = lines.map(|line| line.metric_name.clone()).collect().await;
         names.sort();
         names.dedup();
         for name in names {
@@ -88,7 +94,7 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    if let Some(metric) = args.metric {
+    if let Some(metric) = &args.metric {
         // key is hash of the metric name and all the sorted, concatenated labels
         // value is a tuple of
         // - hashset of "key:value" strings (aka, concatenated labels)
@@ -98,36 +104,52 @@ async fn main() -> Result<(), Error> {
         info!("Metric: {metric}");
 
         // Use a BTreeSet to ensure that the tags are sorted
-        lines
-            .iter()
-            .filter(|line| line.metric_name == metric)
-            .for_each(|line| {
-                let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-                for (key, value) in line.labels.iter() {
-                    let tag = format!("{}:{}", key, value);
-                    sorted_labels.insert(tag);
-                }
-                let mut context_key = hash_builder.build_hasher();
-                context_key.write_usize(metric.len());
-                context_key.write(metric.as_bytes());
-                for label in sorted_labels.iter() {
-                    context_key.write_usize(label.len());
-                    context_key.write(label.as_bytes());
-                }
-                let entry = context_map.entry(context_key.finish()).or_default();
-                entry.0 = sorted_labels;
-                entry.1.push(line.value.as_f64());
-            });
+        let filtered: Vec<_> = lines
+            .filter(|line| &line.metric_name == metric)
+            .collect()
+            .await;
 
-        concatenate!(Estimator, [Variance, variance, mean]);
+        if let Some(point) = filtered.first() {
+            info!("Metric kind: {:?}", point.metric_kind);
+        } else {
+            error!("No data found for metric {}", metric);
+        }
+
+        for line in &filtered {
+            let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
+            for (key, value) in line.labels.iter() {
+                let tag = format!("{}:{}", key, value);
+                sorted_labels.insert(tag);
+            }
+            let mut context_key = hash_builder.build_hasher();
+            context_key.write_usize(metric.len());
+            context_key.write(metric.as_bytes());
+            for label in sorted_labels.iter() {
+                context_key.write_usize(label.len());
+                context_key.write(label.as_bytes());
+            }
+            let entry = context_map.entry(context_key.finish()).or_default();
+            entry.0 = sorted_labels;
+            entry.1.push(line.value.as_f64());
+        }
+
+        concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
 
         for (_, (labels, values)) in context_map.iter() {
             let s: Estimator = values.iter().copied().collect();
             info!(
-                "{metric}[{labels}]: mean: {}",
+                "{metric}[{labels}]: min: {}, mean: {}, max: {}",
+                s.min(),
                 s.mean(),
+                s.max(),
                 labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
             );
+        }
+
+        if args.dump_values {
+            for line in &filtered {
+                println!("{}: {}", line.fetch_index, line.value);
+            }
         }
     }
 

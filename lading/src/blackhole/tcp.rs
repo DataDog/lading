@@ -16,8 +16,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use crate::signals::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -40,14 +38,14 @@ pub struct Config {
 /// The TCP blackhole.
 pub struct Tcp {
     binding_addr: SocketAddr,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Tcp {
     /// Create a new [`Tcp`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "tcp".to_string()),
@@ -88,7 +86,7 @@ impl Tcp {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let listener = TcpListener::bind(self.binding_addr)
             .await
             .map_err(Error::Io)?;
@@ -96,6 +94,8 @@ impl Tcp {
         let connection_accepted = counter!("connection_accepted", &self.metric_labels);
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 conn = listener.accept() => {
@@ -105,7 +105,7 @@ impl Tcp {
                         Self::handle_connection(socket, labels)
                     );
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(())
                 }

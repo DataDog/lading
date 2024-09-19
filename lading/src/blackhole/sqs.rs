@@ -21,8 +21,6 @@ use tokio::time::Duration;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
-use crate::signals::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -62,14 +60,14 @@ pub struct Config {
 pub struct Sqs {
     httpd_addr: SocketAddr,
     concurrency_limit: usize,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl Sqs {
     /// Create a new [`Sqs`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "sqs".to_string()),
@@ -98,7 +96,7 @@ impl Sqs {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let bytes_received = counter!("bytes_received", &self.metric_labels);
         let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {

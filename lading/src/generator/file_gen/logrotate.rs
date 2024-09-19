@@ -34,7 +34,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{common::PeekableReceiver, signals::Phase};
+use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
 
 use super::General;
@@ -101,7 +101,7 @@ pub struct Config {
 /// this without coordination to the target.
 pub struct Server {
     handles: Vec<JoinHandle<Result<(), Error>>>,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
@@ -117,7 +117,11 @@ impl Server {
     /// set.
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Result<Self, Error> {
+    pub fn new(
+        general: General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
         let mut labels = vec![
             ("component".to_string(), "generator".to_string()),
@@ -209,7 +213,7 @@ struct Child {
     maximum_bytes_per_log: NonZeroU32,
     block_cache: block::Cache,
     throttle: Throttle,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Child {
@@ -220,7 +224,7 @@ impl Child {
         maximum_bytes_per_log: NonZeroU32,
         block_cache: block::Cache,
         throttle: Throttle,
-        shutdown: Phase,
+        shutdown: lading_signal::Watcher,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));
@@ -277,6 +281,8 @@ impl Child {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let bytes_written = counter!("bytes_written");
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
@@ -327,7 +333,7 @@ impl Child {
                         total_bytes_written = 0;
                     }
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     fp.flush().await?;
                     info!("shutdown signal received");
                     return Ok(());

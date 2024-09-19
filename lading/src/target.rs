@@ -25,6 +25,7 @@ use std::{
 };
 
 use bollard::Docker;
+use lading_signal::Broadcaster;
 use metrics::gauge;
 use nix::{
     errno::Errno,
@@ -36,7 +37,7 @@ use tokio::{process::Command, time};
 use tracing::{error, info};
 
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, observer::RSS_BYTES, signals::Phase};
+use crate::{common::stdio, observer::RSS_BYTES};
 
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.
@@ -179,13 +180,13 @@ pub enum Config {
 /// protections for that.
 pub struct Server {
     config: Config,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
 }
 
 impl Server {
     /// Create a new [`Server`] instance
     #[must_use]
-    pub fn new(config: Config, shutdown: Phase) -> Self {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Self {
         Self { config, shutdown }
     }
 
@@ -221,7 +222,11 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    pub async fn run(self, pid_snd: TargetPidSender) -> Result<(), Error> {
+    pub async fn run(
+        self,
+        pid_snd: TargetPidSender,
+        target_running: Broadcaster,
+    ) -> Result<(), Error> {
         let config = self.config;
 
         // Note that each target mode has different expectations around target
@@ -230,13 +235,13 @@ impl Server {
         // signalled to exit.
         match config {
             Config::Pid(config) => {
-                Self::watch(config, pid_snd, self.shutdown).await?;
+                Self::watch(config, pid_snd, target_running, self.shutdown).await?;
             }
             Config::Docker(config) => {
-                Self::watch_container(config, pid_snd, self.shutdown).await?;
+                Self::watch_container(config, pid_snd, target_running, self.shutdown).await?;
             }
             Config::Binary(config) => {
-                Self::execute_binary(config, pid_snd, self.shutdown).await?;
+                Self::execute_binary(config, pid_snd, target_running, self.shutdown).await?;
             }
         }
 
@@ -248,7 +253,8 @@ impl Server {
     async fn watch_container(
         config: DockerConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: Phase,
+        target_running: Broadcaster,
+        shutdown: lading_signal::Watcher,
     ) -> Result<(), Error> {
         let docker = Docker::connect_with_socket_defaults()?;
 
@@ -269,6 +275,7 @@ impl Server {
             pid.try_into().expect("cannot convert pid to 32 bit type"),
         ))?;
         drop(pid_snd);
+        target_running.signal();
 
         // Use PIDfd to watch the target process (linux kernel 5.3 and up)
         #[cfg(target_os = "linux")]
@@ -300,6 +307,8 @@ impl Server {
 
         let mut interval = time::interval(Duration::from_millis(400));
         tokio::pin!(target_wait);
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
 
         loop {
             tokio::select! {
@@ -314,7 +323,7 @@ impl Server {
                     error!("target exited unexpectedly; exit code unavailable");
                     break Err(Error::TargetExited(None));
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break Ok(());
                 }
@@ -327,7 +336,8 @@ impl Server {
     async fn watch(
         config: PidConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: Phase,
+        target_running: Broadcaster,
+        shutdown: lading_signal::Watcher,
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
@@ -346,6 +356,7 @@ impl Server {
 
         pid_snd.send(Some(config.pid.get()))?;
         drop(pid_snd);
+        target_running.signal();
 
         // Use PIDfd to watch the target process (linux kernel 5.3 and up)
         #[cfg(target_os = "linux")]
@@ -375,6 +386,8 @@ impl Server {
 
         let mut interval = time::interval(Duration::from_millis(400));
         tokio::pin!(target_wait);
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
 
         loop {
             tokio::select! {
@@ -389,7 +402,7 @@ impl Server {
                     error!("target exited unexpectedly; exit code unavailable");
                     break Err(Error::TargetExited(None));
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     break Ok(());
                 }
@@ -402,7 +415,8 @@ impl Server {
     async fn execute_binary(
         config: BinaryConfig,
         pid_snd: TargetPidSender,
-        mut shutdown: Phase,
+        target_running: Broadcaster,
+        shutdown: lading_signal::Watcher,
     ) -> Result<ExitStatus, Error> {
         let mut target_cmd = Command::new(config.command);
         target_cmd
@@ -420,8 +434,11 @@ impl Server {
         let target_id = target_child.id().ok_or(Error::ProcessFinished)?;
         pid_snd.send(Some(target_id))?;
         drop(pid_snd);
+        target_running.signal();
 
         let mut interval = time::interval(Duration::from_secs(400));
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 _ = interval.tick() => {
@@ -439,7 +456,7 @@ impl Server {
                         },
                     }
                 },
-                () = shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     // Note that `Child::kill` sends SIGKILL which is not what we
                     // want. We instead send SIGTERM so that the child has a chance

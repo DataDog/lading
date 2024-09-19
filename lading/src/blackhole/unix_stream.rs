@@ -16,8 +16,6 @@ use tokio::net;
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use crate::signals::Phase;
-
 use super::General;
 
 #[derive(thiserror::Error, Debug)]
@@ -40,14 +38,14 @@ pub struct Config {
 /// The `UnixStream` blackhole.
 pub struct UnixStream {
     path: PathBuf,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl UnixStream {
     /// Create a new [`UnixStream`] server instance
     #[must_use]
-    pub fn new(general: General, config: Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "unix_stream".to_string()),
@@ -75,12 +73,14 @@ impl UnixStream {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let listener = net::UnixListener::bind(&self.path).map_err(Error::Io)?;
 
         let connection_accepted = counter!("connection_accepted", &self.metric_labels);
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 conn = listener.accept() => {
@@ -90,7 +90,7 @@ impl UnixStream {
                         Self::handle_connection(socket, labels)
                     );
                 }
-                () = self.shutdown.recv() => {
+                () = &mut shutdown_wait => {
                     info!("shutdown signal received");
                     return Ok(())
                 }

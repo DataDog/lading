@@ -26,8 +26,6 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{error, info};
 
-use crate::signals::Phase;
-
 use super::General;
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
@@ -152,14 +150,14 @@ async fn srv(
 pub struct SplunkHec {
     concurrency_limit: usize,
     httpd_addr: SocketAddr,
-    shutdown: Phase,
+    shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
 impl SplunkHec {
     /// Create a new [`SplunkHec`] server instance
     #[must_use]
-    pub fn new(general: General, config: &Config, shutdown: Phase) -> Self {
+    pub fn new(general: General, config: &Config, shutdown: lading_signal::Watcher) -> Self {
         let mut metric_labels = vec![
             ("component".to_string(), "blackhole".to_string()),
             ("component_name".to_string(), "splunk_hec".to_string()),
@@ -188,7 +186,7 @@ impl SplunkHec {
     /// # Panics
     ///
     /// None known.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         let labels = Arc::new(self.metric_labels.clone());
         let service = make_service_fn(|_: &AddrStream| {
             let labels = labels.clone();
