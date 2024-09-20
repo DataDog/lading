@@ -73,7 +73,7 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tonic = { version = "0.9" }
+tonic = { version = "0.12" }
 tower = { version = "0.4", default-features = false, features = [
   "timeout",
   "limit",
