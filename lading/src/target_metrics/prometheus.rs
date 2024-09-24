@@ -256,8 +256,7 @@ pub(crate) async fn scrape_metrics(
                     continue;
                 };
 
-                let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
-                handle.set(value);
+                gauge!(format!("target/{name}"), &all_labels.unwrap_or_default()).set(value);
             }
             Some(MetricType::Counter) => {
                 let Ok(value): Result<f64, _> = value.parse() else {
