@@ -15,7 +15,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-lading-capture = { version = "0.1", path = "../lading_capture" }
+lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
@@ -46,7 +46,7 @@ nix = { version = "0.29", default-features = false, features = [
   "signal",
 ] }
 num_cpus = { version = "1.16" }
-once_cell = { version = "1.18" }
+once_cell = { workspace = true }
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
   "std",

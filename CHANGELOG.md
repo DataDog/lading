@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Changed
 - Linux observer is more resilient to scenarios where lading lacks ptrace permission.
+### Removed
+- lading_capture no longer exports a protobuf version of the capture.
 
 ## [0.23.2]
 ### Changed
