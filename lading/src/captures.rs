@@ -75,6 +75,7 @@ impl CaptureManager {
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
+        metric_expiration_duration: Option<Duration>,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -94,7 +95,7 @@ impl CaptureManager {
                 recency: Recency::new(
                     quanta::Clock::new(),
                     MetricKindMask::COUNTER | MetricKindMask::GAUGE,
-                    Some(Duration::from_secs(2)),
+                    metric_expiration_duration,
                 ),
             }),
             global_labels: FxHashMap::default(),
