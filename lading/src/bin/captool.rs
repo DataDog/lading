@@ -7,7 +7,7 @@ use async_compression::tokio::bufread::ZstdDecoder;
 use average::{concatenate, Estimate, Max, Min, Variance};
 use clap::Parser;
 use futures::io;
-use lading_capture::json::Line;
+use lading_capture::json::{Line, MetricKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
@@ -85,11 +85,11 @@ async fn main() -> Result<(), Error> {
     // Print out available metrics if user asked for it
     // or if they didn't specify a specific metric
     if args.list_metrics || args.metric.is_none() {
-        let mut names: Vec<String> = lines.map(|line| line.metric_name.clone()).collect().await;
+        let mut names: Vec<(String, String)> = lines.map(|line| (line.metric_name.clone(), match line.metric_kind { MetricKind::Counter => "c".to_owned(), MetricKind::Gauge => "g".to_owned() } )).collect().await;
         names.sort();
         names.dedup();
-        for name in names {
-            println!("{}", name);
+        for (name, kind) in names {
+            println!("{kind}: {name}");
         }
         return Ok(());
     }
@@ -134,14 +134,16 @@ async fn main() -> Result<(), Error> {
         }
 
         concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
+        let is_monotonic = |v: &Vec<_>| v.windows(2).all(|w| w[0] <= w[1]);
 
         for (_, (labels, values)) in context_map.iter() {
             let s: Estimator = values.iter().copied().collect();
             info!(
-                "{metric}[{labels}]: min: {}, mean: {}, max: {}",
+                "{metric}[{labels}]: min: {}, mean: {}, max: {}, is_monotonic: {}",
                 s.min(),
                 s.mean(),
                 s.max(),
+                is_monotonic(values),
                 labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
             );
         }
