@@ -4,8 +4,9 @@ use cgroups_rs::cgroup::Cgroup;
 use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
+use procfs::ProcError::PermissionDenied;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::observer::memory::{Regions, Rollup};
 
@@ -46,15 +47,24 @@ struct Sample {
     uptime: u64,
 }
 
+#[derive(Debug, Eq, Hash, PartialEq)]
+struct ProcessIdentifier {
+    pid: i32,
+    exe: String,
+    cmdline: String,
+    comm: String,
+}
+
 #[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
     num_cores: usize,
     ticks_per_second: u64,
     page_size: u64,
-    previous_samples: FxHashMap<(i32, String, String), Sample>,
+    previous_samples: FxHashMap<ProcessIdentifier, Sample>,
     previous_totals: Sample,
     previous_gauges: Vec<Gauge>,
+    have_logged_perms_err: bool,
 }
 
 struct Gauge(metrics::Gauge);
@@ -90,6 +100,7 @@ impl Sampler {
             previous_samples: FxHashMap::default(),
             previous_totals: Sample::default(),
             previous_gauges: Vec::default(),
+            have_logged_perms_err: false,
         })
     }
 
@@ -103,7 +114,7 @@ impl Sampler {
     pub(crate) async fn sample(&mut self) -> Result<(), Error> {
         let mut joinset = tokio::task::JoinSet::new();
         // Key for this map is (pid, basename/exe, cmdline)
-        let mut samples: FxHashMap<(i32, String, String), Sample> = FxHashMap::default();
+        let mut samples: FxHashMap<ProcessIdentifier, Sample> = FxHashMap::default();
 
         let mut total_processes: u64 = 0;
         // We maintain a tally of the total RSS consumed by the parent process
@@ -160,13 +171,16 @@ impl Sampler {
             }
 
             let pid = process.pid();
-            let status = process.status();
-            if status.is_err() {
-                // The pid may have exited since we scanned it or we may not
-                // have sufficient permission.
-                continue;
-            }
-            let status = status.expect("issue with status"); // SAFETY: is_err check above
+            let mut has_ptrace_perm = true;
+            let status = match process.status() {
+                Ok(status) => status,
+                Err(e) => {
+                    warn!("Couldn't read status: {:?}", e);
+                    // The pid may have exited since we scanned it or we may not
+                    // have sufficient permission.
+                    continue;
+                }
+            };
             if status.tgid != pid {
                 // This is a thread, not a process and we do not wish to scan it.
                 continue;
@@ -176,37 +190,57 @@ impl Sampler {
             // /proc/<pid>/exe and we take the last part of that, like posix
             // `top` does. This will require us to label all data with both pid
             // and name, again like `top`.
-            let basename: String = if let Ok(exe) = process.exe() {
-                if let Some(basename) = exe.file_name() {
-                    String::from(
-                        basename
-                            .to_str()
-                            .expect("could not convert basename to str"),
-                    )
-                } else {
-                    // It's possible to have a process with no named exe. On
-                    // Linux systems with functional security setups it's not
-                    // clear _when_ this would be the case but, hey.
+            let basename: String = match process.exe() {
+                Ok(exe) => {
+                    if let Some(basename) = exe.file_name() {
+                        String::from(
+                            basename
+                                .to_str()
+                                .expect("could not convert basename to str"),
+                        )
+                    } else {
+                        // It's possible to have a process with no named exe. On
+                        // Linux systems with functional security setups it's not
+                        // clear _when_ this would be the case but, hey.
+                        String::new()
+                    }
+                }
+                Err(PermissionDenied(_)) => {
+                    // permission to dereference or read this symbolic link is governed
+                    // by a ptrace(2) access mode PTRACE_MODE_READ_FSCREDS check
+                    //
+                    // In practice, this can occur when an unprivileged lading process
+                    // is given a container to monitor as the container pids are owned by root
+                    has_ptrace_perm = false;
+                    if !self.have_logged_perms_err {
+                        error!("lading lacks ptrace permissions, exe will be empty and smaps-related metrics will be missing.");
+                        self.have_logged_perms_err = true;
+                    }
                     String::new()
                 }
-            } else {
-                continue;
+                Err(e) => {
+                    warn!("Couldn't read exe symlink: {:?}", e);
+                    // This is an unknown failure case
+                    String::new()
+                }
             };
 
-            let cmdline: String = if let Ok(cmdline) = process.cmdline() {
-                cmdline.join(" ")
-            } else {
-                "zombie".to_string()
+            let cmdline: String = match process.cmdline() {
+                Ok(cmdline) => cmdline.join(" "),
+                Err(_) => "zombie".to_string(),
             };
 
-            let stats = process.stat();
-            if stats.is_err() {
-                // We don't want to bail out entirely if we can't read stats
-                // which will happen if we don't have permissions or, more
-                // likely, the process has exited.
-                continue;
-            }
-            let stats = stats.expect("stats failed"); // SAFETY: is_err check above
+            let stats = match process.stat() {
+                Ok(stats) => stats,
+                Err(e) => {
+                    // We don't want to bail out entirely if we can't read stats
+                    // which will happen if we don't have permissions or, more
+                    // likely, the process has exited.
+                    warn!("Got err when reading process stat: {e:?}");
+                    continue;
+                }
+            };
+            let comm = stats.comm.clone();
 
             // Calculate process uptime. We have two pieces of information from
             // the kernel: computer uptime and process starttime relative to
@@ -225,7 +259,13 @@ impl Sampler {
                 stime,
                 uptime,
             };
-            samples.insert((pid, basename.clone(), cmdline.clone()), sample);
+            let id = ProcessIdentifier {
+                pid,
+                exe: basename.clone(),
+                comm: comm.clone(),
+                cmdline: cmdline.clone(),
+            };
+            samples.insert(id, sample);
 
             // Answering the question "How much memory is my program consuming?"
             // is not as straightforward as one might hope. Reside set size
@@ -255,6 +295,7 @@ impl Sampler {
                 ("pid", format!("{pid}")),
                 ("exe", basename.clone()),
                 ("cmdline", cmdline.clone()),
+                ("comm", comm.clone()),
             ];
 
             // Number of pages that the process has in real memory.
@@ -287,68 +328,78 @@ impl Sampler {
             report_status_field!(status, labels, vmexe);
             report_status_field!(status, labels, vmlib);
 
-            joinset.spawn(async move {
-                let memory_regions = match Regions::from_pid(pid) {
-                    Ok(memory_regions) => memory_regions,
-                    Err(e) => {
-                        // We don't want to bail out entirely if we can't read stats
-                        // which will happen if we don't have permissions or, more
-                        // likely, the process has exited.
-                        warn!("Couldn't process `/proc/{pid}/smaps`: {}", e);
-                        return;
+            // smaps and smaps_rollup are both governed by the same permission restrictions
+            // as /proc/[pid]/maps. Per man 5 proc:
+            // Permission to access this file is governed by a ptrace access mode PTRACE_MODE_READ_FSCREDS check; see ptrace(2).
+            // If a previous call to process.status() failed due to a lack of ptrace permissions,
+            // then we assume smaps operations will fail as well.
+            if has_ptrace_perm {
+                joinset.spawn(async move {
+
+                    let memory_regions = match Regions::from_pid(pid) {
+                        Ok(memory_regions) => memory_regions,
+                        Err(e) => {
+                            // We don't want to bail out entirely if we can't read stats
+                            // which will happen if we don't have permissions or, more
+                            // likely, the process has exited.
+                            warn!("Couldn't process `/proc/{pid}/smaps`: {}", e);
+                            return;
+                        }
+                    };
+                    for (pathname, measures) in memory_regions.aggregate_by_pathname() {
+                        let labels = [
+                            ("pid", format!("{pid}")),
+                            ("exe", basename.clone()),
+                            ("cmdline", cmdline.clone()),
+                            ("comm", comm.clone()),
+                            ("pathname", pathname),
+                        ];
+                        gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
+                        gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
+                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
+                        gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
                     }
-                };
-                for (pathname, measures) in memory_regions.aggregate_by_pathname() {
+
+                    let measures = memory_regions.aggregate();
                     let labels = [
                         ("pid", format!("{pid}")),
                         ("exe", basename.clone()),
+                        ("comm", comm.clone()),
                         ("cmdline", cmdline.clone()),
-                        ("pathname", pathname),
                     ];
-                    gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
-                    gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
-                    gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
-                    gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
-                }
 
-                let measures = memory_regions.aggregate();
-                let labels = [
-                    ("pid", format!("{pid}")),
-                    ("exe", basename.clone()),
-                    ("cmdline", cmdline.clone()),
-                ];
+                    gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
+                    gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
+                    gauge!("smaps.size.sum", &labels).set(measures.size as f64);
+                    gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
 
-                gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
-                gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
-                gauge!("smaps.size.sum", &labels).set(measures.size as f64);
-                gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
+                    let rollup = match Rollup::from_pid(pid) {
+                        Ok(rollup) => rollup,
+                        Err(e) => {
+                            // We don't want to bail out entirely if we can't read smap rollup
+                            // which will happen if we don't have permissions or, more
+                            // likely, the process has exited.
+                            warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
+                            return;
+                        }
+                    };
 
-                let rollup = match Rollup::from_pid(pid) {
-                    Ok(rollup) => rollup,
-                    Err(e) => {
-                        // We don't want to bail out entirely if we can't read smap rollup
-                        // which will happen if we don't have permissions or, more
-                        // likely, the process has exited.
-                        warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
-                        return;
+                    gauge!("smaps_rollup.rss", &labels).set(rollup.rss as f64);
+                    gauge!("smaps_rollup.pss", &labels).set(rollup.pss as f64);
+                    if let Some(v) = rollup.pss_dirty {
+                        gauge!("smaps_rollup.pss_dirty", &labels).set(v as f64);
                     }
-                };
-
-                gauge!("smaps_rollup.rss", &labels).set(rollup.rss as f64);
-                gauge!("smaps_rollup.pss", &labels).set(rollup.pss as f64);
-                if let Some(v) = rollup.pss_dirty {
-                    gauge!("smaps_rollup.pss_dirty", &labels).set(v as f64);
-                }
-                if let Some(v) = rollup.pss_anon {
-                    gauge!("smaps_rollup.pss_anon", &labels).set(v as f64);
-                }
-                if let Some(v) = rollup.pss_file {
-                    gauge!("smaps_rollup.pss_file", &labels).set(v as f64);
-                }
-                if let Some(v) = rollup.pss_shmem {
-                    gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
-                }
-            });
+                    if let Some(v) = rollup.pss_anon {
+                        gauge!("smaps_rollup.pss_anon", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.pss_file {
+                        gauge!("smaps_rollup.pss_file", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.pss_shmem {
+                        gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
+                    }
+                });
+            }
 
             // if possible we compute the working set of the cgroup
             // using the same heuristic as kubernetes:
@@ -456,10 +507,13 @@ impl Sampler {
 
             let calc = calculate_cpu_percentage(sample, &prev, self.num_cores);
 
+            let ProcessIdentifier{ pid, exe, cmdline, comm } = key;
+
             let labels = [
-                ("pid", format!("{pid}", pid = key.0)),
-                ("exe", key.1.clone()),
-                ("cmdline", key.2.clone()),
+                ("pid", format!("{pid}", pid = pid.clone())),
+                ("exe", exe.clone()),
+                ("cmdline", cmdline.clone()),
+                ("comm", comm.clone()),
             ];
 
             let cpu_gauge = gauge!("cpu_percentage", &labels);
@@ -476,7 +530,9 @@ impl Sampler {
         let total_sample =
             samples
                 .iter()
-                .fold(Sample::default(), |acc, ((pid, _exe, _cmdline), sample)| {
+                .fold(Sample::default(), |acc, (key, sample)| {
+                    let ProcessIdentifier{ pid, exe: _, cmdline: _, comm: _ } = key;
+
                     Sample {
                         utime: acc.utime + sample.utime,
                         stime: acc.stime + sample.stime,
