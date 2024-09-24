@@ -77,17 +77,14 @@ impl Udp {
             .map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = counter!("bytes_received", &self.metric_labels);
-        let packet_received = counter!("packet_received", &self.metric_labels);
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 packet = socket.recv_from(&mut buf) => {
                     let (bytes, _) = packet.map_err(Error::Io)?;
-                    packet_received.increment(1);
-                    bytes_received.increment(bytes as u64);
+                    counter!("packet_received", &self.metric_labels).increment(1);
+                    counter!("bytes_received", &self.metric_labels).increment(bytes as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
