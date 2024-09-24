@@ -704,7 +704,7 @@ dependencies = [
  "once_cell",
  "serde_json",
  "shared",
- "sketches-ddsketch 0.3.0",
+ "sketches-ddsketch",
  "tokio",
  "tokio-stream",
  "tonic 0.9.2",
@@ -1607,8 +1607,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "metrics"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
+source = "git+https://github.com/scottopell/metrics.git?rev=6e40d6c08f4d3a2059a0a7577a6e11930acb52ee#6e40d6c08f4d3a2059a0a7577a6e11930acb52ee"
 dependencies = [
  "ahash",
  "portable-atomic",
@@ -1617,8 +1616,7 @@ dependencies = [
 [[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4f0c8427b39666bf970460908b213ec09b3b350f20c0c2eabcbba51704a08e6"
+source = "git+https://github.com/scottopell/metrics.git?rev=6e40d6c08f4d3a2059a0a7577a6e11930acb52ee#6e40d6c08f4d3a2059a0a7577a6e11930acb52ee"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -1637,8 +1635,7 @@ dependencies = [
 [[package]]
 name = "metrics-util"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
+source = "git+https://github.com/scottopell/metrics.git?rev=6e40d6c08f4d3a2059a0a7577a6e11930acb52ee#6e40d6c08f4d3a2059a0a7577a6e11930acb52ee"
 dependencies = [
  "aho-corasick",
  "crossbeam-epoch",
@@ -1646,11 +1643,10 @@ dependencies = [
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
  "metrics",
- "num_cpus",
  "ordered-float",
  "quanta",
  "radix_trie",
- "sketches-ddsketch 0.2.2",
+ "sketches-ddsketch",
 ]
 
 [[package]]
@@ -2664,12 +2660,6 @@ checksum = "a9e9e0b4211b72e7b8b6e85c807d36c212bdb33ea8587f7569562a84df5465b1"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "sketches-ddsketch"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85636c14b73d81f541e525f585c0a2109e6744e1565b5c1668e31c70c10ed65c"
 
 [[package]]
 name = "sketches-ddsketch"

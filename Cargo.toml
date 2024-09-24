@@ -12,12 +12,13 @@ members = [
 [workspace.dependencies]
 bytes = { version = "1.7", default-features = false, features = ["std"] }
 byte-unit = { version = "4.0", features = ["serde"] }
-metrics = { version = "0.23.0" }
-metrics-util = { version = "0.17.0" }
-metrics-exporter-prometheus = { version = "0.15.3", default-features = false, features = [
-  "http-listener",
-  "uds-listener",
-] }
+
+# Metrics-rs crates are pinned to 6e40d6c08f4d3a2059a0a7577a6e11930acb52ee until
+# a release is cut that contains https://github.com/metrics-rs/metrics/pull/522
+metrics = { git = "https://github.com/scottopell/metrics.git", rev = "6e40d6c08f4d3a2059a0a7577a6e11930acb52ee" }
+metrics-util = { git = "https://github.com/scottopell/metrics.git", rev = "6e40d6c08f4d3a2059a0a7577a6e11930acb52ee" }
+metrics-exporter-prometheus = { git = "https://github.com/scottopell/metrics.git", rev = "6e40d6c08f4d3a2059a0a7577a6e11930acb52ee", default-features = false, features = ["http-listener", "uds-listener"]}
+
 prost = "0.11"
 rand = { version = "0.8", default-features = false }
 rustc-hash = { version = "1.1" }

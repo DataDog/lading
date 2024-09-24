@@ -131,11 +131,12 @@ impl CaptureManager {
             .registry
             .visit_counters(|key: &metrics::Key, counter| {
                 let gen = counter.get_generation();
-
-                if !self
+                let should_store = self
                     .inner
                     .recency
-                    .should_store_counter(key, gen, &self.inner.registry)
+                    .has_counter_expired(key, gen, &self.inner.registry);
+
+                if !should_store
                 {
                     // Skip this metric, its too old
                     return;
@@ -161,11 +162,12 @@ impl CaptureManager {
             .registry
             .visit_gauges(|key: &metrics::Key, gauge| {
                 let gen = gauge.get_generation();
-
-                if !self
+                let should_store = self
                     .inner
                     .recency
-                    .should_store_gauge(key, gen, &self.inner.registry)
+                    .has_gauge_expired(key, gen, &self.inner.registry);
+
+                if !should_store
                 {
                     // Skip this metric, its too old
                     return;
