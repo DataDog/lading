@@ -2,12 +2,6 @@
 //!
 //! This library supports throttling mechanisms for the rest of the lading
 //! project.
-//!
-//! ## Metrics
-//!
-//! The [predictive] and [stable] throttles emit metrics. See those modules'
-//! documentation for details. The all-out throttle does not emit any metrics.
-//!
 
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
