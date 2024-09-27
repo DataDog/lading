@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux observer is more resilient to scenarios where lading lacks ptrace permission.
 ### Removed
 - lading_capture no longer exports a protobuf version of the capture.
+### Added
+- HTTP blackhole now has a response_delay setting, allowing for simulation of latent network connections.
 
 ## [0.23.2]
 ### Changed
