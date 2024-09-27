@@ -13,7 +13,6 @@ bytes = { workspace = true }
 entropy = "0.4"
 hyper = { version = "0.14", features = ["server"] }
 once_cell = { workspace = true }
-serde_json = { workspace = true }
 shared = { path = "../shared" }
 sketches-ddsketch = "0.3"
 tokio = { workspace = true, features = [
