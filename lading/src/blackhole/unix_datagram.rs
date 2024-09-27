@@ -77,15 +77,13 @@ impl UnixDatagram {
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
         let mut buf = [0; 65536];
 
-        let bytes_received = counter!("bytes_received", &self.metric_labels);
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
                 res = socket.recv(&mut buf) => {
                     let n: usize = res.map_err(Error::Io)?;
-                    bytes_received.increment(n as u64);
+                    counter!("bytes_received", &self.metric_labels).increment(n as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

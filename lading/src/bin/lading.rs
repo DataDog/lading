@@ -210,6 +210,10 @@ struct Opts {
     /// whether to ignore inspector configuration, if present, and not run the inspector
     #[clap(long)]
     disable_inspector: bool,
+    /// the time, in seconds, to consider a metric expired and not to be included in the capture
+    /// If set to 0, metrics will never expire
+    #[clap(long, default_value_t = 0)]
+    capture_metric_expiration_seconds: u64,
     /// Extra sub commands
     #[clap(subcommand)]
     extracmds: Option<ExtraCommands>,
@@ -304,8 +308,13 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = ops.capture_path {
+        let metric_expiration_duration = match ops.capture_metric_expiration_seconds {
+            0 => None,
+            _ => Some(std::time::Duration::from_secs(ops.capture_metric_expiration_seconds)),
+        };
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
+            metric_expiration_duration,
             global_labels: options_global_labels.inner,
         };
     } else {
@@ -386,9 +395,11 @@ async fn inner_main(
         Telemetry::Log {
             path,
             global_labels,
+            metric_expiration_duration,
         } => {
             let mut capture_manager = CaptureManager::new(
                 path,
+                metric_expiration_duration,
                 shutdown_watcher.register()?,
                 experiment_started_watcher.clone(),
                 target_running_watcher.clone(),

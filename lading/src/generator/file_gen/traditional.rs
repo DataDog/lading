@@ -255,7 +255,6 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let bytes_written = counter!("bytes_written");
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
@@ -270,7 +269,7 @@ impl Child {
 
                     {
                         fp.write_all(&blk.bytes).await?;
-                        bytes_written.increment(total_bytes);
+                        counter!("bytes_written").increment(total_bytes);
                         total_bytes_written += total_bytes;
                     }
 

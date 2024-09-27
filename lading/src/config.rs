@@ -80,6 +80,8 @@ pub enum Telemetry {
         path: PathBuf,
         /// Additional labels to include in every metric
         global_labels: FxHashMap<String, String>,
+        /// Time to consider metrics 'expired' and not to be included in the log
+        metric_expiration_duration: Option<std::time::Duration>,
     },
 }
 

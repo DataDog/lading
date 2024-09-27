@@ -63,29 +63,7 @@ pub(crate) struct Sampler {
     page_size: u64,
     previous_samples: FxHashMap<ProcessIdentifier, Sample>,
     previous_totals: Sample,
-    previous_gauges: Vec<Gauge>,
     have_logged_perms_err: bool,
-}
-
-struct Gauge(metrics::Gauge);
-
-impl std::fmt::Debug for Gauge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Gauge").finish_non_exhaustive()
-    }
-}
-
-impl From<metrics::Gauge> for Gauge {
-    fn from(gauge: metrics::Gauge) -> Self {
-        Self(gauge)
-    }
-}
-
-impl Gauge {
-    #[inline]
-    fn set(&self, value: f64) {
-        self.0.set(value);
-    }
 }
 
 impl Sampler {
@@ -99,7 +77,6 @@ impl Sampler {
             page_size: procfs::page_size(),
             previous_samples: FxHashMap::default(),
             previous_totals: Sample::default(),
-            previous_gauges: Vec::default(),
             have_logged_perms_err: false,
         })
     }
@@ -130,12 +107,6 @@ impl Sampler {
             .expect("could not query machine uptime")
             .uptime; // seconds since boot
         let uptime_ticks: u64 = uptime_seconds.round() as u64 * self.ticks_per_second; // CPU-ticks since boot
-
-        // Clear values from previous sample run. This ensures that processes
-        // that no longer exist will be reported with a 0 value.
-        for gauge in self.previous_gauges.drain(..) {
-            gauge.set(0.0);
-        }
 
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
@@ -299,21 +270,13 @@ impl Sampler {
             ];
 
             // Number of pages that the process has in real memory.
-            let rss_gauge = gauge!("rss_bytes", &labels);
-            rss_gauge.set(rss as f64);
-            self.previous_gauges.push(rss_gauge.into());
+            gauge!("rss_bytes", &labels).set(rss as f64);
             // Soft limit on RSS bytes, see RLIMIT_RSS in getrlimit(2).
-            let rsslim_gauge = gauge!("rsslim_bytes", &labels);
-            rsslim_gauge.set(rsslim as f64);
-            self.previous_gauges.push(rsslim_gauge.into());
+            gauge!("rsslim_bytes", &labels).set(rsslim as f64);
             // The size in bytes of the process in virtual memory.
-            let vsize_gauge = gauge!("vsize_bytes", &labels);
-            vsize_gauge.set(vsize as f64);
-            self.previous_gauges.push(vsize_gauge.into());
+            gauge!("vsize_bytes", &labels).set(vsize as f64);
             // Number of threads this process has active.
-            let num_threads_gauge = gauge!("num_threads", &labels);
-            num_threads_gauge.set(stats.num_threads as f64);
-            self.previous_gauges.push(num_threads_gauge.into());
+            gauge!("num_threads", &labels).set(stats.num_threads as f64);
 
             total_rss += rss;
             total_processes += 1;
@@ -516,15 +479,9 @@ impl Sampler {
                 ("comm", comm.clone()),
             ];
 
-            let cpu_gauge = gauge!("cpu_percentage", &labels);
-            cpu_gauge.set(calc.cpu);
-            self.previous_gauges.push(cpu_gauge.into());
-            let kernel_gauge = gauge!("kernel_cpu_percentage", &labels);
-            kernel_gauge.set(calc.kernel);
-            self.previous_gauges.push(kernel_gauge.into());
-            let user_cpu_gauge = gauge!("user_cpu_percentage", &labels);
-            user_cpu_gauge.set(calc.user);
-            self.previous_gauges.push(user_cpu_gauge.into());
+            gauge!("cpu_percentage", &labels).set(calc.cpu);
+            gauge!("kernel_cpu_percentage", &labels).set(calc.kernel);
+            gauge!("user_cpu_percentage", &labels).set(calc.user);
         }
 
         let total_sample =

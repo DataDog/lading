@@ -83,6 +83,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
 zstd = "0.13.1"
+quanta = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cgroups-rs = { version = "0.3", default-features = false, features = [] }

@@ -143,8 +143,6 @@ impl PassthruFile {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         let mut current_file = None;
@@ -180,7 +178,7 @@ impl PassthruFile {
                     let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match current_file.write_all(&blk.bytes).await {
                         Ok(()) => {
-                            bytes_written.increment(u64::from(blk.total_bytes.get()));
+                            counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
                         }
                         Err(err) => {
                             warn!("write failed: {}", err);

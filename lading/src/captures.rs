@@ -16,7 +16,10 @@ use std::{
 };
 
 use lading_capture::json;
-use metrics_util::registry::{AtomicStorage, Registry};
+use metrics_util::{
+    registry::{GenerationalAtomicStorage, Recency, Registry},
+    MetricKindMask,
+};
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -42,7 +45,8 @@ pub enum Error {
 }
 
 struct Inner {
-    registry: Registry<metrics::Key, AtomicStorage>,
+    registry: Registry<metrics::Key, GenerationalAtomicStorage>,
+    recency: Recency<metrics::Key>,
 }
 
 #[allow(missing_debug_implementations)]
@@ -71,6 +75,7 @@ impl CaptureManager {
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
+        metric_expiration_duration: Option<Duration>,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -86,7 +91,12 @@ impl CaptureManager {
             _experiment_started: experiment_started,
             target_running,
             inner: Arc::new(Inner {
-                registry: Registry::atomic(),
+                registry: Registry::new(GenerationalAtomicStorage::atomic()),
+                recency: Recency::new(
+                    quanta::Clock::new(),
+                    MetricKindMask::COUNTER | MetricKindMask::GAUGE,
+                    metric_expiration_duration,
+                ),
             }),
             global_labels: FxHashMap::default(),
         })
@@ -120,6 +130,18 @@ impl CaptureManager {
         self.inner
             .registry
             .visit_counters(|key: &metrics::Key, counter| {
+                let gen = counter.get_generation();
+                let should_store = self
+                    .inner
+                    .recency
+                    .has_counter_expired(key, gen, &self.inner.registry);
+
+                if !should_store
+                {
+                    // Skip this metric, its too old
+                    return;
+                }
+
                 let mut labels = self.global_labels.clone();
                 for lbl in key.labels() {
                     // TODO we're allocating the same small strings over and over most likely
@@ -131,7 +153,7 @@ impl CaptureManager {
                     fetch_index: self.fetch_index,
                     metric_name: key.name().into(),
                     metric_kind: json::MetricKind::Counter,
-                    value: json::LineValue::Int(counter.load(Ordering::Relaxed)),
+                    value: json::LineValue::Int(counter.get_inner().load(Ordering::Relaxed)),
                     labels,
                 };
                 lines.push(line);
@@ -139,12 +161,23 @@ impl CaptureManager {
         self.inner
             .registry
             .visit_gauges(|key: &metrics::Key, gauge| {
+                let gen = gauge.get_generation();
+                let should_store = self
+                    .inner
+                    .recency
+                    .has_gauge_expired(key, gen, &self.inner.registry);
+
+                if !should_store
+                {
+                    // Skip this metric, its too old
+                    return;
+                }
                 let mut labels = self.global_labels.clone();
                 for lbl in key.labels() {
                     // TODO we're allocating the same small strings over and over most likely
                     labels.insert(lbl.key().into(), lbl.value().into());
                 }
-                let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
+                let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
                 let line = json::Line {
                     run_id: self.run_id,
                     time: now_ms,
