@@ -62,8 +62,8 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::Nothing
 }
 
-fn default_response_delay() -> Duration {
-    Duration::from_millis(0)
+fn default_response_delay_millis() -> u64 {
+    0
 }
 
 fn default_status_code() -> u16 {
@@ -103,8 +103,8 @@ pub struct Config {
     #[serde(default)]
     pub raw_bytes: Vec<u8>,
     /// delay to add before making a response
-    #[serde(default = "default_response_delay")]
-    pub response_delay: Duration,
+    #[serde(default = "default_response_delay_millis")]
+    pub response_delay_millis: u64,
 }
 
 #[derive(Serialize)]
@@ -219,7 +219,7 @@ impl Http {
             status,
             shutdown,
             metric_labels,
-            response_delay: config.response_delay,
+            response_delay: Duration::from_millis(config.response_delay_millis),
         })
     }
 
