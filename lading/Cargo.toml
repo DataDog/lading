@@ -52,7 +52,7 @@ rand = { workspace = true, default-features = false, features = [
   "std",
   "std_rng",
 ] }
-regex = { version = "1.10" }
+regex = { version = "1.11" }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
