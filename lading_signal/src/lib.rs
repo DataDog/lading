@@ -76,7 +76,6 @@ impl Broadcaster {
     /// Send the signal through any `Watcher` instances.
     ///
     /// Function will NOT block until all peers have ack'ed the signal.
-    #[tracing::instrument(skip(self))]
     pub fn signal(self) {
         drop(self.sender);
     }
@@ -84,7 +83,6 @@ impl Broadcaster {
     /// Send the signal through to any `Watcher` instances.
     ///
     /// Function WILL block until all peers have ack'ed the signal.
-    #[tracing::instrument(skip(self))]
     pub async fn signal_and_wait(self) {
         drop(self.sender);
 
@@ -141,7 +139,6 @@ pub struct Watcher {
 impl Watcher {
     /// Decrease the peer count in the `Broadcaster`, allowing the `Broadcaster` to
     /// unblock if waiting for peers. See `Broadcaster::signal_and_wait`.
-    #[tracing::instrument(skip(self))]
     fn decrease_peer_count(&mut self) {
         if !self.registered {
             // If this instance is not registered the `Broadcaster` will not
@@ -230,7 +227,6 @@ impl Watcher {
     }
 
     /// Register with the `Broadcaster`, returning a new instance of `Watcher`.
-    #[tracing::instrument(skip(self))]
     pub fn register(&self) -> Result<Self, RegisterError> {
         if self.signal_received {
             // If the shutdown signal has already been received, return with
