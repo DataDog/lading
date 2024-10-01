@@ -241,8 +241,6 @@ impl Child {
             names.push(pth);
         }
 
-        info!("names: {names:?}");
-
         Self {
             names,
             bytes_per_second,
