@@ -307,6 +307,7 @@ impl Child {
 
                     if total_bytes_written > maximum_bytes_per_log {
                         fp.flush().await?;
+                        drop(fp);
 
                         // Delete the last name file, if it exists. Move all files to their next highest.
                         if fs::try_exists(&last_name).await? {
@@ -339,6 +340,8 @@ impl Child {
                 }
                 () = &mut shutdown_wait => {
                     fp.flush().await?;
+                    drop(fp);
+
                     info!("shutdown signal received");
                     return Ok(());
                 },
