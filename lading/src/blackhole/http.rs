@@ -300,6 +300,7 @@ body_variant: "nothing"
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
+                response_delay_millis: default_response_delay_millis(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
                     .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::Nothing,
@@ -323,6 +324,7 @@ raw_bytes: [0x01, 0x02, 0x10]
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
+                response_delay_millis: default_response_delay_millis(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
                     .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::RawBytes,
