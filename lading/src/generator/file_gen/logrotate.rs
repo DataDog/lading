@@ -427,11 +427,20 @@ async fn write_bytes(
             for i in (0..total_names - 1).rev() {
                 let from = &names[i];
                 let to = &names[i + 1];
-                fs::rename(from, to).await.map_err(|err| Error::IoRename {
-                    from: PathBuf::from(from),
-                    to: PathBuf::from(to),
+
+                // If the 'from' file exists we can move to the next name, else
+                // there's nothing to move.
+                if fs::try_exists(from).await.map_err(|err| Error::Io {
+                    path: PathBuf::from(from),
+                    operation: IoOp::TryExists,
                     err,
-                })?;
+                })? {
+                    fs::rename(from, to).await.map_err(|err| Error::IoRename {
+                        from: PathBuf::from(from),
+                        to: PathBuf::from(to),
+                        err,
+                    })?;
+                }
             }
         }
 
