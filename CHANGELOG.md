@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - HTTP blackhole now has a `response_delay_millis` setting, allowing for
   simulation of latent network connections.
+### Fixed
+- Logrotate file generator will no longer panic when rotating files beyond one depth
 
 ## [0.23.2]
 ### Changed
