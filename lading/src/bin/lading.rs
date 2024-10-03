@@ -30,7 +30,7 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 use tracing::{debug, error, info, info_span, warn, Instrument};
-use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{util::SubscriberInitExt, EnvFilter};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -628,7 +628,6 @@ fn run_extra_cmds(cmds: ExtraCommands) -> Result<(), Error> {
 
 fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::FULL)
         .with_env_filter(EnvFilter::from_default_env())
         .with_ansi(false)
         .finish()
