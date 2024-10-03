@@ -32,7 +32,7 @@ use tokio::{
     sync::mpsc,
     task::{JoinError, JoinHandle},
 };
-use tracing::info;
+use tracing::{error, info};
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
@@ -57,6 +57,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Name provided but no parent on the path
+    #[error("Name provided but no parent on the path")]
+    NameWithNoParent,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -199,8 +202,14 @@ impl Server {
         for res in join_all(self.handles.drain(..)).await {
             match res {
                 Ok(Ok(())) => continue,
-                Ok(Err(err)) => return Err(err),
-                Err(err) => return Err(Error::Child(err)),
+                Ok(Err(err)) => {
+                    error!("join_all error: {err}");
+                    return Err(err);
+                }
+                Err(err) => {
+                    error!("logrotate child error: {err}");
+                    return Err(Error::Child(err));
+                }
             }
         }
         Ok(())
@@ -263,8 +272,9 @@ impl Child {
             .last()
             .expect("there is no last element in names");
 
-        // SAFETY: By construction the name is guaranteed to have a parent.
-        fs::create_dir_all(&self.names[0].parent().expect("names has no parent")).await?;
+        // SAFETY: By construction there is at least one name present.
+        let parent: &Path = self.names[0].parent().ok_or(Error::NameWithNoParent)?;
+        fs::create_dir_all(parent).await?;
         let mut fp = BufWriter::with_capacity(
             bytes_per_second,
             fs::OpenOptions::new()
@@ -281,7 +291,6 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let bytes_written = counter!("bytes_written");
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
@@ -298,7 +307,7 @@ impl Child {
 
                     {
                         fp.write_all(&blk.bytes).await?;
-                        bytes_written.increment(total_bytes);
+                        counter!("bytes_written").increment(total_bytes);
                         total_bytes_written += total_bytes;
                     }
 
