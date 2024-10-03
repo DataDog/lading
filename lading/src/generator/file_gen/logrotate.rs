@@ -155,13 +155,15 @@ impl Server {
                 )?,
             };
 
-            let mut basename = config.root.clone();
+            let mut dir_path = config.root.clone();
             let depth = rng.gen_range(0..config.max_depth);
             for _ in 0..depth {
-                basename.push(format!("{}", rng.gen::<u16>()));
+                dir_path.push(format!("{}", rng.gen::<u16>()));
             }
-            basename.set_file_name(format!("{}", rng.gen::<u64>()));
-            basename.set_extension("log");
+
+            let file_name = format!("{}.log", rng.gen::<u64>());
+            let mut basename = dir_path.clone();
+            basename.push(&file_name);
 
             let child = Child::new(
                 &basename,
@@ -228,14 +230,14 @@ impl Child {
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));
+
+        let parent_dir = basename.parent().unwrap_or_else(|| Path::new(""));
+        let original_file_name = basename.file_name().unwrap_or_default().to_string_lossy();
+
         for i in 0..total_rotations {
-            let name = format!(
-                "{orig}.{i}",
-                orig = basename.file_name().unwrap_or_default().to_string_lossy()
-            );
-            let mut pth = PathBuf::new();
-            pth.push(basename);
-            pth.set_file_name(name);
+            let rotated_file_name = format!("{original_file_name}.{i}");
+            let mut pth = PathBuf::from(parent_dir);
+            pth.push(rotated_file_name);
             names.push(pth);
         }
 
