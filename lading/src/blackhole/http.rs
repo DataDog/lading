@@ -62,6 +62,10 @@ fn default_body_variant() -> BodyVariant {
     BodyVariant::Nothing
 }
 
+fn default_response_delay_millis() -> u64 {
+    0
+}
+
 fn default_status_code() -> u16 {
     StatusCode::OK.as_u16()
 }
@@ -98,6 +102,9 @@ pub struct Config {
     /// raw array of bytes if the `raw_bytes` body variant is selected
     #[serde(default)]
     pub raw_bytes: Vec<u8>,
+    /// delay to add before making a response
+    #[serde(default = "default_response_delay_millis")]
+    pub response_delay_millis: u64,
 }
 
 #[derive(Serialize)]
@@ -124,6 +131,7 @@ async fn srv(
     body_bytes: Vec<u8>,
     req: Request<Body>,
     headers: HeaderMap,
+    response_delay: Duration,
 ) -> Result<Response<Body>, hyper::Error> {
     requests_received.increment(1);
 
@@ -135,6 +143,8 @@ async fn srv(
         Err(response) => Ok(response),
         Ok(body) => {
             bytes_received.increment(body.len() as u64);
+
+            tokio::time::sleep(response_delay).await;
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
@@ -155,6 +165,7 @@ pub struct Http {
     headers: HeaderMap,
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
+    response_delay: Duration,
 }
 
 impl Http {
@@ -208,6 +219,7 @@ impl Http {
             status,
             shutdown,
             metric_labels,
+            response_delay: Duration::from_millis(config.response_delay_millis),
         })
     }
 
@@ -238,6 +250,7 @@ impl Http {
                         body_bytes.clone(),
                         request,
                         headers.clone(),
+                        self.response_delay,
                     )
                 }))
             }
@@ -287,6 +300,7 @@ body_variant: "nothing"
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
+                response_delay_millis: default_response_delay_millis(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
                     .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::Nothing,
@@ -310,6 +324,7 @@ raw_bytes: [0x01, 0x02, 0x10]
             config,
             Config {
                 concurrent_requests_max: default_concurrent_requests_max(),
+                response_delay_millis: default_response_delay_millis(),
                 binding_addr: SocketAddr::from_str("127.0.0.1:1000")
                     .expect("Not possible to parse into SocketAddr"),
                 body_variant: BodyVariant::RawBytes,
