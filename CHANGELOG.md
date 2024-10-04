@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Changed
 - Linux observer is more resilient to scenarios where lading lacks ptrace permission.
+- Default response latency for HTTP blackhole is now 30ms (previously 0ms)
 ### Removed
 - lading_capture no longer exports a protobuf version of the capture.
 ### Added

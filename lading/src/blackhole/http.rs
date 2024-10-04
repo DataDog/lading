@@ -63,7 +63,7 @@ fn default_body_variant() -> BodyVariant {
 }
 
 fn default_response_delay_millis() -> u64 {
-    0
+    30
 }
 
 fn default_status_code() -> u16 {
