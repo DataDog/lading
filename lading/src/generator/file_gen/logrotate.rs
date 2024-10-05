@@ -192,7 +192,7 @@ impl Server {
 
         let mut handles = Vec::new();
 
-        for _ in 0..config.concurrent_logs {
+        for idx in 0..config.concurrent_logs {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
             let total_bytes =
@@ -217,6 +217,9 @@ impl Server {
             let mut basename = dir_path.clone();
             basename.push(&file_name);
 
+            let mut child_labels = labels.clone();
+            child_labels.push(("child_idx".to_string(), idx.to_string()));
+
             let child = Child::new(
                 &basename,
                 config.total_rotations,
@@ -225,6 +228,7 @@ impl Server {
                 block_cache,
                 throttle,
                 shutdown.clone(),
+                child_labels,
             );
 
             handles.push(tokio::spawn(child.spin()));
@@ -274,9 +278,11 @@ struct Child {
     block_cache: block::Cache,
     throttle: Throttle,
     shutdown: lading_signal::Watcher,
+    labels: Vec<(String, String)>,
 }
 
 impl Child {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         basename: &Path,
         total_rotations: u8,
@@ -285,6 +291,7 @@ impl Child {
         block_cache: block::Cache,
         throttle: Throttle,
         shutdown: lading_signal::Watcher,
+        labels: Vec<(String, String)>,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));
@@ -306,6 +313,7 @@ impl Child {
             block_cache,
             throttle,
             shutdown,
+            labels,
         }
     }
 
@@ -358,13 +366,19 @@ impl Child {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
             let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    write_bytes(&mut rcv, &mut fp, &mut total_bytes_written, bytes_per_second,
-                                total_names, total_bytes, maximum_bytes_per_log,
-                                &self.names, last_name).await?;
+                _ = self.throttle.wait_for(blk.total_bytes) => {
+                    let blk = rcv.next().await.expect("failed to advance through the blocks");
+                    write_bytes(&blk,
+                                &mut fp,
+                                &mut total_bytes_written,
+                                bytes_per_second,
+                                total_names,
+                                maximum_bytes_per_log,
+                                &self.names,
+                                last_name,
+                                &self.labels).await?;
                 }
                 () = &mut shutdown_wait => {
                     fp.flush().await.map_err(|err| Error::IoFlush { err })?;
@@ -381,27 +395,23 @@ impl Child {
 
 #[allow(clippy::too_many_arguments)]
 async fn write_bytes(
-    rcv: &mut PeekableReceiver<Block>,
+    blk: &Block,
     fp: &mut BufWriter<fs::File>,
     total_bytes_written: &mut u64,
     bytes_per_second: usize,
     total_names: usize,
-    total_bytes: NonZeroU32,
     maximum_bytes_per_log: u64,
     names: &[PathBuf],
     last_name: &Path,
+    labels: &[(String, String)],
 ) -> Result<(), Error> {
-    let blk = rcv
-        .next()
-        .await
-        .expect("failed to advance through the blocks"); // actually advance through the blocks
-    let total_bytes = u64::from(total_bytes.get());
+    let total_bytes = u64::from(blk.total_bytes.get());
 
     {
         fp.write_all(&blk.bytes)
             .await
             .map_err(|err| Error::IoWriteAll { err })?;
-        counter!("bytes_written").increment(total_bytes);
+        counter!("bytes_written", labels).increment(total_bytes);
         *total_bytes_written += total_bytes;
     }
 
