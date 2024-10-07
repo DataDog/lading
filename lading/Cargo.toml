@@ -33,7 +33,7 @@ clap = { version = "3.2", default-features = false, features = [
 flate2 = { version = "1.0.34", default-features = false, features = [
   "rust_backend",
 ] }
-futures = "0.3.28"
+futures = "0.3.31"
 http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
