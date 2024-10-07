@@ -27,6 +27,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) sampling: ConfRange<f32>,
     pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
+    pub(crate) ctx_idx: std::cell::Cell<usize>,
 }
 
 impl MetricGenerator {
@@ -86,6 +87,7 @@ impl MetricGenerator {
             sampling,
             sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
+            ctx_idx: std::cell::Cell::new(0),
         })
     }
 }
@@ -102,8 +104,10 @@ impl<'a> Generator<'a> for MetricGenerator {
         // and the program should crash prior to this point.
         let template: &Template = self
             .templates
-            .choose(&mut rng)
-            .expect("failed to choose templates");
+            .get(self.ctx_idx.get())
+            .expect("failed to get template");
+        self.ctx_idx
+            .set((self.ctx_idx.get() + 1) % self.templates.len());
 
         let container_id = choose_or_not_ref(&mut rng, &self.container_ids).map(String::as_str);
         // https://docs.datadoghq.com/metrics/custom_metrics/dogstatsd_metrics_submission/#sample-rates
