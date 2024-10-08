@@ -5,15 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+
+
+## [0.23.3]
 ### Changed
 - Linux observer is more resilient to scenarios where lading lacks ptrace permission.
 ### Removed
 - lading_capture no longer exports a protobuf version of the capture.
 ### Added
 - HTTP blackhole now has a `response_delay_millis` setting, allowing for
-  simulation of latent network connections.
+  simulation of latent network connections. The default value is 0.
 ### Fixed
-- Logrotate file generator will no longer panic when rotating files beyond one depth
+- Logrotate file generator will no longer panic when rotating files beyond one depth.
 
 ## [0.23.2]
 ### Changed
