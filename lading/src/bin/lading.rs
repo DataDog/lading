@@ -87,7 +87,7 @@ impl CliKeyValues {
 impl Display for CliKeyValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         for (k, v) in self.inner.iter() {
-            write!(f, "{}={},", k, v)?;
+            write!(f, "{k}={v},")?;
         }
         Ok(())
     }
@@ -574,7 +574,7 @@ async fn inner_main(
                             break Err(Error::Target(err));
                         }
                     }
-                    Err(err) => panic!("Could not join the spawned target task: {}", err),
+                    Err(err) => panic!("Could not join the spawned target task: {err}"),
                 }
             },
         }
@@ -614,7 +614,7 @@ fn run_process_tree(opts: ProcessTreeGen) -> Result<(), Error> {
 
             info!("Bye. :)");
         }
-        Err(e) => panic!("invalide configuration: {}", e),
+        Err(e) => panic!("invalide configuration: {e}"),
     }
     Ok(())
 }

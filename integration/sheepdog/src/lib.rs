@@ -282,7 +282,7 @@ impl IntegrationTest {
         IntegrationTest::print_stdio(&self.tempdir);
 
         // todo: report captures file & provide some utilities for asserting against it
-        println!("test result: {:?}", metrics);
+        println!("test result: {metrics:?}");
         Ok(metrics)
     }
 
@@ -298,9 +298,9 @@ impl IntegrationTest {
             let mut contents = String::new();
             std::fs::File::open(path)?.read_to_string(&mut contents)?;
             if contents.is_empty() {
-                println!("{}: <empty>", name);
+                println!("{name}: <empty>");
             } else {
-                println!("{}:\n{}", name, contents);
+                println!("{name}:\n{contents}");
             }
             Ok(())
         }

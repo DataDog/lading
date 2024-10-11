@@ -364,7 +364,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tokio::select! {
         result = rpc_server => {
             if let Err(e) = result {
-                panic!("Server error: {}", e);
+                panic!("Server error: {e}");
             }
         },
         _ = shutdown_rx.recv() => {},

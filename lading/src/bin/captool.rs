@@ -118,7 +118,7 @@ async fn main() -> Result<(), Error> {
         for line in &filtered {
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
             for (key, value) in line.labels.iter() {
-                let tag = format!("{}:{}", key, value);
+                let tag = format!("{key}:{value}");
                 sorted_labels.insert(tag);
             }
             let mut context_key = hash_builder.build_hasher();
