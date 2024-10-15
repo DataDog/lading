@@ -3,7 +3,10 @@ use clap::Parser;
 use fuser::{
     FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
+use lading_payload::block;
+use lading_throttle::Throttle;
 use model::NodeType;
+use rand::{rngs::SmallRng, SeedableRng};
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 // use lading_payload::block;
@@ -11,6 +14,7 @@ use nix::libc::{self, ENOENT};
 use serde::Deserialize;
 use std::{
     ffi::OsStr,
+    num::NonZeroU32,
     path::PathBuf,
     time::{Duration, UNIX_EPOCH},
 };
@@ -75,6 +79,9 @@ pub enum Error {
 }
 
 mod model {
+    use lading_payload::block;
+    use lading_throttle::Throttle;
+
     pub type Inode = usize;
     pub type Tick = u64;
 
@@ -104,7 +111,8 @@ mod model {
     pub struct State<'a> {
         nodes: Vec<Node<'a>>,
         pub(super) root_inode: Inode,
-        bytes_per_tick: u64,
+        throttle: Throttle,
+        block_cache: block::Cache,
     }
 
     #[derive(Debug)]
@@ -476,16 +484,33 @@ fn main() -> Result<(), Error> {
     // let config_contents = std::fs::read_to_string(&args.config_path)?;
     // let config: Config = serde_yaml::from_str(&config_contents)?;
 
-    let content = "\
-Call me Ishmael.\n\
-Some years ago—never mind how long precisely—having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world. It is a way I have of driving off the spleen and regulating the circulation. Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet; and especially whenever my hypos get such an upper hand of me, that it requires a strong moral principle to prevent me from deliberately stepping into the street, and methodically knocking people’s hats off—then, I account it high time to get to sea as soon as I can. This is my substitute for pistol and ball. With a philosophical flourish Cato throws himself upon his sword; I quietly take to the ship. There is nothing surprising in this. If they but knew it, almost all men in their degree, some time or other, cherish very nearly the same feelings towards the ocean with me.\n\
-\n\
-There now is your insular city of the Manhattoes, belted round by wharves as Indian isles by coral reefs—commerce surrounds it with her surf. Right and left, the streets take you waterward. Its extreme downtown is the battery, where that noble mole is washed by waves, and cooled by breezes, which a few hours previous were out of sight of land. Look at the crowds of water-gazers there.\n".as_bytes();
+    let primes: [u8; 32] = [
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+        97, 101, 103, 107, 109, 113, 127, 131,
+    ];
+    let mut rng = SmallRng::from_seed(primes);
 
-    // Initialize the model state
+    let block_cache = block::Cache::fixed(
+        &mut rng,
+        NonZeroU32::new(100_000_000).expect("zero value"), // TODO make this an Error
+        10_000,                                            // 10 KiB
+        &lading_payload::Config::Ascii,
+    )
+    .expect("block construction"); // TODO make this an Error
+
+    let throttle_conf = lading_throttle::Config::Stable;
+    let throttle = Throttle::new_with_config(
+        throttle_conf,
+        NonZeroU32::new(
+            args.bytes_per_second.get_bytes() as u32, // TODO avoid chopping this down
+        )
+        .expect("zero value"), // TODO make this an error ,
+    );
+
     let state = model::State::new(
         args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
-        content,
+        throttle,
+        block_cache,
     );
 
     // Initialize the FUSE filesystem
