@@ -342,6 +342,23 @@ impl Cache {
             },
         }
     }
+
+    /// Return a `Block` from the `Cache`
+    ///
+    /// This is a blocking function that returns a single `Block` instance as
+    /// soon as one is ready, blocking the caller until one is available.
+    pub fn next_block(&mut self) -> &Block {
+        match self {
+            Self::Fixed {
+                ref mut idx,
+                blocks,
+            } => {
+                let block = &blocks[*idx];
+                *idx = (*idx + 1) % blocks.len();
+                block
+            }
+        }
+    }
 }
 
 /// Construct a new block cache of form defined by `serializer`.
