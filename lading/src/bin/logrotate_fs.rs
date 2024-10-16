@@ -11,12 +11,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 // use lading_payload::block;
 use nix::libc::{self, ENOENT};
 use serde::Deserialize;
-use std::{
-    ffi::OsStr,
-    num::NonZeroU32,
-    path::PathBuf,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::{ffi::OsStr, num::NonZeroU32, path::PathBuf, time::Duration};
 
 // fn default_config_path() -> String {
 //     "/etc/lading/logrotate_fs.yaml".to_string()
@@ -83,6 +78,7 @@ const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 struct LogrotateFS {
     state: model::State,
     start_time: std::time::Instant,
+    start_time_system: std::time::SystemTime,
 }
 
 impl LogrotateFS {
@@ -95,33 +91,46 @@ impl LogrotateFS {
     fn getattr_helper(&mut self, tick: model::Tick, inode: usize) -> Option<FileAttr> {
         let nlink = self.state.nlink(inode) as u32;
 
-        self.state.getattr(tick, inode).map(|attr| FileAttr {
-            ino: attr.inode as u64,
-            size: attr.size,
-            blocks: (attr.size + 511) / 512,
-            // TODO these times should reflect those in the model, will need to
-            // be translated from the tick to systemtime. Implies we'll need to
-            // adjust up from start_time, knowing that a tick is one second
-            // wide.
-            atime: UNIX_EPOCH,
-            mtime: UNIX_EPOCH,
-            ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH,
-            kind: match attr.kind {
-                model::NodeType::File => fuser::FileType::RegularFile,
-                model::NodeType::Directory => fuser::FileType::Directory,
-            },
-            perm: if matches!(attr.kind, model::NodeType::Directory) {
-                0o755
-            } else {
-                0o644
-            },
-            nlink,
-            uid: unsafe { libc::getuid() },
-            gid: unsafe { libc::getgid() },
-            rdev: 0,
-            blksize: 512,
-            flags: 0,
+        self.state.getattr(tick, inode).map(|attr| {
+            // Convert ticks to durations
+            let access_duration = Duration::from_secs(attr.access_tick);
+            let modified_duration = Duration::from_secs(attr.modified_tick);
+            let status_duration = Duration::from_secs(attr.status_tick);
+
+            // Calculate SystemTime instances
+            let atime = self.start_time_system + access_duration;
+            let mtime = self.start_time_system + modified_duration;
+            let ctime = self.start_time_system + status_duration;
+            let crtime = self.start_time_system; // Assume creation time is when the filesystem started
+
+            FileAttr {
+                ino: attr.inode as u64,
+                size: attr.size,
+                blocks: (attr.size + 511) / 512,
+                // TODO these times should reflect those in the model, will need to
+                // be translated from the tick to systemtime. Implies we'll need to
+                // adjust up from start_time, knowing that a tick is one second
+                // wide.
+                atime,
+                mtime,
+                ctime,
+                crtime,
+                kind: match attr.kind {
+                    model::NodeType::File => fuser::FileType::RegularFile,
+                    model::NodeType::Directory => fuser::FileType::Directory,
+                },
+                perm: if matches!(attr.kind, model::NodeType::Directory) {
+                    0o755
+                } else {
+                    0o644
+                },
+                nlink,
+                uid: unsafe { libc::getuid() },
+                gid: unsafe { libc::getgid() },
+                rdev: 0,
+                blksize: 512,
+                flags: 0,
+            }
         })
     }
 }
@@ -297,6 +306,7 @@ fn main() -> Result<(), Error> {
     let fs = LogrotateFS {
         state,
         start_time: std::time::Instant::now(),
+        start_time_system: std::time::SystemTime::now(),
     };
 
     // Mount the filesystem
