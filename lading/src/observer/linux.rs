@@ -335,7 +335,6 @@ impl Sampler {
             // then we assume smaps operations will fail as well.
             if has_ptrace_perm {
                 joinset.spawn(async move {
-
                     let memory_regions = match Regions::from_pid(pid) {
                         Ok(memory_regions) => memory_regions,
                         Err(e) => {
@@ -507,7 +506,12 @@ impl Sampler {
 
             let calc = calculate_cpu_percentage(sample, &prev, self.num_cores);
 
-            let ProcessIdentifier{ pid, exe, cmdline, comm } = key;
+            let ProcessIdentifier {
+                pid,
+                exe,
+                cmdline,
+                comm,
+            } = key;
 
             let labels = [
                 ("pid", format!("{pid}", pid = pid.clone())),
@@ -527,23 +531,27 @@ impl Sampler {
             self.previous_gauges.push(user_cpu_gauge.into());
         }
 
-        let total_sample =
-            samples
-                .iter()
-                .fold(Sample::default(), |acc, (key, sample)| {
-                    let ProcessIdentifier{ pid, exe: _, cmdline: _, comm: _ } = key;
+        let total_sample = samples
+            .iter()
+            .fold(Sample::default(), |acc, (key, sample)| {
+                let ProcessIdentifier {
+                    pid,
+                    exe: _,
+                    cmdline: _,
+                    comm: _,
+                } = key;
 
-                    Sample {
-                        utime: acc.utime + sample.utime,
-                        stime: acc.stime + sample.stime,
-                        // use parent process uptime
-                        uptime: if *pid == self.parent.pid() {
-                            sample.uptime
-                        } else {
-                            acc.uptime
-                        },
-                    }
-                });
+                Sample {
+                    utime: acc.utime + sample.utime,
+                    stime: acc.stime + sample.stime,
+                    // use parent process uptime
+                    uptime: if *pid == self.parent.pid() {
+                        sample.uptime
+                    } else {
+                        acc.uptime
+                    },
+                }
+            });
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
 
