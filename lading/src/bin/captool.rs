@@ -85,7 +85,18 @@ async fn main() -> Result<(), Error> {
     // Print out available metrics if user asked for it
     // or if they didn't specify a specific metric
     if args.list_metrics || args.metric.is_none() {
-        let mut names: Vec<(String, String)> = lines.map(|line| (line.metric_name.clone(), match line.metric_kind { MetricKind::Counter => "c".to_owned(), MetricKind::Gauge => "g".to_owned() } )).collect().await;
+        let mut names: Vec<(String, String)> = lines
+            .map(|line| {
+                (
+                    line.metric_name.clone(),
+                    match line.metric_kind {
+                        MetricKind::Counter => "c".to_owned(),
+                        MetricKind::Gauge => "g".to_owned(),
+                    },
+                )
+            })
+            .collect()
+            .await;
         names.sort();
         names.dedup();
         for (name, kind) in names {
