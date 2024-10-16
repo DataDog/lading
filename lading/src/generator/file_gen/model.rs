@@ -68,7 +68,7 @@ impl File {
         self.advance_time(now);
 
         assert!(self.bytes_written >= self.bytes_read);
-        self.bytes_read.saturating_sub(self.bytes_read)
+        self.bytes_written.saturating_sub(self.bytes_read)
     }
 
     /// Register a read.
@@ -181,18 +181,19 @@ pub enum NodeType {
 
 impl State {
     /// Create a new instance of `State`.
-    #[tracing::instrument]
+    #[tracing::instrument(skip(block_cache))]
     pub fn new(bytes_per_tick: u64, block_cache: block::Cache) -> State {
-        let root_inode: Inode = 0; // `/`
-        let logs_inode: Inode = 1; // `/logs`
-        let foo_log_inode: Inode = 2; // `/logs/foo.log`
+        let root_inode: Inode = 1; // `/`
+        let logs_inode: Inode = 2; // `/logs`
+        let foo_log_inode: Inode = 3; // `/logs/foo.log`
 
         let mut nodes = HashMap::new();
 
-        let root_dir = Directory {
+        let mut root_dir = Directory {
             children: HashSet::new(),
             parent: None,
         };
+        root_dir.children.insert(logs_inode);
         nodes.insert(
             root_inode,
             Node::Directory {
@@ -201,14 +202,15 @@ impl State {
             },
         );
 
-        let logs_dir = Directory {
+        let mut logs_dir = Directory {
             children: HashSet::new(),
             parent: Some(root_inode),
         };
+        logs_dir.children.insert(foo_log_inode);
         nodes.insert(
             logs_inode,
             Node::Directory {
-                name: "/logs".to_string(),
+                name: "logs".to_string(),
                 dir: logs_dir,
             },
         );
@@ -228,7 +230,7 @@ impl State {
         nodes.insert(
             foo_log_inode,
             Node::File {
-                name: "/logs/foo.log".to_string(),
+                name: "foo.log".to_string(),
                 file: foo_log,
             },
         );
@@ -267,7 +269,7 @@ impl State {
     pub fn lookup(&mut self, now: Tick, parent_inode: Inode, name: &str) -> Option<Inode> {
         self.advance_time(now);
 
-        if let Some(Node::Directory { name, dir }) = self.nodes.get(&parent_inode) {
+        if let Some(Node::Directory { dir, .. }) = self.nodes.get(&parent_inode) {
             for child_inode in &dir.children {
                 let child_node = &self
                     .nodes
@@ -390,5 +392,23 @@ impl State {
     #[must_use]
     pub fn root_inode(&self) -> Inode {
         self.root_inode
+    }
+
+    /// Return the number of links for the inode.
+    #[must_use]
+    pub fn nlink(&self, inode: Inode) -> usize {
+        if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
+            let subdirectory_count = dir
+                .children
+                .iter()
+                .filter(|child_inode| {
+                    matches!(self.nodes.get(child_inode), Some(Node::Directory { .. }))
+                })
+                .count();
+            // nlink is 2 (for "." and "..") plus the number of subdirectories
+            2 + subdirectory_count
+        } else {
+            1
+        }
     }
 }

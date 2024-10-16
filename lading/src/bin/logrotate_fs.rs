@@ -93,10 +93,16 @@ impl LogrotateFS {
 
     #[tracing::instrument(skip(self))]
     fn getattr_helper(&mut self, tick: model::Tick, inode: usize) -> Option<FileAttr> {
+        let nlink = self.state.nlink(inode) as u32;
+
         self.state.getattr(tick, inode).map(|attr| FileAttr {
             ino: attr.inode as u64,
             size: attr.size,
             blocks: (attr.size + 511) / 512,
+            // TODO these times should reflect those in the model, will need to
+            // be translated from the tick to systemtime. Implies we'll need to
+            // adjust up from start_time, knowing that a tick is one second
+            // wide.
             atime: UNIX_EPOCH,
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
@@ -110,7 +116,7 @@ impl LogrotateFS {
             } else {
                 0o644
             },
-            nlink: 1,
+            nlink,
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
             rdev: 0,
@@ -137,9 +143,14 @@ impl Filesystem for LogrotateFS {
         let name_str = name.to_str().unwrap_or("");
         if let Some(ino) = self.state.lookup(tick, parent as usize, name_str) {
             if let Some(attr) = self.getattr_helper(tick, ino) {
+                info!("lookup: returning attr for inode {}: {:?}", ino, attr);
                 reply.entry(&TTL, &attr, 0);
                 return;
+            } else {
+                error!("lookup: getattr_helper returned None for inode {}", ino);
             }
+        } else {
+            error!("lookup: state.lookup returned None for name {}", name_str);
         }
         reply.error(ENOENT);
     }
@@ -191,44 +202,56 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         self.state.advance_time(tick);
 
-        if offset != 0 {
-            reply.ok();
-            return;
-        }
-
         let root_inode = self.state.root_inode();
 
-        if let Some(entries) = self.state.readdir(ino as usize) {
-            let mut index = 1;
-            // TODO fix
-            let _ = reply.add(ino, index, fuser::FileType::Directory, ".");
-            index += 1;
-            if ino != root_inode as u64 {
-                let parent_ino = self
-                    .state
-                    .get_parent_inode(ino as usize)
-                    .expect("inode must have parent");
-                // TODO fix
-                let _ = reply.add(parent_ino as u64, index, fuser::FileType::Directory, "..");
-                index += 1;
-            }
+        // TODO building up a vec of entries here to handle offset really does
+        // suggest that the model needs to be exposed in such a way that this
+        // needn't be done.
+        let mut entries = Vec::new();
 
-            for child_ino in entries {
+        // '.' and '..'
+        entries.push((ino, fuser::FileType::Directory, ".".to_string()));
+        if ino != root_inode as u64 {
+            let parent_ino = self
+                .state
+                .get_parent_inode(ino as usize)
+                .expect("inode must have parent");
+            entries.push((
+                parent_ino as u64,
+                fuser::FileType::Directory,
+                "..".to_string(),
+            ));
+        }
+
+        // reaming children
+        if let Some(child_inodes) = self.state.readdir(ino as usize) {
+            for child_ino in child_inodes {
                 if let Some(name) = self.state.get_name(*child_ino) {
                     let file_type = self
                         .state
                         .get_file_type(*child_ino)
                         .expect("inode must have file type");
-                    let _ = reply.add(*child_ino as u64, index, file_type, name);
-                    index += 1;
+                    entries.push((*child_ino as u64, file_type, name.to_string()));
                 } else {
                     error!("child inode has no name");
                 }
             }
-            reply.ok();
         } else {
             reply.error(ENOENT);
+            return;
         }
+
+        let mut idx = offset as usize;
+        while idx < entries.len() {
+            let (inode, file_type, name) = &entries[idx];
+            let next_offset = (idx + 1) as i64;
+            if reply.add(*inode, next_offset, *file_type, name) {
+                // Buffer is full, exit the loop
+                break;
+            }
+            idx += 1;
+        }
+        reply.ok();
     }
 
     #[tracing::instrument(skip(self, _req, reply))]
