@@ -195,11 +195,16 @@ pub(crate) async fn scrape_metrics(
             continue;
         }
 
-        let mut parts = line.split_ascii_whitespace();
+        let mut parts = line.split_inclusive('}');
         let name_and_labels = parts
             .next()
             .expect("parts iterator is missing name and labels");
-        let value = parts.next().expect("parts iterator is missing value");
+        let value = parts
+            .next()
+            .expect("parts iterator is missing value")
+            .split_ascii_whitespace()
+            .next()
+            .expect("parts iterator is missing value");
 
         if value.contains('#') {
             trace!("Unknown format: {value}");
@@ -322,6 +327,11 @@ mod tests {
     const GAUGE_ONE_LABEL: &str = r#"
     # TYPE memory_usage_bytes gauge
     memory_usage_bytes{process="test"} 5264384
+    "#;
+
+    const GAUGE_LABEL_WITH_SPACES: &str = r#"
+    # TYPE vector_build_info gauge
+    vector_build_info{arch="aarch64",debug="false",host="d0cf527728fe",revision="745babd 2024-09-11 14:55:36.802851761",rust_version="1.78",version="0.41.1"} 1 1729113558073
     "#;
 
     async fn run_scrape_and_parse_metrics(
@@ -482,6 +492,38 @@ mod tests {
         match metric_one.2 {
             metrics_util::debugging::DebugValue::Gauge(v) => {
                 assert_eq!(v, 5_264_384_f64);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gauge_label_with_spaces() {
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_LABEL_WITH_SPACES, tags).await;
+
+        assert_eq!(snapshot.len(), 1);
+        dbg!(&snapshot);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/vector_build_info",
+                    vec![
+                        Label::new("arch", "aarch64"),
+                        Label::new("debug", "false"),
+                        Label::new("host", "d0cf527728fe"),
+                        Label::new("revision", "745babd 2024-09-11 14:55:36.802851761"),
+                        Label::new("rust_version", "1.78"),
+                        Label::new("version", "0.41.1"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
         }
