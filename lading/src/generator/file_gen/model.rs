@@ -168,6 +168,12 @@ pub struct NodeAttributes {
     pub kind: NodeType,
     /// The size in bytes.
     pub size: u64,
+    /// The last access time in ticks.
+    pub access_tick: Tick,
+    /// The last modified time in ticks.
+    pub modified_tick: Tick,
+    /// The last status change time in ticks.
+    pub status_tick: Tick,
 }
 
 /// Describe whether the Node is a File or Directory.
@@ -298,11 +304,17 @@ impl State {
                 inode,
                 kind: NodeType::File,
                 size: file.bytes_written,
+                access_tick: file.access_tick,
+                modified_tick: file.modified_tick,
+                status_tick: file.status_tick,
             },
             Node::Directory { .. } => NodeAttributes {
                 inode,
                 kind: NodeType::Directory,
                 size: 0,
+                access_tick: self.now,
+                modified_tick: self.now,
+                status_tick: self.now,
             },
         })
     }
