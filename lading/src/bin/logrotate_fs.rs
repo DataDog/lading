@@ -3,9 +3,8 @@ use clap::Parser;
 use fuser::{
     FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
+use lading::generator::file_gen::model;
 use lading_payload::block;
-use lading_throttle::Throttle;
-use model::NodeType;
 use rand::{rngs::SmallRng, SeedableRng};
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
@@ -78,261 +77,23 @@ pub enum Error {
     SerdeYaml(#[from] serde_yaml::Error),
 }
 
-mod model {
-    use lading_payload::block;
-    use lading_throttle::Throttle;
-
-    pub type Inode = usize;
-    pub type Tick = u64;
-
-    #[derive(Debug)]
-    pub struct File<'a> {
-        name: String,
-        accumulated_bytes: u64,
-        last_tick: Tick,
-        content: &'a [u8],
-        parent: Inode,
-    }
-
-    #[derive(Debug)]
-    pub struct Directory {
-        name: String,
-        children: &'static [Inode],
-        parent: Option<Inode>,
-    }
-
-    #[derive(Debug)]
-    pub enum Node<'a> {
-        File(File<'a>),
-        Directory(Directory),
-    }
-
-    #[derive(Debug)]
-    pub struct State<'a> {
-        nodes: Vec<Node<'a>>,
-        pub(super) root_inode: Inode,
-        throttle: Throttle,
-        block_cache: block::Cache,
-    }
-
-    #[derive(Debug)]
-    pub struct NodeAttributes {
-        pub(super) inode: Inode,
-        pub(super) kind: NodeType,
-        pub(super) size: u64,
-    }
-
-    #[derive(Debug)]
-    pub enum NodeType {
-        File,
-        Directory,
-    }
-
-    impl<'a> State<'a> {
-        #[tracing::instrument(skip(content))]
-        pub fn new(bytes_per_tick: u64, content: &'a [u8]) -> State<'a> {
-            let root_inode: Inode = 0; // `/`
-            let logs_inode: Inode = 1; // `/logs`
-            let foo_log_inode: Inode = 2; // `/logs/foo.log`
-
-            let mut nodes = Vec::new();
-
-            let root_dir = Directory {
-                name: "/".to_string(),
-                children: &[], // Will update later
-                parent: None,
-            };
-            nodes.push(Node::Directory(root_dir));
-
-            let logs_dir = Directory {
-                name: "logs".to_string(),
-                children: &[], // Will update later
-                parent: Some(root_inode),
-            };
-            nodes.push(Node::Directory(logs_dir));
-
-            let foo_log = File {
-                name: "foo.log".to_string(),
-                accumulated_bytes: 0,
-                last_tick: 0,
-                content,
-                parent: logs_inode,
-            };
-            nodes.push(Node::File(foo_log));
-
-            // Update children
-            let logs_children: &'static [Inode] = Box::leak(vec![foo_log_inode].into_boxed_slice());
-
-            if let Node::Directory(ref mut dir) = nodes[logs_inode] {
-                dir.children = logs_children;
-            }
-
-            let root_children: &'static [Inode] = Box::leak(vec![logs_inode].into_boxed_slice());
-
-            if let Node::Directory(ref mut dir) = nodes[root_inode] {
-                dir.children = root_children;
-            }
-
-            State {
-                nodes,
-                root_inode,
-                bytes_per_tick,
-            }
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn lookup(&self, parent_inode: Inode, name: &str) -> Option<Inode> {
-            if let Some(Node::Directory(dir)) = self.nodes.get(parent_inode) {
-                for &child_inode in dir.children {
-                    let child_node = &self.nodes[child_inode];
-                    let child_name = match child_node {
-                        Node::Directory(child_dir) => &child_dir.name,
-                        Node::File(child_file) => &child_file.name,
-                    };
-                    if child_name == name {
-                        return Some(child_inode);
-                    }
-                }
-            }
-            None
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn getattr(&self, inode: Inode) -> Option<NodeAttributes> {
-            self.nodes.get(inode).map(|node| match node {
-                Node::File(file) => NodeAttributes {
-                    inode,
-                    kind: NodeType::File,
-                    size: file.accumulated_bytes,
-                },
-                Node::Directory(_) => NodeAttributes {
-                    inode,
-                    kind: NodeType::Directory,
-                    size: 0,
-                },
-            })
-        }
-
-        // TODO honestly i'm not sure how I want to handle this. I need to think
-        // about how the block mechanism works.
-
-        // #[tracing::instrument(skip(self))]
-        // // TODO modify to use a Block so that we can simulate waiting for data. Also unclear if the block size mechanism is suitable given the way reads happen but h
-        // pub fn read(
-        //     &mut self,
-        //     inode: Inode,
-        //     offset: usize,
-        //     size: usize,
-        //     tick: Tick,
-        // ) -> Option<&[u8]> {
-        //     if let Some(Node::File(file)) = self.nodes.get_mut(inode) {
-        //         // Update accumulated bytes as per the current tick
-        //         let elapsed_ticks = tick.saturating_sub(file.last_tick);
-        //         if elapsed_ticks > 0 {
-        //             let additional_bytes = self.bytes_per_tick * elapsed_ticks;
-        //             let new_accumulated = file.accumulated_bytes + additional_bytes;
-
-        //             // Update accumulated bytes and last_tick
-        //             file.accumulated_bytes = new_accumulated;
-        //             file.last_tick = tick;
-        //         }
-
-        //         // Simulate infinite data by repeating the content
-        //         let available_bytes = file.accumulated_bytes;
-        //         if offset as u64 >= available_bytes {
-        //             // No data available at this offset
-        //             return Some(&[]);
-        //         }
-
-        //         // Calculate how many bytes we can return
-        //         let bytes_to_read =
-        //             std::cmp::min(size as u64, available_bytes - offset as u64) as usize;
-
-        //         // Calculate the position in the content buffer
-        //         let content_len = file.content.len();
-        //         let start = offset % content_len;
-        //         let end = start + bytes_to_read.min(content_len - start);
-
-        //         Some(&file.content[start..end])
-        //     } else {
-        //         None
-        //     }
-        // }
-
-        #[tracing::instrument(skip(self))]
-        pub fn readdir(&self, inode: Inode) -> Option<&[Inode]> {
-            if let Some(Node::Directory(dir)) = self.nodes.get(inode) {
-                Some(dir.children)
-            } else {
-                None
-            }
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn get_name(&self, inode: Inode) -> &str {
-            match &self.nodes[inode] {
-                Node::Directory(dir) => &dir.name,
-                Node::File(file) => &file.name,
-            }
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn get_file_type(&self, inode: Inode) -> fuser::FileType {
-            match &self.nodes[inode] {
-                Node::Directory(_) => fuser::FileType::Directory,
-                Node::File(_) => fuser::FileType::RegularFile,
-            }
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn get_parent_inode(&self, inode: Inode) -> Inode {
-            if inode == self.root_inode {
-                self.root_inode
-            } else {
-                match &self.nodes[inode] {
-                    Node::Directory(dir) => dir.parent.unwrap_or(self.root_inode),
-                    Node::File(file) => file.parent,
-                }
-            }
-        }
-
-        #[tracing::instrument(skip(self))]
-        pub fn update_state(&mut self, current_tick: Tick) {
-            for node in self.nodes.iter_mut() {
-                if let Node::File(file) = node {
-                    let elapsed_ticks = current_tick.saturating_sub(file.last_tick);
-
-                    if elapsed_ticks > 0 {
-                        let additional_bytes = self.bytes_per_tick * elapsed_ticks;
-                        let new_accumulated = file.accumulated_bytes + additional_bytes;
-
-                        // Update accumulated bytes and last_tick
-                        file.accumulated_bytes = new_accumulated;
-                        file.last_tick = current_tick;
-                    }
-                }
-            }
-        }
-    }
-}
-
 const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 
 #[derive(Debug)]
-struct LogrotateFS<'a> {
-    state: model::State<'a>,
+struct LogrotateFS {
+    state: model::State,
     start_time: std::time::Instant,
 }
 
-impl<'a> LogrotateFS<'a> {
+impl LogrotateFS {
     #[tracing::instrument(skip(self))]
     fn get_current_tick(&self) -> model::Tick {
         self.start_time.elapsed().as_secs()
     }
 
     #[tracing::instrument(skip(self))]
-    fn getattr_helper(&mut self, inode: usize) -> Option<FileAttr> {
-        self.state.getattr(inode).map(|attr| FileAttr {
+    fn getattr_helper(&mut self, tick: model::Tick, inode: usize) -> Option<FileAttr> {
+        self.state.getattr(tick, inode).map(|attr| FileAttr {
             ino: attr.inode as u64,
             size: attr.size,
             blocks: (attr.size + 511) / 512,
@@ -341,10 +102,10 @@ impl<'a> LogrotateFS<'a> {
             ctime: UNIX_EPOCH,
             crtime: UNIX_EPOCH,
             kind: match attr.kind {
-                NodeType::File => fuser::FileType::RegularFile,
-                NodeType::Directory => fuser::FileType::Directory,
+                model::NodeType::File => fuser::FileType::RegularFile,
+                model::NodeType::Directory => fuser::FileType::Directory,
             },
-            perm: if matches!(attr.kind, NodeType::Directory) {
+            perm: if matches!(attr.kind, model::NodeType::Directory) {
                 0o755
             } else {
                 0o644
@@ -359,7 +120,7 @@ impl<'a> LogrotateFS<'a> {
     }
 }
 
-impl<'a> Filesystem for LogrotateFS<'a> {
+impl Filesystem for LogrotateFS {
     #[tracing::instrument(skip(self, _req, _config))]
     fn init(
         &mut self,
@@ -372,11 +133,10 @@ impl<'a> Filesystem for LogrotateFS<'a> {
     #[tracing::instrument(skip(self, _req, reply))]
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let tick = self.get_current_tick();
-        self.state.update_state(tick);
 
         let name_str = name.to_str().unwrap_or("");
-        if let Some(ino) = self.state.lookup(parent as usize, name_str) {
-            if let Some(attr) = self.getattr_helper(ino) {
+        if let Some(ino) = self.state.lookup(tick, parent as usize, name_str) {
+            if let Some(attr) = self.getattr_helper(tick, ino) {
                 reply.entry(&TTL, &attr, 0);
                 return;
             }
@@ -387,9 +147,8 @@ impl<'a> Filesystem for LogrotateFS<'a> {
     #[tracing::instrument(skip(self, _req, reply))]
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         let tick = self.get_current_tick();
-        self.state.update_state(tick);
 
-        if let Some(attr) = self.getattr_helper(ino as usize) {
+        if let Some(attr) = self.getattr_helper(tick, ino as usize) {
             reply.attr(&TTL, &attr);
         } else {
             reply.error(ENOENT);
@@ -409,13 +168,12 @@ impl<'a> Filesystem for LogrotateFS<'a> {
         reply: ReplyData,
     ) {
         let tick = self.get_current_tick();
-        self.state.update_state(tick);
 
         if let Some(data) = self
             .state
             .read(ino as usize, offset as usize, size as usize, tick)
         {
-            reply.data(data);
+            reply.data(&data);
         } else {
             reply.error(ENOENT);
         }
@@ -431,32 +189,41 @@ impl<'a> Filesystem for LogrotateFS<'a> {
         mut reply: ReplyDirectory,
     ) {
         let tick = self.get_current_tick();
-        self.state.update_state(tick);
+        self.state.advance_time(tick);
 
         if offset != 0 {
             reply.ok();
             return;
         }
 
+        let root_inode = self.state.root_inode();
+
         if let Some(entries) = self.state.readdir(ino as usize) {
             let mut index = 1;
             // TODO fix
             let _ = reply.add(ino, index, fuser::FileType::Directory, ".");
             index += 1;
-            let root_inode = self.state.root_inode;
             if ino != root_inode as u64 {
-                let parent_ino = self.state.get_parent_inode(ino as usize);
+                let parent_ino = self
+                    .state
+                    .get_parent_inode(ino as usize)
+                    .expect("inode must have parent");
                 // TODO fix
                 let _ = reply.add(parent_ino as u64, index, fuser::FileType::Directory, "..");
                 index += 1;
             }
 
-            for &child_ino in entries {
-                let name = self.state.get_name(child_ino);
-                let file_type = self.state.get_file_type(child_ino);
-                // TODO fix
-                let _ = reply.add(child_ino as u64, index, file_type, name);
-                index += 1;
+            for child_ino in entries {
+                if let Some(name) = self.state.get_name(*child_ino) {
+                    let file_type = self
+                        .state
+                        .get_file_type(*child_ino)
+                        .expect("inode must have file type");
+                    let _ = reply.add(*child_ino as u64, index, file_type, name);
+                    index += 1;
+                } else {
+                    error!("child inode has no name");
+                }
             }
             reply.ok();
         } else {
@@ -498,18 +265,8 @@ fn main() -> Result<(), Error> {
     )
     .expect("block construction"); // TODO make this an Error
 
-    let throttle_conf = lading_throttle::Config::Stable;
-    let throttle = Throttle::new_with_config(
-        throttle_conf,
-        NonZeroU32::new(
-            args.bytes_per_second.get_bytes() as u32, // TODO avoid chopping this down
-        )
-        .expect("zero value"), // TODO make this an error ,
-    );
-
     let state = model::State::new(
         args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
-        throttle,
         block_cache,
     );
 

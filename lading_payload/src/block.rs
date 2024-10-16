@@ -346,6 +346,18 @@ impl Cache {
         }
     }
 
+    /// Peek at the next `Block` from the `Cache`.
+    ///
+    /// This is a block function that returns a reference to the next `Block`
+    /// instance although the cache is not advanced by this call. Callers must
+    /// call [`Self::next_block`] or this cache will not advance.
+    #[must_use]
+    pub fn peek_next(&self) -> &Block {
+        match self {
+            Self::Fixed { idx, blocks } => &blocks[*idx],
+        }
+    }
+
     /// Return a `Block` from the `Cache`
     ///
     /// This is a blocking function that returns a single `Block` instance as
