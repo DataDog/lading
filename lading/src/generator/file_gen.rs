@@ -13,6 +13,7 @@
 //!
 
 pub mod logrotate;
+pub mod model;
 pub mod traditional;
 
 use std::str;
