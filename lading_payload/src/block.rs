@@ -155,6 +155,8 @@ pub enum Cache {
         idx: usize,
         /// The store of blocks.
         blocks: Vec<Block>,
+        /// The amount of data stored in one cycle, or all blocks
+        total_cycle_size: u64,
     },
 }
 
@@ -323,7 +325,17 @@ impl Cache {
                 construct_block_cache_inner(rng, &pyld, maximum_block_bytes, total_bytes.get())?
             }
         };
-        Ok(Self::Fixed { idx: 0, blocks })
+
+        let total_cycle_size = blocks
+            .iter()
+            .map(|block| u64::from(block.total_bytes.get()))
+            .sum();
+
+        Ok(Self::Fixed {
+            idx: 0,
+            blocks,
+            total_cycle_size,
+        })
     }
 
     /// Run `Cache` forward on the user-provided mpsc sender.
@@ -339,7 +351,9 @@ impl Cache {
     #[allow(clippy::needless_pass_by_value)]
     pub fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
         match self {
-            Self::Fixed { mut idx, blocks } => loop {
+            Self::Fixed {
+                mut idx, blocks, ..
+            } => loop {
                 snd.blocking_send(blocks[idx].clone())?;
                 idx = (idx + 1) % blocks.len();
             },
@@ -354,7 +368,7 @@ impl Cache {
     #[must_use]
     pub fn peek_next(&self) -> &Block {
         match self {
-            Self::Fixed { idx, blocks } => &blocks[*idx],
+            Self::Fixed { idx, blocks, .. } => &blocks[*idx],
         }
     }
 
@@ -367,12 +381,72 @@ impl Cache {
             Self::Fixed {
                 ref mut idx,
                 blocks,
+                ..
             } => {
                 let block = &blocks[*idx];
                 *idx = (*idx + 1) % blocks.len();
                 block
             }
         }
+    }
+
+    /// Read data starting from a given offset and up to the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if reads are larger than machine word bytes wide.
+    pub fn read_at(&self, offset: u64, size: usize) -> Bytes {
+        let mut data = BytesMut::with_capacity(size);
+
+        let (blocks, total_cycle_size) = match self {
+            Cache::Fixed {
+                blocks,
+                total_cycle_size,
+                ..
+            } => (
+                blocks,
+                usize::try_from(*total_cycle_size)
+                    .expect("cycle size larger than machine word bytes"),
+            ),
+        };
+
+        let mut remaining = size;
+        let mut current_offset =
+            usize::try_from(offset).expect("offset larger than machine word bytes");
+
+        while remaining > 0 {
+            // Compute offset within the cycle
+            let offset_within_cycle = current_offset % total_cycle_size;
+
+            // Find which block this offset falls into
+            let mut block_start = 0;
+            for block in blocks {
+                let block_size = block.total_bytes.get() as usize;
+                if offset_within_cycle < block_start + block_size {
+                    // Offset is within this block
+                    let block_offset = offset_within_cycle - block_start;
+                    let bytes_in_block = (block_size - block_offset).min(remaining);
+
+                    data.extend_from_slice(
+                        &block.bytes[block_offset..block_offset + bytes_in_block],
+                    );
+
+                    remaining -= bytes_in_block;
+                    current_offset += bytes_in_block;
+                    break;
+                }
+                block_start += block_size;
+            }
+
+            // If we couldn't find a block this suggests something seriously
+            // wacky has happened.
+            if remaining > 0 && block_start >= total_cycle_size {
+                error!("Offset exceeds total cycle size");
+                break;
+            }
+        }
+
+        data.freeze()
     }
 }
 
