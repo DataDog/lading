@@ -195,7 +195,14 @@ pub(crate) async fn scrape_metrics(
             continue;
         }
 
-        let mut parts = line.split_inclusive('}');
+        let mut parts = if line.contains("}") {
+            line.split_inclusive('}').collect::<Vec<&str>>()
+        } else {
+            // line contains no labels
+            line.split_ascii_whitespace().collect::<Vec<&str>>()
+        }
+        .into_iter();
+
         let name_and_labels = parts
             .next()
             .expect("parts iterator is missing name and labels");
