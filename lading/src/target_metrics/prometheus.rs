@@ -195,7 +195,7 @@ pub(crate) async fn scrape_metrics(
             continue;
         }
 
-        let mut parts = if line.contains("}") {
+        let mut parts = if line.contains('}') {
             line.split_inclusive('}').collect::<Vec<&str>>()
         } else {
             // line contains no labels
