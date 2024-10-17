@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The target metrics prometheus parser now handles labels that have spaces in
   them rather than incorrectly identifying the metric value.
+- Prometheus target metrics scraper will no longer panic if a metric has an
+  invalid value (instead it will be logged)
 
 ## [0.23.3]
 ### Changed

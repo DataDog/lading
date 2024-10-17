@@ -255,20 +255,24 @@ pub(crate) async fn scrape_metrics(
 
         match metric_type {
             Some(MetricType::Gauge) => {
-                let Ok(value): Result<f64, _> = value.parse() else {
-                    let e = value.parse::<f64>().expect("failed to parse gauge value");
-                    warn!("{e}: {name} = {value}");
-                    continue;
+                let value: f64 = match value.parse() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("failed to parse gauge value {value} for metric {name}: {e}");
+                        continue;
+                    }
                 };
 
                 let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
                 handle.set(value);
             }
             Some(MetricType::Counter) => {
-                let Ok(value): Result<f64, _> = value.parse() else {
-                    let e = value.parse::<f64>().expect("failed to parse counter value");
-                    warn!("{e}: {name} = {value}");
-                    continue;
+                let value: f64 = match value.parse() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("failed to parse counter value {value} for metric {name}: {e}");
+                        continue;
+                    }
                 };
 
                 let value = if value < 0.0 {
@@ -332,6 +336,16 @@ mod tests {
     const GAUGE_LABEL_WITH_SPACES: &str = r#"
     # TYPE vector_build_info gauge
     vector_build_info{arch="aarch64",debug="false",host="d0cf527728fe",revision="745babd 2024-09-11 14:55:36.802851761",rust_version="1.78",version="0.41.1"} 1 1729113558073
+    "#;
+
+    const GAUGE_INVALID_VALUE: &str = r#"
+    # TYPE memory_usage_bytes gauge
+    memory_usage_bytes{process="test"} foobar
+    "#;
+
+    const COUNTER_INVALID_VALUE: &str = r#"
+    # TYPE memory_usage_bytes counter
+    memory_usage_bytes{process="test"} foobar
     "#;
 
     async fn run_scrape_and_parse_metrics(
@@ -445,6 +459,7 @@ mod tests {
             _ => panic!("unexpected metric type"),
         }
     }
+
     #[tokio::test]
     async fn test_count_one_labels() {
         let tags = None;
@@ -527,5 +542,19 @@ mod tests {
             }
             _ => panic!("unexpected metric type"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_gauge_invalid_value() {
+        let snapshot = run_scrape_and_parse_metrics(GAUGE_INVALID_VALUE, None).await;
+
+        assert_eq!(snapshot.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_counter_invalid_value() {
+        let snapshot = run_scrape_and_parse_metrics(COUNTER_INVALID_VALUE, None).await;
+
+        assert_eq!(snapshot.len(), 0);
     }
 }
