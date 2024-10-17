@@ -2,7 +2,7 @@
 
 //use lading_payload::block;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use lading_payload::block;
@@ -89,7 +89,7 @@ impl File {
 /// instances or `File` instances. Root directory will not have a `parent`.
 #[derive(Debug)]
 pub struct Directory {
-    children: HashSet<Inode>,
+    children: HashMap<String, Inode>,
     parent: Option<Inode>,
 }
 
@@ -172,10 +172,10 @@ impl State {
         let mut nodes = HashMap::new();
 
         let mut root_dir = Directory {
-            children: HashSet::new(),
+            children: HashMap::new(),
             parent: None,
         };
-        root_dir.children.insert(logs_inode);
+        root_dir.children.insert("logs".to_string(), logs_inode);
         nodes.insert(
             root_inode,
             Node::Directory {
@@ -185,10 +185,12 @@ impl State {
         );
 
         let mut logs_dir = Directory {
-            children: HashSet::new(),
+            children: HashMap::new(),
             parent: Some(root_inode),
         };
-        logs_dir.children.insert(foo_log_inode);
+        logs_dir
+            .children
+            .insert("foo.log".to_string(), foo_log_inode);
         nodes.insert(
             logs_inode,
             Node::Directory {
@@ -252,20 +254,10 @@ impl State {
         self.advance_time(now);
 
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&parent_inode) {
-            for child_inode in &dir.children {
-                let child_node = &self
-                    .nodes
-                    .get(child_inode)
-                    .expect("catastrophic programming error");
-                let child_name = match child_node {
-                    Node::Directory { name, .. } | Node::File { name, .. } => name,
-                };
-                if child_name == name {
-                    return Some(*child_inode);
-                }
-            }
+            dir.children.get(name).copied()
+        } else {
+            None
         }
-        None
     }
 
     /// Look up the attributes for an `Inode`.
@@ -342,23 +334,12 @@ impl State {
     ///
     /// Function does not advance time in the model.
     #[tracing::instrument(skip(self))]
-    pub fn readdir(&self, inode: Inode) -> Option<&HashSet<Inode>> {
+    pub fn readdir(&self, inode: Inode) -> Option<&HashMap<String, Inode>> {
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
             Some(&dir.children)
         } else {
             None
         }
-    }
-
-    /// Get the name of an inode if it exists
-    #[tracing::instrument(skip(self))]
-    pub fn get_name(&self, inode: Inode) -> Option<&str> {
-        self.nodes
-            .get(&inode)
-            .map(|node| match node {
-                Node::Directory { name, .. } | Node::File { name, .. } => name,
-            })
-            .map(String::as_str)
     }
 
     /// Get the fuser file type of an inode if it exists
@@ -396,7 +377,7 @@ impl State {
             let subdirectory_count = dir
                 .children
                 .iter()
-                .filter(|child_inode| {
+                .filter(|(_, child_inode)| {
                     matches!(self.nodes.get(child_inode), Some(Node::Directory { .. }))
                 })
                 .count();
