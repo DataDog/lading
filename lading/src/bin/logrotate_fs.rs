@@ -189,6 +189,11 @@ impl Filesystem for LogrotateFS {
     ) {
         let tick = self.get_current_tick();
 
+        // NOTE this call to State::read is almost surely allocating. It'd be
+        // pretty slick if we could get the buffer directly from the OS to pass
+        // down for writing but we can't. I suppose we could send up the raw
+        // blocks and then chain them together as needed but absent a compelling
+        // reason to do that the simplicity of this API is nice.
         if let Some(data) = self
             .state
             .read(ino as usize, offset as usize, size as usize, tick)
@@ -234,16 +239,12 @@ impl Filesystem for LogrotateFS {
 
         // reaming children
         if let Some(child_inodes) = self.state.readdir(ino as usize) {
-            for child_ino in child_inodes {
-                if let Some(name) = self.state.get_name(*child_ino) {
-                    let file_type = self
-                        .state
-                        .get_file_type(*child_ino)
-                        .expect("inode must have file type");
-                    entries.push((*child_ino as u64, file_type, name.to_string()));
-                } else {
-                    error!("child inode has no name");
-                }
+            for (child_name, child_ino) in child_inodes {
+                let file_type = self
+                    .state
+                    .get_file_type(*child_ino)
+                    .expect("inode must have file type");
+                entries.push((*child_ino as u64, file_type, child_name.clone()));
             }
         } else {
             reply.error(ENOENT);
