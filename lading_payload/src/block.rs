@@ -415,15 +415,17 @@ impl Cache {
             usize::try_from(offset).expect("offset larger than machine word bytes");
 
         while remaining > 0 {
-            // Compute offset within the cycle
-            let offset_within_cycle = current_offset % total_cycle_size;
+            // The plan is this. We treat the blocks as one infinite cycle. We
+            // map our offset into the domain of the blocks, then seek forward
+            // until we find the block we need to start reading from. Then we
+            // read into `data`.
 
-            // Find which block this offset falls into
+            let offset_within_cycle = current_offset % total_cycle_size;
             let mut block_start = 0;
             for block in blocks {
                 let block_size = block.total_bytes.get() as usize;
                 if offset_within_cycle < block_start + block_size {
-                    // Offset is within this block
+                    // Offset is within this block. Begin reading into `data`.
                     let block_offset = offset_within_cycle - block_start;
                     let bytes_in_block = (block_size - block_offset).min(remaining);
 
