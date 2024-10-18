@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them rather than incorrectly identifying the metric value.
 - Prometheus target metrics scraper will no longer panic if a metric has an
   invalid value (instead it will be logged)
+- DogStatsD payloads try harder to satisfy the specified `num_contexts`. Before
+  this change, dogstatsd payloads may be significantly under-representing the
+  desired number of contexts.
 
 ## [0.23.3]
 ### Changed
