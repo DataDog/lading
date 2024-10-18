@@ -3,12 +3,12 @@ use std::fmt;
 
 use rand::{
     distributions::{OpenClosed01, WeightedIndex},
-    prelude::{Distribution, SliceRandom},
+    prelude::Distribution,
     Rng,
 };
 
 use crate::{common::strings, dogstatsd::metric::template::Template, Error, Generator};
-use tracing::debug;
+use tracing::info;
 
 use super::{
     choose_or_not_ref,
@@ -52,7 +52,7 @@ impl MetricGenerator {
     {
         let mut templates = Vec::with_capacity(num_contexts);
 
-        debug!("Generating metric templates for {} contexts.", num_contexts);
+        info!("Generating metric templates for {} contexts.", num_contexts);
         for _ in 0..num_contexts {
             let tags = tags_generator.generate(&mut rng);
             let name_sz = name_length.sample(&mut rng) as usize;
