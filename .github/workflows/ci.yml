@@ -28,8 +28,8 @@ jobs:
             components: "clippy"
             command: cargo clippy --all-features
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.10
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 # v1.10
         with:
           components: ${{matrix.components}}
       - name: Install Protobuf
@@ -41,27 +41,27 @@ jobs:
   cargo-deny: # only runs on Linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: EmbarkStudios/cargo-deny-action@ef301417264190a1eb9f26fcf171642070085c5b # v1
 
   test:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.10
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install nextest
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@49be99c627fae102cb8c86414e9605869641782a # nextest
       - run: cargo nextest run
 
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.10
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - run: cargo test -p sheepdog
@@ -75,8 +75,8 @@ jobs:
       matrix:
         crate: [lading_throttle, lading_payload]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.10
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install kani
@@ -92,12 +92,12 @@ jobs:
       matrix:
         crate: [lading_signal]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.10
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@11df97af8e8102fd60b60a77dfbf58d40cd843b8 # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install nextest
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@49be99c627fae102cb8c86414e9605869641782a # nextest
       - run: RUSTFLAGS="--cfg loom" cargo nextest run --release
         working-directory: ${{ matrix.crate }}
         timeout-minutes: 30
@@ -107,12 +107,12 @@ jobs:
     steps:
       # Check our protobufs for lint cleanliness and for lack of breaking
       # changes
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
       - name: buf-setup
-        uses: bufbuild/buf-setup-action@v1.45.0
+        uses: bufbuild/buf-setup-action@2211e06e8cf26d628cda2eea15c95f8c42b080b3 # v1.45.0
       - name: buf-lint
-        uses: bufbuild/buf-lint-action@v1.1.1
+        uses: bufbuild/buf-lint-action@06f9dd823d873146471cfaaf108a993fe00e5325 # v1.1.1
       - name: buf-breaking
-        uses: bufbuild/buf-breaking-action@v1.1.4
+        uses: bufbuild/buf-breaking-action@c57b3d842a5c3f3b454756ef65305a50a587c5ba # v1.1.4
         with:
           against: 'https://github.com/datadog/lading.git#branch=main'
