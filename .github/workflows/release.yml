@@ -12,10 +12,10 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
 
       - name: Create GitHub release
-        uses: taiki-e/create-gh-release-action@72d65cee1f8033ef0c8b5d79eaf0c45c7c578ce3 # v1
+        uses: taiki-e/create-gh-release-action@72d65cee1f8033ef0c8b5d79eaf0c45c7c578ce3 # v1.8.2
         with:
           changelog: CHANGELOG.md
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -47,8 +47,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
-      - uses: taiki-e/install-action@3e1dd227d968fb9fa43ff604bd9b0ccd1b714919 # v2
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: taiki-e/install-action@3e1dd227d968fb9fa43ff604bd9b0ccd1b714919 # v2.44.40
         with:
           tool: cross
 
@@ -61,7 +61,7 @@ jobs:
 
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
-        uses: taiki-e/upload-rust-binary-action@3bbb07bb7f438d0fdf6ce5118bdf9e6e21c0b2a5 # v1
+        uses: taiki-e/upload-rust-binary-action@3bbb07bb7f438d0fdf6ce5118bdf9e6e21c0b2a5 # v1.22.0
 
         with:
           bin: lading
@@ -72,7 +72,7 @@ jobs:
 
       # Auth for the S3 upload
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
           aws-access-key-id: ${{ secrets.LADING_RELEASE_BOT_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.LADING_RELEASE_BOT_SECRET_ACCESS_KEY }}
@@ -86,7 +86,7 @@ jobs:
   crates-io-publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
 
       - name: Install protobuf
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
