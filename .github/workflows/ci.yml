@@ -149,3 +149,27 @@ jobs:
             -ignore 'Double quote to prevent globbing and word splitting' \
             -ignore 'Consider using { cmd1; cmd2; } >> file instead of individual redirects' \
             -ignore 'Declare and assign separately to avoid masking return values'
+
+  action-sha-pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - name: Check all GitHub Actions in ".github/workflows" are pinned to SHAs
+        uses: stacklok/frizbee-action@a0f3391cbe93a54e2a68cfaca2283f8cf3fd72ea # v0.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          actions: ".github/workflows"
+          dockerfiles: ""
+          fail_on_unpinned: true
+          open_pr: false
+      - name: Check all GitHub Actions in ".github/actions" are pinned to SHAs
+        uses: stacklok/frizbee-action@a0f3391cbe93a54e2a68cfaca2283f8cf3fd72ea # v0.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          actions: ".github/actions"
+          dockerfiles: ""
+          fail_on_unpinned: true
+          open_pr: false
