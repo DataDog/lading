@@ -61,7 +61,7 @@ jobs:
 
       # Run the build & upload artifacts
       - name: Build and upload lading binaries
-        uses: taiki-e/upload-rust-binary-action@3bbb07bb7f438d0fdf6ce5118bdf9e6e21c0b2a5 # v1.22.0
+        uses: taiki-e/upload-rust-binary-action@3a8b5e35eb5fea810221264dfde09e920c1d5310 # v1.22.1
 
         with:
           bin: lading
