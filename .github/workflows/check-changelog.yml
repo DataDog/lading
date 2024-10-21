@@ -9,13 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4
+      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         fetch-depth: 2 # Only need preceeding commit
 
     - name: Check for no-changelog label
       id: label-check
-      uses: actions/github-script@5c56fde4671bc2d3592fb0f2c5b5bab9ddae03b1 # v7
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
       with:
         script: |
           const payload = context.payload;
@@ -25,13 +25,13 @@ jobs:
     - name: Check if CHANGELOG.md was modified
       id: changelog-check
       if: steps.label-check.outputs.has_label == 'false'
-      uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45
+      uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3
       with:
         files: |
           CHANGELOG.md
 
     - name: Assert CHANGELOG.md is modified
-      uses: actions/github-script@5c56fde4671bc2d3592fb0f2c5b5bab9ddae03b1 # v7
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
       if: steps.label-check.outputs.has_label == 'false' && steps.changelog-check.outputs.any_changed != 'true'
       with:
         script: |
