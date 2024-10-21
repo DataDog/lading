@@ -14,21 +14,16 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
-copyleft = "deny"
-default = "deny"
-
 [sources]
 unknown-git = "deny"
 allow-git = ["http://github.com/metrics-rs/metrics"]
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-notice = "deny"
-unsound = "deny"
+version = 2
 ignore = [
   # atty is unsound for some custom allocators on Windows and is unmaintained
   "RUSTSEC-2021-0145",
+  "RUSTSEC-2024-0370"  # proc-macro-error is unmaintained
 ]
 
 [bans]
