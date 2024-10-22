@@ -300,6 +300,8 @@ fn main() -> Result<(), Error> {
 
     let state = model::State::new(
         args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
+        5,                                        // TODO make an argument
+        1_000_000,                                // 1MiB
         block_cache,
     );
 
