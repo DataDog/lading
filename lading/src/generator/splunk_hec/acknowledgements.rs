@@ -89,7 +89,6 @@ impl Channels {
     ) {
         let client: Client<HttpConnector, Body> = Client::builder()
             .retry_canceled_requests(false)
-            .set_host(false)
             .build_http();
 
         let ack_service = AckService {

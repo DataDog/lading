@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them rather than incorrectly identifying the metric value.
 - Prometheus target metrics scraper will no longer panic if a metric has an
   invalid value (instead it will be logged)
+- HTTP traffic sent by the HTTP generator and Splunk generator now always includes
+  a Host header to comply with HTTP 1.1 requirements
 
 ## [0.23.3]
 ### Changed
