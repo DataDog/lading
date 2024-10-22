@@ -248,7 +248,6 @@ impl SplunkHec {
         let client: Client<HttpConnector, Body> = Client::builder()
             .pool_max_idle_per_host(self.parallel_connections as usize)
             .retry_canceled_requests(false)
-            .set_host(false)
             .build_http();
 
         let uri = self.uri;
