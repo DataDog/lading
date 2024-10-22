@@ -180,6 +180,7 @@ pub struct State {
     max_bytes_per_file: u64,
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
     group_names: Vec<Vec<String>>,
+    next_inode: Inode,
 }
 
 /// The attributes of a `Node`.
@@ -290,6 +291,7 @@ impl State {
             block_cache,
             max_bytes_per_file,
             group_names,
+            next_inode: 4,
         }
     }
 
@@ -312,30 +314,104 @@ impl State {
 
         // nothing yet beyond updating the clock, rotations to come
         assert!(now >= self.now);
+        let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
 
-        for node in self.nodes.values_mut() {
-            match node {
-                Node::File { file, .. } => {
-                    file.advance_time(now);
-                    if file.read_only() {
-                        continue;
-                    };
-                    if file.size() >= self.max_bytes_per_file {
-                        file.set_read_only();
-                        // Add rotation logic here. What I want to do is add a
-                        // new File with the name of the current `File` bump the
-                        // ordinal number of `file` and make the new File have
-                        // `file` as its peer. I need to adjust `self.nodes` to
-                        // include the new File and also modify the name of the
-                        // current `file`. Or I should just make a pre-defined
-                        // array of names and index into them with the ordinal.
-                        //
-                        // If the ordinal of the `file` is past
-                        // self.max_rotations we delete it.
+        for inode in inodes.drain(..) {
+            let rotation_data = {
+                let node = self.nodes.get_mut(&inode).expect("Node must exist");
+                match node {
+                    Node::File { file } => {
+                        file.advance_time(now);
+                        if file.read_only() {
+                            None
+                        } else if file.size() >= self.max_bytes_per_file {
+                            // File has exceeded its size, meaning it will be
+                            // rotated. This starts a process that may end in a
+                            // member of the file's group being deleted and the
+                            // creation, certainly, of a new File instance in
+                            // the group.
+                            file.set_read_only();
+
+                            Some((inode, file.parent, file.bytes_per_tick, file.group_id))
+                        } else {
+                            None
+                        }
                     }
+                    Node::Directory { .. } => None,
                 }
-                Node::Directory { .. } => {
-                    // directories are immutable though time flows around them
+            };
+
+            if let Some((rotated_inode, parent_inode, bytes_per_tick, group_id)) = rotation_data {
+                // Create our new File instance, using data from the now rotated file.
+                let new_file = File {
+                    parent: parent_inode,
+                    bytes_written: 0,
+                    bytes_read: 0,
+                    access_tick: now,
+                    modified_tick: now,
+                    status_tick: now,
+                    bytes_per_tick,
+                    read_only: false,
+                    ordinal: 0,
+                    peer: Some(rotated_inode),
+                    group_id,
+                };
+
+                // Insert `new_file` into the node list and make it a member of
+                // its directory's children.
+                self.nodes
+                    .insert(self.next_inode, Node::File { file: new_file });
+                if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode) {
+                    dir.children.insert(self.next_inode);
+                }
+
+                let prev_inode = self.next_inode;
+                // Bump the Inode index
+                self.next_inode = self.next_inode.saturating_add(1);
+
+                // Now, search through the peers of this File and rotate them,
+                // keeping track of the last one which will need to be deleted.
+                let mut current_inode = Some(rotated_inode);
+                let mut prev_inode = Some(prev_inode);
+
+                while let Some(inode) = current_inode {
+                    let (remove_current, next_peer) = {
+                        let node = self.nodes.get_mut(&inode).expect("Node must exist");
+                        match node {
+                            Node::File { file } => {
+                                file.incr_ordinal();
+
+                                let remove_current = file.ordinal() > self.max_rotations;
+                                let next_peer = file.peer;
+                                (remove_current, next_peer)
+                            }
+                            Node::Directory { .. } => panic!("Expected a File node"),
+                        }
+                    };
+
+                    if remove_current {
+                        self.nodes.remove(&inode);
+                        if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode)
+                        {
+                            dir.children.remove(&inode);
+                        }
+
+                        // Update the peer of the previous file to None
+                        if let Some(prev_inode) = prev_inode {
+                            let node = self.nodes.get_mut(&prev_inode).expect("Node must exist");
+                            if let Node::File { file } = node {
+                                file.peer = None;
+                            }
+                        }
+
+                        // The oldest file is removed, break
+                        assert!(next_peer.is_none());
+                        break;
+                    }
+
+                    // Move to the next peer
+                    prev_inode = Some(inode);
+                    current_inode = next_peer;
                 }
             }
         }
