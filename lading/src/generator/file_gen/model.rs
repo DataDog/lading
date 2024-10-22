@@ -44,6 +44,18 @@ pub struct File {
 
     /// The number of bytes that accumulate in this `File` per tick.
     bytes_per_tick: u64,
+
+    /// Whether the file is read-only -- that is, no more "writes" will ever
+    /// happen -- or not.
+    read_only: bool,
+
+    /// The ordinal number of this File. If the file is foo.log the ordinal
+    /// number is 0, if foo.log.1 then 1 etc.
+    ordinal: u8,
+
+    /// The peer of this file, the next in line in rotation. So, if this file is
+    /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
+    peer: Option<Inode>,
 }
 
 impl File {
@@ -70,9 +82,10 @@ impl File {
     /// This function runs the clock forward to `now`, updating `modified_tick`
     /// and `status_tick` as bytes are continuously "written" to the `File`.
     ///
-    /// Will have no result if `now` <= `modified_tick`.
+    /// Will have no result if `now` <= `modified_tick`. Will have no result if
+    /// the file is read-only.
     fn advance_time(&mut self, now: Tick) {
-        if now <= self.modified_tick {
+        if now <= self.modified_tick || self.read_only {
             return;
         }
 
@@ -82,6 +95,39 @@ impl File {
         self.bytes_written = self.bytes_written.saturating_add(bytes_accum);
         self.modified_tick = now;
         self.status_tick = now;
+    }
+
+    /// Set this file to read-only
+    ///
+    /// This function flips the internal bool on this `File` stopping any future
+    /// byte accumulations.
+    pub fn set_read_only(&mut self) {
+        self.read_only = true;
+    }
+
+    /// Return whether the file is read-only or not
+    #[must_use]
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Return the ordinal number of this File
+    #[must_use]
+    pub fn ordinal(&self) -> u8 {
+        self.ordinal
+    }
+
+    /// Increment the ordinal number of this File
+    pub fn incr_ordinal(&mut self) {
+        self.ordinal = self.ordinal.saturating_add(1);
+    }
+
+    /// Returns the current size in bytes of the File
+    ///
+    /// This function does not advance time.
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        self.bytes_written
     }
 }
 
@@ -133,6 +179,8 @@ pub struct State {
     root_inode: Inode,
     now: Tick,
     block_cache: block::Cache,
+    max_rotations: u8,
+    max_bytes_per_file: u64,
 }
 
 /// The attributes of a `Node`.
@@ -164,7 +212,12 @@ pub enum NodeType {
 impl State {
     /// Create a new instance of `State`.
     #[tracing::instrument(skip(block_cache))]
-    pub fn new(bytes_per_tick: u64, block_cache: block::Cache) -> State {
+    pub fn new(
+        bytes_per_tick: u64,
+        max_rotations: u8,
+        max_bytes_per_file: u64,
+        block_cache: block::Cache,
+    ) -> State {
         let root_inode: Inode = 1; // `/`
         let logs_inode: Inode = 2; // `/logs`
         let foo_log_inode: Inode = 3; // `/logs/foo.log`
@@ -210,6 +263,10 @@ impl State {
             status_tick: 0,
 
             bytes_per_tick,
+
+            read_only: false,
+            peer: None,
+            ordinal: 0,
         };
         nodes.insert(
             foo_log_inode,
@@ -229,6 +286,8 @@ impl State {
             root_inode,
             now: 0,
             block_cache,
+            max_rotations,
+            max_bytes_per_file,
         }
     }
 
@@ -252,11 +311,26 @@ impl State {
         // nothing yet beyond updating the clock, rotations to come
         assert!(now >= self.now);
 
-        for node in self.nodes.values_mut() {
+        for (inode, node) in &mut self.nodes {
             match node {
                 Node::File { file, .. } => {
                     file.advance_time(now);
-                    // TODO add rotation logic here
+                    if file.read_only() {
+                        continue;
+                    };
+                    if file.size() >= self.max_bytes_per_file {
+                        file.set_read_only();
+                        // Add rotation logic here. What I want to do is add a
+                        // new File with the name of the current `File` bump the
+                        // ordinal number of `file` and make the new File have
+                        // `file` as its peer. I need to adjust `self.nodes` to
+                        // include the new File and also modify the name of the
+                        // current `file`. Or I should just make a pre-defined
+                        // array of names and index into them with the ordinal.
+                        //
+                        // If the ordinal of the `file` is past
+                        // self.max_rotations we delete it.
+                    }
                 }
                 Node::Directory { .. } => {
                     // directories are immutable though time flows around them
