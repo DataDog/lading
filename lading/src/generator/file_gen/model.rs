@@ -1,7 +1,5 @@
 //! Model the internal logic of a logrotate filesystem.
 
-//use lading_payload::block;
-
 use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
@@ -60,7 +58,7 @@ pub struct File {
 
     /// The group ID of this File. So for instance all File instances that are
     /// called foo.log, foo.log.1 etc have the same group ID.
-    group_id: u8,
+    group_id: u16,
 }
 
 impl File {
@@ -284,7 +282,7 @@ impl State {
             let mut names = Vec::new();
             names.push(base_name.clone()); // Ordinal 0
             for i in 1..=max_rotations {
-                names.push(format!("{}.{}", base_name, i)); // Ordinal i
+                names.push(format!("{base_name}.{i}")); // Ordinal i
             }
             state.group_names.push(names);
         }
@@ -349,7 +347,7 @@ impl State {
                             new_inode
                         }
                     } else {
-                        panic!("current_inode {} is not a directory", current_inode);
+                        panic!("current_inode {current_inode} is not a directory");
                     }
                 };
 
@@ -372,7 +370,7 @@ impl State {
                 read_only: false,
                 ordinal: 0,
                 peer: None,
-                group_id: group_id as u8,
+                group_id,
             };
             state.nodes.insert(file_inode, Node::File { file });
 
