@@ -663,7 +663,7 @@ mod test {
 
             let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
 
-            prop_oneof![wait_op].boxed()
+            prop_oneof![wait_op, getattr_op, lookup_op, read_op].boxed()
         }
     }
 
