@@ -310,10 +310,13 @@ fn main() -> Result<(), Error> {
     .expect("block construction"); // TODO make this an Error
 
     let state = model::State::new(
+        &mut rng,
         args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
         5,                                        // TODO make an argument
         1_000_000,                                // 1MiB
         block_cache,
+        10, // max_depth
+        8,  // concurrent_logs
     );
 
     // Initialize the FUSE filesystem
