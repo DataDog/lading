@@ -11,7 +11,13 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 // use lading_payload::block;
 use nix::libc::{self, ENOENT};
 use serde::Deserialize;
-use std::{ffi::OsStr, num::NonZeroU32, path::PathBuf, time::Duration};
+use std::{
+    ffi::OsStr,
+    num::NonZeroU32,
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 
 // fn default_config_path() -> String {
 //     "/etc/lading/logrotate_fs.yaml".to_string()
@@ -76,7 +82,7 @@ const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 
 #[derive(Debug)]
 struct LogrotateFS {
-    state: model::State,
+    state: Arc<Mutex<model::State>>,
     start_time: std::time::Instant,
     start_time_system: std::time::SystemTime,
 }
@@ -86,53 +92,58 @@ impl LogrotateFS {
     fn get_current_tick(&self) -> model::Tick {
         self.start_time.elapsed().as_secs()
     }
+}
 
-    #[tracing::instrument(skip(self))]
-    fn getattr_helper(&mut self, tick: model::Tick, inode: usize) -> Option<FileAttr> {
-        let nlink = self.state.nlink(inode) as u32;
+#[tracing::instrument(skip(state))]
+fn getattr_helper(
+    state: &mut MutexGuard<model::State>,
+    start_time_system: std::time::SystemTime,
+    tick: model::Tick,
+    inode: usize,
+) -> Option<FileAttr> {
+    let nlink = state.nlink(inode) as u32;
 
-        self.state.getattr(tick, inode).map(|attr| {
-            // Convert ticks to durations
-            let access_duration = Duration::from_secs(attr.access_tick);
-            let modified_duration = Duration::from_secs(attr.modified_tick);
-            let status_duration = Duration::from_secs(attr.status_tick);
+    state.getattr(tick, inode).map(|attr| {
+        // Convert ticks to durations
+        let access_duration = Duration::from_secs(attr.access_tick);
+        let modified_duration = Duration::from_secs(attr.modified_tick);
+        let status_duration = Duration::from_secs(attr.status_tick);
 
-            // Calculate SystemTime instances
-            let atime = self.start_time_system + access_duration;
-            let mtime = self.start_time_system + modified_duration;
-            let ctime = self.start_time_system + status_duration;
-            let crtime = self.start_time_system; // Assume creation time is when the filesystem started
+        // Calculate SystemTime instances
+        let atime = start_time_system + access_duration;
+        let mtime = start_time_system + modified_duration;
+        let ctime = start_time_system + status_duration;
+        let crtime = start_time_system; // Assume creation time is when the filesystem started
 
-            FileAttr {
-                ino: attr.inode as u64,
-                size: attr.size,
-                blocks: (attr.size + 511) / 512,
-                // TODO these times should reflect those in the model, will need to
-                // be translated from the tick to systemtime. Implies we'll need to
-                // adjust up from start_time, knowing that a tick is one second
-                // wide.
-                atime,
-                mtime,
-                ctime,
-                crtime,
-                kind: match attr.kind {
-                    model::NodeType::File => fuser::FileType::RegularFile,
-                    model::NodeType::Directory => fuser::FileType::Directory,
-                },
-                perm: if matches!(attr.kind, model::NodeType::Directory) {
-                    0o755
-                } else {
-                    0o644
-                },
-                nlink,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
-                rdev: 0,
-                blksize: 512,
-                flags: 0,
-            }
-        })
-    }
+        FileAttr {
+            ino: attr.inode as u64,
+            size: attr.size,
+            blocks: (attr.size + 511) / 512,
+            // TODO these times should reflect those in the model, will need to
+            // be translated from the tick to systemtime. Implies we'll need to
+            // adjust up from start_time, knowing that a tick is one second
+            // wide.
+            atime,
+            mtime,
+            ctime,
+            crtime,
+            kind: match attr.kind {
+                model::NodeType::File => fuser::FileType::RegularFile,
+                model::NodeType::Directory => fuser::FileType::Directory,
+            },
+            perm: if matches!(attr.kind, model::NodeType::Directory) {
+                0o755
+            } else {
+                0o644
+            },
+            nlink,
+            uid: unsafe { libc::getuid() },
+            gid: unsafe { libc::getgid() },
+            rdev: 0,
+            blksize: 512,
+            flags: 0,
+        }
+    })
 }
 
 impl Filesystem for LogrotateFS {
@@ -148,10 +159,11 @@ impl Filesystem for LogrotateFS {
     #[tracing::instrument(skip(self, _req, reply))]
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let tick = self.get_current_tick();
+        let mut state = self.state.lock().expect("lock poisoned");
 
         let name_str = name.to_str().unwrap_or("");
-        if let Some(ino) = self.state.lookup(tick, parent as usize, name_str) {
-            if let Some(attr) = self.getattr_helper(tick, ino) {
+        if let Some(ino) = state.lookup(tick, parent as usize, name_str) {
+            if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino) {
                 info!("lookup: returning attr for inode {}: {:?}", ino, attr);
                 reply.entry(&TTL, &attr, 0);
                 return;
@@ -167,8 +179,9 @@ impl Filesystem for LogrotateFS {
     #[tracing::instrument(skip(self, _req, reply))]
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         let tick = self.get_current_tick();
+        let mut state = self.state.lock().expect("lock poisoned");
 
-        if let Some(attr) = self.getattr_helper(tick, ino as usize) {
+        if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino as usize) {
             reply.attr(&TTL, &attr);
         } else {
             reply.error(ENOENT);
@@ -188,16 +201,14 @@ impl Filesystem for LogrotateFS {
         reply: ReplyData,
     ) {
         let tick = self.get_current_tick();
+        let mut state = self.state.lock().expect("lock poisoned");
 
         // NOTE this call to State::read is almost surely allocating. It'd be
         // pretty slick if we could get the buffer directly from the OS to pass
         // down for writing but we can't. I suppose we could send up the raw
         // blocks and then chain them together as needed but absent a compelling
         // reason to do that the simplicity of this API is nice.
-        if let Some(data) = self
-            .state
-            .read(ino as usize, offset as usize, size as usize, tick)
-        {
+        if let Some(data) = state.read(ino as usize, offset as usize, size as usize, tick) {
             reply.data(&data);
         } else {
             reply.error(ENOENT);
@@ -214,9 +225,10 @@ impl Filesystem for LogrotateFS {
         mut reply: ReplyDirectory,
     ) {
         let tick = self.get_current_tick();
-        self.state.advance_time(tick);
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
-        let root_inode = self.state.root_inode();
+        let root_inode = state.root_inode();
 
         // TODO building up a vec of entries here to handle offset really does
         // suggest that the model needs to be exposed in such a way that this
@@ -226,8 +238,7 @@ impl Filesystem for LogrotateFS {
         // '.' and '..'
         entries.push((ino, fuser::FileType::Directory, ".".to_string()));
         if ino != root_inode as u64 {
-            let parent_ino = self
-                .state
+            let parent_ino = state
                 .get_parent_inode(ino as usize)
                 .expect("inode must have parent");
             entries.push((
@@ -238,16 +249,12 @@ impl Filesystem for LogrotateFS {
         }
 
         // reaming children
-        if let Some(child_inodes) = self.state.readdir(ino as usize) {
+        if let Some(child_inodes) = state.readdir(ino as usize) {
             for child_ino in child_inodes {
-                let file_type = self
-                    .state
+                let file_type = state
                     .get_file_type(*child_ino)
                     .expect("inode must have file type");
-                let child_name = self
-                    .state
-                    .get_name(*child_ino)
-                    .expect("inode must have a name");
+                let child_name = state.get_name(*child_ino).expect("inode must have a name");
                 entries.push((*child_ino as u64, file_type, child_name.to_string()));
             }
         } else {
@@ -311,7 +318,7 @@ fn main() -> Result<(), Error> {
 
     // Initialize the FUSE filesystem
     let fs = LogrotateFS {
-        state,
+        state: Arc::new(Mutex::new(state)),
         start_time: std::time::Instant::now(),
         start_time_system: std::time::SystemTime::now(),
     };
