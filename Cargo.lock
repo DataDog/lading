@@ -1452,6 +1452,7 @@ dependencies = [
  "num_cpus",
  "once_cell",
  "procfs",
+ "proptest",
  "rand",
  "regex",
  "reqwest",

@@ -171,7 +171,6 @@ impl Node {
 /// This structure is responsible for maintenance of the structure of the
 /// filesystem. It does not contain any bytes, the caller must maintain this
 /// themselves.
-#[derive(Debug)]
 pub struct State {
     nodes: HashMap<Inode, Node>,
     root_inode: Inode,
@@ -181,6 +180,21 @@ pub struct State {
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
+}
+
+impl std::fmt::Debug for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("nodes", &self.nodes)
+            .field("root_inode", &self.root_inode)
+            .field("now", &self.now)
+            // intentionally leaving out block_cache
+            .field("max_rotations", &self.max_rotations)
+            .field("max_bytes_per_file", &self.max_bytes_per_file)
+            .field("group_names", &self.group_names)
+            .field("next_inode", &self.next_inode)
+            .finish()
+    }
 }
 
 /// The attributes of a `Node`.
@@ -594,6 +608,226 @@ impl State {
             2 + subdirectory_count
         } else {
             1
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        collections::{HashMap, HashSet},
+        num::NonZeroU32,
+    };
+
+    use super::{Directory, File, Inode, Node, State};
+    use lading_payload::block;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rand::{rngs::StdRng, seq::IteratorRandom, SeedableRng};
+
+    /// Our testing strategy is to drive the State as if in a filesystem. The
+    /// crux is the Operation enum that defines which parts of the State are
+    /// exercised and how. Invariant properties are tested after each operation,
+    /// meaning we drive the model forward normally and assure at every step
+    /// that it's in good order.
+
+    #[derive(Debug, Clone)]
+    enum Operation {
+        Read { offset: usize, size: usize },
+        Lookup { name: Option<String> },
+        GetAttr,
+        Wait { ticks: u64 },
+    }
+
+    impl Arbitrary for Operation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            let read_op = (any::<usize>(), 1usize..1024usize)
+                .prop_map(|(offset, size)| Operation::Read { offset, size });
+
+            let lookup_op = (any::<Option<String>>()).prop_map(|name| Operation::Lookup { name });
+
+            let getattr_op = Just(Operation::GetAttr);
+
+            let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
+
+            prop_oneof![read_op, lookup_op, wait_op, getattr_op].boxed()
+        }
+    }
+
+    fn random_inode<R>(rng: &mut R, state: &State) -> Inode
+    where
+        R: Rng,
+    {
+        if state.nodes.is_empty() {
+            state.root_inode
+        } else {
+            *state.nodes.keys().choose(rng).unwrap_or(&state.root_inode)
+        }
+    }
+
+    fn random_name<R>(rng: &mut R, state: &State) -> String
+    where
+        R: Rng,
+    {
+        let names: Vec<String> = state
+            .nodes
+            .values()
+            .filter_map(|node| match node {
+                Node::Directory { name, .. } => Some(name.clone()),
+                Node::File { file } => {
+                    let group_names = state.group_names.get(file.group_id as usize)?;
+                    group_names.get(file.ordinal() as usize).cloned()
+                }
+            })
+            .collect();
+
+        names.into_iter().choose(rng).unwrap()
+    }
+
+    fn assert_state_properties(state: &State) {
+        // nothing yet
+    }
+
+    impl Arbitrary for State {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        // TODO maybe I get rid of this Arbitrary eventually and have everything driven by State::new
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // We'll generate a valid initial State and a sequence of times to advance
+            (
+                1u64..=1000u64,          // initial now
+                1u8..=10u8,              // max_rotations
+                1024u64..=10_000_000u64, // max_bytes_per_file
+                4usize..=100usize,       // next_inode (ensure it's at least 4)
+            )
+                .prop_map(
+                    move |(now, max_rotations, max_bytes_per_file, next_inode)| {
+                        let root_inode: Inode = 1;
+                        let logs_inode: Inode = 2;
+                        let foo_log_inode: Inode = 3;
+
+                        let mut nodes = HashMap::new();
+
+                        let mut root_dir = Directory {
+                            children: HashSet::new(),
+                            parent: None,
+                        };
+                        root_dir.children.insert(logs_inode);
+                        nodes.insert(
+                            root_inode,
+                            Node::Directory {
+                                name: "/".to_string(),
+                                dir: root_dir,
+                            },
+                        );
+
+                        let mut logs_dir = Directory {
+                            children: HashSet::new(),
+                            parent: Some(root_inode),
+                        };
+                        logs_dir.children.insert(foo_log_inode);
+                        nodes.insert(
+                            logs_inode,
+                            Node::Directory {
+                                name: "logs".to_string(),
+                                dir: logs_dir,
+                            },
+                        );
+
+                        let base_name = "foo.log".to_string();
+                        let mut names = Vec::new();
+                        names.push(base_name.clone()); // Ordinal 0
+                        for i in 1..=max_rotations {
+                            names.push(format!("foo.log.{i}")); // Ordinal i
+                        }
+                        let group_names = vec![names];
+
+                        let foo_log = File {
+                            parent: logs_inode,
+
+                            bytes_written: 0,
+                            bytes_read: 0,
+
+                            access_tick: now,
+                            modified_tick: now,
+                            status_tick: now,
+
+                            bytes_per_tick: 1024, // 1 KiB per tick
+                            read_only: false,
+                            peer: None,
+                            ordinal: 0,
+                            group_id: 0,
+                        };
+                        nodes.insert(foo_log_inode, Node::File { file: foo_log });
+
+                        let mut rng = StdRng::seed_from_u64(1024);
+                        let block_cache = block::Cache::fixed(
+                            &mut rng,
+                            NonZeroU32::new(1_000_000).expect("zero value"), // TODO make this an Error
+                            10_000,                                          // 10 KiB
+                            &lading_payload::Config::Ascii,
+                        )
+                        .expect("block construction"); // TODO make this an Error
+
+                        State {
+                            nodes,
+                            root_inode,
+                            now,
+                            block_cache,
+                            max_rotations,
+                            max_bytes_per_file,
+                            group_names,
+                            next_inode,
+                        }
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_state_operations(seed in any::<u64>(), mut state in any::<State>(), operations in vec(any::<Operation>(), 1..100)) {
+            // Assert that the state is well-formed before we begin
+            assert_state_properties(&state);
+
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut now = state.now;
+            for op in operations {
+                match op {
+                    Operation::Read { offset, size } => {
+                        let inode = random_inode(&mut rng, &state);
+                        now += 1;
+                        let _ = state.read(inode, offset, size, now);
+                    },
+                    Operation::Lookup { name: op_name } => {
+                        let parent_inode = random_inode(&mut rng, &state);
+                        let name = if let Some(n) = op_name {
+                            n
+                        } else {
+                            random_name(&mut rng, &state)
+                        };
+                        now += 1;
+                        let _ = state.lookup(now, parent_inode, &name);
+                    },
+                    Operation::GetAttr => {
+                        let inode = random_inode(&mut rng, &state);
+                        now += 1;
+                        let _ = state.getattr(now, inode);
+                    },
+                    Operation::Wait { ticks } => {
+                        now += ticks;
+                        state.advance_time(now);
+                    },
+                }
+
+                // After each operation, assert that the properties hold
+                assert_state_properties(&state);
+            }
         }
     }
 }
