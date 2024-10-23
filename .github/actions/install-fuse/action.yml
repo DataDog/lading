@@ -5,7 +5,7 @@ runs:
   steps:
     - run: |
         if [ "${{ runner.os }}" == "Linux" ]; then
-          sudo apt-get update && sudo apt-get install -y fuse
+          sudo apt-get update && sudo apt-get install -y fuse3
         elif [ "${{ runner.os }}" == "macOS" ]; then
           brew install macfuse
         fi
