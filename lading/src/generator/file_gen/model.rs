@@ -312,7 +312,6 @@ impl State {
         // The State holds all notion of when a File should rotate and also be
         // deleted. The File has no say in that at all.
 
-        // nothing yet beyond updating the clock, rotations to come
         assert!(now >= self.now);
         let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
 
@@ -332,7 +331,13 @@ impl State {
                             // the group.
                             file.set_read_only();
 
-                            Some((inode, file.parent, file.bytes_per_tick, file.group_id))
+                            Some((
+                                inode,
+                                file.parent,
+                                file.bytes_per_tick,
+                                file.group_id,
+                                file.ordinal(),
+                            ))
                         } else {
                             None
                         }
@@ -341,7 +346,9 @@ impl State {
                 }
             };
 
-            if let Some((rotated_inode, parent_inode, bytes_per_tick, group_id)) = rotation_data {
+            if let Some((rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal)) =
+                rotation_data
+            {
                 // Create our new File instance, using data from the now rotated file.
                 let new_file = File {
                     parent: parent_inode,
@@ -365,18 +372,20 @@ impl State {
                     dir.children.insert(self.next_inode);
                 }
 
-                let prev_inode = self.next_inode;
                 // Bump the Inode index
                 self.next_inode = self.next_inode.saturating_add(1);
 
                 // Now, search through the peers of this File and rotate them,
-                // keeping track of the last one which will need to be deleted.
-                let mut current_inode = Some(rotated_inode);
-                let mut prev_inode = Some(prev_inode);
+                // keeping track of the last one which will need to be
+                // deleted. There is no previous node as the rotated_inode is of
+                // the 0th ordinal.
+                let mut current_inode = rotated_inode;
+                assert!(ordinal == 0);
+                let mut prev_inode = None;
 
-                while let Some(inode) = current_inode {
+                loop {
                     let (remove_current, next_peer) = {
-                        let node = self.nodes.get_mut(&inode).expect("Node must exist");
+                        let node = self.nodes.get_mut(&current_inode).expect("Node must exist");
                         match node {
                             Node::File { file } => {
                                 file.incr_ordinal();
@@ -390,10 +399,15 @@ impl State {
                     };
 
                     if remove_current {
-                        self.nodes.remove(&inode);
+                        // The only time a node is removed is when it's at the
+                        // end of the line. This means that next_peer is None
+                        // and there are no further peers to explore.
+                        assert!(next_peer.is_none());
+
+                        self.nodes.remove(&current_inode);
                         if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode)
                         {
-                            dir.children.remove(&inode);
+                            dir.children.remove(&current_inode);
                         }
 
                         // Update the peer of the previous file to None
@@ -404,14 +418,16 @@ impl State {
                             }
                         }
 
-                        // The oldest file is removed, break
-                        assert!(next_peer.is_none());
                         break;
                     }
 
                     // Move to the next peer
+                    //
+                    // SAFETY: The next_peer is only None in the
+                    // `remove_current` branch, meaning that we only reach this
+                    // point if the next peer is Some.
                     prev_inode = Some(inode);
-                    current_inode = next_peer;
+                    current_inode = next_peer.expect("next peer must not be none");
                 }
             }
         }
@@ -475,10 +491,9 @@ impl State {
 
     /// Read `size` bytes from `inode`.
     ///
-    /// We do not model a position in files, meaning that `offset` is
-    /// ignored. An attempt will be made to read `size` bytes at time `tick` --
-    /// time will be advanced -- and a slice up to `size` bytes will be returned
-    /// or `None` if no bytes are available to be read.
+    /// An attempt will be made to read `size` bytes at time `tick` -- time will
+    /// be advanced -- and a slice up to `size` bytes will be returned or `None`
+    /// if no bytes are available to be read.
     #[tracing::instrument(skip(self))]
     pub fn read(&mut self, inode: Inode, offset: usize, size: usize, now: Tick) -> Option<Bytes> {
         self.advance_time(now);
@@ -534,19 +549,15 @@ impl State {
     /// Return the name of the inode if it exists
     #[tracing::instrument(skip(self))]
     pub fn get_name(&self, inode: Inode) -> Option<&str> {
-        if inode == self.root_inode {
-            Some("/")
-        } else {
-            self.nodes
-                .get(&inode)
-                .map(|node| match node {
-                    Node::Directory { name, .. } => name,
-                    Node::File { file } => {
-                        &self.group_names[file.group_id as usize][file.ordinal as usize]
-                    }
-                })
-                .map(String::as_str)
-        }
+        self.nodes
+            .get(&inode)
+            .map(|node| match node {
+                Node::Directory { name, .. } => name,
+                Node::File { file } => {
+                    &self.group_names[file.group_id as usize][file.ordinal as usize]
+                }
+            })
+            .map(String::as_str)
     }
 
     /// Return the parent inode of an inode, if it exists
