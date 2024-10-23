@@ -1,0 +1,12 @@
+name: 'Install FUSE'
+description: 'Installs FUSE on the runner OS'
+runs:
+  using: 'composite'
+  steps:
+    - run: |
+        if [ "${{ runner.os }}" == "Linux" ]; then
+          sudo apt-get update && sudo apt-get install -y fuse
+        elif [ "${{ runner.os }}" == "macOS" ]; then
+          brew install macfuse
+        fi
+      shell: bash
