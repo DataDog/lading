@@ -445,7 +445,7 @@ impl State {
                     // SAFETY: The next_peer is only None in the
                     // `remove_current` branch, meaning that we only reach this
                     // point if the next peer is Some.
-                    prev_inode = Some(inode);
+                    prev_inode = Some(current_inode);
                     if next_peer.is_none() {
                         // We're at the end of the rotated files but not so many
                         // it's time to rotate off.
@@ -625,7 +625,7 @@ impl State {
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{HashMap, HashSet},
+        collections::{HashMap, HashSet, VecDeque},
         num::NonZeroU32,
     };
 
@@ -698,7 +698,137 @@ mod test {
     }
 
     fn assert_state_properties(state: &State) {
-        // nothing yet
+        // Property 1: bytes_written >= bytes_read
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                assert!(
+                    file.bytes_written >= file.bytes_read,
+                    "bytes_written ({}) < bytes_read ({})",
+                    file.bytes_written,
+                    file.bytes_read
+                );
+            }
+        }
+
+        // Property 2: status_tick == modified_tick || status_tick == access_tick
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                assert!(
+                    file.status_tick == file.modified_tick || file.status_tick == file.access_tick,
+                    "status_tick ({}) != modified_tick ({}) or access_tick ({})",
+                    file.status_tick,
+                    file.modified_tick,
+                    file.access_tick
+                );
+            }
+        }
+
+        // Property 3: Correct peer chain
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                let mut current_file = file;
+                let mut expected_ordinal = current_file.ordinal;
+                let mut seen_inodes = HashSet::new();
+
+                while let Some(peer_inode) = current_file.peer {
+                    if !seen_inodes.insert(peer_inode) {
+                        panic!("Cycle detected in peer chain at inode {}", peer_inode);
+                    }
+
+                    if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
+                        expected_ordinal += 1;
+                        assert_eq!(
+                            peer_file.ordinal, expected_ordinal,
+                            "Expected ordinal {}, got {}",
+                            expected_ordinal, peer_file.ordinal
+                        );
+                        current_file = peer_file;
+                    } else {
+                        panic!("Peer inode {} does not exist or is not a file", peer_inode);
+                    }
+                }
+            }
+        }
+
+        // Property 4: Ordinal values within bounds
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                assert!(
+                    file.ordinal <= state.max_rotations,
+                    "Ordinal {} exceeds max_rotations {}",
+                    file.ordinal,
+                    state.max_rotations
+                );
+            }
+        }
+
+        // Property 5: No orphaned files
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(state.root_inode);
+
+        while let Some(inode) = queue.pop_front() {
+            if !visited.insert(inode) {
+                continue;
+            }
+
+            if let Some(node) = state.nodes.get(&inode) {
+                match node {
+                    Node::Directory { dir, .. } => {
+                        for &child_inode in &dir.children {
+                            queue.push_back(child_inode);
+                        }
+                    }
+                    Node::File { file } => {
+                        // Traverse the peer chain
+                        let mut current_file = file;
+                        let mut seen_inodes = HashSet::new();
+                        while let Some(peer_inode) = current_file.peer {
+                            if !seen_inodes.insert(peer_inode) {
+                                panic!("Cycle detected in peer chain at inode {}", peer_inode);
+                            }
+                            if let Some(Node::File { file: peer_file }) =
+                                state.nodes.get(&peer_inode)
+                            {
+                                visited.insert(peer_inode);
+                                current_file = peer_file;
+                            } else {
+                                panic!("Peer inode {} does not exist or is not a file", peer_inode);
+                            }
+                        }
+                    }
+                }
+            } else {
+                panic!("Inode {} does not exist in state.nodes", inode);
+            }
+        }
+
+        for &inode in state.nodes.keys() {
+            assert!(visited.contains(&inode), "Inode {} is orphaned", inode);
+        }
+
+        // Property 6: Correct names corresponding to ordinals
+        for (&inode, node) in &state.nodes {
+            if let Node::File { file } = node {
+                if let Some(names) = state.group_names.get(file.group_id as usize) {
+                    if let Some(expected_name) = names.get(file.ordinal as usize) {
+                        let actual_name = state.get_name(inode).unwrap_or("");
+                        assert_eq!(
+                            actual_name,
+                            expected_name.as_str(),
+                            "Inode {} name mismatch: expected {}, got {}",
+                            inode,
+                            expected_name,
+                            actual_name
+                        );
+                    } else {
+                        panic!("Ordinal {} is out of bounds in group_names", file.ordinal);
+                    }
+                } else {
+                    panic!("Group ID {} is not present in group_names", file.group_id);
+                }
+            }
+        }
     }
 
     impl Arbitrary for State {
