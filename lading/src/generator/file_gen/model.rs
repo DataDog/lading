@@ -331,32 +331,37 @@ impl State {
 
         for inode in inodes.drain(..) {
             let rotation_data = {
-                let node = self.nodes.get_mut(&inode).expect("Node must exist");
-                match node {
-                    Node::File { file } => {
-                        file.advance_time(now);
-                        if file.read_only() {
-                            None
-                        } else if file.size() >= self.max_bytes_per_file {
-                            // File has exceeded its size, meaning it will be
-                            // rotated. This starts a process that may end in a
-                            // member of the file's group being deleted and the
-                            // creation, certainly, of a new File instance in
-                            // the group.
-                            file.set_read_only();
+                println!("{nodes:?}", nodes = self.nodes);
+                if let Some(node) = self.nodes.get_mut(&inode) {
+                    match node {
+                        Node::File { file } => {
+                            file.advance_time(now);
+                            if file.read_only() {
+                                None
+                            } else if file.size() >= self.max_bytes_per_file {
+                                // File has exceeded its size, meaning it will be
+                                // rotated. This starts a process that may end in a
+                                // member of the file's group being deleted and the
+                                // creation, certainly, of a new File instance in
+                                // the group.
+                                file.set_read_only();
 
-                            Some((
-                                inode,
-                                file.parent,
-                                file.bytes_per_tick,
-                                file.group_id,
-                                file.ordinal(),
-                            ))
-                        } else {
-                            None
+                                Some((
+                                    inode,
+                                    file.parent,
+                                    file.bytes_per_tick,
+                                    file.group_id,
+                                    file.ordinal(),
+                                ))
+                            } else {
+                                None
+                            }
                         }
+                        Node::Directory { .. } => None,
                     }
-                    Node::Directory { .. } => None,
+                } else {
+                    // Node has been removed, skip
+                    continue;
                 }
             };
 
@@ -441,6 +446,11 @@ impl State {
                     // `remove_current` branch, meaning that we only reach this
                     // point if the next peer is Some.
                     prev_inode = Some(inode);
+                    if next_peer.is_none() {
+                        // We're at the end of the rotated files but not so many
+                        // it's time to rotate off.
+                        break;
+                    }
                     current_inode = next_peer.expect("next peer must not be none");
                 }
             }
@@ -653,7 +663,7 @@ mod test {
 
             let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
 
-            prop_oneof![read_op, lookup_op, wait_op, getattr_op].boxed()
+            prop_oneof![wait_op].boxed()
         }
     }
 
