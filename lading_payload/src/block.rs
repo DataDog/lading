@@ -112,22 +112,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
     }
 }
 
-fn fibonacci(n: usize) -> u64 {
-    if n == 0 {
-        return 0;
-    } else if n == 1 {
-        return 1;
-    }
-    let mut a = 0;
-    let mut b = 1;
-    for _ in 2..=n {
-        let temp = a + b;
-        a = b;
-        b = temp;
-    }
-    b
-}
-
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 /// The method for which caching will be configure
@@ -399,8 +383,7 @@ where
     );
 
     let start = Instant::now();
-    let mut fib_index = 0;
-    let mut next_fib_interval = fibonacci(fib_index);
+    let mut next_minute = 1;
 
     // Build out the blocks.
     //
@@ -439,14 +422,13 @@ where
 
         let elapsed_secs = start.elapsed().as_secs();
         let elapsed_minutes = elapsed_secs / 60;
-        if elapsed_minutes >= next_fib_interval {
+        if elapsed_minutes >= next_minute {
             info!(
                 "Progress: {} bytes remaining, elapsed time: {:?}",
                 bytes_remaining,
                 start.elapsed()
             );
-            fib_index += 1;
-            next_fib_interval = fibonacci(fib_index);
+            next_minute += 1;
         }
 
         if bytes_remaining < min_block_size {
