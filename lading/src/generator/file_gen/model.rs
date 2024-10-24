@@ -49,6 +49,10 @@ pub struct File {
     /// happen -- or not.
     read_only: bool,
 
+    /// The peer of this file, the next in line in rotation. So, if this file is
+    /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
+    peer: Option<Inode>,
+
     /// The ordinal number of this File. If the file is foo.log the ordinal
     /// number is 0, if foo.log.1 then 1 etc.
     ordinal: u8,
@@ -177,6 +181,7 @@ pub struct State {
     now: Tick,
     block_cache: block::Cache,
     max_bytes_per_file: u64,
+    max_rotations: u8,
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
@@ -193,7 +198,7 @@ impl std::fmt::Debug for State {
             .field("max_bytes_per_file", &self.max_bytes_per_file)
             .field("group_names", &self.group_names)
             .field("next_inode", &self.next_inode)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -290,6 +295,8 @@ impl State {
             read_only: false,
             ordinal: 0,
             group_id: 0,
+
+            peer: None,
         };
         nodes.insert(foo_log_inode, Node::File { file: foo_log });
 
@@ -304,6 +311,7 @@ impl State {
             now: 0,
             block_cache,
             max_bytes_per_file,
+            max_rotations,
             group_names,
             next_inode: 4,
         }
@@ -331,7 +339,6 @@ impl State {
 
         for inode in inodes.drain(..) {
             let rotation_data = {
-                println!("{nodes:?}", nodes = self.nodes);
                 if let Some(node) = self.nodes.get_mut(&inode) {
                     match node {
                         Node::File { file } => {
