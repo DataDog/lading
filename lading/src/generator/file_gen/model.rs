@@ -468,8 +468,12 @@ impl State {
                 //
                 // Remove this peer from any File, then remove the node and
                 // capture the lost bytes.
+                let parent_inode = file.parent;
                 self.remove_from_peers(handle.inode);
                 self.nodes.remove(&handle.inode);
+                if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode) {
+                    dir.children.remove(&handle.inode);
+                }
                 self.lost_bytes += lost_bytes;
                 lost_bytes
             } else {
@@ -1134,31 +1138,43 @@ mod test {
                             .keys()
                             .choose(&mut rng)
                             .expect("open_handles should not be empty");
-                        state.close_file(
-                            now,
-                            open_handles.remove(&inode).expect("File handle must exist"),
-                        );
+                        if state.nodes.contains_key(&inode) {
+                            state.close_file(
+                                now,
+                                open_handles.remove(&inode).expect("File handle must exist"),
+                            );
+                        } else {
+                            panic!("Attempted to close a file with an invalid or already removed inode: {inode}");
+                        }
                     }
                 }
                 Operation::Read { offset, size } => {
                     let inode = random_inode(&mut rng, &state);
                     // Read from an open file
                     if let Some(handle) = open_handles.get(&inode) {
-                        let _ = state.read(*handle, offset, size, now);
+                        if state.nodes.contains_key(&handle.inode) {
+                            let _ = state.read(*handle, offset, size, now);
+                        } else {
+                            panic!("Attempted to read from an invalid or already removed inode: {inode}", inode = handle.inode);
+                        }
                     }
                 }
                 Operation::Lookup { name: op_name } => {
                     let parent_inode = random_inode(&mut rng, &state);
-                    let name = if let Some(n) = op_name {
-                        n
+                    if state.nodes.contains_key(&parent_inode) {
+                        let name = op_name.unwrap_or_else(|| random_name(&mut rng, &state));
+                        let _ = state.lookup(now, parent_inode, &name);
                     } else {
-                        random_name(&mut rng, &state)
-                    };
-                    let _ = state.lookup(now, parent_inode, &name);
+                        panic!("Attempted to look up a name in an invalid or already removed parent inode: {parent_inode}");
+                    }
                 }
                 Operation::GetAttr => {
                     let inode = random_inode(&mut rng, &state);
-                    let _ = state.getattr(now, inode);
+                    if state.nodes.contains_key(&inode) {
+                        let _ = state.getattr(now, inode);
+                    } else {
+                        panic!("Attempted to get attributes of an invalid or already removed inode: {inode}");
+                    }
                 }
                 Operation::Wait { ticks } => {
                     now += ticks;
