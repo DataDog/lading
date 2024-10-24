@@ -59,9 +59,62 @@ pub struct File {
     /// The group ID of this File. So for instance all File instances that are
     /// called foo.log, foo.log.1 etc have the same group ID.
     group_id: u16,
+
+    /// The number of open file handles for this `File`.
+    open_handles: usize,
+
+    /// Indicates that the `File` no longer has a name but is not removed from
+    /// the filesystem.
+    unlinked: bool,
+}
+
+/// Represents an open file handle.
+#[derive(Debug, Clone, Copy)]
+pub struct FileHandle {
+    inode: Inode,
 }
 
 impl File {
+    /// Open a new handle to this file.
+    ///
+    /// TODO these need to modify access time et al
+    pub fn open(&mut self, now: Tick) {
+        self.advance_time(now);
+
+        self.open_handles += 1;
+    }
+
+    /// Close a handle to this file.
+    ///
+    /// Function returns the number of lost bytes if this was the last handle
+    /// and the file is unlinked, None otherwise.
+    ///
+    /// TODO these need to modify access time et al
+    pub fn close(&mut self, now: Tick) -> Option<u64> {
+        self.advance_time(now);
+
+        if self.open_handles == 0 {
+            panic!("Attempted to close a file with no open handles");
+        }
+        self.open_handles -= 1;
+
+        if self.open_handles == 0 && self.unlinked {
+            // File can be fully deleted now.
+            // Calculate lost bytes.
+            let lost_bytes = self.bytes_written.saturating_sub(self.bytes_read);
+            Some(lost_bytes)
+        } else {
+            None
+        }
+    }
+
+    /// Mark the file as unlinked (deleted).
+    pub fn unlink(&mut self, now: Tick) {
+        self.advance_time(now);
+
+        self.unlinked = true;
+    }
+
     /// Register a read.
     ///
     /// This function is pair to [`File::available_to_read`]. It's possible that
@@ -184,6 +237,7 @@ pub struct State {
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
+    lost_bytes: u64,
 }
 
 impl std::fmt::Debug for State {
@@ -266,6 +320,7 @@ impl State {
             max_rotations,
             group_names: Vec::new(),
             next_inode: 2,
+            lost_bytes: 0,
         };
 
         if concurrent_logs == 0 {
@@ -371,6 +426,8 @@ impl State {
                 ordinal: 0,
                 peer: None,
                 group_id,
+                open_handles: 0,
+                unlinked: false,
             };
             state.nodes.insert(file_inode, Node::File { file });
 
@@ -381,6 +438,57 @@ impl State {
         }
 
         state
+    }
+
+    /// Open a file and return a handle.
+    ///
+    /// This function advances time.
+    pub fn open_file(&mut self, now: Tick, inode: Inode) -> Option<FileHandle> {
+        self.advance_time(now);
+
+        if let Some(Node::File { file, .. }) = self.nodes.get_mut(&inode) {
+            file.open(now);
+            Some(FileHandle { inode })
+        } else {
+            None
+        }
+    }
+
+    /// Close a file handle.
+    ///
+    /// This function advances time.
+    pub fn close_file(&mut self, now: Tick, handle: FileHandle) -> u64 {
+        self.advance_time(now);
+
+        if let Some(Node::File { file, .. }) = self.nodes.get_mut(&handle.inode) {
+            if let Some(lost_bytes) = file.close(now) {
+                // If Some then the file no longer has a name -- it's unlinked
+                // -- and there are no further file handles open for it. Remove
+                // the record of the node and accumulate lost bytes.
+                //
+                // Remove this peer from any File, then remove the node and
+                // capture the lost bytes.
+                self.remove_from_peers(handle.inode);
+                self.nodes.remove(&handle.inode);
+                self.lost_bytes += lost_bytes;
+                lost_bytes
+            } else {
+                0
+            }
+        } else {
+            panic!("Invalid file handle");
+        }
+    }
+
+    /// Remove `inode` from the list of peers
+    fn remove_from_peers(&mut self, inode: Inode) {
+        for node in self.nodes.values_mut() {
+            if let Node::File { file } = node {
+                if file.peer == Some(inode) {
+                    file.peer = None;
+                }
+            }
+        }
     }
 
     /// Advance time in the model.
@@ -418,6 +526,7 @@ impl State {
                                 // creation, certainly, of a new File instance in
                                 // the group.
                                 file.set_read_only();
+                                file.unlink(now);
 
                                 Some((
                                     inode,
@@ -454,6 +563,8 @@ impl State {
                     ordinal: 0,
                     peer: Some(rotated_inode),
                     group_id,
+                    open_handles: 0,
+                    unlinked: false,
                 };
 
                 // Insert `new_file` into the node list and make it a member of
@@ -496,6 +607,7 @@ impl State {
                         // and there are no further peers to explore.
                         assert!(next_peer.is_none());
 
+                        self.remove_from_peers(current_inode);
                         self.nodes.remove(&current_inode);
                         if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode)
                         {
@@ -698,9 +810,11 @@ impl State {
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{HashSet, VecDeque},
+        collections::{HashMap, HashSet, VecDeque},
         num::NonZeroU32,
     };
+
+    use crate::generator::file_gen::model::FileHandle;
 
     use super::{Inode, Node, State};
     use lading_payload::block;
@@ -716,10 +830,22 @@ mod test {
 
     #[derive(Debug, Clone)]
     enum Operation {
-        Read { offset: usize, size: usize },
-        Lookup { name: Option<String> },
+        Open {
+            inode: Option<Inode>,
+        },
+        Close,
+        Read {
+            inode: Option<Inode>,
+            offset: usize,
+            size: usize,
+        },
+        Lookup {
+            name: Option<String>,
+        },
         GetAttr,
-        Wait { ticks: u64 },
+        Wait {
+            ticks: u64,
+        },
     }
 
     impl Arbitrary for Operation {
@@ -727,8 +853,17 @@ mod test {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let read_op = (any::<usize>(), 1usize..1024usize)
-                .prop_map(|(offset, size)| Operation::Read { offset, size });
+            let open_op = any::<Option<Inode>>().prop_map(|inode| Operation::Open { inode });
+
+            let close_op = Just(Operation::Close);
+
+            let read_op = (any::<Option<Inode>>(), any::<usize>(), 1usize..1024usize).prop_map(
+                |(inode, offset, size)| Operation::Read {
+                    inode,
+                    offset,
+                    size,
+                },
+            );
 
             let lookup_op = (any::<Option<String>>()).prop_map(|name| Operation::Lookup { name });
 
@@ -736,7 +871,7 @@ mod test {
 
             let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
 
-            prop_oneof![wait_op, getattr_op, lookup_op, read_op].boxed()
+            prop_oneof![wait_op, getattr_op, lookup_op, read_op, open_op, close_op].boxed()
         }
     }
 
@@ -951,6 +1086,14 @@ mod test {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig {
+            // Increase the number of generated cases (default is 256)
+            cases: 1_024,
+            // Allow more shrink iterations (default is 4096)
+            max_shrink_iters: 100_000,
+            .. ProptestConfig::default()
+        })]
+
         #[test]
         fn test_state_operations(seed in any::<u64>(),
                                  mut state in any::<State>(),
@@ -960,10 +1103,42 @@ mod test {
             assert_state_properties(&state);
 
             let mut now = state.now;
+            let mut open_handles: HashMap<Inode, usize> = HashMap::new();
+
             for op in operations {
                 match op {
-                    Operation::Read { offset, size } => {
-                        let inode = random_inode(&mut rng, &state);
+                    Operation::Open { inode } => {
+                        let inode = inode.unwrap_or_else(|| random_inode(&mut rng, &state));
+                        now += 1;
+                        if let Some(handle) = state.open_file(now, inode) {
+                            *open_handles.entry(handle.inode).or_insert(0) += 1;
+                        }
+                    },
+                    Operation::Close => {
+                        let maybe_inode = open_handles.keys().choose(&mut rng);
+                        if maybe_inode.is_none() {
+                            continue;
+                        }
+                        let inode: Inode = *maybe_inode.unwrap();
+
+                        now += 1;
+                        if open_handles.get(&inode).copied().expect("inode must exist") > 0 {
+                            let _ = state.close_file(now, FileHandle { inode });
+                            *open_handles.get_mut(&inode).unwrap() -= 1;
+                            if open_handles[&inode] == 0 {
+                                open_handles.remove(&inode);
+                            }
+                        }
+                    },
+                    Operation::Read { inode, offset, size } => {
+                        let inode = inode.unwrap_or_else(|| {
+                            // Prefer to read from an open file
+                            if let Some(&inode) = open_handles.keys().choose(&mut rng) {
+                                inode
+                            } else {
+                                random_inode(&mut rng, &state)
+                            }
+                        });
                         now += 1;
                         let _ = state.read(inode, offset, size, now);
                     },
