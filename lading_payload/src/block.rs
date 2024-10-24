@@ -11,7 +11,10 @@ use byte_unit::{Byte, ByteUnit};
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::{
+    sync::mpsc::{error::SendError, Sender},
+    time::Instant,
+};
 use tracing::{error, info, span, warn, Level};
 
 /// Error for `Cache::spin`
@@ -107,6 +110,22 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
             bytes,
         })
     }
+}
+
+fn fibonacci(n: usize) -> u64 {
+    if n == 0 {
+        return 0;
+    } else if n == 1 {
+        return 1;
+    }
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 2..=n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    b
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -373,6 +392,15 @@ where
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
+    info!(
+        ?max_block_size,
+        ?total_bytes,
+        "Constructing requested block cache"
+    );
+
+    let start = Instant::now();
+    let mut fib_index = 0;
+    let mut next_fib_interval = fibonacci(fib_index);
 
     // Build out the blocks.
     //
@@ -407,6 +435,18 @@ where
                 error!("Unexpected error during block construction: {e}");
                 return Err(e);
             }
+        }
+
+        let elapsed_secs = start.elapsed().as_secs();
+        let elapsed_minutes = elapsed_secs / 60;
+        if elapsed_minutes >= next_fib_interval {
+            info!(
+                "Progress: {} bytes remaining, elapsed time: {:?}",
+                bytes_remaining,
+                start.elapsed()
+            );
+            fib_index += 1;
+            next_fib_interval = fibonacci(fib_index);
         }
 
         if bytes_remaining < min_block_size {
