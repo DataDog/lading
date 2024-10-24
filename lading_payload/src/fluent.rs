@@ -128,7 +128,9 @@ where
                 .expect("failed to generate string"),
         ),
         1 => {
-            let mut obj = FxHashMap::default();
+            let s: std::hash::BuildHasherDefault<rustc_hash::FxHasher> =
+                std::hash::BuildHasherDefault::default();
+            let mut obj = FxHashMap::with_capacity_and_hasher(128, s);
             for _ in 0..rng.gen_range(0..128) {
                 let key = str_pool
                     .of_size_range(rng, 1_u8..16)
