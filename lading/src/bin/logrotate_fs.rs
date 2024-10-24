@@ -204,11 +204,16 @@ impl Filesystem for LogrotateFS {
         // down for writing but we can't. I suppose we could send up the raw
         // blocks and then chain them together as needed but absent a compelling
         // reason to do that the simplicity of this API is nice.
-        if let Some(data) = state.read(ino as usize, offset as usize, size as usize, tick) {
-            reply.data(&data);
-        } else {
-            reply.error(ENOENT);
-        }
+
+        unimplemented!();
+
+        // TODO ah I've changed state.read to take a FileHandle but is this a mistake?
+
+        // if let Some(data) = state.read(ino as usize, offset as usize, size as usize, tick) {
+        //     reply.data(&data);
+        // } else {
+        //     reply.error(ENOENT);
+        // }
     }
 
     #[tracing::instrument(skip(self, _req, reply))]
