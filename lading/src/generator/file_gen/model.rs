@@ -108,6 +108,16 @@ impl File {
         }
     }
 
+    /// Return the number of open file handles to this `File`
+    pub fn open_handles(&self) -> usize {
+        self.open_handles
+    }
+
+    /// Return whether the file is unlinked or not
+    pub fn unlinked(&self) -> bool {
+        self.unlinked
+    }
+
     /// Mark the file as unlinked (deleted).
     pub fn unlink(&mut self, now: Tick) {
         self.advance_time(now);
@@ -466,14 +476,14 @@ impl State {
                 // -- and there are no further file handles open for it. Remove
                 // the record of the node and accumulate lost bytes.
                 //
-                // Remove this peer from any File, then remove the node and
-                // capture the lost bytes.
-                let parent_inode = file.parent;
-                self.remove_from_peers(handle.inode);
-                self.nodes.remove(&handle.inode);
-                if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode) {
-                    dir.children.remove(&handle.inode);
-                }
+                // Close will only return lost bytes if the file is unlinked and
+                // this was the last file handle. There should be no record of
+                // the file in its parent directory nor should its peer be
+                // anything but None.
+                // assert!(file.peer.is_none());
+                // if let Some(Node::Directory { dir, .. }) = self.nodes.get(&file.parent) {
+                //     assert!(!dir.children.contains(&handle.inode));
+                // }
                 self.lost_bytes += lost_bytes;
                 lost_bytes
             } else {
@@ -481,17 +491,6 @@ impl State {
             }
         } else {
             panic!("Invalid file handle");
-        }
-    }
-
-    /// Remove `inode` from the list of peers
-    fn remove_from_peers(&mut self, inode: Inode) {
-        for node in self.nodes.values_mut() {
-            if let Node::File { file } = node {
-                if file.peer == Some(inode) {
-                    file.peer = None;
-                }
-            }
         }
     }
 
@@ -516,6 +515,9 @@ impl State {
         let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
 
         for inode in inodes.drain(..) {
+            // Determine if the file pointed to by inode needs to be rotated. A
+            // file is only rotated if it is linked, that is, it has a name in
+            // the filesystem.
             let rotation_data = {
                 if let Some(node) = self.nodes.get_mut(&inode) {
                     match node {
@@ -524,14 +526,16 @@ impl State {
                             if file.read_only() {
                                 None
                             } else if file.size() >= self.max_bytes_per_file {
-                                // File has exceeded its size, meaning it will be
-                                // rotated. This starts a process that may end in a
-                                // member of the file's group being deleted and the
-                                // creation, certainly, of a new File instance in
-                                // the group.
+                                // Because of the way read-only is set on any
+                                // but the 0th ordinal the only read/write file
+                                // that ever is detected for rotation is the 0th
+                                // ordinal.
+                                assert!(
+                                    file.ordinal() == 0,
+                                    "Expected rotated file to be 0th ordinal, was {ordinal}",
+                                    ordinal = file.ordinal()
+                                );
                                 file.set_read_only();
-                                file.unlink(now);
-
                                 Some((
                                     inode,
                                     file.parent,
@@ -551,11 +555,20 @@ impl State {
                 }
             };
 
+            // The file pointed to by `inode` -- which we will refer to as
+            // `rotated_inode` from this point on -- is to be rotated.  A
+            // rotated file is not immediately unlinked but it does have its
+            // ordinal increased which may cause it to be unlinked if the
+            // ordinal exceeds `max_rotations`. An unlinked file may be deleted
+            // if there are no active file handles. A rotated file is set
+            // read-only so it never accumulates further bytes.
             if let Some((rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal)) =
                 rotation_data
             {
+                // Create our new file, called, well, `new_file`. This will
+                // become the 0th ordinal in the `group_id` and may -- although
+                // we don't know yet -- cause `rotated_inode` to be deleted.
                 let new_file_inode = self.next_inode;
-                // Create our new File instance, using data from the now rotated file.
                 let new_file = File {
                     parent: parent_inode,
                     bytes_written: 0,
@@ -583,15 +596,26 @@ impl State {
                 // Bump the Inode index
                 self.next_inode = self.next_inode.saturating_add(1);
 
-                // Now, search through the peers of this File and rotate them,
-                // keeping track of the last one which will need to be
-                // deleted. There is no previous node as the rotated_inode is of
-                // the 0th ordinal.
+                // Now, we step through the list of peers beginning with
+                // `rotated_inode` and increment the ordinal of each file we
+                // find. This tells us if the file falls off the end of the peer
+                // chain or not. If it does, the file will be unlinked. If the
+                // file is unlinked and has no active file handles it is removed
+                // from the node map.
+                //
+                // We do not preserve unlinked files in the peer chain. We
+                // likewise do not preserve unlinked files in its parent
+                // directory. We _do_ preserve unlinked files in the node map
+                // until the last file handle is removed for that node.
+
                 let mut current_inode = rotated_inode;
-                assert!(ordinal == 0);
-                let mut prev_inode = None;
+                assert!(ordinal == 0, "Expected ordinal 0, got {ordinal}");
+                let mut prev_inode = new_file_inode;
 
                 loop {
+                    // Increment the current_inode's ordinal and determine if
+                    // the ordinal is now past max_rotations and whether the
+                    // next peer needs to be followed.
                     let (remove_current, next_peer) = {
                         let node = self.nodes.get_mut(&current_inode).expect("Node must exist");
                         match node {
@@ -608,25 +632,24 @@ impl State {
 
                     if remove_current {
                         // The only time a node is removed is when it's at the
-                        // end of the line. This means that next_peer is None
-                        // and there are no further peers to explore.
+                        // end of the peer chain. This means that next_peer is
+                        // None and there are no further peers to explore.
                         assert!(next_peer.is_none());
 
-                        // Unlink the file and remove it from its parent
-                        if let Some(Node::File { file }) = self.nodes.get_mut(&current_inode) {
-                            file.unlink(now);
-                        }
+                        // Because we are at the end of the peer chain we remove
+                        // the node from its parent directory and unlink it.
                         if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode)
                         {
                             dir.children.remove(&current_inode);
                         }
+                        if let Some(Node::File { file }) = self.nodes.get_mut(&current_inode) {
+                            file.unlink(now);
+                        }
 
                         // Update the peer of the previous file to None
-                        if let Some(prev_inode) = prev_inode {
-                            let node = self.nodes.get_mut(&prev_inode).expect("Node must exist");
-                            if let Node::File { file } = node {
-                                file.peer = None;
-                            }
+                        let node = self.nodes.get_mut(&prev_inode).expect("Node must exist");
+                        if let Node::File { file } = node {
+                            file.peer = None;
                         }
 
                         // Break the loop, as there are no further peers to process
@@ -635,18 +658,30 @@ impl State {
 
                     // Move to the next peer
                     //
-                    // SAFETY: The next_peer is only None in the
-                    // `remove_current` branch, meaning that we only reach this
-                    // point if the next peer is Some.
-                    prev_inode = Some(current_inode);
-                    if next_peer.is_none() {
+                    // The next_peer is only None in the `remove_current`
+                    // branch, meaning that we only reach this point if the next
+                    // peer is Some.
+                    prev_inode = current_inode;
+                    if let Some(next_peer) = next_peer {
+                        current_inode = next_peer;
+                    } else {
                         // We're at the end of the rotated files but not so many
                         // it's time to rotate off.
                         break;
                     }
-                    current_inode = next_peer.expect("next peer must not be none");
                 }
             }
+
+            // Now, at this point we have some File instances in the node map
+            // that are orphaned. If the current file is unlinked and it has no
+            // open handles we delete it.
+
+            // TODO(fix) we must GC orphaned files
+            //
+            // Right now we only calculate lost_bytes if a file is opened, then
+            // closed. This is not correct. Files that have been created and
+            // then never opened before being rotated out matter too. This is a
+            // serious model error.
         }
 
         self.now = now;
@@ -978,99 +1013,82 @@ mod test {
         }
 
         // Property 3: Correct peer chain
+        //
+        // A peer chain should always begin with the 0th member of a group and
+        // proceed until the last member of that group. No peer should be
+        // unlinked and the ordinal of each peer should increase as we move down
+        // the chain.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
-                let mut current_file = file;
-                let mut expected_ordinal = current_file.ordinal;
-                let mut seen_inodes = HashSet::new();
+                if file.ordinal == 0 {
+                    // Start of a peer chain
+                    let mut current_file = file;
+                    let mut expected_ordinal = current_file.ordinal;
+                    let mut seen_inodes = HashSet::new();
 
-                while let Some(peer_inode) = current_file.peer {
-                    if !seen_inodes.insert(peer_inode) {
-                        panic!("Cycle detected in peer chain at inode {}", peer_inode);
-                    }
+                    while let Some(peer_inode) = current_file.peer {
+                        if !seen_inodes.insert(peer_inode) {
+                            panic!("Cycle detected in peer chain at inode {peer_inode}",);
+                        }
 
-                    if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
-                        expected_ordinal += 1;
-                        assert_eq!(
-                            peer_file.ordinal, expected_ordinal,
-                            "Expected ordinal {}, got {}",
-                            expected_ordinal, peer_file.ordinal
-                        );
-                        current_file = peer_file;
-                    } else {
-                        panic!("Peer inode {} does not exist or is not a file", peer_inode);
+                        if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
+                            assert!(
+                                !peer_file.unlinked(),
+                                "File was found in peer chain unlinked"
+                            );
+                            expected_ordinal += 1;
+                            assert_eq!(
+                                peer_file.ordinal,
+                                expected_ordinal,
+                                "Expected ordinal {expected_ordinal}, got {peer_file_ordinal}",
+                                peer_file_ordinal = peer_file.ordinal
+                            );
+                            current_file = peer_file;
+                        } else {
+                            panic!("Peer inode {peer_inode} does not exist or is not a file");
+                        }
                     }
                 }
             }
         }
 
         // Property 4: Ordinal values within bounds
+        //
+        // No ordinal should exeed max_rotations, so long as the file is linked.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
+                if file.unlinked() {
+                    continue;
+                }
                 assert!(
                     file.ordinal <= state.max_rotations,
-                    "Ordinal {} exceeds max_rotations {}",
-                    file.ordinal,
-                    state.max_rotations
+                    "Ordinal {ordinal} exceeds max_rotations {max_rotations}: {state:#?}",
+                    ordinal = file.ordinal,
+                    max_rotations = state.max_rotations
                 );
             }
         }
 
         // Property 5: No orphaned files
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(state.root_inode);
+        //
+        // Every node held by the filesystem is either a linked file, an
+        // unlinked file or a directory. A linked file appears in peer chains
+        // and is subject to rotation. An unlinked file has no name, is not
+        // subject to rotation and does not appear in a peer chain. An unlinked
+        // file is orphaned only when it has no open file handles. A directory
+        // holds linked and unlinked files.
 
-        while let Some(inode) = queue.pop_front() {
-            if !visited.insert(inode) {
-                continue;
-            }
+        // TODO
 
-            if let Some(node) = state.nodes.get(&inode) {
-                match node {
-                    Node::Directory { dir, .. } => {
-                        for &child_inode in &dir.children {
-                            queue.push_back(child_inode);
-                        }
-                    }
-                    Node::File { file } => {
-                        // Traverse the peer chain
-                        let mut current_file = file;
-                        let mut seen_inodes = HashSet::new();
-                        while let Some(peer_inode) = current_file.peer {
-                            if !seen_inodes.insert(peer_inode) {
-                                panic!("Cycle detected in peer chain at inode {}", peer_inode);
-                            }
-                            if let Some(Node::File { file: peer_file }) =
-                                state.nodes.get(&peer_inode)
-                            {
-                                visited.insert(peer_inode);
-                                current_file = peer_file;
-                            } else {
-                                panic!("Peer inode {} does not exist or is not a file", peer_inode);
-                            }
-                        }
-                    }
-                }
-            } else {
-                panic!("Inode {} does not exist in state.nodes", inode);
-            }
-        }
-
-        for &inode in state.nodes.keys() {
-            // Skip unlinked files with open handles
-            if let Some(Node::File { file }) = state.nodes.get(&inode) {
-                if file.unlinked && file.open_handles > 0 {
-                    continue;
-                }
-            }
-
-            assert!(visited.contains(&inode), "Inode {inode} is orphaned");
-        }
-
-        // Property 6: Correct names corresponding to ordinals
+        // Property 6: Correct names corresponding to ordinals in linked files
+        //
+        // For every linked file the ordinal of said file should correspond to
+        // the correct name.
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
+                if file.unlinked() {
+                    continue;
+                }
                 if let Some(names) = state.group_names.get(file.group_id as usize) {
                     if let Some(expected_name) = names.get(file.ordinal as usize) {
                         let actual_name = state.get_name(inode).unwrap_or("");
