@@ -53,10 +53,6 @@ pub struct File {
     /// number is 0, if foo.log.1 then 1 etc.
     ordinal: u8,
 
-    /// The peer of this file, the next in line in rotation. So, if this file is
-    /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
-    peer: Option<Inode>,
-
     /// The group ID of this File. So for instance all File instances that are
     /// called foo.log, foo.log.1 etc have the same group ID.
     group_id: u8,
