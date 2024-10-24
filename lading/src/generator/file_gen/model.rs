@@ -52,10 +52,6 @@ pub struct File {
     /// The ordinal number of this File. If the file is foo.log the ordinal
     /// number is 0, if foo.log.1 then 1 etc.
     ordinal: u8,
-
-    /// The peer of this file, the next in line in rotation. So, if this file is
-    /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
-    peer: Option<Inode>,
 }
 
 impl File {
@@ -179,7 +175,6 @@ pub struct State {
     root_inode: Inode,
     now: Tick,
     block_cache: block::Cache,
-    max_rotations: u8,
     max_bytes_per_file: u64,
 }
 
@@ -265,7 +260,6 @@ impl State {
             bytes_per_tick,
 
             read_only: false,
-            peer: None,
             ordinal: 0,
         };
         nodes.insert(
@@ -286,7 +280,6 @@ impl State {
             root_inode,
             now: 0,
             block_cache,
-            max_rotations,
             max_bytes_per_file,
         }
     }
@@ -311,7 +304,7 @@ impl State {
         // nothing yet beyond updating the clock, rotations to come
         assert!(now >= self.now);
 
-        for (inode, node) in &mut self.nodes {
+        for node in self.nodes.values_mut() {
             match node {
                 Node::File { file, .. } => {
                     file.advance_time(now);
