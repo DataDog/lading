@@ -1,11 +1,10 @@
 //! Model the internal logic of a logrotate filesystem.
 
-//use lading_payload::block;
-
 use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use lading_payload::block;
+use rand::Rng;
 
 /// Time representation of the model
 pub type Tick = u64;
@@ -59,7 +58,7 @@ pub struct File {
 
     /// The group ID of this File. So for instance all File instances that are
     /// called foo.log, foo.log.1 etc have the same group ID.
-    group_id: u8,
+    group_id: u16,
 }
 
 impl File {
@@ -230,24 +229,26 @@ pub enum NodeType {
 
 impl State {
     /// Create a new instance of `State`.
-    #[tracing::instrument(skip(block_cache))]
-    pub fn new(
+    #[tracing::instrument(skip(rng, block_cache))]
+    pub fn new<R>(
+        rng: &mut R,
         bytes_per_tick: u64,
         max_rotations: u8,
         max_bytes_per_file: u64,
         block_cache: block::Cache,
-    ) -> State {
+        max_depth: u8,
+        concurrent_logs: u16,
+    ) -> State
+    where
+        R: Rng,
+    {
         let root_inode: Inode = 1; // `/`
-        let logs_inode: Inode = 2; // `/logs`
-        let foo_log_inode: Inode = 3; // `/logs/foo.log`
-
         let mut nodes = HashMap::new();
 
-        let mut root_dir = Directory {
+        let root_dir = Directory {
             children: HashSet::new(),
             parent: None,
         };
-        root_dir.children.insert(logs_inode);
         nodes.insert(
             root_inode,
             Node::Directory {
@@ -256,65 +257,130 @@ impl State {
             },
         );
 
-        let mut logs_dir = Directory {
-            children: HashSet::new(),
-            parent: Some(root_inode),
-        };
-        logs_dir.children.insert(foo_log_inode);
-        nodes.insert(
-            logs_inode,
-            Node::Directory {
-                name: "logs".to_string(),
-                dir: logs_dir,
-            },
-        );
-
-        let mut group_names = Vec::new();
-
-        // Create names for the rotation group
-        let base_name = "foo.log".to_string();
-        let mut names = Vec::new();
-        names.push(base_name.clone()); // Ordinal 0
-        for i in 1..=max_rotations {
-            names.push(format!("foo.log.{i}")); // Ordinal i
-        }
-        group_names.push(names);
-
-        let foo_log = File {
-            parent: logs_inode,
-
-            bytes_written: 0,
-            bytes_read: 0,
-
-            access_tick: 0,
-            modified_tick: 0,
-            status_tick: 0,
-
-            bytes_per_tick,
-
-            read_only: false,
-            ordinal: 0,
-            group_id: 0,
-
-            peer: None,
-        };
-        nodes.insert(foo_log_inode, Node::File { file: foo_log });
-
-        // NOTE this structure is going to be a problem when I include rotating
-        // files. Specifically the inodes will need to change so there might
-        // need to be a concept of a SuperFile that holds inodes or something
-        // for its rotating children? Dunno. An array with a current pointer?
-
-        State {
+        let mut state = State {
             nodes,
             root_inode,
             now: 0,
             block_cache,
             max_bytes_per_file,
             max_rotations,
-            group_names,
-            next_inode: 4,
+            group_names: Vec::new(),
+            next_inode: 2,
+        };
+
+        if concurrent_logs == 0 {
+            return state;
         }
+
+        // Generate random group names
+        let num_groups = rng.gen_range(1..=concurrent_logs);
+        for group_id in 0..num_groups {
+            let base: String = (0..8)
+                .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                .collect();
+            let base_name = format!("{base}_{group_id}.log");
+            let mut names = Vec::new();
+            names.push(base_name.clone()); // Ordinal 0
+            for i in 1..=max_rotations {
+                names.push(format!("{base_name}.{i}")); // Ordinal i
+            }
+            state.group_names.push(names);
+        }
+
+        // Strategy:
+        //
+        // For 0 to num_groups generate a directory path up to `max_depth` from
+        // the root node and place a file in that directory. Node that we must
+        // keep track of the group we're in, so we loop over num_groups.
+
+        for group_id in 0..num_groups {
+            let mut current_inode = state.root_inode;
+            let depth = rng.gen_range(1..=max_depth as usize);
+
+            // Build the directory path
+            for _ in 0..depth {
+                let dir_name: String = (0..8)
+                    .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                    .collect();
+
+                // Create the directory. If the name already exists under the current_inode we reuse it.
+                let dir_inode = {
+                    if let Some(Node::Directory { dir, .. }) = state.nodes.get(&current_inode) {
+                        let mut found_inode = None;
+                        for &child_inode in &dir.children {
+                            if let Some(Node::Directory { name, .. }) =
+                                state.nodes.get(&child_inode)
+                            {
+                                if name == &dir_name {
+                                    found_inode = Some(child_inode);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if let Some(inode) = found_inode {
+                            // Already exists, use it.
+                            inode
+                        } else {
+                            // Does not exist, create it.
+                            let new_inode = state.next_inode;
+                            state.next_inode += 1;
+
+                            let new_dir = Directory {
+                                children: HashSet::new(),
+                                parent: Some(current_inode),
+                            };
+                            state.nodes.insert(
+                                new_inode,
+                                Node::Directory {
+                                    name: dir_name.clone(),
+                                    dir: new_dir,
+                                },
+                            );
+
+                            if let Some(Node::Directory { dir, .. }) =
+                                state.nodes.get_mut(&current_inode)
+                            {
+                                dir.children.insert(new_inode);
+                            }
+
+                            new_inode
+                        }
+                    } else {
+                        panic!("current_inode {current_inode} is not a directory");
+                    }
+                };
+
+                // Move to the next directory level
+                current_inode = dir_inode;
+            }
+
+            // current_inode is the directory that'll be the parent for the new File.
+            let file_inode = state.next_inode;
+            state.next_inode += 1;
+
+            let file = File {
+                parent: current_inode,
+                bytes_written: 0,
+                bytes_read: 0,
+                access_tick: state.now,
+                modified_tick: state.now,
+                status_tick: state.now,
+                bytes_per_tick,
+                read_only: false,
+                ordinal: 0,
+                peer: None,
+                group_id,
+            };
+            state.nodes.insert(file_inode, Node::File { file });
+
+            // Add the file to the directory's children
+            if let Some(Node::Directory { dir, .. }) = state.nodes.get_mut(&current_inode) {
+                dir.children.insert(file_inode);
+            }
+        }
+
+        state
     }
 
     /// Advance time in the model.
@@ -632,11 +698,11 @@ impl State {
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{HashMap, HashSet, VecDeque},
+        collections::{HashSet, VecDeque},
         num::NonZeroU32,
     };
 
-    use super::{Directory, File, Inode, Node, State};
+    use super::{Inode, Node, State};
     use lading_payload::block;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -671,6 +737,52 @@ mod test {
             let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
 
             prop_oneof![wait_op, getattr_op, lookup_op, read_op].boxed()
+        }
+    }
+
+    impl Arbitrary for State {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                any::<u64>(),           // seed
+                1u64..=10_000u64,       // bytes_per_tick
+                1u8..=16u8,             // max_rotations
+                1024u64..=1_000_000u64, // max_bytes_per_file
+                1u8..=8u8,              // max_depth
+                1u16..=32u16,           // concurrent_logs
+            )
+                .prop_map(
+                    |(
+                        seed,
+                        bytes_per_tick,
+                        max_rotations,
+                        max_bytes_per_file,
+                        max_depth,
+                        concurrent_logs,
+                    )| {
+                        let mut rng = StdRng::seed_from_u64(seed);
+                        let block_cache = block::Cache::fixed(
+                            &mut rng,
+                            NonZeroU32::new(1_000_000).expect("zero value"),
+                            10_000,
+                            &lading_payload::Config::Ascii,
+                        )
+                        .expect("block construction");
+
+                        State::new(
+                            &mut rng,
+                            bytes_per_tick,
+                            max_rotations,
+                            max_bytes_per_file,
+                            block_cache,
+                            max_depth,
+                            concurrent_logs,
+                        )
+                    },
+                )
+                .boxed()
         }
     }
 
@@ -838,111 +950,15 @@ mod test {
         }
     }
 
-    impl Arbitrary for State {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        // TODO maybe I get rid of this Arbitrary eventually and have everything driven by State::new
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // We'll generate a valid initial State and a sequence of times to advance
-            (
-                1u64..=1000u64,          // initial now
-                1u8..=10u8,              // max_rotations
-                1024u64..=10_000_000u64, // max_bytes_per_file
-                4usize..=100usize,       // next_inode (ensure it's at least 4)
-            )
-                .prop_map(
-                    move |(now, max_rotations, max_bytes_per_file, next_inode)| {
-                        let root_inode: Inode = 1;
-                        let logs_inode: Inode = 2;
-                        let foo_log_inode: Inode = 3;
-
-                        let mut nodes = HashMap::new();
-
-                        let mut root_dir = Directory {
-                            children: HashSet::new(),
-                            parent: None,
-                        };
-                        root_dir.children.insert(logs_inode);
-                        nodes.insert(
-                            root_inode,
-                            Node::Directory {
-                                name: "/".to_string(),
-                                dir: root_dir,
-                            },
-                        );
-
-                        let mut logs_dir = Directory {
-                            children: HashSet::new(),
-                            parent: Some(root_inode),
-                        };
-                        logs_dir.children.insert(foo_log_inode);
-                        nodes.insert(
-                            logs_inode,
-                            Node::Directory {
-                                name: "logs".to_string(),
-                                dir: logs_dir,
-                            },
-                        );
-
-                        let base_name = "foo.log".to_string();
-                        let mut names = Vec::new();
-                        names.push(base_name.clone()); // Ordinal 0
-                        for i in 1..=max_rotations {
-                            names.push(format!("foo.log.{i}")); // Ordinal i
-                        }
-                        let group_names = vec![names];
-
-                        let foo_log = File {
-                            parent: logs_inode,
-
-                            bytes_written: 0,
-                            bytes_read: 0,
-
-                            access_tick: now,
-                            modified_tick: now,
-                            status_tick: now,
-
-                            bytes_per_tick: 1024, // 1 KiB per tick
-                            read_only: false,
-                            peer: None,
-                            ordinal: 0,
-                            group_id: 0,
-                        };
-                        nodes.insert(foo_log_inode, Node::File { file: foo_log });
-
-                        let mut rng = StdRng::seed_from_u64(1024);
-                        let block_cache = block::Cache::fixed(
-                            &mut rng,
-                            NonZeroU32::new(1_000_000).expect("zero value"), // TODO make this an Error
-                            10_000,                                          // 10 KiB
-                            &lading_payload::Config::Ascii,
-                        )
-                        .expect("block construction"); // TODO make this an Error
-
-                        State {
-                            nodes,
-                            root_inode,
-                            now,
-                            block_cache,
-                            max_rotations,
-                            max_bytes_per_file,
-                            group_names,
-                            next_inode,
-                        }
-                    },
-                )
-                .boxed()
-        }
-    }
-
     proptest! {
         #[test]
-        fn test_state_operations(seed in any::<u64>(), mut state in any::<State>(), operations in vec(any::<Operation>(), 1..100)) {
+        fn test_state_operations(seed in any::<u64>(),
+                                 mut state in any::<State>(),
+                                 operations in vec(any::<Operation>(), 1..100)) {
+            let mut rng = StdRng::seed_from_u64(seed);
             // Assert that the state is well-formed before we begin
             assert_state_properties(&state);
 
-            let mut rng = StdRng::seed_from_u64(seed);
             let mut now = state.now;
             for op in operations {
                 match op {
