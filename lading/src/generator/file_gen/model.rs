@@ -590,7 +590,6 @@ impl State {
                 let mut current_inode = rotated_inode;
                 assert!(ordinal == 0);
                 let mut prev_inode = None;
-                let mut rotated_inode_removed = false;
 
                 loop {
                     let (remove_current, next_peer) = {
@@ -613,12 +612,10 @@ impl State {
                         // and there are no further peers to explore.
                         assert!(next_peer.is_none());
 
-                        if current_inode == rotated_inode {
-                            rotated_inode_removed = true;
+                        // Unlink the file and remove it from its parent
+                        if let Some(Node::File { file }) = self.nodes.get_mut(&current_inode) {
+                            file.unlink(now);
                         }
-
-                        self.remove_from_peers(current_inode);
-                        self.nodes.remove(&current_inode);
                         if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode)
                         {
                             dir.children.remove(&current_inode);
@@ -632,6 +629,7 @@ impl State {
                             }
                         }
 
+                        // Break the loop, as there are no further peers to process
                         break;
                     }
 
@@ -647,14 +645,6 @@ impl State {
                         break;
                     }
                     current_inode = next_peer.expect("next peer must not be none");
-                }
-
-                // Adjust the new file's peer if necessary
-                if rotated_inode_removed {
-                    if let Some(Node::File { file: new_file }) = self.nodes.get_mut(&new_file_inode)
-                    {
-                        new_file.peer = None;
-                    }
                 }
             }
         }
@@ -1068,7 +1058,14 @@ mod test {
         }
 
         for &inode in state.nodes.keys() {
-            assert!(visited.contains(&inode), "Inode {} is orphaned", inode);
+            // Skip unlinked files with open handles
+            if let Some(Node::File { file }) = state.nodes.get(&inode) {
+                if file.unlinked && file.open_handles > 0 {
+                    continue;
+                }
+            }
+
+            assert!(visited.contains(&inode), "Inode {inode} is orphaned");
         }
 
         // Property 6: Correct names corresponding to ordinals
@@ -1080,16 +1077,19 @@ mod test {
                         assert_eq!(
                             actual_name,
                             expected_name.as_str(),
-                            "Inode {} name mismatch: expected {}, got {}",
-                            inode,
-                            expected_name,
-                            actual_name
+                            "Inode {inode} name mismatch: expected {expected_name}, got {actual_name}",
                         );
                     } else {
-                        panic!("Ordinal {} is out of bounds in group_names", file.ordinal);
+                        panic!(
+                            "Ordinal {ordinal} is out of bounds in group_names",
+                            ordinal = file.ordinal
+                        );
                     }
                 } else {
-                    panic!("Group ID {} is not present in group_names", file.group_id);
+                    panic!(
+                        "Group ID {group_id} is not present in group_names",
+                        group_id = file.group_id
+                    );
                 }
             }
         }
@@ -1138,14 +1138,12 @@ mod test {
                             .keys()
                             .choose(&mut rng)
                             .expect("open_handles should not be empty");
-                        if state.nodes.contains_key(&inode) {
-                            state.close_file(
-                                now,
-                                open_handles.remove(&inode).expect("File handle must exist"),
-                            );
-                        } else {
-                            panic!("Attempted to close a file with an invalid or already removed inode: {inode}");
-                        }
+                        state.close_file(
+                            now,
+                            open_handles
+                                .remove(&inode)
+                                .expect("[close] file handle must exist"),
+                        );
                     }
                 }
                 Operation::Read { offset, size } => {
