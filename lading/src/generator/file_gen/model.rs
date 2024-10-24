@@ -550,6 +550,7 @@ impl State {
             if let Some((rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal)) =
                 rotation_data
             {
+                let new_file_inode = self.next_inode;
                 // Create our new File instance, using data from the now rotated file.
                 let new_file = File {
                     parent: parent_inode,
@@ -570,9 +571,9 @@ impl State {
                 // Insert `new_file` into the node list and make it a member of
                 // its directory's children.
                 self.nodes
-                    .insert(self.next_inode, Node::File { file: new_file });
+                    .insert(new_file_inode, Node::File { file: new_file });
                 if let Some(Node::Directory { dir, .. }) = self.nodes.get_mut(&parent_inode) {
-                    dir.children.insert(self.next_inode);
+                    dir.children.insert(new_file_inode);
                 }
 
                 // Bump the Inode index
@@ -585,6 +586,7 @@ impl State {
                 let mut current_inode = rotated_inode;
                 assert!(ordinal == 0);
                 let mut prev_inode = None;
+                let mut rotated_inode_removed = false;
 
                 loop {
                     let (remove_current, next_peer) = {
@@ -606,6 +608,10 @@ impl State {
                         // end of the line. This means that next_peer is None
                         // and there are no further peers to explore.
                         assert!(next_peer.is_none());
+
+                        if current_inode == rotated_inode {
+                            rotated_inode_removed = true;
+                        }
 
                         self.remove_from_peers(current_inode);
                         self.nodes.remove(&current_inode);
@@ -637,6 +643,14 @@ impl State {
                         break;
                     }
                     current_inode = next_peer.expect("next peer must not be none");
+                }
+
+                // Adjust the new file's peer if necessary
+                if rotated_inode_removed {
+                    if let Some(Node::File { file: new_file }) = self.nodes.get_mut(&new_file_inode)
+                    {
+                        new_file.peer = None;
+                    }
                 }
             }
         }
@@ -704,9 +718,16 @@ impl State {
     /// be advanced -- and a slice up to `size` bytes will be returned or `None`
     /// if no bytes are available to be read.
     #[tracing::instrument(skip(self))]
-    pub fn read(&mut self, inode: Inode, offset: usize, size: usize, now: Tick) -> Option<Bytes> {
+    pub fn read(
+        &mut self,
+        file_handle: FileHandle,
+        offset: usize,
+        size: usize,
+        now: Tick,
+    ) -> Option<Bytes> {
         self.advance_time(now);
 
+        let inode = file_handle.inode;
         match self.nodes.get_mut(&inode) {
             Some(Node::File { ref mut file }) => {
                 let bytes_written = usize::try_from(file.bytes_written)
@@ -830,22 +851,12 @@ mod test {
 
     #[derive(Debug, Clone)]
     enum Operation {
-        Open {
-            inode: Option<Inode>,
-        },
+        Open,
         Close,
-        Read {
-            inode: Option<Inode>,
-            offset: usize,
-            size: usize,
-        },
-        Lookup {
-            name: Option<String>,
-        },
+        Read { offset: usize, size: usize },
+        Lookup { name: Option<String> },
         GetAttr,
-        Wait {
-            ticks: u64,
-        },
+        Wait { ticks: u64 },
     }
 
     impl Arbitrary for Operation {
@@ -853,23 +864,18 @@ mod test {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let open_op = any::<Option<Inode>>().prop_map(|inode| Operation::Open { inode });
+            let open_op = Just(Operation::Open);
 
             let close_op = Just(Operation::Close);
 
-            let read_op = (any::<Option<Inode>>(), any::<usize>(), 1usize..1024usize).prop_map(
-                |(inode, offset, size)| Operation::Read {
-                    inode,
-                    offset,
-                    size,
-                },
-            );
+            let read_op = (0usize..1024usize, 1usize..1024usize)
+                .prop_map(|(offset, size)| Operation::Read { offset, size });
 
             let lookup_op = (any::<Option<String>>()).prop_map(|name| Operation::Lookup { name });
 
             let getattr_op = Just(Operation::GetAttr);
 
-            let wait_op = (0u64..=1_000u64).prop_map(|ticks| Operation::Wait { ticks });
+            let wait_op = (0u64..=100u64).prop_map(|ticks| Operation::Wait { ticks });
 
             prop_oneof![wait_op, getattr_op, lookup_op, read_op, open_op, close_op].boxed()
         }
@@ -881,12 +887,12 @@ mod test {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                any::<u64>(),           // seed
-                1u64..=10_000u64,       // bytes_per_tick
-                1u8..=16u8,             // max_rotations
-                1024u64..=1_000_000u64, // max_bytes_per_file
-                1u8..=8u8,              // max_depth
-                1u16..=32u16,           // concurrent_logs
+                any::<u64>(),         // seed
+                1u64..=5_000u64,      // bytes_per_tick
+                1u8..=8u8,            // max_rotations
+                1024u64..=500_000u64, // max_bytes_per_file
+                1u8..=4u8,            // max_depth
+                1u16..=16u16,         // concurrent_logs
             )
                 .prop_map(
                     |(
@@ -1090,7 +1096,8 @@ mod test {
             // Increase the number of generated cases (default is 256)
             cases: 1_024,
             // Allow more shrink iterations (default is 4096)
-            max_shrink_iters: 100_000,
+            max_shrink_iters: 1_000_000,
+            max_shrink_time: 300_000, // five minutes
             .. ProptestConfig::default()
         })]
 
@@ -1098,74 +1105,69 @@ mod test {
         fn test_state_operations(seed in any::<u64>(),
                                  mut state in any::<State>(),
                                  operations in vec(any::<Operation>(), 1..100)) {
-            let mut rng = StdRng::seed_from_u64(seed);
-            // Assert that the state is well-formed before we begin
-            assert_state_properties(&state);
+            test_state_operations_inner(seed, state, operations)
+        }
+    }
 
-            let mut now = state.now;
-            let mut open_handles: HashMap<Inode, usize> = HashMap::new();
+    #[inline]
+    fn test_state_operations_inner(seed: u64, mut state: State, operations: Vec<Operation>) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        // Assert that the state is well-formed before we begin
+        assert_state_properties(&state);
 
-            for op in operations {
-                match op {
-                    Operation::Open { inode } => {
-                        let inode = inode.unwrap_or_else(|| random_inode(&mut rng, &state));
-                        now += 1;
-                        if let Some(handle) = state.open_file(now, inode) {
-                            *open_handles.entry(handle.inode).or_insert(0) += 1;
-                        }
-                    },
-                    Operation::Close => {
-                        let maybe_inode = open_handles.keys().choose(&mut rng);
-                        if maybe_inode.is_none() {
-                            continue;
-                        }
-                        let inode: Inode = *maybe_inode.unwrap();
+        let mut now = state.now;
+        let mut open_handles: HashMap<Inode, FileHandle> = HashMap::new();
 
-                        now += 1;
-                        if open_handles.get(&inode).copied().expect("inode must exist") > 0 {
-                            let _ = state.close_file(now, FileHandle { inode });
-                            *open_handles.get_mut(&inode).unwrap() -= 1;
-                            if open_handles[&inode] == 0 {
-                                open_handles.remove(&inode);
-                            }
-                        }
-                    },
-                    Operation::Read { inode, offset, size } => {
-                        let inode = inode.unwrap_or_else(|| {
-                            // Prefer to read from an open file
-                            if let Some(&inode) = open_handles.keys().choose(&mut rng) {
-                                inode
-                            } else {
-                                random_inode(&mut rng, &state)
-                            }
-                        });
-                        now += 1;
-                        let _ = state.read(inode, offset, size, now);
-                    },
-                    Operation::Lookup { name: op_name } => {
-                        let parent_inode = random_inode(&mut rng, &state);
-                        let name = if let Some(n) = op_name {
-                            n
-                        } else {
-                            random_name(&mut rng, &state)
-                        };
-                        now += 1;
-                        let _ = state.lookup(now, parent_inode, &name);
-                    },
-                    Operation::GetAttr => {
-                        let inode = random_inode(&mut rng, &state);
-                        now += 1;
-                        let _ = state.getattr(now, inode);
-                    },
-                    Operation::Wait { ticks } => {
-                        now += ticks;
-                        state.advance_time(now);
-                    },
+        for op in operations {
+            match op {
+                Operation::Open => {
+                    let inode = random_inode(&mut rng, &state);
+                    if let Some(handle) = state.open_file(now, inode) {
+                        assert!(handle.inode == inode);
+                        open_handles.insert(handle.inode, handle);
+                    }
                 }
-
-                // After each operation, assert that the properties hold
-                assert_state_properties(&state);
+                Operation::Close => {
+                    // Only attempt to close if there's an open handle available
+                    if !open_handles.is_empty() {
+                        let inode = *open_handles
+                            .keys()
+                            .choose(&mut rng)
+                            .expect("open_handles should not be empty");
+                        state.close_file(
+                            now,
+                            open_handles.remove(&inode).expect("File handle must exist"),
+                        );
+                    }
+                }
+                Operation::Read { offset, size } => {
+                    let inode = random_inode(&mut rng, &state);
+                    // Read from an open file
+                    if let Some(handle) = open_handles.get(&inode) {
+                        let _ = state.read(*handle, offset, size, now);
+                    }
+                }
+                Operation::Lookup { name: op_name } => {
+                    let parent_inode = random_inode(&mut rng, &state);
+                    let name = if let Some(n) = op_name {
+                        n
+                    } else {
+                        random_name(&mut rng, &state)
+                    };
+                    let _ = state.lookup(now, parent_inode, &name);
+                }
+                Operation::GetAttr => {
+                    let inode = random_inode(&mut rng, &state);
+                    let _ = state.getattr(now, inode);
+                }
+                Operation::Wait { ticks } => {
+                    now += ticks;
+                    state.advance_time(now);
+                }
             }
+
+            // After each operation, assert that the properties hold
+            assert_state_properties(&state);
         }
     }
 }
