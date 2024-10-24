@@ -11,7 +11,10 @@ use byte_unit::{Byte, ByteUnit};
 use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::{
+    sync::mpsc::{error::SendError, Sender},
+    time::Instant,
+};
 use tracing::{error, info, span, warn, Level};
 
 /// Error for `Cache::spin`
@@ -373,6 +376,14 @@ where
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
+    info!(
+        ?max_block_size,
+        ?total_bytes,
+        "Constructing requested block cache"
+    );
+
+    let start = Instant::now();
+    let mut next_minute = 1;
 
     // Build out the blocks.
     //
@@ -407,6 +418,17 @@ where
                 error!("Unexpected error during block construction: {e}");
                 return Err(e);
             }
+        }
+
+        let elapsed_secs = start.elapsed().as_secs();
+        let elapsed_minutes = elapsed_secs / 60;
+        if elapsed_minutes >= next_minute {
+            info!(
+                "Progress: {} bytes remaining, elapsed time: {:?}",
+                bytes_remaining,
+                start.elapsed()
+            );
+            next_minute += 1;
         }
 
         if bytes_remaining < min_block_size {

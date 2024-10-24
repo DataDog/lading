@@ -140,6 +140,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(false)
         .finish()
         .init();
