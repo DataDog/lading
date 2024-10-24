@@ -85,27 +85,13 @@ impl File {
     }
 
     /// Close a handle to this file.
-    ///
-    /// Function returns the number of lost bytes if this was the last handle
-    /// and the file is unlinked, None otherwise.
-    ///
-    /// TODO these need to modify access time et al
-    pub fn close(&mut self, now: Tick) -> Option<u64> {
+    pub fn close(&mut self, now: Tick) {
         self.advance_time(now);
 
         if self.open_handles == 0 {
             panic!("Attempted to close a file with no open handles");
         }
         self.open_handles -= 1;
-
-        if self.open_handles == 0 && self.unlinked {
-            // File can be fully deleted now.
-            // Calculate lost bytes.
-            let lost_bytes = self.bytes_written.saturating_sub(self.bytes_read);
-            Some(lost_bytes)
-        } else {
-            None
-        }
     }
 
     /// Return the number of open file handles to this `File`
@@ -467,28 +453,11 @@ impl State {
     /// Close a file handle.
     ///
     /// This function advances time.
-    pub fn close_file(&mut self, now: Tick, handle: FileHandle) -> u64 {
+    pub fn close_file(&mut self, now: Tick, handle: FileHandle) {
         self.advance_time(now);
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&handle.inode) {
-            if let Some(lost_bytes) = file.close(now) {
-                // If Some then the file no longer has a name -- it's unlinked
-                // -- and there are no further file handles open for it. Remove
-                // the record of the node and accumulate lost bytes.
-                //
-                // Close will only return lost bytes if the file is unlinked and
-                // this was the last file handle. There should be no record of
-                // the file in its parent directory nor should its peer be
-                // anything but None.
-                // assert!(file.peer.is_none());
-                // if let Some(Node::Directory { dir, .. }) = self.nodes.get(&file.parent) {
-                //     assert!(!dir.children.contains(&handle.inode));
-                // }
-                self.lost_bytes += lost_bytes;
-                lost_bytes
-            } else {
-                0
-            }
+            file.close(now)
         } else {
             panic!("Invalid file handle");
         }
@@ -671,20 +640,30 @@ impl State {
                     }
                 }
             }
-
-            // Now, at this point we have some File instances in the node map
-            // that are orphaned. If the current file is unlinked and it has no
-            // open handles we delete it.
-
-            // TODO(fix) we must GC orphaned files
-            //
-            // Right now we only calculate lost_bytes if a file is opened, then
-            // closed. This is not correct. Files that have been created and
-            // then never opened before being rotated out matter too. This is a
-            // serious model error.
         }
 
+        self.gc();
+
         self.now = now;
+    }
+
+    // Garbage collect unlinked files with no open handles, calculating the bytes
+    // lost from these files.
+    fn gc(&mut self) {
+        let mut to_remove = Vec::new();
+        for (&inode, node) in &self.nodes {
+            if let Node::File { file } = node {
+                if file.unlinked && file.open_handles == 0 {
+                    to_remove.push(inode);
+                }
+            }
+        }
+        for inode in to_remove {
+            if let Some(Node::File { file }) = self.nodes.remove(&inode) {
+                let lost_bytes = file.bytes_written.saturating_sub(file.bytes_read);
+                self.lost_bytes += lost_bytes;
+            }
+        }
     }
 
     /// Look up the Inode for a given `name`.
@@ -860,7 +839,7 @@ impl State {
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{HashMap, HashSet, VecDeque},
+        collections::{HashMap, HashSet},
         num::NonZeroU32,
     };
 
@@ -1077,8 +1056,16 @@ mod test {
         // subject to rotation and does not appear in a peer chain. An unlinked
         // file is orphaned only when it has no open file handles. A directory
         // holds linked and unlinked files.
-
-        // TODO
+        for (&inode, node) in &state.nodes {
+            if let Node::File { file } = node {
+                if file.unlinked() && file.open_handles() == 0 {
+                    panic!(
+                        "Found orphaned file inode {} (unlinked with zero open handles)",
+                        inode
+                    );
+                }
+            }
+        }
 
         // Property 6: Correct names corresponding to ordinals in linked files
         //
@@ -1198,7 +1185,10 @@ mod test {
                 }
             }
 
-            // After each operation, assert that the properties hold
+            // After each operation, assert that the properties hold. Note that
+            // because GC is lazy -- happens only when time advances -- we force
+            // it to run.
+            state.gc();
             assert_state_properties(&state);
         }
     }
