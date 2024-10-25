@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use bytes::Bytes;
 use lading_payload::block;
 use rand::Rng;
+use tracing::info;
 
 /// Time representation of the model
 pub type Tick = u64;
@@ -675,6 +676,7 @@ impl State {
 
     // Garbage collect unlinked files with no open handles, calculating the bytes
     // lost from these files.
+    #[tracing::instrument(skip(self))]
     fn gc(&mut self) {
         let mut to_remove = Vec::new();
         for (&inode, node) in &self.nodes {
@@ -688,6 +690,7 @@ impl State {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
                 let lost_bytes = file.bytes_written.saturating_sub(file.bytes_read);
                 self.lost_bytes += lost_bytes;
+                info!("TOTAL BYTES LOST: {lost}", lost = self.lost_bytes);
             }
         }
     }
