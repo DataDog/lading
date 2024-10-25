@@ -95,6 +95,10 @@ impl File {
     /// TODO these need to modify access time et al
     pub fn open(&mut self, now: Tick) {
         self.advance_time(now);
+        if now > self.access_tick {
+            self.access_tick = now;
+            self.status_tick = now;
+        }
 
         self.open_handles += 1;
     }
@@ -109,7 +113,7 @@ impl File {
         self.advance_time(now);
 
         assert!(
-            self.open_handles == 0,
+            self.open_handles > 0,
             "Attempted to close a file with no open handles"
         );
         self.open_handles -= 1;
@@ -146,10 +150,12 @@ impl File {
     /// will be advanced, meaning `modified_tick` may update.
     pub fn read(&mut self, request: u64, now: Tick) {
         self.advance_time(now);
+        if now > self.access_tick {
+            self.access_tick = now;
+            self.status_tick = now;
+        }
 
         self.bytes_read = self.bytes_read.saturating_add(request);
-        self.access_tick = now;
-        self.status_tick = now;
     }
 
     /// Run the clock forward in the `File`.
