@@ -71,7 +71,22 @@ pub struct File {
 /// Represents an open file handle.
 #[derive(Debug, Clone, Copy)]
 pub struct FileHandle {
+    id: u64,
     inode: Inode,
+}
+
+impl FileHandle {
+    /// Return the ID of this file handle
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Return the inode of this file handle
+    #[must_use]
+    pub fn inode(&self) -> Inode {
+        self.inode
+    }
 }
 
 impl File {
@@ -233,6 +248,7 @@ pub struct State {
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
+    next_file_handle: u64,
     lost_bytes: u64,
 }
 
@@ -316,6 +332,7 @@ impl State {
             max_rotations,
             group_names: Vec::new(),
             next_inode: 2,
+            next_file_handle: 0,
             lost_bytes: 0,
         };
 
@@ -444,7 +461,9 @@ impl State {
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&inode) {
             file.open(now);
-            Some(FileHandle { inode })
+            let id = self.next_file_handle;
+            self.next_file_handle = self.next_file_handle.wrapping_add(1);
+            Some(FileHandle { inode, id })
         } else {
             None
         }
@@ -1112,7 +1131,7 @@ mod test {
 
         #[test]
         fn test_state_operations(seed in any::<u64>(),
-                                 mut state in any::<State>(),
+                                 state in any::<State>(),
                                  operations in vec(any::<Operation>(), 1..100)) {
             test_state_operations_inner(seed, state, operations)
         }

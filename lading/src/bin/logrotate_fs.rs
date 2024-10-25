@@ -12,6 +12,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 use nix::libc::{self, ENOENT};
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     num::NonZeroU32,
     path::PathBuf,
@@ -83,6 +84,8 @@ const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 #[derive(Debug)]
 struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
+    open_files: Arc<Mutex<HashMap<u64, model::FileHandle>>>,
+
     start_time: std::time::Instant,
     start_time_system: std::time::SystemTime,
 }
@@ -189,7 +192,7 @@ impl Filesystem for LogrotateFS {
         &mut self,
         _req: &Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
         size: u32,
         _flags: i32,
@@ -199,21 +202,54 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
 
-        // NOTE this call to State::read is almost surely allocating. It'd be
-        // pretty slick if we could get the buffer directly from the OS to pass
-        // down for writing but we can't. I suppose we could send up the raw
-        // blocks and then chain them together as needed but absent a compelling
-        // reason to do that the simplicity of this API is nice.
+        // Get the FileHandle from fh
+        let file_handle = {
+            let open_files = self.open_files.lock().expect("lock poisoned");
+            open_files.get(&fh).cloned()
+        };
 
-        unimplemented!();
+        if let Some(file_handle) = file_handle {
+            assert!(
+                file_handle.inode() as u64 == ino,
+                "file handle inode and passed ino do not match"
+            );
+            if let Some(data) = state.read(file_handle, offset as usize, size as usize, tick) {
+                reply.data(&data);
+            } else {
+                reply.error(ENOENT);
+            }
+        } else {
+            reply.error(ENOENT);
+        }
+    }
 
-        // TODO ah I've changed state.read to take a FileHandle but is this a mistake?
+    #[tracing::instrument(skip(self, _req, reply))]
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        _flush: bool,
+        reply: fuser::ReplyEmpty,
+    ) {
+        let tick = self.get_current_tick();
+        let mut state = self.state.lock().expect("lock poisoned");
 
-        // if let Some(data) = state.read(ino as usize, offset as usize, size as usize, tick) {
-        //     reply.data(&data);
-        // } else {
-        //     reply.error(ENOENT);
-        // }
+        // Remove the FileHandle from the mapping
+        let file_handle = {
+            let mut open_files = self.open_files.lock().expect("lock poisoned");
+            open_files.remove(&fh)
+        };
+
+        if let Some(file_handle) = file_handle {
+            // Close the file in the state
+            state.close_file(tick, file_handle);
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
     }
 
     #[tracing::instrument(skip(self, _req, reply))]
@@ -281,7 +317,19 @@ impl Filesystem for LogrotateFS {
 
     #[tracing::instrument(skip(self, _req, reply))]
     fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
-        reply.opened(ino, flags as u32);
+        let tick = self.get_current_tick();
+        let mut state = self.state.lock().expect("lock poisoned");
+
+        if let Some(file_handle) = state.open_file(tick, ino as usize) {
+            let fh = file_handle.id();
+            {
+                let mut open_files = self.open_files.lock().expect("lock poisoned");
+                open_files.insert(fh, file_handle);
+            }
+            reply.opened(fh, flags as u32);
+        } else {
+            reply.error(ENOENT);
+        }
     }
 }
 
@@ -326,6 +374,7 @@ fn main() -> Result<(), Error> {
     // Initialize the FUSE filesystem
     let fs = LogrotateFS {
         state: Arc::new(Mutex::new(state)),
+        open_files: Arc::new(Mutex::new(HashMap::new())),
         start_time: std::time::Instant::now(),
         start_time_system: std::time::SystemTime::now(),
     };
