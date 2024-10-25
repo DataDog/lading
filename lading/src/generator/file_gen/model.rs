@@ -100,21 +100,29 @@ impl File {
     }
 
     /// Close a handle to this file.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if attempt is made to close file with no file
+    /// handles outstanding.
     pub fn close(&mut self, now: Tick) {
         self.advance_time(now);
 
-        if self.open_handles == 0 {
-            panic!("Attempted to close a file with no open handles");
-        }
+        assert!(
+            self.open_handles == 0,
+            "Attempted to close a file with no open handles"
+        );
         self.open_handles -= 1;
     }
 
     /// Return the number of open file handles to this `File`
+    #[must_use]
     pub fn open_handles(&self) -> usize {
         self.open_handles
     }
 
     /// Return whether the file is unlinked or not
+    #[must_use]
     pub fn unlinked(&self) -> bool {
         self.unlinked
     }
@@ -463,7 +471,7 @@ impl State {
             file.open(now);
             let id = self.next_file_handle;
             self.next_file_handle = self.next_file_handle.wrapping_add(1);
-            Some(FileHandle { inode, id })
+            Some(FileHandle { id, inode })
         } else {
             None
         }
@@ -472,11 +480,15 @@ impl State {
     /// Close a file handle.
     ///
     /// This function advances time.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if `FileHandle` is not valid.
     pub fn close_file(&mut self, now: Tick, handle: FileHandle) {
         self.advance_time(now);
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&handle.inode) {
-            file.close(now)
+            file.close(now);
         } else {
             panic!("Invalid file handle");
         }
@@ -489,16 +501,6 @@ impl State {
     /// Will panic if passed `now` is less than recorded `now`. Time can only
     /// advance.
     pub fn advance_time(&mut self, now: Tick) {
-        // Okay so here's the idea.
-        //
-        // 1. I introduce a read-only File via boolean flag
-        // 2. A File has a "peer" Option<Inode> that allows for lookup of the next in line
-        // 3. The names are held here. We traverse the linked list of peers and
-        // then delete anything past max_rotations.
-        //
-        // The State holds all notion of when a File should rotate and also be
-        // deleted. The File has no say in that at all.
-
         assert!(now >= self.now);
         let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
 
@@ -611,8 +613,7 @@ impl State {
                                 file.incr_ordinal();
 
                                 let remove_current = file.ordinal() > self.max_rotations;
-                                let next_peer = file.peer;
-                                (remove_current, next_peer)
+                                (remove_current, file.peer)
                             }
                             Node::Directory { .. } => panic!("Expected a File node"),
                         }
