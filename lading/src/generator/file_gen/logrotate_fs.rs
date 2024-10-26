@@ -1,16 +1,25 @@
-use byte_unit::Byte;
-use clap::Parser;
+//! A filesystem that mimics logs with rotation
+
+#![allow(clippy::cast_sign_loss)] // TODO remove these clippy allows
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(missing_docs)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::needless_pass_by_value)]
+
 use fuser::{
-    FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
+    spawn_mount2, BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData,
+    ReplyDirectory, ReplyEntry, Request,
 };
-use lading::generator::file_gen::model;
 use lading_payload::block;
 use rand::{rngs::SmallRng, SeedableRng};
+use tokio::task;
 use tracing::{error, info};
-use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 // use lading_payload::block;
+use crate::generator;
 use nix::libc::{self, ENOENT};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -20,66 +29,134 @@ use std::{
     time::Duration,
 };
 
-// fn default_config_path() -> String {
-//     "/etc/lading/logrotate_fs.yaml".to_string()
-// }
+mod model;
 
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-struct Args {
-    // /// path on disk to the configuration file
-    // #[clap(long, default_value_t = default_config_path())]
-    // config_path: String,
-    #[clap(long)]
-    bytes_per_second: Byte,
-    #[clap(long)]
-    mount_point: PathBuf,
-}
+const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
-struct Config {
-    // // /// The seed for random operations against this target
-    // // pub seed: [u8; 32],
-    // /// Total number of concurrent logs.
-    // concurrent_logs: u16,
-    // /// The **soft** maximum byte size of each log.
-    // maximum_bytes_per_log: Byte,
-    // /// The number of rotations per log file.
-    // total_rotations: u8,
-    // /// The maximum directory depth allowed below the root path. If 0 all log
-    // /// files will be present in the root path.
-    // max_depth: u8,
-    // /// Sets the [`crate::payload::Config`] of this template.
-    // variant: lading_payload::Config,
+pub struct Config {
+    /// The seed for random operations against this target
+    pub seed: [u8; 32],
+    /// Total number of concurrent logs.
+    concurrent_logs: u16,
+    /// The maximum byte size of each log.
+    maximum_bytes_per_log: byte_unit::Byte,
+    /// The number of rotations per log file.
+    total_rotations: u8,
+    /// The maximum directory depth allowed below the root path. If 0 all log
+    /// files will be present in the root path.
+    max_depth: u8,
+    /// Sets the [`crate::payload::Config`] of this template.
+    variant: lading_payload::Config,
     /// Defines the number of bytes that written in each log file.
-    bytes_per_second: Byte,
-    // /// Defines the maximum internal cache of this log target. `file_gen` will
-    // /// pre-build its outputs up to the byte capacity specified here.
-    // maximum_prebuild_cache_size_bytes: Byte,
-    // /// The maximum size in bytes of the largest block in the prebuild cache.
-    // #[serde(default = "lading_payload::block::default_maximum_block_size")]
-    // maximum_block_size: byte_unit::Byte,
-    // /// Whether to use a fixed or streaming block cache
-    // #[serde(default = "lading_payload::block::default_cache_method")]
-    // block_cache_method: block::CacheMethod,
-    // /// The load throttle configuration
-    // #[serde(default)]
-    // throttle: lading_throttle::Config,
+    bytes_per_second: byte_unit::Byte,
+    /// Defines the maximum internal cache of this log target. `file_gen` will
+    /// pre-build its outputs up to the byte capacity specified here.
+    maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The maximum size in bytes of the largest block in the prebuild cache.
+    #[serde(default = "lading_payload::block::default_maximum_block_size")]
+    maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
 }
 
 #[derive(thiserror::Error, Debug)]
+/// Error for `LogrotateFs`
 pub enum Error {
     #[error(transparent)]
+    /// IO error
     Io(#[from] std::io::Error),
-    #[error("Failed to deserialize configuration: {0}")]
-    SerdeYaml(#[from] serde_yaml::Error),
+    /// Creation of payload blocks failed.
+    #[error("Block creation error: {0}")]
+    Block(#[from] block::Error),
+    /// Failed to convert, value is 0
+    #[error("Value provided must not be zero")]
+    Zero,
 }
 
-const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
+#[derive(Debug)]
+/// The logrotate filesystem server.
+///
+/// This generator manages a FUSE filesystem which "writes" files to a mounted
+/// filesystem, rotating them as appropriate. It does this without coordination
+/// to the target _but_ keeps track of how many bytes are written and read
+/// during operation.
+pub struct Server {
+    //    handles: Vec<JoinHandle<Result<(), Error>>>,
+    shutdown: lading_signal::Watcher,
+    background_session: BackgroundSession,
+}
+
+impl Server {
+    pub fn new(
+        _: generator::General,
+        config: Config,
+        shutdown: lading_signal::Watcher,
+    ) -> Result<Self, Error> {
+        // TODO spawn a filesystem thread here and not in spin but bubble up any
+        // errors and make it so that spin waits for the FS thread and also for
+        // the shutdown signal. We have a synchronous try_recv on the Watcher
+        // but the way that fuser runs it just blocks the thread and there's no
+        // place to poll.
+        let mut rng = SmallRng::from_seed(config.seed);
+
+        let total_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+                .ok_or(Error::Zero)?;
+        let block_cache = block::Cache::fixed(
+            &mut rng,
+            total_bytes,
+            config.maximum_block_size.get_bytes(),
+            &config.variant,
+        )?;
+
+        let state = model::State::new(
+            &mut rng,
+            config.bytes_per_second.get_bytes() as u64,
+            config.total_rotations,
+            config.maximum_bytes_per_log.get_bytes() as u64,
+            block_cache,
+            config.max_depth,
+            config.concurrent_logs,
+        );
+
+        // Initialize the FUSE filesystem
+        let fs = LogrotateFS {
+            state: Arc::new(Mutex::new(state)),
+            open_files: Arc::new(Mutex::new(HashMap::new())),
+            start_time: std::time::Instant::now(),
+            start_time_system: std::time::SystemTime::now(),
+        };
+
+        let options = vec![
+            MountOption::FSName("lading_logrotate_fs".to_string()),
+            MountOption::AutoUnmount,
+            MountOption::AllowOther,
+        ];
+
+        // Mount the filesystem in the background
+        let background_session = spawn_mount2(fs, config.mount_point, &options)
+            .expect("Failed to mount FUSE filesystem");
+
+        Ok(Self {
+            shutdown,
+            background_session,
+        })
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_possible_truncation)]
+    pub async fn spin(self) -> Result<(), Error> {
+        self.shutdown.recv().await;
+
+        let handle = task::spawn_blocking(|| self.background_session.join());
+        let _ = handle.await;
+
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 struct LogrotateFS {
@@ -146,17 +223,13 @@ fn getattr_helper(
 }
 
 impl Filesystem for LogrotateFS {
-    #[tracing::instrument(skip(self, _req, _config))]
-    fn init(
-        &mut self,
-        _req: &Request,
-        _config: &mut fuser::KernelConfig,
-    ) -> Result<(), libc::c_int> {
+    #[tracing::instrument(skip(self))]
+    fn init(&mut self, _: &Request, _: &mut fuser::KernelConfig) -> Result<(), libc::c_int> {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, _req, reply))]
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    #[tracing::instrument(skip(self, reply))]
+    fn lookup(&mut self, _: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
 
@@ -166,17 +239,16 @@ impl Filesystem for LogrotateFS {
                 info!("lookup: returning attr for inode {}: {:?}", ino, attr);
                 reply.entry(&TTL, &attr, 0);
                 return;
-            } else {
-                error!("lookup: getattr_helper returned None for inode {}", ino);
             }
+            error!("lookup: getattr_helper returned None for inode {}", ino);
         } else {
             error!("lookup: state.lookup returned None for name {}", name_str);
         }
         reply.error(ENOENT);
     }
 
-    #[tracing::instrument(skip(self, _req, reply))]
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    #[tracing::instrument(skip(self, reply))]
+    fn getattr(&mut self, _: &Request, ino: u64, reply: ReplyAttr) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
 
@@ -187,16 +259,16 @@ impl Filesystem for LogrotateFS {
         }
     }
 
-    #[tracing::instrument(skip(self, _req, reply))]
+    #[tracing::instrument(skip(self, reply))]
     fn read(
         &mut self,
-        _req: &Request,
+        _: &Request,
         ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
-        _flags: i32,
-        _lock_owner: Option<u64>,
+        _: i32,
+        _: Option<u64>,
         reply: ReplyData,
     ) {
         let tick = self.get_current_tick();
@@ -205,7 +277,7 @@ impl Filesystem for LogrotateFS {
         // Get the FileHandle from fh
         let file_handle = {
             let open_files = self.open_files.lock().expect("lock poisoned");
-            open_files.get(&fh).cloned()
+            open_files.get(&fh).copied()
         };
 
         if let Some(file_handle) = file_handle {
@@ -223,15 +295,15 @@ impl Filesystem for LogrotateFS {
         }
     }
 
-    #[tracing::instrument(skip(self, _req, reply))]
+    #[tracing::instrument(skip(self, reply))]
     fn release(
         &mut self,
-        _req: &Request,
-        _ino: u64,
+        _: &Request,
+        _: u64,
         fh: u64,
-        _flags: i32,
-        _lock_owner: Option<u64>,
-        _flush: bool,
+        _: i32,
+        _: Option<u64>,
+        _: bool,
         reply: fuser::ReplyEmpty,
     ) {
         let tick = self.get_current_tick();
@@ -252,15 +324,8 @@ impl Filesystem for LogrotateFS {
         }
     }
 
-    #[tracing::instrument(skip(self, _req, reply))]
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+    #[tracing::instrument(skip(self, reply))]
+    fn readdir(&mut self, _: &Request, ino: u64, _: u64, offset: i64, mut reply: ReplyDirectory) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
@@ -331,65 +396,4 @@ impl Filesystem for LogrotateFS {
             reply.error(ENOENT);
         }
     }
-}
-
-#[tracing::instrument]
-fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        .with_ansi(false)
-        .finish()
-        .init();
-
-    info!("Hello, welcome. I hope things are well with you.");
-
-    let args = Args::parse();
-    // let config_contents = std::fs::read_to_string(&args.config_path)?;
-    // let config: Config = serde_yaml::from_str(&config_contents)?;
-
-    let primes: [u8; 32] = [
-        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
-        97, 101, 103, 107, 109, 113, 127, 131,
-    ];
-    let mut rng = SmallRng::from_seed(primes);
-
-    let block_cache = block::Cache::fixed(
-        &mut rng,
-        NonZeroU32::new(100_000_000).expect("zero value"), // TODO make this an Error
-        10_000,                                            // 10 KiB
-        &lading_payload::Config::Ascii,
-    )
-    .expect("block construction"); // TODO make this an Error
-
-    let state = model::State::new(
-        &mut rng,
-        args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
-        5,                                        // TODO make an argument
-        1_000_000,                                // 1MiB
-        block_cache,
-        10, // max_depth
-        8,  // concurrent_logs
-    );
-
-    // Initialize the FUSE filesystem
-    let fs = LogrotateFS {
-        state: Arc::new(Mutex::new(state)),
-        open_files: Arc::new(Mutex::new(HashMap::new())),
-        start_time: std::time::Instant::now(),
-        start_time_system: std::time::SystemTime::now(),
-    };
-
-    // Mount the filesystem
-    fuser::mount2(
-        fs,
-        &args.mount_point,
-        &[
-            MountOption::FSName("logrotate_fs".to_string()),
-            MountOption::AutoUnmount,
-            MountOption::AllowOther,
-        ],
-    )
-    .expect("Failed to mount FUSE filesystem");
-
-    Ok(())
 }
