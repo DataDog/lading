@@ -239,12 +239,16 @@ impl Filesystem for LogrotateFS {
 
         // reaming children
         if let Some(child_inodes) = self.state.readdir(ino as usize) {
-            for (child_name, child_ino) in child_inodes {
+            for child_ino in child_inodes {
                 let file_type = self
                     .state
                     .get_file_type(*child_ino)
                     .expect("inode must have file type");
-                entries.push((*child_ino as u64, file_type, child_name.clone()));
+                let child_name = self
+                    .state
+                    .get_name(*child_ino)
+                    .expect("inode must have a name");
+                entries.push((*child_ino as u64, file_type, child_name.to_string()));
             }
         } else {
             reply.error(ENOENT);

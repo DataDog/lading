@@ -2,7 +2,7 @@
 
 //use lading_payload::block;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use lading_payload::block;
@@ -52,6 +52,10 @@ pub struct File {
     /// The ordinal number of this File. If the file is foo.log the ordinal
     /// number is 0, if foo.log.1 then 1 etc.
     ordinal: u8,
+
+    /// The group ID of this File. So for instance all File instances that are
+    /// called foo.log, foo.log.1 etc have the same group ID.
+    group_id: u8,
 }
 
 impl File {
@@ -131,7 +135,7 @@ impl File {
 /// instances or `File` instances. Root directory will not have a `parent`.
 #[derive(Debug)]
 pub struct Directory {
-    children: HashMap<String, Inode>,
+    children: HashSet<Inode>,
     parent: Option<Inode>,
 }
 
@@ -140,8 +144,6 @@ pub struct Directory {
 pub enum Node {
     /// A [`File`]
     File {
-        /// The name of this file. If the full path is /logs/foo.log then this is "foo.log".
-        name: String,
         /// The `File` instance.
         file: File,
     },
@@ -176,6 +178,8 @@ pub struct State {
     now: Tick,
     block_cache: block::Cache,
     max_bytes_per_file: u64,
+    // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
+    group_names: Vec<Vec<String>>,
 }
 
 /// The attributes of a `Node`.
@@ -220,10 +224,10 @@ impl State {
         let mut nodes = HashMap::new();
 
         let mut root_dir = Directory {
-            children: HashMap::new(),
+            children: HashSet::new(),
             parent: None,
         };
-        root_dir.children.insert("logs".to_string(), logs_inode);
+        root_dir.children.insert(logs_inode);
         nodes.insert(
             root_inode,
             Node::Directory {
@@ -233,12 +237,10 @@ impl State {
         );
 
         let mut logs_dir = Directory {
-            children: HashMap::new(),
+            children: HashSet::new(),
             parent: Some(root_inode),
         };
-        logs_dir
-            .children
-            .insert("foo.log".to_string(), foo_log_inode);
+        logs_dir.children.insert(foo_log_inode);
         nodes.insert(
             logs_inode,
             Node::Directory {
@@ -246,6 +248,17 @@ impl State {
                 dir: logs_dir,
             },
         );
+
+        let mut group_names = Vec::new();
+
+        // Create names for the rotation group
+        let base_name = "foo.log".to_string();
+        let mut names = Vec::new();
+        names.push(base_name.clone()); // Ordinal 0
+        for i in 1..=max_rotations {
+            names.push(format!("foo.log.{i}")); // Ordinal i
+        }
+        group_names.push(names);
 
         let foo_log = File {
             parent: logs_inode,
@@ -261,14 +274,9 @@ impl State {
 
             read_only: false,
             ordinal: 0,
+            group_id: 0,
         };
-        nodes.insert(
-            foo_log_inode,
-            Node::File {
-                name: "foo.log".to_string(),
-                file: foo_log,
-            },
-        );
+        nodes.insert(foo_log_inode, Node::File { file: foo_log });
 
         // NOTE this structure is going to be a problem when I include rotating
         // files. Specifically the inodes will need to change so there might
@@ -281,6 +289,7 @@ impl State {
             now: 0,
             block_cache,
             max_bytes_per_file,
+            group_names,
         }
     }
 
@@ -344,10 +353,21 @@ impl State {
         self.advance_time(now);
 
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&parent_inode) {
-            dir.children.get(name).copied()
-        } else {
-            None
+            for &child_inode in &dir.children {
+                if let Some(node) = self.nodes.get(&child_inode) {
+                    let child_name = match node {
+                        Node::File { file } => {
+                            &self.group_names[file.group_id as usize][file.ordinal as usize]
+                        }
+                        Node::Directory { name, .. } => name,
+                    };
+                    if child_name == name {
+                        return Some(child_inode);
+                    }
+                }
+            }
         }
+        None
     }
 
     /// Look up the attributes for an `Inode`.
@@ -388,10 +408,7 @@ impl State {
         self.advance_time(now);
 
         match self.nodes.get_mut(&inode) {
-            Some(Node::File {
-                name: _,
-                ref mut file,
-            }) => {
+            Some(Node::File { ref mut file }) => {
                 let bytes_written = usize::try_from(file.bytes_written)
                     .expect("more bytes written than machine word");
 
@@ -421,7 +438,7 @@ impl State {
     ///
     /// Function does not advance time in the model.
     #[tracing::instrument(skip(self))]
-    pub fn readdir(&self, inode: Inode) -> Option<&HashMap<String, Inode>> {
+    pub fn readdir(&self, inode: Inode) -> Option<&HashSet<Inode>> {
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
             Some(&dir.children)
         } else {
@@ -436,6 +453,24 @@ impl State {
             Node::Directory { .. } => fuser::FileType::Directory,
             Node::File { .. } => fuser::FileType::RegularFile,
         })
+    }
+
+    /// Return the name of the inode if it exists
+    #[tracing::instrument(skip(self))]
+    pub fn get_name(&self, inode: Inode) -> Option<&str> {
+        if inode == self.root_inode {
+            Some("/")
+        } else {
+            self.nodes
+                .get(&inode)
+                .map(|node| match node {
+                    Node::Directory { name, .. } => name,
+                    Node::File { file } => {
+                        &self.group_names[file.group_id as usize][file.ordinal as usize]
+                    }
+                })
+                .map(String::as_str)
+        }
     }
 
     /// Return the parent inode of an inode, if it exists
@@ -464,7 +499,7 @@ impl State {
             let subdirectory_count = dir
                 .children
                 .iter()
-                .filter(|(_, child_inode)| {
+                .filter(|child_inode| {
                     matches!(self.nodes.get(child_inode), Some(Node::Directory { .. }))
                 })
                 .count();
