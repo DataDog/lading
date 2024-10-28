@@ -2,7 +2,7 @@
 FROM docker.io/rust:1.81.0-bullseye AS builder
 
 RUN apt-get update && apt-get install -y \
-    protobuf-compiler \
+    protobuf-compiler fuse3 libfuse3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
