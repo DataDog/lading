@@ -239,8 +239,31 @@ impl State {
     /// Will panic if passed `now` is less than recorded `now`. Time can only
     /// advance.
     pub fn advance_time(&mut self, now: Tick) {
+        // Okay so here's the idea.
+        //
+        // 1. I introduce a read-only File via boolean flag
+        // 2. A File has a "peer" Option<Inode> that allows for lookup of the next in line
+        // 3. The names are held here. We traverse the linked list of peers and
+        // then delete anything past max_rotations.
+        //
+        // The State holds all notion of when a File should rotate and also be
+        // deleted. The File has no say in that at all.
+
         // nothing yet beyond updating the clock, rotations to come
         assert!(now >= self.now);
+
+        for node in self.nodes.values_mut() {
+            match node {
+                Node::File { file, .. } => {
+                    file.advance_time(now);
+                    // TODO add rotation logic here
+                }
+                Node::Directory { .. } => {
+                    // directories are immutable though time flows around them
+                }
+            }
+        }
+
         self.now = now;
     }
 
@@ -267,26 +290,23 @@ impl State {
     pub fn getattr(&mut self, now: Tick, inode: Inode) -> Option<NodeAttributes> {
         self.advance_time(now);
 
-        self.nodes.get_mut(&inode).map(|node| {
-            node.advance_time(now);
-            match node {
-                Node::File { file, .. } => NodeAttributes {
-                    inode,
-                    kind: NodeType::File,
-                    size: file.bytes_written,
-                    access_tick: file.access_tick,
-                    modified_tick: file.modified_tick,
-                    status_tick: file.status_tick,
-                },
-                Node::Directory { .. } => NodeAttributes {
-                    inode,
-                    kind: NodeType::Directory,
-                    size: 0,
-                    access_tick: self.now,
-                    modified_tick: self.now,
-                    status_tick: self.now,
-                },
-            }
+        self.nodes.get(&inode).map(|node| match node {
+            Node::File { file, .. } => NodeAttributes {
+                inode,
+                kind: NodeType::File,
+                size: file.bytes_written,
+                access_tick: file.access_tick,
+                modified_tick: file.modified_tick,
+                status_tick: file.status_tick,
+            },
+            Node::Directory { .. } => NodeAttributes {
+                inode,
+                kind: NodeType::Directory,
+                size: 0,
+                access_tick: self.now,
+                modified_tick: self.now,
+                status_tick: self.now,
+            },
         })
     }
 
