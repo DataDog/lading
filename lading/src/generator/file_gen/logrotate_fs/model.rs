@@ -67,6 +67,9 @@ pub(crate) struct File {
     /// Indicates that the `File` no longer has a name but is not removed from
     /// the filesystem.
     unlinked: bool,
+
+    /// The maximual offset observed, maintained by `State`.
+    max_offset_observed: u64,
 }
 
 /// Represents an open file handle.
@@ -434,6 +437,7 @@ impl State {
                 group_id,
                 open_handles: 0,
                 unlinked: false,
+                max_offset_observed: 0,
             };
             state.nodes.insert(file_inode, Node::File { file });
 
@@ -558,6 +562,7 @@ impl State {
                     group_id,
                     open_handles: 0,
                     unlinked: false,
+                    max_offset_observed: 0,
                 };
                 new_file.advance_time(now);
 
@@ -667,7 +672,7 @@ impl State {
         }
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
-                let lost_bytes = file.bytes_written.saturating_sub(file.bytes_read);
+                let lost_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
                 counter!("lost_bytes").increment(lost_bytes);
             }
         }
@@ -755,6 +760,9 @@ impl State {
 
                 let available = bytes_written.saturating_sub(offset);
                 let to_read = available.min(size);
+
+                let end_offset = offset as u64 + to_read as u64;
+                file.max_offset_observed = file.max_offset_observed.max(end_offset);
 
                 // Get data from block_cache without worrying about blocks
                 let data = self.block_cache.read_at(offset as u64, to_read);
@@ -972,14 +980,17 @@ mod test {
     }
 
     fn assert_state_properties(state: &State) {
-        // Property 1: bytes_written >= bytes_read
+        // Property 1: bytes_written >= max_offset_observed
+        //
+        // While a caller can read the same bytes multiple times they cannot
+        // read past the maximum bytes available.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
                 assert!(
-                    file.bytes_written >= file.bytes_read,
-                    "bytes_written ({}) < bytes_read ({})",
+                    file.bytes_written >= file.max_offset_observed,
+                    "bytes_written ({}) < max_offset_observed ({})",
                     file.bytes_written,
-                    file.bytes_read
+                    file.max_offset_observed,
                 );
             }
         }
