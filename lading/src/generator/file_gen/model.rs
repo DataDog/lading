@@ -47,30 +47,6 @@ pub struct File {
 }
 
 impl File {
-    /// Returns the number of bytes available to be read at instance `now`.
-    ///
-    /// This function returns the number of bytes that have been "written" to
-    /// the `File` and are available to be read. For instance, `modified_tick`
-    /// may be in the past but sufficient bytes have accumulated in the file for
-    /// non-zero reads to remain possible. Bytes will not be noted as consumed
-    /// until the caller calls [`File::read`].
-    ///
-    /// Call to this file will advance `bytes_written` if `now` >
-    /// `modified_tick`.
-    ///
-    /// Returns 0 if `bytes_written` == `bytes_read`.
-    ///
-    /// # Panics
-    ///
-    /// Function will panic if `bytes_written` < `bytes_read`. This indicates a
-    /// catastrophic programming error.
-    pub fn available_to_read(&mut self, now: Tick) -> u64 {
-        self.advance_time(now);
-
-        assert!(self.bytes_written >= self.bytes_read);
-        self.bytes_written.saturating_sub(self.bytes_read)
-    }
-
     /// Register a read.
     ///
     /// This function is pair to [`File::available_to_read`]. It's possible that
@@ -87,16 +63,6 @@ impl File {
         self.bytes_read = self.bytes_read.saturating_add(request);
         self.access_tick = now;
         self.status_tick = now;
-    }
-
-    /// Register a read-only open.
-    ///
-    /// This function updates `access_time` to `now`. Time is advanced which may
-    /// result in more bytes being available in-file.
-    pub fn ro_open(&mut self, now: Tick) {
-        self.advance_time(now);
-
-        self.access_tick = now;
     }
 
     /// Run the clock forward in the `File`.
@@ -347,19 +313,23 @@ impl State {
                 name: _,
                 ref mut file,
             }) => {
-                let available = file.available_to_read(now);
-                if available == 0 {
-                    return None;
+                let bytes_written = usize::try_from(file.bytes_written)
+                    .expect("more bytes written than machine word");
+
+                if offset >= bytes_written {
+                    // Offset beyond EOF
+                    return Some(Bytes::new());
                 }
 
-                let block_len = self.block_cache.peek_next().total_bytes.get() as usize;
-                if block_len <= size {
-                    let block = self.block_cache.next_block();
-                    file.read(block_len as u64, now);
-                    Some(block.bytes.clone())
-                } else {
-                    None
-                }
+                let available = bytes_written.saturating_sub(offset);
+                let to_read = available.min(size);
+
+                // Get data from block_cache without worrying about blocks
+                let data = self.block_cache.read_at(offset as u64, to_read);
+
+                file.read(to_read as u64, now);
+
+                Some(data)
             }
             Some(Node::Directory { .. }) | None => None,
         }
