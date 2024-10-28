@@ -30,6 +30,8 @@ pub(crate) struct File {
     /// Property: `bytes_written` >= `bytes_read`.
     bytes_read: u64,
 
+    /// The `Tick` on which the `File` was created.
+    created_tick: Tick,
     /// The `Tick` on which the `File` was last accessed. Updated on reads,
     /// opens for reading.
     access_tick: Tick,
@@ -48,6 +50,9 @@ pub(crate) struct File {
     /// Whether the file is read-only -- that is, no more "writes" will ever
     /// happen -- or not.
     read_only: bool,
+
+    /// When the file became read-only. Will only be Some if read_only is false.
+    read_only_since: Option<Tick>,
 
     /// The peer of this file, the next in line in rotation. So, if this file is
     /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
@@ -176,8 +181,9 @@ impl File {
     ///
     /// This function flips the internal bool on this `File` stopping any future
     /// byte accumulations.
-    pub(crate) fn set_read_only(&mut self) {
+    pub(crate) fn set_read_only(&mut self, now: Tick) {
         self.read_only = true;
+        self.read_only_since = Some(now);
     }
 
     /// Return whether the file is read-only or not
@@ -203,6 +209,15 @@ impl File {
     #[must_use]
     pub(crate) fn size(&self) -> u64 {
         self.bytes_written
+    }
+
+    /// Calculate the expected bytes written based on writable duration.
+    #[cfg(test)]
+    pub(crate) fn expected_bytes_written(&self, now: Tick) -> u64 {
+        let start_tick = self.created_tick;
+        let end_tick = self.read_only_since.unwrap_or(now);
+        let writable_duration = end_tick.saturating_sub(start_tick);
+        self.bytes_per_tick.saturating_mul(writable_duration)
     }
 }
 
@@ -279,6 +294,8 @@ pub(crate) struct NodeAttributes {
     pub(crate) modified_tick: Tick,
     /// The last status change time in ticks.
     pub(crate) status_tick: Tick,
+    /// The tick on which the file was created.
+    pub(crate) created_tick: Tick,
 }
 
 /// Describe whether the Node is a File or Directory.
@@ -430,6 +447,7 @@ impl State {
                 access_tick: state.now,
                 modified_tick: state.now,
                 status_tick: state.now,
+                created_tick: state.now,
                 bytes_per_tick,
                 read_only: false,
                 ordinal: 0,
@@ -438,6 +456,7 @@ impl State {
                 open_handles: 0,
                 unlinked: false,
                 max_offset_observed: 0,
+                read_only_since: None,
             };
             state.nodes.insert(file_inode, Node::File { file });
 
@@ -514,7 +533,7 @@ impl State {
                                     "Expected rotated file to be 0th ordinal, was {ordinal}",
                                     ordinal = file.ordinal()
                                 );
-                                file.set_read_only();
+                                file.set_read_only(now);
                                 Some((
                                     inode,
                                     file.parent,
@@ -555,6 +574,7 @@ impl State {
                     access_tick: self.now,
                     modified_tick: self.now,
                     status_tick: self.now,
+                    created_tick: self.now,
                     bytes_per_tick,
                     read_only: false,
                     ordinal: 0,
@@ -563,6 +583,7 @@ impl State {
                     open_handles: 0,
                     unlinked: false,
                     max_offset_observed: 0,
+                    read_only_since: None,
                 };
                 new_file.advance_time(now);
 
@@ -720,6 +741,7 @@ impl State {
                 access_tick: file.access_tick,
                 modified_tick: file.modified_tick,
                 status_tick: file.status_tick,
+                created_tick: file.created_tick,
             },
             Node::Directory { .. } => NodeAttributes {
                 inode,
@@ -728,6 +750,7 @@ impl State {
                 access_tick: self.now,
                 modified_tick: self.now,
                 status_tick: self.now,
+                created_tick: self.now,
             },
         })
     }
@@ -1110,6 +1133,21 @@ mod test {
                         group_id = file.group_id
                     );
                 }
+            }
+        }
+
+        // Property 7: bytes_written are tick accurate
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                let expected_bytes = file.expected_bytes_written(state.now);
+                assert_eq!(
+                    file.bytes_written,
+                    expected_bytes,
+                    "bytes_written ({}) does not match expected_bytes_written ({}) for file with inode {}",
+                    file.bytes_written,
+                    expected_bytes,
+                    file.parent
+                );
             }
         }
     }

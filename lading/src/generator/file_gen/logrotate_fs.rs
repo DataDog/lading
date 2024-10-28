@@ -188,12 +188,13 @@ fn getattr_helper(
         let access_duration = Duration::from_secs(attr.access_tick);
         let modified_duration = Duration::from_secs(attr.modified_tick);
         let status_duration = Duration::from_secs(attr.status_tick);
+        let created_duration = Duration::from_secs(attr.created_tick);
 
         // Calculate SystemTime instances
         let atime = start_time_system + access_duration;
         let mtime = start_time_system + modified_duration;
         let ctime = start_time_system + status_duration;
-        let crtime = start_time_system; // Assume creation time is when the filesystem started
+        let crtime = start_time_system + created_duration;
 
         FileAttr {
             ino: attr.inode as u64,
