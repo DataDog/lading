@@ -146,6 +146,16 @@ pub enum Node {
     },
 }
 
+impl Node {
+    /// Run the clock forward on this node
+    pub fn advance_time(&mut self, now: Tick) {
+        match self {
+            Node::Directory { .. } => { /* nothing, intentionally */ }
+            Node::File { file, .. } => file.advance_time(now),
+        }
+    }
+}
+
 /// The state of the filesystem
 ///
 /// This structure is responsible for maintenance of the structure of the
@@ -299,23 +309,26 @@ impl State {
     pub fn getattr(&mut self, now: Tick, inode: Inode) -> Option<NodeAttributes> {
         self.advance_time(now);
 
-        self.nodes.get(&inode).map(|node| match node {
-            Node::File { file, .. } => NodeAttributes {
-                inode,
-                kind: NodeType::File,
-                size: file.bytes_written,
-                access_tick: file.access_tick,
-                modified_tick: file.modified_tick,
-                status_tick: file.status_tick,
-            },
-            Node::Directory { .. } => NodeAttributes {
-                inode,
-                kind: NodeType::Directory,
-                size: 0,
-                access_tick: self.now,
-                modified_tick: self.now,
-                status_tick: self.now,
-            },
+        self.nodes.get_mut(&inode).map(|node| {
+            node.advance_time(now);
+            match node {
+                Node::File { file, .. } => NodeAttributes {
+                    inode,
+                    kind: NodeType::File,
+                    size: file.bytes_written,
+                    access_tick: file.access_tick,
+                    modified_tick: file.modified_tick,
+                    status_tick: file.status_tick,
+                },
+                Node::Directory { .. } => NodeAttributes {
+                    inode,
+                    kind: NodeType::Directory,
+                    size: 0,
+                    access_tick: self.now,
+                    modified_tick: self.now,
+                    status_tick: self.now,
+                },
+            }
         })
     }
 
