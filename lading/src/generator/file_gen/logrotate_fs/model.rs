@@ -144,6 +144,7 @@ impl File {
             self.status_tick = now;
         }
 
+        counter!("bytes_read").increment(request);
         self.bytes_read = self.bytes_read.saturating_add(request);
     }
 
@@ -162,6 +163,7 @@ impl File {
         let diff = now.saturating_sub(self.modified_tick);
         let bytes_accum = diff.saturating_mul(self.bytes_per_tick);
 
+        counter!("bytes_written").increment(bytes_accum);
         self.bytes_written = self.bytes_written.saturating_add(bytes_accum);
         self.modified_tick = now;
         self.status_tick = now;
