@@ -51,7 +51,7 @@ pub(crate) struct File {
     /// happen -- or not.
     read_only: bool,
 
-    /// When the file became read-only. Will only be Some if read_only is false.
+    /// When the file became read-only. Will only be Some if `read_only` is false.
     read_only_since: Option<Tick>,
 
     /// The peer of this file, the next in line in rotation. So, if this file is
@@ -508,6 +508,7 @@ impl State {
     ///
     /// Will panic if passed `now` is less than recorded `now`. Time can only
     /// advance.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn advance_time(&mut self, now: Tick) {
         assert!(now >= self.now);
         let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
