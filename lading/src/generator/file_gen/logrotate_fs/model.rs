@@ -544,13 +544,13 @@ impl State {
                 // become the 0th ordinal in the `group_id` and may -- although
                 // we don't know yet -- cause `rotated_inode` to be deleted.
                 let new_file_inode = self.next_inode;
-                let new_file = File {
+                let mut new_file = File {
                     parent: parent_inode,
                     bytes_written: 0,
                     bytes_read: 0,
-                    access_tick: now,
-                    modified_tick: now,
-                    status_tick: now,
+                    access_tick: self.now,
+                    modified_tick: self.now,
+                    status_tick: self.now,
                     bytes_per_tick,
                     read_only: false,
                     ordinal: 0,
@@ -559,6 +559,7 @@ impl State {
                     open_handles: 0,
                     unlinked: false,
                 };
+                new_file.advance_time(now);
 
                 // Insert `new_file` into the node list and make it a member of
                 // its directory's children.
@@ -757,6 +758,7 @@ impl State {
 
                 // Get data from block_cache without worrying about blocks
                 let data = self.block_cache.read_at(offset as u64, to_read);
+                assert!(data.len() == to_read, "Data returned from block_cache is distinct from the read size: {l} != {to_read}", l = data.len());
 
                 file.read(to_read as u64, now);
 
