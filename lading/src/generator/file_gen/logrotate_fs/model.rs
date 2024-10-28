@@ -847,9 +847,7 @@ mod test {
         num::NonZeroU32,
     };
 
-    use crate::generator::file_gen::model::FileHandle;
-
-    use super::{Inode, Node, State};
+    use super::{FileHandle, Inode, Node, State};
     use lading_payload::block;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -1015,10 +1013,7 @@ mod test {
                         }
 
                         if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
-                            assert!(
-                                !peer_file.unlinked(),
-                                "File was found in peer chain unlinked"
-                            );
+                            assert!(!peer_file.unlinked, "File was found in peer chain unlinked");
                             expected_ordinal += 1;
                             assert_eq!(
                                 peer_file.ordinal,
@@ -1040,7 +1035,7 @@ mod test {
         // No ordinal should exeed max_rotations, so long as the file is linked.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
-                if file.unlinked() {
+                if file.unlinked {
                     continue;
                 }
                 assert!(
@@ -1062,7 +1057,7 @@ mod test {
         // holds linked and unlinked files.
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
-                if file.unlinked() && file.open_handles() == 0 {
+                if file.unlinked && file.open_handles == 0 {
                     panic!(
                         "Found orphaned file inode {} (unlinked with zero open handles)",
                         inode
@@ -1077,7 +1072,7 @@ mod test {
         // the correct name.
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
-                if file.unlinked() {
+                if file.unlinked {
                     continue;
                 }
                 if let Some(names) = state.group_names.get(file.group_id as usize) {
