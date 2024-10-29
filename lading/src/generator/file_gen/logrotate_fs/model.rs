@@ -379,9 +379,14 @@ impl State {
             return state;
         }
 
-        // Generate random group names
-        let num_groups = rng.gen_range(1..=concurrent_logs);
-        for group_id in 0..num_groups {
+        // Strategy:
+        //
+        // For 0 to `concurrent_logs` generate a directory path up to
+        // `max_depth` from the root node and place a file in that
+        // directory. Node that we must keep track of the group we're in, so we
+        // loop over `concurrent_logs`.
+        for group_id in 0..concurrent_logs {
+            // First, generate the group name.
             let base: String = (0..8)
                 .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
                 .collect();
@@ -392,15 +397,8 @@ impl State {
                 names.push(format!("{base_name}.{i}")); // Ordinal i
             }
             state.group_names.push(names);
-        }
 
-        // Strategy:
-        //
-        // For 0 to num_groups generate a directory path up to `max_depth` from
-        // the root node and place a file in that directory. Node that we must
-        // keep track of the group we're in, so we loop over num_groups.
-
-        for group_id in 0..num_groups {
+            // Now, build up the directory tree and put the file in it.
             let mut current_inode = state.root_inode;
             let depth = if max_depth == 0 {
                 0
