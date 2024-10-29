@@ -22,7 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::task::{self, JoinError};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 mod model;
 
@@ -123,6 +123,10 @@ impl Server {
             config.concurrent_logs,
         );
 
+        info!(
+            "Creating logrotate filesystem with mount point {mount}",
+            mount = config.mount_point.display(),
+        );
         // Initialize the FUSE filesystem
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
@@ -243,7 +247,7 @@ impl Filesystem for LogrotateFS {
         let name_str = name.to_str().unwrap_or("");
         if let Some(ino) = state.lookup(tick, parent as usize, name_str) {
             if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino) {
-                info!("lookup: returning attr for inode {}: {:?}", ino, attr);
+                debug!("lookup: returning attr for inode {}: {:?}", ino, attr);
                 reply.entry(&TTL, &attr, 0);
                 return;
             }
