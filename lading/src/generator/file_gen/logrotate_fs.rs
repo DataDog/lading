@@ -113,8 +113,11 @@ impl Server {
             &config.variant,
         )?;
 
+        let start_time = std::time::Instant::now();
+        let start_time_system = std::time::SystemTime::now();
         let state = model::State::new(
             &mut rng,
+            start_time.elapsed().as_secs(),
             config.bytes_per_second.get_bytes() as u64,
             config.total_rotations,
             config.maximum_bytes_per_log.get_bytes() as u64,
@@ -131,8 +134,8 @@ impl Server {
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
             open_files: Arc::new(Mutex::new(HashMap::new())),
-            start_time: std::time::Instant::now(),
-            start_time_system: std::time::SystemTime::now(),
+            start_time,
+            start_time_system,
         };
 
         let options = vec![
