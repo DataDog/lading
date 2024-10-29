@@ -4,18 +4,18 @@ use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use lading_payload::block;
+use metrics::counter;
 use rand::Rng;
-use tracing::info;
 
 /// Time representation of the model
-pub type Tick = u64;
+pub(crate) type Tick = u64;
 /// The identification node number
-pub type Inode = usize;
+pub(crate) type Inode = usize;
 
 /// Model representation of a `File`. Does not actually contain any bytes but
 /// stores sufficient metadata to determine access patterns over time.
 #[derive(Debug, Clone, Copy)]
-pub struct File {
+pub(crate) struct File {
     /// The parent `Node` of this `File`.
     parent: Inode,
 
@@ -30,6 +30,8 @@ pub struct File {
     /// Property: `bytes_written` >= `bytes_read`.
     bytes_read: u64,
 
+    /// The `Tick` on which the `File` was created.
+    created_tick: Tick,
     /// The `Tick` on which the `File` was last accessed. Updated on reads,
     /// opens for reading.
     access_tick: Tick,
@@ -49,6 +51,9 @@ pub struct File {
     /// happen -- or not.
     read_only: bool,
 
+    /// When the file became read-only. Will only be Some if `read_only` is false.
+    read_only_since: Option<Tick>,
+
     /// The peer of this file, the next in line in rotation. So, if this file is
     /// foo.log the peer will be foo.log.1 and its peer foo.log.2 etc.
     peer: Option<Inode>,
@@ -67,11 +72,14 @@ pub struct File {
     /// Indicates that the `File` no longer has a name but is not removed from
     /// the filesystem.
     unlinked: bool,
+
+    /// The maximual offset observed, maintained by `State`.
+    max_offset_observed: u64,
 }
 
 /// Represents an open file handle.
 #[derive(Debug, Clone, Copy)]
-pub struct FileHandle {
+pub(crate) struct FileHandle {
     id: u64,
     inode: Inode,
 }
@@ -79,13 +87,13 @@ pub struct FileHandle {
 impl FileHandle {
     /// Return the ID of this file handle
     #[must_use]
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
     /// Return the inode of this file handle
     #[must_use]
-    pub fn inode(&self) -> Inode {
+    pub(crate) fn inode(&self) -> Inode {
         self.inode
     }
 }
@@ -94,7 +102,7 @@ impl File {
     /// Open a new handle to this file.
     ///
     /// TODO these need to modify access time et al
-    pub fn open(&mut self, now: Tick) {
+    pub(crate) fn open(&mut self, now: Tick) {
         self.advance_time(now);
         if now > self.access_tick {
             self.access_tick = now;
@@ -110,7 +118,7 @@ impl File {
     ///
     /// Function will panic if attempt is made to close file with no file
     /// handles outstanding.
-    pub fn close(&mut self, now: Tick) {
+    pub(crate) fn close(&mut self, now: Tick) {
         self.advance_time(now);
 
         assert!(
@@ -120,20 +128,8 @@ impl File {
         self.open_handles -= 1;
     }
 
-    /// Return the number of open file handles to this `File`
-    #[must_use]
-    pub fn open_handles(&self) -> usize {
-        self.open_handles
-    }
-
-    /// Return whether the file is unlinked or not
-    #[must_use]
-    pub fn unlinked(&self) -> bool {
-        self.unlinked
-    }
-
     /// Mark the file as unlinked (deleted).
-    pub fn unlink(&mut self, now: Tick) {
+    pub(crate) fn unlink(&mut self, now: Tick) {
         self.advance_time(now);
 
         self.unlinked = true;
@@ -149,13 +145,14 @@ impl File {
     ///
     /// Updates `access_tick` to `now` and adds `request` to `bytes_read`. Time
     /// will be advanced, meaning `modified_tick` may update.
-    pub fn read(&mut self, request: u64, now: Tick) {
+    pub(crate) fn read(&mut self, request: u64, now: Tick) {
         self.advance_time(now);
         if now > self.access_tick {
             self.access_tick = now;
             self.status_tick = now;
         }
 
+        counter!("bytes_read").increment(request);
         self.bytes_read = self.bytes_read.saturating_add(request);
     }
 
@@ -174,6 +171,7 @@ impl File {
         let diff = now.saturating_sub(self.modified_tick);
         let bytes_accum = diff.saturating_mul(self.bytes_per_tick);
 
+        counter!("bytes_written").increment(bytes_accum);
         self.bytes_written = self.bytes_written.saturating_add(bytes_accum);
         self.modified_tick = now;
         self.status_tick = now;
@@ -183,24 +181,25 @@ impl File {
     ///
     /// This function flips the internal bool on this `File` stopping any future
     /// byte accumulations.
-    pub fn set_read_only(&mut self) {
+    pub(crate) fn set_read_only(&mut self, now: Tick) {
         self.read_only = true;
+        self.read_only_since = Some(now);
     }
 
     /// Return whether the file is read-only or not
     #[must_use]
-    pub fn read_only(&self) -> bool {
+    pub(crate) fn read_only(&self) -> bool {
         self.read_only
     }
 
     /// Return the ordinal number of this File
     #[must_use]
-    pub fn ordinal(&self) -> u8 {
+    pub(crate) fn ordinal(&self) -> u8 {
         self.ordinal
     }
 
     /// Increment the ordinal number of this File
-    pub fn incr_ordinal(&mut self) {
+    pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
     }
 
@@ -208,22 +207,31 @@ impl File {
     ///
     /// This function does not advance time.
     #[must_use]
-    pub fn size(&self) -> u64 {
+    pub(crate) fn size(&self) -> u64 {
         self.bytes_written
+    }
+
+    /// Calculate the expected bytes written based on writable duration.
+    #[cfg(test)]
+    pub(crate) fn expected_bytes_written(&self, now: Tick) -> u64 {
+        let start_tick = self.created_tick;
+        let end_tick = self.read_only_since.unwrap_or(now);
+        let writable_duration = end_tick.saturating_sub(start_tick);
+        self.bytes_per_tick.saturating_mul(writable_duration)
     }
 }
 
 /// Model representation of a `Directory`. Contains children are `Directory`
 /// instances or `File` instances. Root directory will not have a `parent`.
 #[derive(Debug)]
-pub struct Directory {
+pub(crate) struct Directory {
     children: HashSet<Inode>,
     parent: Option<Inode>,
 }
 
 /// A filesystem object, either a `File` or a `Directory`.
 #[derive(Debug)]
-pub enum Node {
+pub(crate) enum Node {
     /// A [`File`]
     File {
         /// The `File` instance.
@@ -238,22 +246,12 @@ pub enum Node {
     },
 }
 
-impl Node {
-    /// Run the clock forward on this node
-    pub fn advance_time(&mut self, now: Tick) {
-        match self {
-            Node::Directory { .. } => { /* nothing, intentionally */ }
-            Node::File { file, .. } => file.advance_time(now),
-        }
-    }
-}
-
 /// The state of the filesystem
 ///
 /// This structure is responsible for maintenance of the structure of the
 /// filesystem. It does not contain any bytes, the caller must maintain this
 /// themselves.
-pub struct State {
+pub(crate) struct State {
     nodes: HashMap<Inode, Node>,
     root_inode: Inode,
     now: Tick,
@@ -264,7 +262,6 @@ pub struct State {
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
     next_file_handle: u64,
-    lost_bytes: u64,
 }
 
 impl std::fmt::Debug for State {
@@ -284,24 +281,26 @@ impl std::fmt::Debug for State {
 
 /// The attributes of a `Node`.
 #[derive(Debug, Clone, Copy)]
-pub struct NodeAttributes {
+pub(crate) struct NodeAttributes {
     /// The id of the node.
-    pub inode: Inode,
+    pub(crate) inode: Inode,
     /// The kind, whether a file or directory.
-    pub kind: NodeType,
+    pub(crate) kind: NodeType,
     /// The size in bytes.
-    pub size: u64,
+    pub(crate) size: u64,
     /// The last access time in ticks.
-    pub access_tick: Tick,
+    pub(crate) access_tick: Tick,
     /// The last modified time in ticks.
-    pub modified_tick: Tick,
+    pub(crate) modified_tick: Tick,
     /// The last status change time in ticks.
-    pub status_tick: Tick,
+    pub(crate) status_tick: Tick,
+    /// The tick on which the file was created.
+    pub(crate) created_tick: Tick,
 }
 
 /// Describe whether the Node is a File or Directory.
 #[derive(Debug, Clone, Copy)]
-pub enum NodeType {
+pub(crate) enum NodeType {
     /// A [`File`]
     File,
     /// A [`Directory`]
@@ -311,7 +310,7 @@ pub enum NodeType {
 impl State {
     /// Create a new instance of `State`.
     #[tracing::instrument(skip(rng, block_cache))]
-    pub fn new<R>(
+    pub(crate) fn new<R>(
         rng: &mut R,
         bytes_per_tick: u64,
         max_rotations: u8,
@@ -348,7 +347,6 @@ impl State {
             group_names: Vec::new(),
             next_inode: 2,
             next_file_handle: 0,
-            lost_bytes: 0,
         };
 
         if concurrent_logs == 0 {
@@ -449,6 +447,7 @@ impl State {
                 access_tick: state.now,
                 modified_tick: state.now,
                 status_tick: state.now,
+                created_tick: state.now,
                 bytes_per_tick,
                 read_only: false,
                 ordinal: 0,
@@ -456,6 +455,8 @@ impl State {
                 group_id,
                 open_handles: 0,
                 unlinked: false,
+                max_offset_observed: 0,
+                read_only_since: None,
             };
             state.nodes.insert(file_inode, Node::File { file });
 
@@ -471,7 +472,7 @@ impl State {
     /// Open a file and return a handle.
     ///
     /// This function advances time.
-    pub fn open_file(&mut self, now: Tick, inode: Inode) -> Option<FileHandle> {
+    pub(crate) fn open_file(&mut self, now: Tick, inode: Inode) -> Option<FileHandle> {
         self.advance_time(now);
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&inode) {
@@ -491,7 +492,7 @@ impl State {
     /// # Panics
     ///
     /// Function will panic if `FileHandle` is not valid.
-    pub fn close_file(&mut self, now: Tick, handle: FileHandle) {
+    pub(crate) fn close_file(&mut self, now: Tick, handle: FileHandle) {
         self.advance_time(now);
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&handle.inode) {
@@ -507,7 +508,8 @@ impl State {
     ///
     /// Will panic if passed `now` is less than recorded `now`. Time can only
     /// advance.
-    pub fn advance_time(&mut self, now: Tick) {
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn advance_time(&mut self, now: Tick) {
         assert!(now >= self.now);
         let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
 
@@ -532,7 +534,7 @@ impl State {
                                     "Expected rotated file to be 0th ordinal, was {ordinal}",
                                     ordinal = file.ordinal()
                                 );
-                                file.set_read_only();
+                                file.set_read_only(now);
                                 Some((
                                     inode,
                                     file.parent,
@@ -566,13 +568,14 @@ impl State {
                 // become the 0th ordinal in the `group_id` and may -- although
                 // we don't know yet -- cause `rotated_inode` to be deleted.
                 let new_file_inode = self.next_inode;
-                let new_file = File {
+                let mut new_file = File {
                     parent: parent_inode,
                     bytes_written: 0,
                     bytes_read: 0,
-                    access_tick: now,
-                    modified_tick: now,
-                    status_tick: now,
+                    access_tick: self.now,
+                    modified_tick: self.now,
+                    status_tick: self.now,
+                    created_tick: self.now,
                     bytes_per_tick,
                     read_only: false,
                     ordinal: 0,
@@ -580,7 +583,10 @@ impl State {
                     group_id,
                     open_handles: 0,
                     unlinked: false,
+                    max_offset_observed: 0,
+                    read_only_since: None,
                 };
+                new_file.advance_time(now);
 
                 // Insert `new_file` into the node list and make it a member of
                 // its directory's children.
@@ -688,9 +694,8 @@ impl State {
         }
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
-                let lost_bytes = file.bytes_written.saturating_sub(file.bytes_read);
-                self.lost_bytes += lost_bytes;
-                info!("TOTAL BYTES LOST: {lost}", lost = self.lost_bytes);
+                let lost_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
+                counter!("lost_bytes").increment(lost_bytes);
             }
         }
     }
@@ -701,7 +706,7 @@ impl State {
     /// returning any inode that happens to match. Time will be advanced to
     /// `now`.
     #[tracing::instrument(skip(self))]
-    pub fn lookup(&mut self, now: Tick, parent_inode: Inode, name: &str) -> Option<Inode> {
+    pub(crate) fn lookup(&mut self, now: Tick, parent_inode: Inode, name: &str) -> Option<Inode> {
         self.advance_time(now);
 
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&parent_inode) {
@@ -726,7 +731,7 @@ impl State {
     ///
     /// Time will be advanced to `now`.
     #[tracing::instrument(skip(self))]
-    pub fn getattr(&mut self, now: Tick, inode: Inode) -> Option<NodeAttributes> {
+    pub(crate) fn getattr(&mut self, now: Tick, inode: Inode) -> Option<NodeAttributes> {
         self.advance_time(now);
 
         self.nodes.get(&inode).map(|node| match node {
@@ -737,6 +742,7 @@ impl State {
                 access_tick: file.access_tick,
                 modified_tick: file.modified_tick,
                 status_tick: file.status_tick,
+                created_tick: file.created_tick,
             },
             Node::Directory { .. } => NodeAttributes {
                 inode,
@@ -745,6 +751,7 @@ impl State {
                 access_tick: self.now,
                 modified_tick: self.now,
                 status_tick: self.now,
+                created_tick: self.now,
             },
         })
     }
@@ -755,7 +762,7 @@ impl State {
     /// be advanced -- and a slice up to `size` bytes will be returned or `None`
     /// if no bytes are available to be read.
     #[tracing::instrument(skip(self))]
-    pub fn read(
+    pub(crate) fn read(
         &mut self,
         file_handle: FileHandle,
         offset: usize,
@@ -778,8 +785,12 @@ impl State {
                 let available = bytes_written.saturating_sub(offset);
                 let to_read = available.min(size);
 
+                let end_offset = offset as u64 + to_read as u64;
+                file.max_offset_observed = file.max_offset_observed.max(end_offset);
+
                 // Get data from block_cache without worrying about blocks
                 let data = self.block_cache.read_at(offset as u64, to_read);
+                assert!(data.len() == to_read, "Data returned from block_cache is distinct from the read size: {l} != {to_read}", l = data.len());
 
                 file.read(to_read as u64, now);
 
@@ -796,7 +807,7 @@ impl State {
     ///
     /// Function does not advance time in the model.
     #[tracing::instrument(skip(self))]
-    pub fn readdir(&self, inode: Inode) -> Option<&HashSet<Inode>> {
+    pub(crate) fn readdir(&self, inode: Inode) -> Option<&HashSet<Inode>> {
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
             Some(&dir.children)
         } else {
@@ -806,7 +817,7 @@ impl State {
 
     /// Get the fuser file type of an inode if it exists
     #[tracing::instrument(skip(self))]
-    pub fn get_file_type(&self, inode: Inode) -> Option<fuser::FileType> {
+    pub(crate) fn get_file_type(&self, inode: Inode) -> Option<fuser::FileType> {
         self.nodes.get(&inode).map(|node| match node {
             Node::Directory { .. } => fuser::FileType::Directory,
             Node::File { .. } => fuser::FileType::RegularFile,
@@ -815,7 +826,7 @@ impl State {
 
     /// Return the name of the inode if it exists
     #[tracing::instrument(skip(self))]
-    pub fn get_name(&self, inode: Inode) -> Option<&str> {
+    pub(crate) fn get_name(&self, inode: Inode) -> Option<&str> {
         self.nodes
             .get(&inode)
             .map(|node| match node {
@@ -829,7 +840,7 @@ impl State {
 
     /// Return the parent inode of an inode, if it exists
     #[tracing::instrument(skip(self))]
-    pub fn get_parent_inode(&self, inode: Inode) -> Option<Inode> {
+    pub(crate) fn get_parent_inode(&self, inode: Inode) -> Option<Inode> {
         if inode == self.root_inode {
             Some(self.root_inode)
         } else {
@@ -842,13 +853,13 @@ impl State {
 
     /// Return the root inode of this state
     #[must_use]
-    pub fn root_inode(&self) -> Inode {
+    pub(crate) fn root_inode(&self) -> Inode {
         self.root_inode
     }
 
     /// Return the number of links for the inode.
     #[must_use]
-    pub fn nlink(&self, inode: Inode) -> usize {
+    pub(crate) fn nlink(&self, inode: Inode) -> usize {
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
             let subdirectory_count = dir
                 .children
@@ -872,9 +883,7 @@ mod test {
         num::NonZeroU32,
     };
 
-    use crate::generator::file_gen::model::FileHandle;
-
-    use super::{Inode, Node, State};
+    use super::{FileHandle, Inode, Node, State};
     use lading_payload::block;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -995,14 +1004,17 @@ mod test {
     }
 
     fn assert_state_properties(state: &State) {
-        // Property 1: bytes_written >= bytes_read
+        // Property 1: bytes_written >= max_offset_observed
+        //
+        // While a caller can read the same bytes multiple times they cannot
+        // read past the maximum bytes available.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
                 assert!(
-                    file.bytes_written >= file.bytes_read,
-                    "bytes_written ({}) < bytes_read ({})",
+                    file.bytes_written >= file.max_offset_observed,
+                    "bytes_written ({}) < max_offset_observed ({})",
                     file.bytes_written,
-                    file.bytes_read
+                    file.max_offset_observed,
                 );
             }
         }
@@ -1040,10 +1052,7 @@ mod test {
                         }
 
                         if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
-                            assert!(
-                                !peer_file.unlinked(),
-                                "File was found in peer chain unlinked"
-                            );
+                            assert!(!peer_file.unlinked, "File was found in peer chain unlinked");
                             expected_ordinal += 1;
                             assert_eq!(
                                 peer_file.ordinal,
@@ -1065,7 +1074,7 @@ mod test {
         // No ordinal should exeed max_rotations, so long as the file is linked.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
-                if file.unlinked() {
+                if file.unlinked {
                     continue;
                 }
                 assert!(
@@ -1087,7 +1096,7 @@ mod test {
         // holds linked and unlinked files.
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
-                if file.unlinked() && file.open_handles() == 0 {
+                if file.unlinked && file.open_handles == 0 {
                     panic!(
                         "Found orphaned file inode {} (unlinked with zero open handles)",
                         inode
@@ -1102,7 +1111,7 @@ mod test {
         // the correct name.
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
-                if file.unlinked() {
+                if file.unlinked {
                     continue;
                 }
                 if let Some(names) = state.group_names.get(file.group_id as usize) {
@@ -1125,6 +1134,21 @@ mod test {
                         group_id = file.group_id
                     );
                 }
+            }
+        }
+
+        // Property 7: bytes_written are tick accurate
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                let expected_bytes = file.expected_bytes_written(state.now);
+                assert_eq!(
+                    file.bytes_written,
+                    expected_bytes,
+                    "bytes_written ({}) does not match expected_bytes_written ({}) for file with inode {}",
+                    file.bytes_written,
+                    expected_bytes,
+                    file.parent
+                );
             }
         }
     }
