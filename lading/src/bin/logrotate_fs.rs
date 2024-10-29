@@ -119,10 +119,6 @@ fn getattr_helper(
             ino: attr.inode as u64,
             size: attr.size,
             blocks: (attr.size + 511) / 512,
-            // TODO these times should reflect those in the model, will need to
-            // be translated from the tick to systemtime. Implies we'll need to
-            // adjust up from start_time, knowing that a tick is one second
-            // wide.
             atime,
             mtime,
             ctime,
@@ -233,6 +229,9 @@ impl Filesystem for LogrotateFS {
         // TODO building up a vec of entries here to handle offset really does
         // suggest that the model needs to be exposed in such a way that this
         // needn't be done.
+        //
+        // Ah, actually, the right buffer to push into is reply.add. There's no
+        // need for `entries` at all.
         let mut entries = Vec::new();
 
         // '.' and '..'
@@ -248,7 +247,7 @@ impl Filesystem for LogrotateFS {
             ));
         }
 
-        // reaming children
+        // remaining children
         if let Some(child_inodes) = state.readdir(ino as usize) {
             for child_ino in child_inodes {
                 let file_type = state
@@ -310,10 +309,13 @@ fn main() -> Result<(), Error> {
     .expect("block construction"); // TODO make this an Error
 
     let state = model::State::new(
+        &mut rng,
         args.bytes_per_second.get_bytes() as u64, // Adjust units accordingly
         5,                                        // TODO make an argument
         1_000_000,                                // 1MiB
         block_cache,
+        10, // max_depth
+        8,  // concurrent_logs
     );
 
     // Initialize the FUSE filesystem
