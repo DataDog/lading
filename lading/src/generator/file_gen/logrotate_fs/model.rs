@@ -99,9 +99,35 @@ impl FileHandle {
 }
 
 impl File {
+    /// Create a new instance of `File`
+    pub(crate) fn new(
+        parent: Inode,
+        bytes_per_tick: u64,
+        group_id: u16,
+        now: Tick,
+        peer: Option<Inode>,
+    ) -> Self {
+        Self {
+            parent,
+            bytes_written: 0,
+            bytes_read: 0,
+            access_tick: now,
+            modified_tick: now,
+            status_tick: now,
+            created_tick: now,
+            bytes_per_tick,
+            read_only: false,
+            read_only_since: None,
+            ordinal: 0,
+            peer,
+            group_id,
+            open_handles: 0,
+            unlinked: false,
+            max_offset_observed: 0,
+        }
+    }
+
     /// Open a new handle to this file.
-    ///
-    /// TODO these need to modify access time et al
     pub(crate) fn open(&mut self, now: Tick) {
         self.advance_time(now);
         if now > self.access_tick {
@@ -440,24 +466,7 @@ impl State {
             let file_inode = state.next_inode;
             state.next_inode += 1;
 
-            let file = File {
-                parent: current_inode,
-                bytes_written: 0,
-                bytes_read: 0,
-                access_tick: state.now,
-                modified_tick: state.now,
-                status_tick: state.now,
-                created_tick: state.now,
-                bytes_per_tick,
-                read_only: false,
-                ordinal: 0,
-                peer: None,
-                group_id,
-                open_handles: 0,
-                unlinked: false,
-                max_offset_observed: 0,
-                read_only_since: None,
-            };
+            let file = File::new(current_inode, bytes_per_tick, group_id, state.now, None);
             state.nodes.insert(file_inode, Node::File { file });
 
             // Add the file to the directory's children
@@ -564,24 +573,13 @@ impl State {
             // become the 0th ordinal in the `group_id` and may -- although
             // we don't know yet -- cause `rotated_inode` to be deleted.
             let new_file_inode = self.next_inode;
-            let mut new_file = File {
-                parent: parent_inode,
-                bytes_written: 0,
-                bytes_read: 0,
-                access_tick: self.now,
-                modified_tick: self.now,
-                status_tick: self.now,
-                created_tick: self.now,
+            let mut new_file = File::new(
+                parent_inode,
                 bytes_per_tick,
-                read_only: false,
-                ordinal: 0,
-                peer: Some(rotated_inode),
                 group_id,
-                open_handles: 0,
-                unlinked: false,
-                max_offset_observed: 0,
-                read_only_since: None,
-            };
+                self.now,
+                Some(rotated_inode),
+            );
             new_file.advance_time(now);
             self.next_inode = self.next_inode.saturating_add(1);
 
