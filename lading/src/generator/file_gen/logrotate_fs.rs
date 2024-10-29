@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ffi::OsStr,
+    fs,
     num::NonZeroU32,
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
@@ -130,6 +131,7 @@ impl Server {
             "Creating logrotate filesystem with mount point {mount}",
             mount = config.mount_point.display(),
         );
+        fs::create_dir_all(&config.mount_point)?;
         // Initialize the FUSE filesystem
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
