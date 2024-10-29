@@ -3,22 +3,15 @@
 #![allow(clippy::cast_sign_loss)] // TODO remove these clippy allows
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
-#![allow(missing_docs)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::needless_pass_by_value)]
 
+use crate::generator;
 use fuser::{
     spawn_mount2, BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData,
     ReplyDirectory, ReplyEntry, Request,
 };
 use lading_payload::block;
-use rand::{rngs::SmallRng, SeedableRng};
-use tokio::task;
-use tracing::{error, info};
-// use lading_payload::block;
-use crate::generator;
 use nix::libc::{self, ENOENT};
+use rand::{rngs::SmallRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -28,6 +21,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
+use tokio::task::{self, JoinError};
+use tracing::{error, info};
 
 mod model;
 
@@ -74,6 +69,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Could not join on task
+    #[error("Could not join on task: {0}")]
+    Join(#[from] JoinError),
 }
 
 #[derive(Debug)]
@@ -84,22 +82,25 @@ pub enum Error {
 /// to the target _but_ keeps track of how many bytes are written and read
 /// during operation.
 pub struct Server {
-    //    handles: Vec<JoinHandle<Result<(), Error>>>,
     shutdown: lading_signal::Watcher,
     background_session: BackgroundSession,
 }
 
 impl Server {
+    /// Create a new instances of `Server`
+    ///
+    /// # Errors
+    ///
+    /// Function will error if block cache cannot be built.
+    ///
+    /// # Panics
+    ///
+    /// Function will panic if the filesystem cannot be started.
     pub fn new(
         _: generator::General,
         config: Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        // TODO spawn a filesystem thread here and not in spin but bubble up any
-        // errors and make it so that spin waits for the FS thread and also for
-        // the shutdown signal. We have a synchronous try_recv on the Watcher
-        // but the way that fuser runs it just blocks the thread and there's no
-        // place to poll.
         let mut rng = SmallRng::from_seed(config.seed);
 
         let total_bytes =
@@ -148,11 +149,16 @@ impl Server {
 
     #[allow(clippy::cast_precision_loss)]
     #[allow(clippy::cast_possible_truncation)]
+    /// Run the `Server` to completion
+    ///
+    /// # Errors
+    ///
+    /// Function will error if it cannot join on filesystem thread.
     pub async fn spin(self) -> Result<(), Error> {
         self.shutdown.recv().await;
 
         let handle = task::spawn_blocking(|| self.background_session.join());
-        let _ = handle.await;
+        let () = handle.await?;
 
         Ok(())
     }
