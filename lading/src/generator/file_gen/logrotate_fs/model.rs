@@ -521,8 +521,22 @@ impl State {
     /// advance.
     pub(crate) fn advance_time(&mut self, now: Tick) {
         assert!(now >= self.now);
-        let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
+        // We have to simulate all ticks that happen between self.now and now,
+        // else an observer will detect a sudden shift in the model. This is
+        // still possible by careful observation of the metadata for files
+        // updating only on tick boundaries, but it's better than shifts only
+        // when observation happens.
+        while self.now < now {
+            self.now += 1;
+            self.advance_time_inner(self.now);
+        }
+    }
 
+    #[inline]
+    fn advance_time_inner(&mut self, now: Tick) {
+        assert!(now >= self.now);
+
+        let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
         for inode in inodes.drain(..) {
             let (rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal) = {
                 // If the node pointed to by inode doesn't exist, that's a
@@ -1140,6 +1154,25 @@ mod test {
                     file.bytes_written,
                     expected_bytes,
                     file.parent
+                );
+            }
+        }
+
+        // Property 8: max(bytes_written) <= max_bytes_per_file + bytes_per_second
+        //
+        // If just prior to a rollover the file is within bytes_per_second of
+        // max_bytes_per_file on the next tick that the rollover happens the
+        // file will be larger than max_bytes_per_file but to a limited degree.
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                if file.unlinked {
+                    continue;
+                }
+                let max_size = state.max_bytes_per_file + file.bytes_per_tick;
+                assert!(
+                    file.size() <= max_size,
+                    "File size {sz} exceeds max allowed size {max_size}",
+                    sz = file.size()
                 );
             }
         }
