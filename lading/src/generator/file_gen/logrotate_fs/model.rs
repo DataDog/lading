@@ -402,7 +402,11 @@ impl State {
 
         for group_id in 0..num_groups {
             let mut current_inode = state.root_inode;
-            let depth = rng.gen_range(1..=max_depth as usize);
+            let depth = if max_depth == 0 {
+                0
+            } else {
+                rng.gen_range(1..=max_depth as usize)
+            };
 
             // Build the directory path
             for _ in 0..depth {
