@@ -10,7 +10,7 @@ COPY . /app
 RUN cargo build --release --locked --bin lading
 
 FROM docker.io/debian:bullseye-20240701-slim
-RUN apt-get update && apt-get install -y libfuse3-dev=3.10.3-2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libfuse3-dev=3.10.3-2 fuse3 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/lading /usr/bin/lading
 
 # smoke test
