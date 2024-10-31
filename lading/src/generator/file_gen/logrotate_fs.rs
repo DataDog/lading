@@ -342,52 +342,56 @@ impl Filesystem for LogrotateFS {
         state.advance_time(tick);
 
         let root_inode = state.root_inode();
+        let mut entry_offset = 0;
 
-        // TODO building up a vec of entries here to handle offset really does
-        // suggest that the model needs to be exposed in such a way that this
-        // needn't be done.
-        //
-        // Ah, actually, the right buffer to push into is reply.add. There's no
-        // need for `entries` at all.
-        let mut entries = Vec::new();
+        // Entry 0: "."
+        if entry_offset >= offset
+            && reply.add(ino, entry_offset + 1, fuser::FileType::Directory, ".")
+        {
+            reply.ok();
+            return;
+        }
+        entry_offset += 1;
 
-        // '.' and '..'
-        entries.push((ino, fuser::FileType::Directory, ".".to_string()));
+        // Entry 1: ".." when applicable
         if ino != root_inode as u64 {
-            let parent_ino = state
-                .get_parent_inode(ino as usize)
-                .expect("inode must have parent");
-            entries.push((
-                parent_ino as u64,
-                fuser::FileType::Directory,
-                "..".to_string(),
-            ));
+            if entry_offset >= offset {
+                let parent_ino = state
+                    .get_parent_inode(ino as usize)
+                    .expect("inode must have parent");
+                if reply.add(
+                    parent_ino as u64,
+                    entry_offset + 1,
+                    fuser::FileType::Directory,
+                    "..",
+                ) {
+                    reply.ok();
+                    return;
+                }
+            }
+            entry_offset += 1;
         }
 
-        // remaining children
+        // Child entries, returned in inode order by `State::readdir`
         if let Some(child_inodes) = state.readdir(ino as usize) {
-            for child_ino in child_inodes {
-                let file_type = state
-                    .get_file_type(*child_ino)
-                    .expect("inode must have file type");
-                let child_name = state.get_name(*child_ino).expect("inode must have a name");
-                entries.push((*child_ino as u64, file_type, child_name.to_string()));
+            for &child_ino in child_inodes {
+                if entry_offset >= offset {
+                    let file_type = state
+                        .get_file_type(child_ino)
+                        .expect("inode must have file type");
+                    let child_name = state.get_name(child_ino).expect("inode must have a name");
+                    if reply.add(child_ino as u64, entry_offset + 1, file_type, child_name) {
+                        reply.ok();
+                        return;
+                    }
+                }
+                entry_offset += 1;
             }
         } else {
             reply.error(ENOENT);
             return;
         }
 
-        let mut idx = offset as usize;
-        while idx < entries.len() {
-            let (inode, file_type, name) = &entries[idx];
-            let next_offset = (idx + 1) as i64;
-            if reply.add(*inode, next_offset, *file_type, name) {
-                // Buffer is full, exit the loop
-                break;
-            }
-            idx += 1;
-        }
         reply.ok();
     }
 

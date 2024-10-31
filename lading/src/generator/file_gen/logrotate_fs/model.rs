@@ -1,11 +1,11 @@
 //! Model the internal logic of a logrotate filesystem.
 
-use std::collections::{HashMap, HashSet};
-
 use bytes::Bytes;
 use lading_payload::block;
 use metrics::counter;
 use rand::Rng;
+use rustc_hash::FxHashMap;
+use std::collections::BTreeSet;
 
 /// Time representation of the model
 pub(crate) type Tick = u64;
@@ -249,10 +249,19 @@ impl File {
 
 /// Model representation of a `Directory`. Contains children are `Directory`
 /// instances or `File` instances. Root directory will not have a `parent`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Directory {
-    children: HashSet<Inode>,
+    children: BTreeSet<Inode>,
     parent: Option<Inode>,
+}
+
+impl Directory {
+    fn new(parent: Option<Inode>) -> Self {
+        Self {
+            children: BTreeSet::default(),
+            parent,
+        }
+    }
 }
 
 /// A filesystem object, either a `File` or a `Directory`.
@@ -278,7 +287,7 @@ pub(crate) enum Node {
 /// filesystem. It does not contain any bytes, the caller must maintain this
 /// themselves.
 pub(crate) struct State {
-    nodes: HashMap<Inode, Node>,
+    nodes: FxHashMap<Inode, Node>,
     root_inode: Inode,
     now: Tick,
     block_cache: block::Cache,
@@ -288,6 +297,7 @@ pub(crate) struct State {
     group_names: Vec<Vec<String>>,
     next_inode: Inode,
     next_file_handle: u64,
+    inode_scratch: Vec<Inode>,
 }
 
 impl std::fmt::Debug for State {
@@ -297,6 +307,7 @@ impl std::fmt::Debug for State {
             .field("root_inode", &self.root_inode)
             .field("now", &self.now)
             // intentionally leaving out block_cache
+            // intentionally leaving out inode_scratch
             .field("max_rotations", &self.max_rotations)
             .field("max_bytes_per_file", &self.max_bytes_per_file)
             .field("group_names", &self.group_names)
@@ -349,12 +360,9 @@ impl State {
         R: Rng,
     {
         let root_inode: Inode = 1; // `/`
-        let mut nodes = HashMap::new();
+        let mut nodes = FxHashMap::default();
 
-        let root_dir = Directory {
-            children: HashSet::new(),
-            parent: None,
-        };
+        let root_dir = Directory::default();
         nodes.insert(
             root_inode,
             Node::Directory {
@@ -373,6 +381,7 @@ impl State {
             group_names: Vec::new(),
             next_inode: 2,
             next_file_handle: 0,
+            inode_scratch: Vec::with_capacity(concurrent_logs as usize),
         };
 
         if concurrent_logs == 0 {
@@ -435,10 +444,7 @@ impl State {
                             let new_inode = state.next_inode;
                             state.next_inode += 1;
 
-                            let new_dir = Directory {
-                                children: HashSet::new(),
-                                parent: Some(current_inode),
-                            };
+                            let new_dir = Directory::new(Some(current_inode));
                             state.nodes.insert(
                                 new_inode,
                                 Node::Directory {
@@ -536,8 +542,11 @@ impl State {
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
-        let mut inodes: Vec<Inode> = self.nodes.keys().copied().collect();
-        for inode in inodes.drain(..) {
+        for inode in self.nodes.keys() {
+            self.inode_scratch.push(*inode);
+        }
+
+        for inode in self.inode_scratch.drain(..) {
             let (rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
@@ -806,14 +815,15 @@ impl State {
         }
     }
 
-    /// Read inodes from a directory
+    /// Read inodes from a directory.
     ///
     /// Returns None if the inode is a `File`, else returns the hashset of
-    /// children inodes.
+    /// children inodes. Guaranteed to be in the same order so long as time does
+    /// not advance.
     ///
     /// Function does not advance time in the model.
     #[tracing::instrument(skip(self))]
-    pub(crate) fn readdir(&self, inode: Inode) -> Option<&HashSet<Inode>> {
+    pub(crate) fn readdir(&self, inode: Inode) -> Option<&BTreeSet<Inode>> {
         if let Some(Node::Directory { dir, .. }) = self.nodes.get(&inode) {
             Some(&dir.children)
         } else {
