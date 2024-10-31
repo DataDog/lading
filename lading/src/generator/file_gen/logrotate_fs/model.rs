@@ -1186,6 +1186,26 @@ mod test {
                 );
             }
         }
+
+        // Property 9: Rotated files have bytes_written within acceptable range
+        //
+        // For a rotated file (read_only == true), bytes_written should be
+        // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
+        // (max_bytes_per_file + bytes_per_tick).
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                if !file.read_only {
+                    continue;
+                }
+                let min_size = state.max_bytes_per_file.saturating_sub(file.bytes_per_tick);
+                let max_size = state.max_bytes_per_file.saturating_add(file.bytes_per_tick);
+                assert!(
+                    file.bytes_written >= min_size && file.bytes_written < max_size,
+                    "Rotated file size {bytes_written} not in expected range [{min_size}, {max_size})",
+                    bytes_written = file.bytes_written
+                );
+            }
+        }
     }
 
     proptest! {

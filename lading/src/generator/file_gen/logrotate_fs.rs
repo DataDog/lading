@@ -243,6 +243,7 @@ impl Filesystem for LogrotateFS {
     fn lookup(&mut self, _: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         let name_str = name.to_str().unwrap_or("");
         if let Some(ino) = state.lookup(tick, parent as usize, name_str) {
@@ -262,6 +263,7 @@ impl Filesystem for LogrotateFS {
     fn getattr(&mut self, _: &Request, ino: u64, reply: ReplyAttr) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino as usize) {
             reply.attr(&TTL, &attr);
@@ -284,6 +286,7 @@ impl Filesystem for LogrotateFS {
     ) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         // Get the FileHandle from fh
         let file_handle = {
@@ -319,6 +322,7 @@ impl Filesystem for LogrotateFS {
     ) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         // Remove the FileHandle from the mapping
         let file_handle = {
@@ -399,6 +403,7 @@ impl Filesystem for LogrotateFS {
     fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         if let Some(file_handle) = state.open_file(tick, ino as usize) {
             let fh = file_handle.id();
