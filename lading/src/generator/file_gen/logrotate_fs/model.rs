@@ -347,8 +347,10 @@ pub(crate) enum NodeType {
 impl State {
     /// Create a new instance of `State`.
     #[tracing::instrument(skip(rng, block_cache))]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         rng: &mut R,
+        initial_tick: Tick,
         bytes_per_tick: u64,
         max_rotations: u8,
         max_bytes_per_file: u64,
@@ -374,7 +376,7 @@ impl State {
         let mut state = State {
             nodes,
             root_inode,
-            now: 0,
+            now: initial_tick,
             block_cache,
             max_bytes_per_file,
             max_rotations,
@@ -955,6 +957,7 @@ mod test {
                 1024u64..=500_000u64, // max_bytes_per_file
                 1u8..=4u8,            // max_depth
                 1u16..=16u16,         // concurrent_logs
+                1u64..=1000u64,       // initial_tick
             )
                 .prop_map(
                     |(
@@ -964,6 +967,7 @@ mod test {
                         max_bytes_per_file,
                         max_depth,
                         concurrent_logs,
+                        initial_tick,
                     )| {
                         let mut rng = StdRng::seed_from_u64(seed);
                         let block_cache = block::Cache::fixed(
@@ -976,6 +980,7 @@ mod test {
 
                         State::new(
                             &mut rng,
+                            initial_tick,
                             bytes_per_tick,
                             max_rotations,
                             max_bytes_per_file,
