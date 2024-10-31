@@ -10,6 +10,7 @@ use fuser::{
     ReplyDirectory, ReplyEntry, Request,
 };
 use lading_payload::block;
+use metrics::counter;
 use nix::libc::{self, ENOENT};
 use rand::{rngs::SmallRng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -250,6 +251,8 @@ impl Filesystem for LogrotateFS {
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
 
+        counter!("fs_lookup").increment(1);
+
         let name_str = name.to_str().unwrap_or("");
         if let Some(ino) = state.lookup(tick, parent as usize, name_str) {
             if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino) {
@@ -269,6 +272,8 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
+
+        counter!("fs_getattr").increment(1);
 
         if let Some(attr) = getattr_helper(&mut state, self.start_time_system, tick, ino as usize) {
             reply.attr(&TTL, &attr);
@@ -292,6 +297,8 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
+
+        counter!("fs_read").increment(1);
 
         // Get the FileHandle from fh
         let file_handle = {
@@ -329,6 +336,8 @@ impl Filesystem for LogrotateFS {
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
 
+        counter!("fs_release").increment(1);
+
         // Remove the FileHandle from the mapping
         let file_handle = {
             let mut open_files = self.open_files.lock().expect("lock poisoned");
@@ -349,6 +358,8 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
+
+        counter!("fs_readdir").increment(1);
 
         let root_inode = state.root_inode();
         let mut entry_offset = 0;
@@ -409,6 +420,8 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
+
+        counter!("fs_open").increment(1);
 
         if let Some(file_handle) = state.open_file(tick, ino as usize) {
             let fh = file_handle.id();

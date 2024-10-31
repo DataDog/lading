@@ -642,6 +642,7 @@ impl State {
                 let (remove_current, next_peer) = match node {
                     Node::File { file } => {
                         file.incr_ordinal();
+                        counter!("log_file_rotated").increment(1);
 
                         let remove_current = file.ordinal() > self.max_rotations;
                         (remove_current, file.peer)
@@ -712,6 +713,7 @@ impl State {
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
                 let lost_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
+                counter!("log_file_deleted").increment(1);
                 counter!("lost_bytes").increment(lost_bytes);
             }
         }
