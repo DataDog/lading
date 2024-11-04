@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+### Fixed
+- Target pid watcher will not report 0 for containers.
+
 ## [0.23.4]
 ### Added
 - Introduced logrotate_fs, a sub-generator of `file_gen` that exposes a FUSE
