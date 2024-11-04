@@ -261,6 +261,17 @@ impl Server {
         let pid: i64 = loop {
             if let Ok(container) = docker.inspect_container(&config.name, None).await {
                 if let Some(pid) = container.state.and_then(|state| state.pid) {
+                    // In some cases docker will report pid 0 as the pid for the
+                    // polled container. This is not usable by us and we believe
+                    // a race condition.
+                    if pid == 0 {
+                        info!(
+                            "Found container with name {name} but with pid {pid}. Polling.",
+                            name = config.name
+                        );
+                        time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
                     break pid;
                 }
             } else {
