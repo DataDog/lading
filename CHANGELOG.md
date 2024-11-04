@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Fixed
 - Target pid watcher will not report 0 for containers.
+### Removed
+- Container is now the only supported release artifact, removing crates.io
+  publish and binaries.
 
 ## [0.23.4]
 ### Added
