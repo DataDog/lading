@@ -122,8 +122,8 @@ To give `lading` extra permissions needed, `setcap` can be used to grant the bin
 
 ## How to get a build (besides building from source)
 
-### Binary Releases
-https://github.com/DataDog/lading/releases
+### Container Releases
+https://github.com/DataDog/lading/pkgs/container/lading
 
 ### Docker
 
