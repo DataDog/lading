@@ -1256,15 +1256,6 @@ mod test {
         // }
     }
 
-    // fn compute_bytes_per_tick(load_profile: &LoadProfile, initial_tick: Tick, tick: Tick) -> u64 {
-    //     match load_profile {
-    //         LoadProfile::Constant(bytes_per_tick) => *bytes_per_tick,
-    //         LoadProfile::Linear { start, rate } => {
-    //             start.saturating_add(rate.saturating_mul(tick.saturating_sub(initial_tick)))
-    //         }
-    //     }
-    // }
-
     fn compute_expected_bytes_written(
         load_profile: &LoadProfile,
         initial_tick: Tick,
