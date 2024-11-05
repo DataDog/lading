@@ -47,8 +47,6 @@ pub struct Config {
     max_depth: u8,
     /// Sets the [`crate::payload::Config`] of this template.
     variant: lading_payload::Config,
-    /// Defines the number of bytes that written in each log file.
-    bytes_per_second: byte_unit::Byte,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: byte_unit::Byte,
@@ -57,6 +55,39 @@ pub struct Config {
     maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
+    /// The load profile, controlling bytes per second as a function of time.
+    load_profile: LoadProfile,
+}
+
+/// Profile for load in this filesystem.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadProfile {
+    /// Constant bytes per second
+    Constant(byte_unit::Byte),
+    /// Linear growth of bytes per second
+    Linear {
+        /// Starting point for bytes per second
+        initial_bytes_per_second: byte_unit::Byte,
+        /// Amount to increase per second
+        rate: byte_unit::Byte,
+    },
+}
+
+impl LoadProfile {
+    fn to_model(self) -> model::LoadProfile {
+        // For now, one tick is one second.
+        match self {
+            LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.get_bytes() as u64),
+            LoadProfile::Linear {
+                initial_bytes_per_second,
+                rate,
+            } => model::LoadProfile::Linear {
+                start: initial_bytes_per_second.get_bytes() as u64,
+                rate: rate.get_bytes() as u64,
+            },
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -117,15 +148,16 @@ impl Server {
 
         let start_time = std::time::Instant::now();
         let start_time_system = std::time::SystemTime::now();
+
         let state = model::State::new(
             &mut rng,
             start_time.elapsed().as_secs(),
-            config.bytes_per_second.get_bytes() as u64,
             config.total_rotations,
             config.maximum_bytes_per_log.get_bytes() as u64,
             block_cache,
             config.max_depth,
             config.concurrent_logs,
+            config.load_profile.to_model(),
         );
 
         info!(
