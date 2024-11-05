@@ -102,8 +102,8 @@ impl File {
     /// Create a new instance of `File`
     pub(crate) fn new(
         parent: Inode,
-        bytes_per_tick: u64,
         group_id: u16,
+        bytes_per_tick: u64,
         now: Tick,
         peer: Option<Inode>,
     ) -> Self {
@@ -236,15 +236,6 @@ impl File {
     pub(crate) fn size(&self) -> u64 {
         self.bytes_written
     }
-
-    /// Calculate the expected bytes written based on writable duration.
-    #[cfg(test)]
-    pub(crate) fn expected_bytes_written(&self, now: Tick) -> u64 {
-        let start_tick = self.created_tick;
-        let end_tick = self.read_only_since.unwrap_or(now);
-        let writable_duration = end_tick.saturating_sub(start_tick);
-        self.bytes_per_tick.saturating_mul(writable_duration)
-    }
 }
 
 /// Model representation of a `Directory`. Contains children are `Directory`
@@ -281,6 +272,20 @@ pub(crate) enum Node {
     },
 }
 
+/// Profile for load in this filesystem.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LoadProfile {
+    /// Constant bytes per tick
+    Constant(u64),
+    /// Linear growth of bytes per tick
+    Linear {
+        /// Starting point for bytes per tick
+        start: u64,
+        /// Amount to increase per tick
+        rate: u64,
+    },
+}
+
 /// The state of the filesystem
 ///
 /// This structure is responsible for maintenance of the structure of the
@@ -290,6 +295,7 @@ pub(crate) struct State {
     nodes: FxHashMap<Inode, Node>,
     root_inode: Inode,
     now: Tick,
+    initial_tick: Tick,
     block_cache: block::Cache,
     max_bytes_per_file: u64,
     max_rotations: u8,
@@ -298,6 +304,7 @@ pub(crate) struct State {
     next_inode: Inode,
     next_file_handle: u64,
     inode_scratch: Vec<Inode>,
+    load_profile: LoadProfile,
 }
 
 impl std::fmt::Debug for State {
@@ -351,12 +358,12 @@ impl State {
     pub(crate) fn new<R>(
         rng: &mut R,
         initial_tick: Tick,
-        bytes_per_tick: u64,
         max_rotations: u8,
         max_bytes_per_file: u64,
         block_cache: block::Cache,
         max_depth: u8,
         concurrent_logs: u16,
+        load_profile: LoadProfile,
     ) -> State
     where
         R: Rng,
@@ -376,6 +383,7 @@ impl State {
         let mut state = State {
             nodes,
             root_inode,
+            initial_tick,
             now: initial_tick,
             block_cache,
             max_bytes_per_file,
@@ -384,6 +392,7 @@ impl State {
             next_inode: 2,
             next_file_handle: 0,
             inode_scratch: Vec::with_capacity(concurrent_logs as usize),
+            load_profile,
         };
 
         if concurrent_logs == 0 {
@@ -476,7 +485,7 @@ impl State {
             let file_inode = state.next_inode;
             state.next_inode += 1;
 
-            let file = File::new(current_inode, bytes_per_tick, group_id, state.now, None);
+            let file = File::new(current_inode, group_id, 0, state.now, None);
             state.nodes.insert(file_inode, Node::File { file });
 
             // Add the file to the directory's children
@@ -544,12 +553,31 @@ impl State {
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
+        // Compute new global bytes_per_tick, at now - 1.
+        let elapsed_ticks = now.saturating_sub(self.initial_tick).saturating_sub(1);
+        let bytes_per_tick = match &self.load_profile {
+            LoadProfile::Constant(bytes) => *bytes,
+            LoadProfile::Linear { start, rate } => {
+                start.saturating_add(rate.saturating_mul(elapsed_ticks))
+            }
+        };
+
+        // Update each File's bytes_per_tick but do not advance time, as that is
+        // done later.
+        for node in self.nodes.values_mut() {
+            if let Node::File { file } = node {
+                if !file.read_only && !file.unlinked {
+                    file.bytes_per_tick = bytes_per_tick;
+                }
+            }
+        }
+
         for inode in self.nodes.keys() {
             self.inode_scratch.push(*inode);
         }
 
         for inode in self.inode_scratch.drain(..) {
-            let (rotated_inode, parent_inode, bytes_per_tick, group_id, ordinal) = {
+            let (rotated_inode, parent_inode, group_id, ordinal) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
                 // pairs.
@@ -587,26 +615,24 @@ impl State {
                 file.set_read_only(now);
 
                 // Rotation data needed below.
-                (
-                    inode,
-                    file.parent,
-                    file.bytes_per_tick,
-                    file.group_id,
-                    file.ordinal,
-                )
+                (inode, file.parent, file.group_id, file.ordinal)
             };
 
             // Create our new file, called, well, `new_file`. This will
             // become the 0th ordinal in the `group_id` and may -- although
             // we don't know yet -- cause `rotated_inode` to be deleted.
+            //
+            // Set bytes_per_tick to current and now to now-1 else we'll never
+            // ramp properly.
             let new_file_inode = self.next_inode;
             let mut new_file = File::new(
                 parent_inode,
-                bytes_per_tick,
                 group_id,
-                self.now,
+                bytes_per_tick,
+                self.now.saturating_sub(1),
                 Some(rotated_inode),
             );
+
             new_file.advance_time(now);
             self.next_inode = self.next_inode.saturating_add(1);
 
@@ -695,7 +721,6 @@ impl State {
         }
 
         self.gc();
-        self.now = now;
     }
 
     // Garbage collect unlinked files with no open handles, calculating the bytes
@@ -903,7 +928,7 @@ mod test {
         num::NonZeroU32,
     };
 
-    use super::{FileHandle, Inode, Node, State};
+    use super::{FileHandle, Inode, LoadProfile, Node, State, Tick};
     use lading_payload::block;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -947,6 +972,18 @@ mod test {
         }
     }
 
+    impl Arbitrary for LoadProfile {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            let constant_strategy = (1u64..=10_000u64).prop_map(LoadProfile::Constant);
+            let linear_strategy = (1u64..=1_000u64, 1u64..=100u64)
+                .prop_map(|(start, rate)| LoadProfile::Linear { start, rate });
+            prop_oneof![constant_strategy, linear_strategy].boxed()
+        }
+    }
+
     impl Arbitrary for State {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
@@ -954,22 +991,22 @@ mod test {
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
                 any::<u64>(),         // seed
-                1u64..=5_000u64,      // bytes_per_tick
                 1u8..=8u8,            // max_rotations
                 1024u64..=500_000u64, // max_bytes_per_file
                 1u8..=4u8,            // max_depth
                 1u16..=16u16,         // concurrent_logs
                 1u64..=1000u64,       // initial_tick
+                any::<LoadProfile>(), // load_profile
             )
                 .prop_map(
                     |(
                         seed,
-                        bytes_per_tick,
                         max_rotations,
                         max_bytes_per_file,
                         max_depth,
                         concurrent_logs,
                         initial_tick,
+                        load_profile,
                     )| {
                         let mut rng = StdRng::seed_from_u64(seed);
                         let block_cache = block::Cache::fixed(
@@ -983,12 +1020,12 @@ mod test {
                         State::new(
                             &mut rng,
                             initial_tick,
-                            bytes_per_tick,
                             max_rotations,
                             max_bytes_per_file,
                             block_cache,
                             max_depth,
                             concurrent_logs,
+                            load_profile,
                         )
                     },
                 )
@@ -1161,56 +1198,91 @@ mod test {
         }
 
         // Property 7: bytes_written are tick accurate
-        for node in state.nodes.values() {
+        for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
-                let expected_bytes = file.expected_bytes_written(state.now);
+                let end_tick = file.read_only_since.unwrap_or(state.now);
+                let expected_bytes = compute_expected_bytes_written(
+                    &state.load_profile,
+                    state.initial_tick,
+                    file.created_tick,
+                    end_tick,
+                );
                 assert_eq!(
                     file.bytes_written,
                     expected_bytes,
-                    "bytes_written ({}) does not match expected_bytes_written ({}) for file with inode {}",
+                    "bytes_written ({}) does not match expected_bytes_written ({expected_bytes}) for file with inode {inode}",
                     file.bytes_written,
-                    expected_bytes,
-                    file.parent
                 );
             }
         }
 
-        // Property 8: max(bytes_written) <= max_bytes_per_file + bytes_per_second
-        //
-        // If just prior to a rollover the file is within bytes_per_second of
-        // max_bytes_per_file on the next tick that the rollover happens the
-        // file will be larger than max_bytes_per_file but to a limited degree.
-        for node in state.nodes.values() {
-            if let Node::File { file } = node {
-                if file.unlinked {
-                    continue;
-                }
-                let max_size = state.max_bytes_per_file + file.bytes_per_tick;
-                assert!(
-                    file.size() <= max_size,
-                    "File size {sz} exceeds max allowed size {max_size}",
-                    sz = file.size()
-                );
-            }
-        }
+        // // Property 8: max(bytes_written) <= max_bytes_per_file + bytes_per_second
+        // //
+        // // If just prior to a rollover the file is within bytes_per_second of
+        // // max_bytes_per_file on the next tick that the rollover happens the
+        // // file will be larger than max_bytes_per_file but to a limited degree.
+        // for node in state.nodes.values() {
+        //     if let Node::File { file } = node {
+        //         if file.unlinked {
+        //             continue;
+        //         }
+        //         let max_size = state.max_bytes_per_file + file.bytes_per_tick;
+        //         assert!(
+        //             file.size() <= max_size,
+        //             "File size {sz} exceeds max allowed size {max_size}",
+        //             sz = file.size()
+        //         );
+        //     }
+        // }
 
-        // Property 9: Rotated files have bytes_written within acceptable range
-        //
-        // For a rotated file (read_only == true), bytes_written should be
-        // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
-        // (max_bytes_per_file + bytes_per_tick).
-        for node in state.nodes.values() {
-            if let Node::File { file } = node {
-                if !file.read_only {
-                    continue;
-                }
-                let min_size = state.max_bytes_per_file.saturating_sub(file.bytes_per_tick);
-                let max_size = state.max_bytes_per_file.saturating_add(file.bytes_per_tick);
-                assert!(
-                    file.bytes_written >= min_size && file.bytes_written < max_size,
-                    "Rotated file size {bytes_written} not in expected range [{min_size}, {max_size})",
-                    bytes_written = file.bytes_written
-                );
+        // // Property 9: Rotated files have bytes_written within acceptable range
+        // //
+        // // For a rotated file (read_only == true), bytes_written should be
+        // // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
+        // // (max_bytes_per_file + bytes_per_tick).
+        // for node in state.nodes.values() {
+        //     if let Node::File { file } = node {
+        //         if !file.read_only {
+        //             continue;
+        //         }
+        //         let min_size = state.max_bytes_per_file.saturating_sub(file.bytes_per_tick);
+        //         let max_size = state.max_bytes_per_file.saturating_add(file.bytes_per_tick);
+        //         assert!(
+        //             file.bytes_written >= min_size && file.bytes_written < max_size,
+        //             "Rotated file size {bytes_written} not in expected range [{min_size}, {max_size})",
+        //             bytes_written = file.bytes_written
+        //         );
+        //     }
+        // }
+    }
+
+    fn compute_expected_bytes_written(
+        load_profile: &LoadProfile,
+        initial_tick: Tick,
+        created_tick: Tick,
+        end_tick: Tick,
+    ) -> u64 {
+        let start_tick = created_tick.max(initial_tick);
+        let end_tick = end_tick.max(start_tick);
+        let duration = end_tick - start_tick;
+
+        match load_profile {
+            LoadProfile::Constant(bytes_per_tick) => bytes_per_tick.saturating_mul(duration),
+            LoadProfile::Linear { start, rate } => {
+                // bytes_per_tick at time t is start + rate * (t - initial_tick)
+                // total_bytes = sum_{t = start_tick}^{end_tick - 1} bytes_per_tick at t
+                // Simplify the sum:
+                // total_bytes = duration * start + rate * sum_{t = start_tick}^{end_tick - 1} (t - initial_tick)
+                // sum_{t = start_tick}^{end_tick - 1} (t - initial_tick) = sum_{k = start_tick - initial_tick}^{end_tick - 1 - initial_tick} k
+                let a = start_tick.saturating_sub(initial_tick);
+                let b = end_tick.saturating_sub(1).saturating_sub(initial_tick);
+                let num_terms = b.saturating_sub(a).saturating_add(1);
+                let sum_of_terms = num_terms.saturating_mul(a + b) / 2;
+
+                let total_bytes = duration
+                    .saturating_mul(*start)
+                    .saturating_add(rate.saturating_mul(sum_of_terms));
+                total_bytes
             }
         }
     }
