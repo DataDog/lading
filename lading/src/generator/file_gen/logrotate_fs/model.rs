@@ -1212,10 +1212,10 @@ mod test {
         // Property 8: Rotated files have bytes_written within acceptable range
         //
         // For a rotated file (read_only == true), bytes_written should be
-        // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
-        // (max_bytes_per_file + 2 * bytes_per_tick). It's possible because of
-        // when rotation is done that a full tick will elapse, allowing an
-        // additional tick worth of bytes to be written, hence the 2x.
+        // within max_bytes_per_file <= bytes_written < (max_bytes_per_file + 2
+        // * bytes_per_tick). It's possible because of when rotation is done
+        // that a full tick will elapse, allowing an additional tick worth of
+        // bytes to be written, hence the 2x.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
                 if !file.read_only {
