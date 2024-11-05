@@ -1209,26 +1209,7 @@ mod test {
             }
         }
 
-        // // Property 8: max(bytes_written) <= max_bytes_per_file + bytes_per_second
-        // //
-        // // If just prior to a rollover the file is within bytes_per_second of
-        // // max_bytes_per_file on the next tick that the rollover happens the
-        // // file will be larger than max_bytes_per_file but to a limited degree.
-        // for node in state.nodes.values() {
-        //     if let Node::File { file } = node {
-        //         if file.unlinked {
-        //             continue;
-        //         }
-        //         let max_size = state.max_bytes_per_file + file.bytes_per_tick;
-        //         assert!(
-        //             file.size() <= max_size,
-        //             "File size {sz} exceeds max allowed size {max_size}",
-        //             sz = file.size()
-        //         );
-        //     }
-        // }
-
-        // Property 9: Rotated files have bytes_written within acceptable range
+        // Property 8: Rotated files have bytes_written within acceptable range
         //
         // For a rotated file (read_only == true), bytes_written should be
         // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
