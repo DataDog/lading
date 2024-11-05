@@ -598,11 +598,6 @@ impl State {
                 // file is only rotated if it is linked, that is, it has a name in
                 // the filesystem.
                 if file.bytes_written < self.max_bytes_per_file {
-                    println!(
-                        "bytes_written {bytes_written} < max_bytes_per_file {max_bytes_per_file}",
-                        bytes_written = file.bytes_written,
-                        max_bytes_per_file = self.max_bytes_per_file
-                    );
                     continue;
                 }
                 assert!(
