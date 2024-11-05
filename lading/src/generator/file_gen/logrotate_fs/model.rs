@@ -1198,19 +1198,6 @@ mod test {
         }
 
         // Property 7: bytes_written are tick accurate
-        // for node in state.nodes.values() {
-        //     if let Node::File { file } = node {
-        //         let expected_bytes = file.expected_bytes_written(state.now);
-        //         assert_eq!(
-        //             file.bytes_written,
-        //             expected_bytes,
-        //             "bytes_written ({}) does not match expected_bytes_written ({}) for file with inode {}",
-        //             file.bytes_written,
-        //             expected_bytes,
-        //             file.parent
-        //         );
-        //     }
-        // }
         for (&inode, node) in &state.nodes {
             if let Node::File { file } = node {
                 let end_tick = file.read_only_since.unwrap_or(state.now);
