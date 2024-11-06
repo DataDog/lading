@@ -6,6 +6,7 @@ use metrics::counter;
 use rand::Rng;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
+use tracing::info;
 
 /// Time representation of the model
 pub(crate) type Tick = u64;
@@ -731,8 +732,14 @@ impl State {
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
                 let lost_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
+                info!("Log file deleted. Total bytes lost: {lost_bytes}. Total bytes written: {bytes_written}. Total bytes read: {bytes_read}. Group ID: {group_id}. Created: {created_tick}.",
+                      group_id = file.group_id,
+                      created_tick = file.created_tick,
+                      bytes_written = file.bytes_written,
+                      bytes_read = file.bytes_read);
                 counter!("log_file_deleted").increment(1);
-                counter!("lost_bytes").increment(lost_bytes);
+                counter!("lost_bytes", "group_id" => format!("{}", file.group_id))
+                    .increment(lost_bytes);
             }
         }
     }
