@@ -300,7 +300,7 @@ impl Filesystem for LogrotateFS {
     }
 
     #[tracing::instrument(skip(self, reply))]
-    fn getattr(&mut self, _: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _: &Request, ino: u64, _: Option<u64>, reply: ReplyAttr) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
         state.advance_time(tick);
