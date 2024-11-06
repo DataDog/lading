@@ -30,6 +30,7 @@ uuid = { version = "1.11", default-features = false, features = ["v4", "serde"] 
 once_cell = { version = "1.20" }
 
 [profile.release]
+strip = true      # Strip debug symbols from the binary.
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optmization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
