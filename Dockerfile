@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     protobuf-compiler fuse3 libfuse3-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef
+RUN cargo install cargo-chef --locked
 
 # Planning stage, artifact is 'recipe.json'
 FROM chef AS planner
