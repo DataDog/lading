@@ -228,14 +228,6 @@ impl File {
     pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
     }
-
-    /// Returns the current size in bytes of the File
-    ///
-    /// This function does not advance time.
-    #[must_use]
-    pub(crate) fn size(&self) -> u64 {
-        self.bytes_written
-    }
 }
 
 /// Model representation of a `Directory`. Contains children are `Directory`
@@ -319,6 +311,7 @@ impl std::fmt::Debug for State {
             .field("max_bytes_per_file", &self.max_bytes_per_file)
             .field("group_names", &self.group_names)
             .field("next_inode", &self.next_inode)
+            .field("load_profile", &self.load_profile)
             .finish_non_exhaustive()
     }
 }
@@ -592,19 +585,19 @@ impl State {
                     Node::Directory { .. } => continue,
                 };
 
-                // No matter what we advance time for the file.
-                file.advance_time(now);
-
                 // If the file is read-only we have no more work to do on this file
                 // although it _may_ be touched if we process a peer chain below.
                 if file.read_only() {
                     continue;
                 }
 
+                // If the file is available for writing we advance time for the file.
+                file.advance_time(now);
+
                 // Determine if the file pointed to by inode needs to be rotated. A
                 // file is only rotated if it is linked, that is, it has a name in
                 // the filesystem.
-                if file.size() < self.max_bytes_per_file {
+                if file.bytes_written < self.max_bytes_per_file {
                     continue;
                 }
                 assert!(
@@ -992,7 +985,7 @@ mod test {
             (
                 any::<u64>(),         // seed
                 1u8..=8u8,            // max_rotations
-                1024u64..=500_000u64, // max_bytes_per_file
+                1u64..=100_000u64,    // max_bytes_per_file
                 1u8..=4u8,            // max_depth
                 1u16..=16u16,         // concurrent_logs
                 1u64..=1000u64,       // initial_tick
@@ -1216,44 +1209,29 @@ mod test {
             }
         }
 
-        // // Property 8: max(bytes_written) <= max_bytes_per_file + bytes_per_second
-        // //
-        // // If just prior to a rollover the file is within bytes_per_second of
-        // // max_bytes_per_file on the next tick that the rollover happens the
-        // // file will be larger than max_bytes_per_file but to a limited degree.
-        // for node in state.nodes.values() {
-        //     if let Node::File { file } = node {
-        //         if file.unlinked {
-        //             continue;
-        //         }
-        //         let max_size = state.max_bytes_per_file + file.bytes_per_tick;
-        //         assert!(
-        //             file.size() <= max_size,
-        //             "File size {sz} exceeds max allowed size {max_size}",
-        //             sz = file.size()
-        //         );
-        //     }
-        // }
-
-        // // Property 9: Rotated files have bytes_written within acceptable range
-        // //
-        // // For a rotated file (read_only == true), bytes_written should be
-        // // within (max_bytes_per_file - bytes_per_tick) <= bytes_written <
-        // // (max_bytes_per_file + bytes_per_tick).
-        // for node in state.nodes.values() {
-        //     if let Node::File { file } = node {
-        //         if !file.read_only {
-        //             continue;
-        //         }
-        //         let min_size = state.max_bytes_per_file.saturating_sub(file.bytes_per_tick);
-        //         let max_size = state.max_bytes_per_file.saturating_add(file.bytes_per_tick);
-        //         assert!(
-        //             file.bytes_written >= min_size && file.bytes_written < max_size,
-        //             "Rotated file size {bytes_written} not in expected range [{min_size}, {max_size})",
-        //             bytes_written = file.bytes_written
-        //         );
-        //     }
-        // }
+        // Property 8: Rotated files have bytes_written within acceptable range
+        //
+        // For a rotated file (read_only == true), bytes_written should be
+        // within max_bytes_per_file <= bytes_written < (max_bytes_per_file + 2
+        // * bytes_per_tick). It's possible because of when rotation is done
+        // that a full tick will elapse, allowing an additional tick worth of
+        // bytes to be written, hence the 2x.
+        for node in state.nodes.values() {
+            if let Node::File { file } = node {
+                if !file.read_only {
+                    continue;
+                }
+                let min_size = state.max_bytes_per_file;
+                let max_size = state
+                    .max_bytes_per_file
+                    .saturating_add(2 * file.bytes_per_tick);
+                assert!(
+                    file.bytes_written >= min_size && file.bytes_written <= max_size,
+                    "Rotated file size {actual} not in expected range [{min_size}, {max_size}]",
+                    actual = file.bytes_written
+                );
+            }
+        }
     }
 
     fn compute_expected_bytes_written(
