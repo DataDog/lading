@@ -662,7 +662,8 @@ impl State {
                 let (remove_current, next_peer) = match node {
                     Node::File { file } => {
                         file.incr_ordinal();
-                        counter!("log_file_rotated").increment(1);
+                        counter!("log_file_rotated", "group_id" => format!("{}", file.group_id))
+                            .increment(1);
 
                         let remove_current = file.ordinal() > self.max_rotations;
                         (remove_current, file.peer)
