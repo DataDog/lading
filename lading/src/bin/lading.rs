@@ -465,7 +465,7 @@ async fn inner_main(
             let metrics_server = target_metrics::Server::new(
                 cfg,
                 shutdown_watcher.clone(),
-                experiment_started_watcher.clone(),
+                target_running_watcher.clone(),
             );
             tokio::spawn(async {
                 match metrics_server.run().await {

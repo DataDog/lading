@@ -48,17 +48,15 @@ impl Server {
     pub fn new(
         config: Config,
         shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
     ) -> Self {
         match config {
             Config::Expvar(conf) => {
-                Self::Expvar(expvar::Expvar::new(conf, shutdown, experiment_started))
+                Self::Expvar(expvar::Expvar::new(conf, shutdown, target_running))
             }
-            Config::Prometheus(conf) => Self::Prometheus(prometheus::Prometheus::new(
-                conf,
-                shutdown,
-                experiment_started,
-            )),
+            Config::Prometheus(conf) => {
+                Self::Prometheus(prometheus::Prometheus::new(conf, shutdown, target_running))
+            }
         }
     }
 
