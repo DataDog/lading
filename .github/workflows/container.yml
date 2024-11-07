@@ -60,8 +60,8 @@ jobs:
             ${{ steps.meta.outputs.tags }}-${{ matrix.arch }}
           push: true
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=ghcr.io/datadog/lading:latest
-          cache-to: type=registry,ref=ghcr.io/datadog/lading:latest,mode=max
+          cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
+          cache-to: type=registry,ref=ghcr.io/datadog/lading:cache,mode=max
 
   manifest:
     name: Create Multi-Arch Manifest
@@ -96,8 +96,8 @@ jobs:
 
       - name: Create and Push Multi-Arch Manifest
         run: |
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}-arm64
+          docker manifest create ${{ steps.meta.outputs.tags }} \
+            ${{ steps.meta.outputs.tags }}-amd64 \
+            ${{ steps.meta.outputs.tags }}-arm64
 
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}
+          docker manifest push ${{ steps.meta.outputs.tags }}
