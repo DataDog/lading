@@ -88,10 +88,6 @@ jobs:
         with:
           tags: |
             type=sha,format=long
-            type=ref,prefix=pr-,event=pr
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=semver,pattern={{major}},event=tag
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Create and Push Multi-Arch Manifest
