@@ -86,18 +86,9 @@ jobs:
             type=sha,format=long
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Confirm images exist
-        run: |
-          docker pull ${{ steps.meta.outputs.tags }}-amd64
-          docker pull ${{ steps.meta.outputs.tags }}-arm64
-
       - name: Create and Push Multiarch Manifest
         run: |
-          docker manifest create ${{ steps.meta.outputs.tags }} \
+          docker buildx imagetools create \
+            --tag ${{ steps.meta.outputs.tags }} \
             ${{ steps.meta.outputs.tags }}-amd64 \
             ${{ steps.meta.outputs.tags }}-arm64
-
-          docker manifest annotate ${{ steps.meta.outputs.tags }} ${{ steps.meta.outputs.tags }}-amd64 --os linux --arch amd64
-          docker manifest annotate ${{ steps.meta.outputs.tags }} ${{ steps.meta.outputs.tags }}-arm64 --os linux --arch arm64
-
-          docker manifest push ${{ steps.meta.outputs.tags }}
