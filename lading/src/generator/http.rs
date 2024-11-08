@@ -92,6 +92,9 @@ pub enum Error {
     /// Wrapper around [`hyper::http::Error`].
     #[error("HTTP error: {0}")]
     Http(#[from] hyper::http::Error),
+    //  OTLP traffic
+    //#[error("OTLP error: {0}")]
+    //Otlp(#[from] OtlpError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] ByteError),

@@ -109,6 +109,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(variant, g.seed, total_bytes, g.maximum_block_size)?;
         }
+        lading::generator::Inner::Otlp(g) => unimplemented!("Otlp not supported"),
         lading::generator::Inner::SplunkHec(_) => unimplemented!("SplunkHec not supported"),
         lading::generator::Inner::FileTree(_) => unimplemented!("FileTree not supported"),
         lading::generator::Inner::Grpc(g) => {

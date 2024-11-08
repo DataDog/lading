@@ -19,6 +19,7 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
+pub mod otlp;
 pub mod passthru_file;
 pub mod process_tree;
 pub mod procfs;
@@ -40,6 +41,9 @@ pub enum Error {
     /// See [`crate::generator::http::Error`] for details.
     #[error(transparent)]
     Http(#[from] http::Error),
+    /// See [`crate::generator::otlp::Error`] for details.
+    #[error(transparent)]
+    Otlp(#[from] otlp::Error),
     /// See [`crate::generator::splunk_hec::Error`] for details.
     #[error(transparent)]
     SplunkHec(#[from] splunk_hec::Error),
@@ -102,6 +106,8 @@ pub enum Inner {
     Udp(udp::Config),
     /// See [`crate::generator::http::Config`] for details.
     Http(http::Config),
+    /// See [`crate::generator::otlp::Config`] for details.
+    Otlp(otlp::Config),
     /// See [`crate::generator::splunk_hec::Config`] for details.
     SplunkHec(splunk_hec::Config),
     /// See [`crate::generator::file_gen::Config`] for details.
@@ -134,6 +140,8 @@ pub enum Server {
     Udp(udp::Udp),
     /// See [`crate::generator::http::Http`] for details.
     Http(http::Http),
+    /// See [`crate::generator::otlp::Otlp`] for details.
+    Otlp(otlp::Otlp),
     /// See [`crate::generator::splunk_hec::SplunkHec`] for details.
     SplunkHec(splunk_hec::SplunkHec),
     /// See [`crate::generator::file_gen::FileGen`] for details.
@@ -169,6 +177,7 @@ impl Server {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
             Inner::Http(conf) => Self::Http(http::Http::new(config.general, conf, shutdown)?),
+            Inner::Otlp(conf) => Self::Otlp(otlp::Otlp::new(config.general, conf, shutdown)?),
             Inner::SplunkHec(conf) => {
                 Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, conf, shutdown)?)
             }
@@ -228,6 +237,7 @@ impl Server {
             Server::Tcp(inner) => inner.spin().await?,
             Server::Udp(inner) => inner.spin().await?,
             Server::Http(inner) => inner.spin().await?,
+            Server::Otlp(inner) => inner.spin().await?,
             Server::SplunkHec(inner) => inner.spin().await?,
             Server::FileGen(inner) => inner.spin().await?,
             Server::FileTree(inner) => inner.spin().await?,
