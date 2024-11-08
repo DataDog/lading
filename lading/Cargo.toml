@@ -34,7 +34,7 @@ flate2 = { version = "1.0.34", default-features = false, features = [
   "rust_backend",
 ] }
 futures = "0.3.31"
-fuser = "0.15"
+fuser = { version = "0.15", optional = true }
 http = "0.2"
 http-serde = "1.1"
 hyper = { version = "0.14", features = ["client"] }
@@ -97,6 +97,7 @@ proptest = "1.5"
 
 [features]
 default = []
+logrotate_fs = ["fuser"]
 
 [lib]
 doctest = false

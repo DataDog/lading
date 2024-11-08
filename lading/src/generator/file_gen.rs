@@ -13,6 +13,7 @@
 //!
 
 pub mod logrotate;
+#[cfg(feature = "logrotate_fs")]
 pub mod logrotate_fs;
 pub mod traditional;
 
@@ -31,6 +32,7 @@ pub enum Error {
     /// Wrapper around [`logrotate::Error`].
     #[error(transparent)]
     Logrotate(#[from] logrotate::Error),
+    #[cfg(feature = "logrotate_fs")]
     /// Wrapper around [`logrotate_fs::Error`].
     #[error(transparent)]
     LogrotateFs(#[from] logrotate_fs::Error),
@@ -45,6 +47,7 @@ pub enum Config {
     Traditional(traditional::Config),
     /// See [`logrotate::Config`].
     Logrotate(logrotate::Config),
+    #[cfg(feature = "logrotate_fs")]
     /// See [`logrotate_fs::Config`].
     LogrotateFs(logrotate_fs::Config),
 }
@@ -59,6 +62,7 @@ pub enum FileGen {
     Traditional(traditional::Server),
     /// See [`logrotate::Server`] for details.
     Logrotate(logrotate::Server),
+    #[cfg(feature = "logrotate_fs")]
     /// See [`logrotate_fs::Server`] for details.
     LogrotateFs(logrotate_fs::Server),
 }
@@ -85,6 +89,7 @@ impl FileGen {
                 Self::Traditional(traditional::Server::new(general, c, shutdown)?)
             }
             Config::Logrotate(c) => Self::Logrotate(logrotate::Server::new(general, c, shutdown)?),
+            #[cfg(feature = "logrotate_fs")]
             Config::LogrotateFs(c) => {
                 Self::LogrotateFs(logrotate_fs::Server::new(general, c, shutdown)?)
             }
@@ -108,6 +113,7 @@ impl FileGen {
         match self {
             Self::Traditional(inner) => inner.spin().await?,
             Self::Logrotate(inner) => inner.spin().await?,
+            #[cfg(feature = "logrotate_fs")]
             Self::LogrotateFs(inner) => inner.spin().await?,
         };
 
