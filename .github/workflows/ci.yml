@@ -19,12 +19,12 @@ jobs:
             protobuf: true
             fuse: true
             components: ""
-            command: cargo check
+            command: cargo check --all-features
           - tool: fmt
             protobuf: true
             fuse: true
             components: "rustfmt"
-            command: cargo fmt --all -- --check
+            command: cargo fmt --all -- --check --all-features
           - tool: clippy
             protobuf: true
             fuse: true
@@ -62,7 +62,7 @@ jobs:
         uses: ./.github/actions/install-fuse
       - name: Install nextest
         uses: taiki-e/install-action@49be99c627fae102cb8c86414e9605869641782a # nextest
-      - run: cargo nextest run
+      - run: cargo nextest run --all-features
 
   integration-test:
     name: Integration Tests
