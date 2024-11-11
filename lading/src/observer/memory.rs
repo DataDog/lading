@@ -45,6 +45,7 @@ pub(crate) struct Rollup {
     pub(crate) pss_anon: Option<u64>,
     pub(crate) pss_file: Option<u64>,
     pub(crate) pss_shmem: Option<u64>,
+    pub(crate) anon_huge_pages: Option<u64>,
 }
 
 impl Rollup {
@@ -73,6 +74,7 @@ impl Rollup {
         let mut pss_anon = None;
         let mut pss_file = None;
         let mut pss_shmem = None;
+        let mut anon_huge_pages = None;
 
         for line in lines {
             let mut chars = line.char_indices().peekable();
@@ -117,6 +119,9 @@ impl Rollup {
                 "Pss_Shmem:" => {
                     pss_shmem = Some(value_in_kibibytes()?);
                 }
+                "AnonHugePages" => {
+                    anon_huge_pages = Some(value_in_kibibytes()?);
+                }
                 _ => {}
             }
         }
@@ -134,6 +139,7 @@ impl Rollup {
             pss_anon,
             pss_file,
             pss_shmem,
+            anon_huge_pages,
         })
     }
 }
@@ -159,6 +165,7 @@ pub(crate) struct Region {
     pub(crate) pss: u64,
     pub(crate) swap: u64,
     pub(crate) rss: u64,
+    pub(crate) anon_huge_pages: u64,
     pub(crate) pss_dirty: Option<u64>, // only present in 6.0+
 }
 // Best docs ref I have:
@@ -237,6 +244,7 @@ impl Region {
         let mut rss: Option<u64> = None;
         let mut swap: Option<u64> = None;
         let mut pss_dirty: Option<u64> = None;
+        let mut anon_huge_pages: Option<u64> = None;
 
         for line in lines {
             let mut chars = line.char_indices().peekable();
@@ -278,11 +286,16 @@ impl Region {
                 "Pss_Dirty:" => {
                     pss_dirty = Some(value_in_kibibytes()?);
                 }
+                "AnonHugePages:" => {
+                    anon_huge_pages = Some(value_in_kibibytes()?);
+                }
                 _ => {}
             }
         }
 
-        let (Some(size), Some(pss), Some(rss), Some(swap)) = (size, pss, rss, swap) else {
+        let (Some(size), Some(pss), Some(rss), Some(swap), Some(anon_huge_pages)) =
+            (size, pss, rss, swap, anon_huge_pages)
+        else {
             return Err(Error::Parsing(format!(
                 "Could not parse all value fields from region: '{contents}'"
             )));
@@ -301,6 +314,7 @@ impl Region {
             swap,
             rss,
             pss_dirty,
+            anon_huge_pages,
         })
     }
 }
@@ -311,6 +325,7 @@ pub(crate) struct AggrMeasure {
     pub(crate) pss: u64,
     pub(crate) swap: u64,
     pub(crate) rss: u64,
+    pub(crate) anon_huge_pages: u64,
 }
 
 impl Regions {
@@ -327,6 +342,7 @@ impl Regions {
             aggr.pss = aggr.pss.saturating_add(region.pss);
             aggr.swap = aggr.swap.saturating_add(aggr.swap);
             aggr.rss = aggr.rss.saturating_add(region.rss);
+            aggr.anon_huge_pages = aggr.anon_huge_pages.saturating_add(region.anon_huge_pages);
         }
 
         aggr
@@ -343,11 +359,13 @@ impl Regions {
                 pss: 0,
                 swap: 0,
                 rss: 0,
+                anon_huge_pages: 0,
             });
             entry.size += region.size;
             entry.pss += region.pss;
             entry.swap += region.swap;
             entry.rss += region.rss;
+            entry.anon_huge_pages += region.anon_huge_pages;
         }
 
         map.into_iter().collect()
@@ -441,7 +459,7 @@ Private_Dirty:         0 kB
 Referenced:            8 kB
 Anonymous:             0 kB
 LazyFree:              0 kB
-AnonHugePages:         0 kB
+AnonHugePages:        12 kB
 ShmemPmdMapped:        0 kB
 FilePmdMapped:         0 kB
 Shared_Hugetlb:        0 kB
@@ -484,6 +502,7 @@ VmFlags: rd ex mr mw me de sd";
         assert_eq!(region_two.pss, 2 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_two.swap, 0 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_two.rss, 8 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.anon_huge_pages, 12 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_two.pss_dirty, Some(0));
     }
 
