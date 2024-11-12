@@ -26,10 +26,11 @@ tonic = { version = "0.9", default-features = false, features = [
   "transport",
   "prost",
 ] }
-tower = { version = "0.4", default-features = false, features = [
+tower = { workspace = true, features = [
   "timeout",
   "limit",
   "load-shed",
+  "util",
 ] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }

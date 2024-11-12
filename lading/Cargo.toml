@@ -75,10 +75,11 @@ tokio = { workspace = true, features = [
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { version = "0.9" }
-tower = { version = "0.4", default-features = false, features = [
+tower = { workspace = true, features = [
   "timeout",
   "limit",
   "load-shed",
+  "util",
 ] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
