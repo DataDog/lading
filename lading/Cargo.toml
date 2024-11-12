@@ -19,6 +19,9 @@ lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
+opentelemetry = { version = "0.26", features = ["metrics", "otel_unstable"] }
+opentelemetry_sdk = { version = "0.26", features = ["metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.26.0", features = ["tonic", "metrics", "http-proto", "http-json"] }
 
 async-compression = { version = "0.4.17", features = ["tokio", "zstd"] }
 average = { version = "0.15", default-features = false, features = [] }
