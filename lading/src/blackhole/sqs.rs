@@ -9,7 +9,7 @@
 use std::{fmt::Write, net::SocketAddr};
 
 use hyper::{
-    body,
+    body::HttpBody,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
@@ -243,7 +243,7 @@ async fn srv(
 ) -> Result<Response<Body>, Error> {
     requests_received.increment(1);
 
-    let bytes = body::to_bytes(req).await?;
+    let bytes = req.collect().await?.to_bytes();
     bytes_received.increment(bytes.len() as u64);
 
     let action: Action = serde_qs::from_bytes(&bytes)?;

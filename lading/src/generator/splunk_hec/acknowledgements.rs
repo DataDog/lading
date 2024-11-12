@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use futures::Future;
 use http::{header::AUTHORIZATION, Method, Request, StatusCode, Uri};
-use hyper::{client::HttpConnector, Body, Client};
+use hyper::{body::HttpBody, client::HttpConnector, Body, Client};
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
@@ -202,7 +202,7 @@ async fn ack_request(
             let status = parts.status;
             counter!("ack_status_request_ok", "channel_id" => channel_id.clone(), "status" => status.to_string()).increment(1);
             if status == StatusCode::OK {
-                let body = hyper::body::to_bytes(body).await?;
+                let body = body.collect().await?.to_bytes();
                 let ack_status = serde_json::from_slice::<HecAckStatusResponse>(&body)?;
 
                 let mut ack_ids_acked: u32 = 0;

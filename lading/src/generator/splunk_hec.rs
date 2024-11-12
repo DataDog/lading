@@ -16,7 +16,7 @@
 
 mod acknowledgements;
 
-use std::{num::NonZeroU32, thread, time::Duration};
+use std::{future::ready, num::NonZeroU32, thread, time::Duration};
 
 use acknowledgements::Channels;
 use byte_unit::ByteError;
@@ -24,7 +24,7 @@ use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
 };
-use hyper::{client::HttpConnector, Body, Client};
+use hyper::{body::HttpBody, client::HttpConnector, Body, Client};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
@@ -120,6 +120,9 @@ pub enum Error {
     /// Wrapper around [`acknowledgements::Error`]
     #[error(transparent)]
     Acknowledge(#[from] acknowledgements::Error),
+    /// Wrapper around [`hyper::Error`].
+    #[error("HTTP error: {0}")]
+    Hyper(#[from] hyper::Error),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -337,14 +340,10 @@ async fn send_hec_request(
                         let mut status_labels = labels.clone();
                         status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
                         counter!("request_ok", &status_labels).increment(1);
-                        channel
-                            .send(async {
-                                let body_bytes = hyper::body::to_bytes(body).await.expect("unable to convert response body to bytes");
-                                let hec_ack_response =
-                                    serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("unable to parse response body");
-                                hec_ack_response.ack_id
-                            })
-                            .await?;
+                        let body_bytes = body.collect().await?.to_bytes();
+                        let hec_ack_response =
+                            serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("unable to parse response body");
+                        channel.send(ready(hec_ack_response.ack_id)).await?;
                     }
                     Err(err) => {
                         let mut error_labels = labels.clone();
