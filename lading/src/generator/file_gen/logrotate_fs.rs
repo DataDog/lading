@@ -366,6 +366,7 @@ impl Filesystem for LogrotateFS {
     ) {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
+        state.advance_time(tick);
 
         counter!("fs_release").increment(1);
 
@@ -376,10 +377,8 @@ impl Filesystem for LogrotateFS {
         };
 
         if let Some(file_handle) = file_handle {
-            // Close the file in the model, advance time.
+            // Close the file in the model
             state.close_file(tick, file_handle);
-            state.advance_time(tick);
-
             reply.ok();
         } else {
             reply.error(ENOENT);
