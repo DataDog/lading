@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body,
+    body::HttpBody,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Method, Request, StatusCode,
@@ -127,7 +127,7 @@ impl From<&SocketCounters> for SocketMetrics {
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body = body::to_bytes(body).await?;
+    let body = body.collect().await?.to_bytes();
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");

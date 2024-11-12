@@ -10,7 +10,8 @@ use std::{net::SocketAddr, time::Duration};
 
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
-    body, header,
+    body::HttpBody,
+    header,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
@@ -137,7 +138,7 @@ async fn srv(
 
     let (parts, body) = req.into_parts();
 
-    let bytes = body::to_bytes(body).await?;
+    let bytes = body.collect().await?.to_bytes();
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
