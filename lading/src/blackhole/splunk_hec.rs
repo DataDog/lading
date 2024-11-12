@@ -16,7 +16,8 @@ use std::{
 };
 
 use hyper::{
-    body, header,
+    body::HttpBody,
+    header,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, Server, StatusCode,
@@ -93,7 +94,7 @@ async fn srv(
     metrics::counter!("requests_received", &*labels).increment(1);
 
     let (parts, body) = req.into_parts();
-    let bytes = body::to_bytes(body).await?;
+    let bytes = body.collect().await?.to_bytes();
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),

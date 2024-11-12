@@ -37,7 +37,7 @@ futures = "0.3.31"
 fuser = { version = "0.15", optional = true }
 http = "0.2"
 http-serde = "1.1"
-hyper = { version = "0.14", features = ["client"] }
+hyper = { workspace = true, features = ["client", "backports", "deprecated"] }
 is_executable = "1.0.4"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
