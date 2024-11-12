@@ -16,14 +16,13 @@ unused-allowed-license = "allow"
 
 [sources]
 unknown-git = "deny"
-allow-git = ["http://github.com/metrics-rs/metrics"]
 
 [advisories]
 version = 2
 ignore = [
-  # atty is unsound for some custom allocators on Windows and is unmaintained
-  "RUSTSEC-2021-0145",
-  "RUSTSEC-2024-0370"  # proc-macro-error is unmaintained
+  "RUSTSEC-2024-0370", # proc-macro-error is unmaintained
+  "RUSTSEC-2024-0384", # instant crate is unmaintained
+  "RUSTSEC-2024-0387"  # opentelemetry_api is unmaintained
 ]
 
 [bans]
