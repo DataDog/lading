@@ -367,6 +367,8 @@ impl Filesystem for LogrotateFS {
         let tick = self.get_current_tick();
         let mut state = self.state.lock().expect("lock poisoned");
 
+        counter!("fs_release").increment(1);
+
         // Remove `fh->FileHandle` from the set of open_files.
         let file_handle = {
             let mut open_files = self.open_files.lock().expect("lock poisoned");
