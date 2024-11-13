@@ -1268,10 +1268,8 @@ mod test {
                 if file.unlinked && file.read_only {
                     if file.open_handles > 0 {
                         // Should remain in state.nodes
-                        assert!(
-                        state.nodes.contains_key(&inode),
-                        "Unlinked, read-only file with open handles should remain in state.nodes"
-                    );
+                        assert!(state.nodes.contains_key(&inode),
+                                "Unlinked, read-only file with open handles should remain in state.nodes");
 
                         // There should be valid file handles pointing to this inode
                         let valid_handles: Vec<_> = state
@@ -1286,16 +1284,12 @@ mod test {
                             })
                             .collect();
 
-                        assert!(
-                        !valid_handles.is_empty(),
-                        "Unlinked, read-only file with open handles should have valid file handles"
-                    );
+                        assert!(!valid_handles.is_empty(),
+                                "Unlinked, read-only file with open handles should have valid file handles");
                     } else {
                         // Should be removed from state.nodes after GC
-                        assert!(
-                        !state.nodes.contains_key(&inode),
-                        "Unlinked, read-only file with zero open handles should be removed from state.nodes"
-                    );
+                        assert!(!state.nodes.contains_key(&inode),
+                                "Unlinked, read-only file with zero open handles should be removed from state.nodes");
                     }
                 }
             }
