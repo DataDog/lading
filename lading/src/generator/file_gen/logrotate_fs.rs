@@ -370,14 +370,14 @@ impl Filesystem for LogrotateFS {
 
         counter!("fs_release").increment(1);
 
-        // Remove the FileHandle from the mapping
+        // Remove `fh->FileHandle` from the set of open_files.
         let file_handle = {
             let mut open_files = self.open_files.lock().expect("lock poisoned");
             open_files.remove(&fh)
         };
 
         if let Some(file_handle) = file_handle {
-            // Close the file in the state
+            // Close the file in the model
             state.close_file(tick, file_handle);
             reply.ok();
         } else {

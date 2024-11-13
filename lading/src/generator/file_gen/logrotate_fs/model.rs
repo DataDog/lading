@@ -298,6 +298,7 @@ pub(crate) struct State {
     next_file_handle: u64,
     inode_scratch: Vec<Inode>,
     load_profile: LoadProfile,
+    valid_file_handles: FxHashMap<u64, Inode>, // Track valid FileHandle IDs -> Inode
 }
 
 impl std::fmt::Debug for State {
@@ -387,6 +388,7 @@ impl State {
             next_file_handle: 0,
             inode_scratch: Vec::with_capacity(concurrent_logs as usize),
             load_profile,
+            valid_file_handles: FxHashMap::default(),
         };
 
         if concurrent_logs == 0 {
@@ -501,6 +503,7 @@ impl State {
             file.open(now);
             let id = self.next_file_handle;
             self.next_file_handle = self.next_file_handle.wrapping_add(1);
+            self.valid_file_handles.insert(id, inode);
             Some(FileHandle { id, inode })
         } else {
             None
@@ -519,6 +522,7 @@ impl State {
 
         if let Some(Node::File { file, .. }) = self.nodes.get_mut(&handle.inode) {
             file.close(now);
+            self.valid_file_handles.remove(&handle.id);
         } else {
             panic!("Invalid file handle");
         }
@@ -815,6 +819,17 @@ impl State {
         now: Tick,
     ) -> Option<Bytes> {
         self.advance_time(now);
+
+        // Check if the FileHandle is still valid and maps to the correct inode
+        if let Some(&inode) = self.valid_file_handles.get(&file_handle.id) {
+            // Doesn't match the node.
+            if inode != file_handle.inode {
+                return None;
+            }
+        } else {
+            // No longer valid.
+            return None;
+        }
 
         let inode = file_handle.inode;
         match self.nodes.get_mut(&inode) {
@@ -1238,6 +1253,45 @@ mod test {
                     "Rotated file size {actual} not in expected range [{min_size}, {max_size}]",
                     actual = file.bytes_written
                 );
+            }
+        }
+
+        // Property 9: Unlinked files remain readable so long as there is a
+        // valid file handle.
+        //
+        // Files that are unlinked and read-only should remain in the state's
+        // nodes as long as they have open handles. They should be removed only
+        // when open_handles == 0. Reads should still be possible via valid open
+        // file handles.
+        for (&inode, node) in &state.nodes {
+            if let Node::File { file } = node {
+                if file.unlinked && file.read_only {
+                    if file.open_handles > 0 {
+                        // Should remain in state.nodes
+                        assert!(state.nodes.contains_key(&inode),
+                                "Unlinked, read-only file with open handles should remain in state.nodes");
+
+                        // There should be valid file handles pointing to this inode
+                        let valid_handles: Vec<_> = state
+                            .valid_file_handles
+                            .iter()
+                            .filter_map(|(&handle_id, &fh_inode)| {
+                                if fh_inode == inode {
+                                    Some(handle_id)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        assert!(!valid_handles.is_empty(),
+                                "Unlinked, read-only file with open handles should have valid file handles");
+                    } else {
+                        // Should be removed from state.nodes after GC
+                        assert!(!state.nodes.contains_key(&inode),
+                                "Unlinked, read-only file with zero open handles should be removed from state.nodes");
+                    }
+                }
             }
         }
     }
