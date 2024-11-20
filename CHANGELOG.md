@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - logrotate_fs is now behind a feature flag and not enabled in the default
   build. It remains enabled in the release artifact.
+- On linux, transparent huge page usage is now collected and available
+  alongside existing `smaps_rollup` and `smaps_by_pathname` data.
 
 ## [0.24.0]
 ## Added

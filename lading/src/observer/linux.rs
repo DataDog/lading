@@ -357,6 +357,8 @@ impl Sampler {
                         gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
                         gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
                         gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
+                        gauge!("smaps.anon_huge_pages.by_pathname", &labels)
+                            .set(measures.anon_huge_pages as f64);
                     }
 
                     let measures = memory_regions.aggregate();
@@ -396,6 +398,9 @@ impl Sampler {
                     }
                     if let Some(v) = rollup.pss_shmem {
                         gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.anon_huge_pages {
+                        gauge!("smaps_rollup.anon_huge_pages", &labels).set(v as f64);
                     }
                 });
             }
