@@ -32,6 +32,10 @@ struct Args {
     /// path to line-delimited capture file
     capture_path: String,
 
+    /// path to a second capture file for comparison
+    #[clap(short, long)]
+    comparison_capture_path: Option<String>,
+
     /// warmup period in seconds - data points before this time will be ignored
     #[clap(long)]
     warmup: Option<u64>,
@@ -47,20 +51,15 @@ pub enum Error {
     Deserialize(#[from] serde_json::Error),
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::FULL)
-        .with_ansi(false)
-        .finish()
-        .init();
+concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
 
-    info!("Welcome to captool");
-    let args = Args::parse();
-
-    let capture_path = std::path::Path::new(&args.capture_path);
+async fn process_capture_path(
+    args: &Args,
+    path: &str,
+) -> Result<Option<Vec<(String, Estimator)>>, Error> {
+    let capture_path = std::path::Path::new(&path);
     if !capture_path.exists() {
-        error!("Capture file {} does not exist", &args.capture_path);
+        error!("Capture file {path} does not exist");
         return Err(Error::InvalidArgs);
     }
 
@@ -106,7 +105,7 @@ async fn main() -> Result<(), Error> {
         for (name, kind) in names {
             println!("{kind}: {name}");
         }
-        return Ok(());
+        return Ok(None);
     }
 
     if let Some(metric) = &args.metric {
@@ -155,24 +154,107 @@ async fn main() -> Result<(), Error> {
             entry.1.push(line.value.as_f64());
         }
 
-        concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
-        let is_monotonic = |v: &Vec<_>| v.windows(2).all(|w| w[0] <= w[1]);
+        // let is_monotonic = |v: &Vec<_>| v.windows(2).all(|w| w[0] <= w[1]);
+
+        let mut estimators = vec![];
 
         for (_, (labels, values)) in context_map.iter() {
             let s: Estimator = values.iter().copied().collect();
-            info!(
-                "{metric}[{labels}]: min: {}, mean: {}, max: {}, is_monotonic: {}",
-                s.min(),
-                s.mean(),
-                s.max(),
-                is_monotonic(values),
-                labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
-            );
+            // println!(
+            //     "{metric}[{labels}]: min: {}, mean: {}, max: {}, is_monotonic: {}",
+            //     s.min(),
+            //     s.mean(),
+            //     s.max(),
+            //     is_monotonic(values),
+            //     labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
+            // );
+
+            let mut context = labels
+                .iter()
+                .filter(|v| !v.starts_with("replicate:") && !v.starts_with("pid:"))
+                .cloned()
+                .collect::<Vec<_>>();
+            context.sort();
+            let context = context.join(",");
+
+            estimators.push((context, s));
         }
 
         if args.dump_values {
             for line in &filtered {
                 println!("{}: {}", line.fetch_index, line.value);
+            }
+        }
+
+        return Ok(Some(estimators));
+    }
+
+    Ok(None)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::FULL)
+        .with_ansi(false)
+        .finish()
+        .init();
+
+    info!("Welcome to captool");
+    let args = Args::parse();
+
+    let cap1 = process_capture_path(&args, &args.capture_path).await?;
+
+    if let Some(comparison_capture_path) = &args.comparison_capture_path {
+        let metric = args.metric.clone().unwrap();
+
+        let cap1 = cap1.unwrap();
+        let cap2 = process_capture_path(&args, comparison_capture_path)
+            .await?
+            .unwrap();
+
+        let all_contexts = cap1
+            .iter()
+            .map(|(labels, _)| labels.clone())
+            .chain(cap2.iter().map(|(labels, _)| labels.clone()))
+            .collect::<BTreeSet<_>>();
+
+        for label in &all_contexts {
+            let cap1_lookup = &cap1.iter().find(|(labels, _)| labels.contains(label));
+            let cap2_lookup = &cap2.iter().find(|(labels, _)| labels.contains(label));
+
+            if cap1_lookup.is_none() {
+                println!("{} only present in cap2", label);
+                continue;
+            }
+            if cap2_lookup.is_none() {
+                println!("{} only present in cap1", label);
+                continue;
+            }
+
+            let cap1_est = &cap1_lookup.unwrap().1;
+            let cap2_est = &cap2_lookup.unwrap().1;
+
+            let min = cap1_est.min() - cap2_est.min();
+            let mean = cap1_est.mean() - cap2_est.mean();
+            let max = cap1_est.max() - cap2_est.max();
+
+            if min.abs() > 0.01 || mean.abs() > 0.01 || max.abs() > 0.01 {
+                println!("{metric}[{label}]");
+                println!(
+                    "\tA: min: {}, mean: {}, max: {}",
+                    cap1_est.min(),
+                    cap1_est.mean(),
+                    cap1_est.max(),
+                );
+                println!(
+                    "\tB: min: {}, mean: {}, max: {}",
+                    cap2_est.min(),
+                    cap2_est.mean(),
+                    cap2_est.max(),
+                );
+                println!("\tDiff min: {min}, mean: {mean}, max: {max}");
             }
         }
     }
