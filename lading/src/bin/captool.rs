@@ -29,8 +29,12 @@ struct Args {
     #[clap(short, long)]
     dump_values: bool,
 
-    /// Path to line-delimited capture file
+    /// path to line-delimited capture file
     capture_path: String,
+
+    /// warmup period in seconds - data points before this time will be ignored
+    #[clap(long)]
+    warmup: Option<u64>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -117,6 +121,13 @@ async fn main() -> Result<(), Error> {
         // Use a BTreeSet to ensure that the tags are sorted
         let filtered: Vec<_> = lines
             .filter(|line| &line.metric_name == metric)
+            .filter(|line| {
+                if let Some(warmup) = args.warmup {
+                    line.fetch_index >= warmup
+                } else {
+                    true
+                }
+            })
             .collect()
             .await;
 
