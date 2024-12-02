@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - logrotate_fs is now behind a feature flag and not enabled in the default
   build. It remains enabled in the release artifact.
 - The build now includes http1 and http2 support. Actual usage and availability may vary.
+- captool: add support for warmup period
 
 ## [0.24.0]
 ## Added
