@@ -17,7 +17,7 @@
 
 use std::{
     io,
-    num::NonZeroU32,
+    num::NonZeroI32,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::atomic::{AtomicU64, Ordering},
@@ -45,10 +45,10 @@ pub(crate) static RSS_BYTES_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Type used to receive the target PID once it is running.
 #[allow(clippy::module_name_repetitions)]
-pub type TargetPidReceiver = tokio::sync::broadcast::Receiver<Option<u32>>;
+pub type TargetPidReceiver = tokio::sync::broadcast::Receiver<Option<i32>>;
 
 #[allow(clippy::module_name_repetitions)]
-type TargetPidSender = tokio::sync::broadcast::Sender<Option<u32>>;
+type TargetPidSender = tokio::sync::broadcast::Sender<Option<i32>>;
 
 /// Errors produced by [`Meta`]
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -112,13 +112,13 @@ pub enum Error {
     SigTerm(Errno),
     /// The target PID does not exist or is invalid
     #[error("PID not found: {0}")]
-    PidNotFound(u32),
+    PidNotFound(i32),
     /// The target process exited unexpectedly
     #[error("target exited unexpectedly: {0:?}")]
     TargetExited(Option<ExitStatus>),
     /// See [`SendError`]
     #[error(transparent)]
-    Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
+    Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
     /// Process already finished error
     #[error("Child has already been polled to completion")]
     ProcessFinished,
@@ -140,7 +140,7 @@ pub struct DockerConfig {
 #[derive(Debug, PartialEq, Eq)]
 pub struct PidConfig {
     /// PID to watch
-    pub pid: NonZeroU32,
+    pub pid: NonZeroI32,
 }
 
 /// Configuration for binary launch mode
@@ -352,11 +352,7 @@ impl Server {
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
-        let raw_pid: i32 = config
-            .pid
-            .get()
-            .try_into()
-            .map_err(|_| Error::PidNotFound(config.pid.get()))?;
+        let raw_pid: i32 = config.pid.get();
         let pid = Pid::from_raw(raw_pid);
 
         // Verify that the given PID is valid
@@ -443,7 +439,11 @@ impl Server {
             .envs(config.environment_variables.iter());
         let mut target_child = target_cmd.spawn().map_err(Error::TargetSpawn)?;
         let target_id = target_child.id().ok_or(Error::ProcessFinished)?;
-        pid_snd.send(Some(target_id))?;
+        pid_snd.send(Some(
+            target_id
+                .try_into()
+                .expect("could not convert target pid to i32"),
+        ))?;
         drop(pid_snd);
         target_running.signal();
 

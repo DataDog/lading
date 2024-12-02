@@ -49,7 +49,7 @@ enum Error {
     #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
-    Send(#[from] tokio::sync::broadcast::error::SendError<Option<u32>>),
+    Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
     #[error("Maximum RSS bytes limit exceeds u64::MAX {0}")]
     Meta(#[from] lading::target::MetaError),
     #[error("Parsing Prometheus address failed: {0}")]
@@ -267,7 +267,9 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let target = if ops.no_target {
         None
     } else if let Some(pid) = ops.target_pid {
-        Some(target::Config::Pid(target::PidConfig { pid }))
+        Some(target::Config::Pid(target::PidConfig {
+            pid: pid.try_into().expect("Could not convert pid to i32"),
+        }))
     } else if let Some(name) = &ops.target_container {
         Some(target::Config::Docker(target::DockerConfig {
             name: name.clone(),
