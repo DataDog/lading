@@ -3,8 +3,8 @@ use std::{collections::VecDeque, io, path::Path, sync::atomic::Ordering};
 use cgroups_rs::cgroup::Cgroup;
 use metrics::gauge;
 use nix::errno::Errno;
-use procfs::process::Process;
 use procfs::ProcError::PermissionDenied;
+use procfs::{process::Process, Current};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, warn};
 
@@ -89,8 +89,8 @@ impl Gauge {
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: u32) -> Result<Self, Error> {
-        let parent = Process::new(parent_pid.try_into().expect("PID coercion failed"))?;
+    pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
+        let parent = Process::new(parent_pid)?;
 
         Ok(Self {
             parent,
@@ -126,9 +126,7 @@ impl Sampler {
         // later for calculating per-process uptime. Because we capture this one
         // we will be slightly out of date with each subsequent iteration of the
         // loop. We do not believe this to be an issue.
-        let uptime_seconds: f64 = procfs::Uptime::new()
-            .expect("could not query machine uptime")
-            .uptime; // seconds since boot
+        let uptime_seconds: f64 = procfs::Uptime::current()?.uptime; // seconds since boot
         let uptime_ticks: u64 = uptime_seconds.round() as u64 * self.ticks_per_second; // CPU-ticks since boot
 
         // Clear values from previous sample run. This ensures that processes
