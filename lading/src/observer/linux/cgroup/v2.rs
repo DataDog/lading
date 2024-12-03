@@ -1,7 +1,11 @@
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use metrics::gauge;
 use tokio::fs;
+use tracing::debug;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -68,7 +72,7 @@ pub(crate) async fn poll(path: PathBuf, labels: &[(String, String)]) -> Result<(
                 gauge!(metric_prefix, labels).set(value);
             } else {
                 // Key-value pairs
-                if kv_pairs(content, &metric_prefix, labels).is_err() {
+                if kv_pairs(&file_path, content, &metric_prefix, labels).is_err() {
                     // File may fail to parse, for instance cgroup.controllers
                     // is a list of strings.
                     continue;
@@ -80,9 +84,31 @@ pub(crate) async fn poll(path: PathBuf, labels: &[(String, String)]) -> Result<(
     Ok(())
 }
 
-fn kv_pairs(content: &str, metric_prefix: &str, labels: &[(String, String)]) -> Result<(), Error> {
+fn kv_pairs(
+    file_path: &Path,
+    content: &str,
+    metric_prefix: &str,
+    labels: &[(String, String)],
+) -> Result<(), Error> {
     for line in content.lines() {
         let mut parts = line.split_whitespace();
+        if let Some(key) = parts.next() {
+            if let Some(value_str) = parts.next() {
+                let value: f64 = value_str.parse()?;
+                let metric_name = format!("{metric_prefix}.{key}");
+                gauge!(metric_name, labels).set(value);
+            } else {
+                debug!(
+                    "[{path}] missing value in key/value pair: {content}",
+                    path = file_path.to_string_lossy(),
+                );
+            }
+        } else {
+            debug!(
+                "[{path} missing key in key/value pair: {content}",
+                path = file_path.to_string_lossy(),
+            );
+        }
         let key = parts.next().expect("malformed key-value pair");
         let value_str = parts.next().expect("malformed key-value pair");
         let value: f64 = value_str.parse()?;
