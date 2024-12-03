@@ -43,7 +43,7 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 }
 
 /// Polls for any cgroup metrics that can be read, v2 version.
-pub(crate) async fn poll(file_path: PathBuf, labels: &[(String, String)]) -> Result<(), Error> {
+pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
     // Read all files in the cgroup `path` and create metrics for them. If we
     // lack permissions to read we skip the file. We do not use ? to allow for
     // the maximal number of files to be read.

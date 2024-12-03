@@ -6,7 +6,7 @@ use std::{collections::VecDeque, io};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashSet;
-use tracing::error;
+use tracing::{debug, error};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -80,13 +80,24 @@ impl Sampler {
         // Now iterate the pids and collect the unique names of the cgroups associated.
         let mut cgroups = FxHashSet::default();
         for pid in pids {
-            let cgroup_path = v2::get_path(pid).await?;
-            cgroups.insert(cgroup_path);
+            match v2::get_path(pid).await {
+                Ok(cgroup_path) => {
+                    cgroups.insert(cgroup_path);
+                }
+                Err(err) => {
+                    debug!("Unable to get cgroup path for pid {pid}: {err}");
+                }
+            }
         }
 
         // Now iterate the cgroups and collect samples.
         for cgroup_path in cgroups {
-            v2::poll(cgroup_path, &self.labels).await?;
+            if let Err(err) = v2::poll(&cgroup_path, &self.labels).await {
+                error!(
+                    "Unable to poll cgroup metrics for {path}: {err}",
+                    path = cgroup_path.to_string_lossy()
+                );
+            }
         }
         Ok(())
     }
