@@ -39,7 +39,7 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 }
 
 /// Polls for any cgroup metrics that can be read, v2 version.
-pub(crate) async fn poll(path: PathBuf) -> Result<(), Error> {
+pub(crate) async fn poll(path: PathBuf, labels: &[(String, String)]) -> Result<(), Error> {
     let mut entries = fs::read_dir(&path).await?;
 
     while let Some(entry) = entries.next_entry().await? {
@@ -65,10 +65,10 @@ pub(crate) async fn poll(path: PathBuf) -> Result<(), Error> {
             // name.
             if let Ok(value) = content.parse::<f64>() {
                 // Single-valued
-                gauge!(metric_prefix).set(value);
+                gauge!(metric_prefix, labels).set(value);
             } else {
                 // Key-value pairs
-                if kv_pairs(content, &metric_prefix).is_err() {
+                if kv_pairs(content, &metric_prefix, labels).is_err() {
                     // File may fail to parse, for instance cgroup.controllers
                     // is a list of strings.
                     continue;
@@ -80,14 +80,14 @@ pub(crate) async fn poll(path: PathBuf) -> Result<(), Error> {
     Ok(())
 }
 
-fn kv_pairs(content: &str, metric_prefix: &str) -> Result<(), Error> {
+fn kv_pairs(content: &str, metric_prefix: &str, labels: &[(String, String)]) -> Result<(), Error> {
     for line in content.lines() {
         let mut parts = line.split_whitespace();
         let key = parts.next().expect("malformed key-value pair");
         let value_str = parts.next().expect("malformed key-value pair");
         let value: f64 = value_str.parse()?;
         let metric_name = format!("{metric_prefix}.{key}");
-        gauge!(metric_name).set(value);
+        gauge!(metric_name, labels).set(value);
     }
     Ok(())
 }

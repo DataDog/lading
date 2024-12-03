@@ -292,10 +292,10 @@ impl Sampler {
             let vsize: u64 = stats.vsize;
 
             let labels = [
-                ("pid", format!("{pid}")),
-                ("exe", basename.clone()),
-                ("cmdline", cmdline.clone()),
-                ("comm", comm.clone()),
+                (String::from("pid"), format!("{pid}")),
+                (String::from("exe"), basename.clone()),
+                (String::from("cmdline"), cmdline.clone()),
+                (String::from("comm"), comm.clone()),
             ];
 
             // Number of pages that the process has in real memory.
@@ -363,8 +363,8 @@ impl Sampler {
                     let labels = [
                         ("pid", format!("{pid}")),
                         ("exe", basename.clone()),
-                        ("comm", comm.clone()),
                         ("cmdline", cmdline.clone()),
+                        ("comm", comm.clone()),
                     ];
 
                     gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
@@ -404,7 +404,7 @@ impl Sampler {
             // using the same heuristic as kubernetes:
             // total_usage - inactive_file
             let cgroup_path = v2::get_path(pid).await?;
-            v2::poll(cgroup_path).await?;
+            v2::poll(cgroup_path, &labels).await?;
         }
 
         gauge!("num_processes").set(total_processes as f64);
