@@ -109,11 +109,6 @@ fn kv_pairs(
                 path = file_path.to_string_lossy(),
             );
         }
-        let key = parts.next().expect("malformed key-value pair");
-        let value_str = parts.next().expect("malformed key-value pair");
-        let value: f64 = value_str.parse()?;
-        let metric_name = format!("{metric_prefix}.{key}");
-        gauge!(metric_name, labels).set(value);
     }
     Ok(())
 }
