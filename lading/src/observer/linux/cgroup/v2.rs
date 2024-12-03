@@ -43,41 +43,84 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 }
 
 /// Polls for any cgroup metrics that can be read, v2 version.
-pub(crate) async fn poll(path: PathBuf, labels: &[(String, String)]) -> Result<(), Error> {
-    let mut entries = fs::read_dir(&path).await?;
+pub(crate) async fn poll(file_path: PathBuf, labels: &[(String, String)]) -> Result<(), Error> {
+    // Read all files in the cgroup `path` and create metrics for them. If we
+    // lack permissions to read we skip the file. We do not use ? to allow for
+    // the maximal number of files to be read.
+    match fs::read_dir(&file_path).await {
+        Ok(mut entries) => {
+            match entries.next_entry().await {
+                Ok(maybe_entry) => {
+                    if let Some(entry) = maybe_entry {
+                        match entry.metadata().await {
+                            Ok(metadata) => {
+                                if metadata.is_file() {
+                                    let file_name = entry.file_name();
+                                    let metric_prefix = match file_name.to_str() {
+                                        Some(s) => String::from(s),
+                                        None => {
+                                            // Skip files with non-UTF-8 names
+                                            return Ok(());
+                                        }
+                                    };
+                                    let file_path = entry.path();
 
-    while let Some(entry) = entries.next_entry().await? {
-        let metadata = entry.metadata().await?;
-        if metadata.is_file() {
-            let file_name = entry.file_name();
-            let metric_prefix = match file_name.to_str() {
-                Some(s) => String::from(s),
-                None => {
-                    // Skip files with non-UTF-8 names
-                    continue;
+                                    match fs::read_to_string(&file_path).await {
+                                        Ok(content) => {
+                                            let content = content.trim();
+
+                                            // Cgroup files that have values are either single-valued or
+                                            // key-value pairs. For single-valued files, we create a single
+                                            // metric and for key-value pairs, we create metrics with the same
+                                            // scheme as single-valued files but tack on the key to the metric
+                                            // name.
+                                            if let Ok(value) = content.parse::<f64>() {
+                                                // Single-valued
+                                                gauge!(metric_prefix, labels).set(value);
+                                            } else {
+                                                // Key-value pairs
+                                                if kv_pairs(
+                                                    &file_path,
+                                                    content,
+                                                    &metric_prefix,
+                                                    labels,
+                                                )
+                                                .is_err()
+                                                {
+                                                    // File may fail to parse, for instance cgroup.controllers
+                                                    // is a list of strings.
+                                                    return Ok(());
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            debug!(
+                                                "[{path}] failed to read cgroup file contents: {err:?}",
+                                                path = file_path.to_string_lossy()
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                debug!(
+                                    "[{path}] failed to read metadata for cgroup file: {err:?}",
+                                    path = file_path.to_string_lossy()
+                                );
+                            }
+                        }
+                    }
                 }
-            };
-            let file_path = entry.path();
-
-            let content = fs::read_to_string(&file_path).await?;
-            let content = content.trim();
-
-            // Cgroup files that have values are either single-valued or
-            // key-value pairs. For single-valued files, we create a single
-            // metric and for key-value pairs, we create metrics with the same
-            // scheme as single-valued files but tack on the key to the metric
-            // name.
-            if let Ok(value) = content.parse::<f64>() {
-                // Single-valued
-                gauge!(metric_prefix, labels).set(value);
-            } else {
-                // Key-value pairs
-                if kv_pairs(&file_path, content, &metric_prefix, labels).is_err() {
-                    // File may fail to parse, for instance cgroup.controllers
-                    // is a list of strings.
-                    continue;
+                Err(err) => {
+                    debug!(
+                        "[{path}] failed to read entry in cgroup directory: {err:?}",
+                        path = file_path.to_string_lossy()
+                    );
                 }
             }
+        }
+        Err(err) => {
+            debug!("Failed to read cgroup directory: {err:?}",);
         }
     }
 
@@ -99,13 +142,13 @@ fn kv_pairs(
                 gauge!(metric_name, labels).set(value);
             } else {
                 debug!(
-                    "[{path}] missing value in key/value pair: {content}",
+                    "[{path}] missing value in key/value pair, skipping",
                     path = file_path.to_string_lossy(),
                 );
             }
         } else {
             debug!(
-                "[{path} missing key in key/value pair: {content}",
+                "[{path} missing key in key/value pair, skipping",
                 path = file_path.to_string_lossy(),
             );
         }
