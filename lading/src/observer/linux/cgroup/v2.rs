@@ -1,3 +1,4 @@
+use core::f64;
 use std::{
     io,
     path::{Path, PathBuf},
@@ -5,7 +6,7 @@ use std::{
 
 use metrics::gauge;
 use tokio::fs;
-use tracing::debug;
+use tracing::{debug, error};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -49,18 +50,18 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
     // the maximal number of files to be read.
     match fs::read_dir(&file_path).await {
         Ok(mut entries) => {
-            match entries.next_entry().await {
-                Ok(maybe_entry) => {
-                    if let Some(entry) = maybe_entry {
+            loop {
+                match entries.next_entry().await {
+                    Ok(Some(entry)) => {
                         match entry.metadata().await {
                             Ok(metadata) => {
                                 if metadata.is_file() {
                                     let file_name = entry.file_name();
                                     let metric_prefix = match file_name.to_str() {
-                                        Some(s) => String::from(s),
+                                        Some(s) => format!("cgroup.v2.{s}"),
                                         None => {
                                             // Skip files with non-UTF-8 names
-                                            return Ok(());
+                                            continue;
                                         }
                                     };
                                     let file_path = entry.path();
@@ -74,7 +75,9 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                             // metric and for key-value pairs, we create metrics with the same
                                             // scheme as single-valued files but tack on the key to the metric
                                             // name.
-                                            if let Ok(value) = content.parse::<f64>() {
+                                            if content == "max" {
+                                                gauge!(metric_prefix, labels).set(f64::MAX);
+                                            } else if let Ok(value) = content.parse::<f64>() {
                                                 // Single-valued
                                                 gauge!(metric_prefix, labels).set(value);
                                             } else {
@@ -89,7 +92,7 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                 {
                                                     // File may fail to parse, for instance cgroup.controllers
                                                     // is a list of strings.
-                                                    return Ok(());
+                                                    continue;
                                                 }
                                             }
                                         }
@@ -110,12 +113,15 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                             }
                         }
                     }
-                }
-                Err(err) => {
-                    debug!(
-                        "[{path}] failed to read entry in cgroup directory: {err:?}",
-                        path = file_path.to_string_lossy()
-                    );
+                    Ok(None) => {
+                        break;
+                    }
+                    Err(err) => {
+                        debug!(
+                            "[{path}] failed to read entry in cgroup directory: {err:?}",
+                            path = file_path.to_string_lossy()
+                        );
+                    }
                 }
             }
         }
@@ -145,12 +151,14 @@ fn kv_pairs(
                     "[{path}] missing value in key/value pair, skipping",
                     path = file_path.to_string_lossy(),
                 );
+                return Ok(());
             }
         } else {
             debug!(
                 "[{path} missing key in key/value pair, skipping",
                 path = file_path.to_string_lossy(),
             );
+            return Ok(());
         }
     }
     Ok(())
