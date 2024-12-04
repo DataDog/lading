@@ -1454,6 +1454,7 @@ dependencies = [
  "once_cell",
  "procfs",
  "proptest",
+ "quanta",
  "rand",
  "regex",
  "reqwest",

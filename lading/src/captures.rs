@@ -16,7 +16,11 @@ use std::{
 };
 
 use lading_capture::json;
-use metrics_util::registry::{AtomicStorage, Registry};
+use metrics::Key;
+use metrics_util::{
+    registry::{AtomicStorage, GenerationalAtomicStorage, GenerationalStorage, Recency, Registry},
+    MetricKindMask,
+};
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -42,7 +46,8 @@ pub enum Error {
 }
 
 struct Inner {
-    registry: Registry<metrics::Key, AtomicStorage>,
+    registry: Registry<Key, GenerationalAtomicStorage>,
+    recency: Recency<Key>,
 }
 
 #[allow(missing_debug_implementations)]
@@ -77,6 +82,16 @@ impl CaptureManager {
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
+
+        let inner = Inner {
+            registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
+            recency: Recency::new(
+                quanta::Clock::new(),
+                MetricKindMask::GAUGE | MetricKindMask::COUNTER,
+                Some(Duration::from_secs(7)),
+            ),
+        };
+
         Ok(Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
@@ -85,9 +100,7 @@ impl CaptureManager {
             shutdown,
             _experiment_started: experiment_started,
             target_running,
-            inner: Arc::new(Inner {
-                registry: Registry::atomic(),
-            }),
+            inner: Arc::new(inner),
             global_labels: FxHashMap::default(),
         })
     }
@@ -117,45 +130,63 @@ impl CaptureManager {
     fn record_captures(&mut self) -> Result<(), Error> {
         let now_ms: u128 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
         let mut lines = Vec::new();
-        self.inner
-            .registry
-            .visit_counters(|key: &metrics::Key, counter| {
-                let mut labels = self.global_labels.clone();
-                for lbl in key.labels() {
-                    // TODO we're allocating the same small strings over and over most likely
-                    labels.insert(lbl.key().into(), lbl.value().into());
-                }
-                let line = json::Line {
-                    run_id: self.run_id,
-                    time: now_ms,
-                    fetch_index: self.fetch_index,
-                    metric_name: key.name().into(),
-                    metric_kind: json::MetricKind::Counter,
-                    value: json::LineValue::Int(counter.load(Ordering::Relaxed)),
-                    labels,
-                };
-                lines.push(line);
-            });
-        self.inner
-            .registry
-            .visit_gauges(|key: &metrics::Key, gauge| {
-                let mut labels = self.global_labels.clone();
-                for lbl in key.labels() {
-                    // TODO we're allocating the same small strings over and over most likely
-                    labels.insert(lbl.key().into(), lbl.value().into());
-                }
-                let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
-                let line = json::Line {
-                    run_id: self.run_id,
-                    time: now_ms,
-                    fetch_index: self.fetch_index,
-                    metric_name: key.name().into(),
-                    metric_kind: json::MetricKind::Gauge,
-                    value: json::LineValue::Float(value),
-                    labels,
-                };
-                lines.push(line);
-            });
+
+        let counter_handles = self.inner.registry.get_counter_handles();
+        for (key, counter) in counter_handles {
+            let gen = counter.get_generation();
+            if !self
+                .inner
+                .recency
+                .should_store_counter(&key, gen, &self.inner.registry)
+            {
+                continue;
+            }
+
+            let mut labels = self.global_labels.clone();
+            for lbl in key.labels() {
+                // TODO we're allocating the same small strings over and over most likely
+                labels.insert(lbl.key().into(), lbl.value().into());
+            }
+            let line = json::Line {
+                run_id: self.run_id,
+                time: now_ms,
+                fetch_index: self.fetch_index,
+                metric_name: key.name().into(),
+                metric_kind: json::MetricKind::Counter,
+                value: json::LineValue::Int(counter.get_inner().load(Ordering::Relaxed)),
+                labels,
+            };
+            lines.push(line);
+        }
+
+        let gauge_handles = self.inner.registry.get_gauge_handles();
+        for (key, gauge) in gauge_handles {
+            let gen = gauge.get_generation();
+            if !self
+                .inner
+                .recency
+                .should_store_gauge(&key, gen, &self.inner.registry)
+            {
+                continue;
+            }
+
+            let mut labels = self.global_labels.clone();
+            for lbl in key.labels() {
+                // TODO we're allocating the same small strings over and over most likely
+                labels.insert(lbl.key().into(), lbl.value().into());
+            }
+            let line = json::Line {
+                run_id: self.run_id,
+                time: now_ms,
+                fetch_index: self.fetch_index,
+                metric_name: key.name().into(),
+                metric_kind: json::MetricKind::Gauge,
+                value: json::LineValue::Int(gauge.get_inner().load(Ordering::Relaxed)),
+                labels,
+            };
+            lines.push(line);
+        }
+
         debug!(
             "Recording {} captures to {}",
             lines.len(),

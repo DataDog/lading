@@ -83,6 +83,7 @@ tower = { version = "0.4", default-features = false, features = [
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
+quanta = { version = "0.12", default-features = false, features = [] }
 zstd = "0.13.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
