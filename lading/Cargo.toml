@@ -20,7 +20,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
-async-compression = { version = "0.4.17", features = ["tokio", "zstd"] }
+async-compression = { version = "0.4.18", features = ["tokio", "zstd"] }
 average = { version = "0.15", default-features = false, features = [] }
 bollard = { version = "0.17", default-features = false, features = [] }
 byte-unit = { workspace = true }
