@@ -88,7 +88,7 @@ impl CaptureManager {
             recency: Recency::new(
                 quanta::Clock::new(),
                 MetricKindMask::GAUGE | MetricKindMask::COUNTER,
-                Some(Duration::from_secs(7)),
+                Some(Duration::from_secs(3)),
             ),
         };
 
