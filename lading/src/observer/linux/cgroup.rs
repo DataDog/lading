@@ -6,7 +6,7 @@ use std::{collections::VecDeque, io};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashSet;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -91,7 +91,7 @@ impl Sampler {
                 }
             }
 
-            info!("Found {count} child processes", count = pids.len());
+            trace!("Found {count} processes", count = pids.len());
             // Now iterate the pids and collect the unique names of the cgroups associated.
             let mut cgroups = FxHashSet::default();
             for pid in pids {
@@ -108,7 +108,7 @@ impl Sampler {
 
             // Now iterate the cgroups and collect samples.
             for cgroup_path in cgroups {
-                info!(
+                debug!(
                     "Polling cgroup metrics for {path}",
                     path = cgroup_path.to_string_lossy()
                 );
