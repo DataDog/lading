@@ -6,7 +6,7 @@ use std::{collections::VecDeque, io};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashSet;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
