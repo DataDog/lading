@@ -11,6 +11,7 @@ allow = [
   "Apache-2.0 WITH LLVM-exception",
   "Zlib",
   "Unicode-DFS-2016",
+  "Unicode-3.0",
 ]
 unused-allowed-license = "allow"
 
