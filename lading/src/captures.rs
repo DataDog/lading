@@ -32,8 +32,13 @@ pub enum Error {
     #[error("Failed to set recorder")]
     SetRecorderError,
     /// Wrapper around [`io::Error`].
-    #[error("Io error: {0}")]
-    Io(#[from] io::Error),
+    #[error("[{context} Io error: {err}")]
+    Io {
+        /// The context for the error, simple tag
+        context: &'static str,
+        /// The underlying error
+        err: io::Error,
+    },
     #[error("Time provided is later than right now : {0}")]
     /// Wrapper around [`std::time::SystemTimeError`].
     SystemTime(#[from] std::time::SystemTimeError),
@@ -196,10 +201,22 @@ impl CaptureManager {
                 .ok_or(Error::CapturePath)?
         );
         for line in lines.drain(..) {
+            info!("encoding: {line:?}");
             let pyld = serde_json::to_string(&line)?;
-            self.capture_fp.write_all(pyld.as_bytes())?;
-            self.capture_fp.write_all(b"\n")?;
-            self.capture_fp.flush()?;
+            self.capture_fp
+                .write_all(pyld.as_bytes())
+                .map_err(|err| Error::Io {
+                    context: "payload write",
+                    err,
+                })?;
+            self.capture_fp.write_all(b"\n").map_err(|err| Error::Io {
+                context: "newline write",
+                err,
+            })?;
+            self.capture_fp.flush().map_err(|err| Error::Io {
+                context: "flush",
+                err,
+            })?;
         }
 
         Ok(())
@@ -248,6 +265,10 @@ impl CaptureManager {
                     }
                     std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
                 }
+            })
+            .map_err(|err| Error::Io {
+                context: "thread building",
+                err,
             })?;
         Ok(())
     }
