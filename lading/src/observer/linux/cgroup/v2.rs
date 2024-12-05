@@ -6,7 +6,7 @@ use std::{
 
 use metrics::gauge;
 use tokio::fs;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -57,12 +57,12 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                             Ok(metadata) => {
                                 if metadata.is_file() {
                                     let file_name = entry.file_name();
-                                    let metric_prefix = match file_name.to_str() {
-                                        Some(s) => format!("cgroup.v2.{s}"),
-                                        None => {
-                                            // Skip files with non-UTF-8 names
-                                            continue;
-                                        }
+                                    let metric_prefix = if let Some(s) = file_name.to_str() {
+                                        format!("cgroup.v2.{s}")
+                                    } else {
+                                        // Skip files with non-UTF-8 names
+                                        warn!("Encountered non-UTF-8 file name in cgroup v2 directory. What a weird thing to happen.");
+                                        continue;
                                     };
                                     let file_path = entry.path();
 
@@ -70,18 +70,21 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                         Ok(content) => {
                                             let content = content.trim();
 
-                                            // Cgroup files that have values are either single-valued or
-                                            // key-value pairs. For single-valued files, we create a single
-                                            // metric and for key-value pairs, we create metrics with the same
-                                            // scheme as single-valued files but tack on the key to the metric
-                                            // name.
+                                            // The format of cgroupv2 interface
+                                            // files is defined here:
+                                            // https://docs.kernel.org/admin-guide/cgroup-v2.html#interface-files
+                                            //
+                                            // This implementation parses only new-line separated files with a
+                                            // single value which may be "max" or a number. It also parses
+                                            // key-value pairs of the "flat keyed" style.
+
+                                            // Single value
                                             if content == "max" {
                                                 gauge!(metric_prefix, labels).set(f64::MAX);
                                             } else if let Ok(value) = content.parse::<f64>() {
-                                                // Single-valued
                                                 gauge!(metric_prefix, labels).set(value);
                                             } else {
-                                                // Key-value pairs
+                                                // Flat keyed style key-value pairs
                                                 if kv_pairs(
                                                     &file_path,
                                                     content,
@@ -143,7 +146,10 @@ fn kv_pairs(
         let mut parts = line.split_whitespace();
         if let Some(key) = parts.next() {
             if let Some(value_str) = parts.next() {
-                let value: f64 = value_str.parse()?;
+                let value: f64 = match value_str {
+                    "max" => f64::MAX,
+                    s => s.parse()?,
+                };
                 let metric_name = format!("{metric_prefix}.{key}");
                 gauge!(metric_name, labels).set(value);
             } else {
