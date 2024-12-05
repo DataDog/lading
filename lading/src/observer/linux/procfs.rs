@@ -292,7 +292,7 @@ impl Sampler {
             // then we assume smaps operations will fail as well.
             if has_ptrace_perm {
                 joinset.spawn(async move {
-                    // TODO this code reads smaps
+                    // `/proc/{pid}/smaps`
                     let memory_regions = match memory::smaps::Regions::from_pid(pid) {
                         Ok(memory_regions) => memory_regions,
                         Err(e) => {
@@ -315,6 +315,32 @@ impl Sampler {
                         gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
                         gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
                         gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
+                        gauge!("smaps.private_clean.by_pathname", &labels)
+                            .set(measures.private_clean as f64);
+                        gauge!("smaps.private_dirty.by_pathname", &labels)
+                            .set(measures.private_dirty as f64);
+                        gauge!("smaps.shared_clean.by_pathname", &labels)
+                            .set(measures.shared_clean as f64);
+                        gauge!("smaps.shared_dirty.by_pathname", &labels)
+                            .set(measures.shared_dirty as f64);
+                        gauge!("smaps.referenced.by_pathname", &labels)
+                            .set(measures.referenced as f64);
+                        gauge!("smaps.anonymous.by_pathname", &labels)
+                            .set(measures.anonymous as f64);
+                        gauge!("smaps.lazy_free.by_pathname", &labels)
+                            .set(measures.lazy_free as f64);
+                        gauge!("smaps.anon_huge_pages.by_pathname", &labels)
+                            .set(measures.anon_huge_pages as f64);
+                        gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels)
+                            .set(measures.shmem_pmd_mapped as f64);
+                        gauge!("smaps.shared_hugetlb.by_pathname", &labels)
+                            .set(measures.shared_hugetlb as f64);
+                        gauge!("smaps.private_hugetlb.by_pathname", &labels)
+                            .set(measures.private_hugetlb as f64);
+                        gauge!("smaps.file_pmd_mapped.by_pathname", &labels)
+                            .set(measures.file_pmd_mapped as f64);
+                        gauge!("smaps.locked.by_pathname", &labels).set(measures.locked as f64);
+                        gauge!("smaps.swap_pss.by_pathname", &labels).set(measures.swap_pss as f64);
                     }
 
                     let measures = memory_regions.aggregate();
@@ -329,8 +355,26 @@ impl Sampler {
                     gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
                     gauge!("smaps.size.sum", &labels).set(measures.size as f64);
                     gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
+                    gauge!("smaps.shared_clean.sum", &labels).set(measures.shared_clean as f64);
+                    gauge!("smaps.shared_dirty.sum", &labels).set(measures.shared_dirty as f64);
+                    gauge!("smaps.private_clean.sum", &labels).set(measures.private_clean as f64);
+                    gauge!("smaps.private_dirty.sum", &labels).set(measures.private_dirty as f64);
+                    gauge!("smaps.referenced.sum", &labels).set(measures.referenced as f64);
+                    gauge!("smaps.anonymous.sum", &labels).set(measures.anonymous as f64);
+                    gauge!("smaps.lazy_free.sum", &labels).set(measures.lazy_free as f64);
+                    gauge!("smaps.anon_huge_pages.sum", &labels)
+                        .set(measures.anon_huge_pages as f64);
+                    gauge!("smaps.shmem_pmd_mapped.sum", &labels)
+                        .set(measures.shmem_pmd_mapped as f64);
+                    gauge!("smaps.file_pmd_mapped.sum", &labels)
+                        .set(measures.file_pmd_mapped as f64);
+                    gauge!("smaps.shared_hugetlb.sum", &labels).set(measures.shared_hugetlb as f64);
+                    gauge!("smaps.private_hugetlb.sum", &labels)
+                        .set(measures.private_hugetlb as f64);
+                    gauge!("smaps.swap_pss.sum", &labels).set(measures.swap_pss as f64);
+                    gauge!("smaps.locked.sum", &labels).set(measures.locked as f64);
 
-                    // This code reads smaps_rollup
+                    // `/proc/{pid}/smaps_rollup`
                     let rollup = match memory::smaps_rollup::Rollup::from_pid(pid) {
                         Ok(rollup) => rollup,
                         Err(e) => {
@@ -355,6 +399,54 @@ impl Sampler {
                     }
                     if let Some(v) = rollup.pss_shmem {
                         gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.swap {
+                        gauge!("smaps_rollup.swap", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.swap_pss {
+                        gauge!("smaps_rollup.swap_pss", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.shared_clean {
+                        gauge!("smaps_rollup.shared_clean", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.shared_dirty {
+                        gauge!("smaps_rollup.shared_dirty", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.private_clean {
+                        gauge!("smaps_rollup.private_clean", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.private_dirty {
+                        gauge!("smaps_rollup.private_dirty", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.referenced {
+                        gauge!("smaps_rollup.referenced", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.anonymous {
+                        gauge!("smaps_rollup.anonymous", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.lazy_free {
+                        gauge!("smaps_rollup.lazy_free", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.anon_huge_pages {
+                        gauge!("smaps_rollup.anon_huge_pages", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.shmem_pmd_mapped {
+                        gauge!("smaps_rollup.shmem_pmd_mapped", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.shared_hugetlb {
+                        gauge!("smaps_rollup.shared_hugetlb", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.private_hugetlb {
+                        gauge!("smaps_rollup.private_hugetlb", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.shared_hugetlb {
+                        gauge!("smaps_rollup.shared_hugetlb", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.file_pmd_mapped {
+                        gauge!("smaps_rollup.file_pmd_mapped", &labels).set(v as f64);
+                    }
+                    if let Some(v) = rollup.locked {
+                        gauge!("smaps_rollup.locked", &labels).set(v as f64);
                     }
                 });
             }

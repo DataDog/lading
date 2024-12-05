@@ -43,20 +43,20 @@ pub(crate) struct Region {
     pub(crate) swap: u64,
     pub(crate) rss: u64,
     pub(crate) pss_dirty: Option<u64>, // only present in 6.0+
-    pub(crate) shared_clean: Option<u64>,
-    pub(crate) shared_dirty: Option<u64>,
-    pub(crate) private_clean: Option<u64>,
-    pub(crate) private_dirty: Option<u64>,
-    pub(crate) referenced: Option<u64>,
-    pub(crate) anonymous: Option<u64>,
-    pub(crate) lazy_free: Option<u64>,
-    pub(crate) anon_huge_pages: Option<u64>,
-    pub(crate) shmem_pmd_mapped: Option<u64>,
-    pub(crate) file_pmd_mapped: Option<u64>,
-    pub(crate) shared_hugetlb: Option<u64>,
-    pub(crate) private_hugetlb: Option<u64>,
-    pub(crate) swap_pss: Option<u64>,
-    pub(crate) locked: Option<u64>,
+    pub(crate) shared_clean: u64,
+    pub(crate) shared_dirty: u64,
+    pub(crate) private_clean: u64,
+    pub(crate) private_dirty: u64,
+    pub(crate) referenced: u64,
+    pub(crate) anonymous: u64,
+    pub(crate) lazy_free: u64,
+    pub(crate) anon_huge_pages: u64,
+    pub(crate) shmem_pmd_mapped: u64,
+    pub(crate) file_pmd_mapped: u64,
+    pub(crate) shared_hugetlb: u64,
+    pub(crate) private_hugetlb: u64,
+    pub(crate) swap_pss: u64,
+    pub(crate) locked: u64,
 }
 
 impl Region {
@@ -245,20 +245,20 @@ impl Region {
             swap,
             rss,
             pss_dirty,
-            shared_clean,
-            shared_dirty,
-            private_clean,
-            private_dirty,
-            referenced,
-            anonymous,
-            lazy_free,
-            anon_huge_pages,
-            shmem_pmd_mapped,
-            file_pmd_mapped,
-            shared_hugetlb,
-            private_hugetlb,
-            swap_pss,
-            locked,
+            shared_clean: shared_clean.unwrap_or(0),
+            shared_dirty: shared_dirty.unwrap_or(0),
+            private_clean: private_clean.unwrap_or(0),
+            private_dirty: private_dirty.unwrap_or(0),
+            referenced: referenced.unwrap_or(0),
+            anonymous: anonymous.unwrap_or(0),
+            lazy_free: lazy_free.unwrap_or(0),
+            anon_huge_pages: anon_huge_pages.unwrap_or(0),
+            shmem_pmd_mapped: shmem_pmd_mapped.unwrap_or(0),
+            file_pmd_mapped: file_pmd_mapped.unwrap_or(0),
+            shared_hugetlb: shared_hugetlb.unwrap_or(0),
+            private_hugetlb: private_hugetlb.unwrap_or(0),
+            swap_pss: swap_pss.unwrap_or(0),
+            locked: locked.unwrap_or(0),
         })
     }
 }
@@ -269,6 +269,21 @@ pub(crate) struct AggrMeasure {
     pub(crate) pss: u64,
     pub(crate) swap: u64,
     pub(crate) rss: u64,
+    pub(crate) pss_dirty: u64,
+    pub(crate) shared_clean: u64,
+    pub(crate) shared_dirty: u64,
+    pub(crate) private_clean: u64,
+    pub(crate) private_dirty: u64,
+    pub(crate) referenced: u64,
+    pub(crate) anonymous: u64,
+    pub(crate) lazy_free: u64,
+    pub(crate) anon_huge_pages: u64,
+    pub(crate) shmem_pmd_mapped: u64,
+    pub(crate) file_pmd_mapped: u64,
+    pub(crate) shared_hugetlb: u64,
+    pub(crate) private_hugetlb: u64,
+    pub(crate) swap_pss: u64,
+    pub(crate) locked: u64,
 }
 
 impl Regions {
@@ -285,6 +300,24 @@ impl Regions {
             aggr.pss = aggr.pss.saturating_add(region.pss);
             aggr.swap = aggr.swap.saturating_add(region.swap);
             aggr.rss = aggr.rss.saturating_add(region.rss);
+
+            aggr.pss_dirty = aggr.pss_dirty.saturating_add(region.pss_dirty.unwrap_or(0));
+            aggr.shared_clean = aggr.shared_clean.saturating_add(region.shared_clean);
+            aggr.shared_dirty = aggr.shared_dirty.saturating_add(region.shared_dirty);
+            aggr.private_clean = aggr.private_clean.saturating_add(region.private_clean);
+            aggr.private_dirty = aggr.private_dirty.saturating_add(region.private_dirty);
+            aggr.referenced = aggr.referenced.saturating_add(region.referenced);
+            aggr.anonymous = aggr.anonymous.saturating_add(region.anonymous);
+            aggr.lazy_free = aggr.lazy_free.saturating_add(region.lazy_free);
+            aggr.anon_huge_pages = aggr.anon_huge_pages.saturating_add(region.anon_huge_pages);
+            aggr.shmem_pmd_mapped = aggr
+                .shmem_pmd_mapped
+                .saturating_add(region.shmem_pmd_mapped);
+            aggr.file_pmd_mapped = aggr.file_pmd_mapped.saturating_add(region.file_pmd_mapped);
+            aggr.shared_hugetlb = aggr.shared_hugetlb.saturating_add(region.shared_hugetlb);
+            aggr.private_hugetlb = aggr.private_hugetlb.saturating_add(region.private_hugetlb);
+            aggr.swap_pss = aggr.swap_pss.saturating_add(region.swap_pss);
+            aggr.locked = aggr.locked.saturating_add(region.locked);
         }
 
         aggr
@@ -296,16 +329,26 @@ impl Regions {
         for region in &self.0 {
             let pathname = region.pathname.clone();
 
-            let entry = map.entry(pathname).or_insert_with(|| AggrMeasure {
-                size: 0,
-                pss: 0,
-                swap: 0,
-                rss: 0,
-            });
+            let entry = map.entry(pathname).or_default();
             entry.size += region.size;
             entry.pss += region.pss;
             entry.swap += region.swap;
             entry.rss += region.rss;
+            entry.pss_dirty += region.pss_dirty.unwrap_or(0);
+            entry.shared_clean += region.shared_clean;
+            entry.shared_dirty += region.shared_dirty;
+            entry.private_clean += region.private_clean;
+            entry.private_dirty += region.private_dirty;
+            entry.referenced += region.referenced;
+            entry.anonymous += region.anonymous;
+            entry.lazy_free += region.lazy_free;
+            entry.anon_huge_pages += region.anon_huge_pages;
+            entry.shmem_pmd_mapped += region.shmem_pmd_mapped;
+            entry.file_pmd_mapped += region.file_pmd_mapped;
+            entry.shared_hugetlb += region.shared_hugetlb;
+            entry.private_hugetlb += region.private_hugetlb;
+            entry.swap_pss += region.swap_pss;
+            entry.locked += region.locked;
         }
 
         map.into_iter().collect()
