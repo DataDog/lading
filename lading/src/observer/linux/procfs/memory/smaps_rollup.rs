@@ -116,6 +116,9 @@ impl Rollup {
 
 #[cfg(test)]
 mod test {
+    use crate::observer::linux::procfs::memory::smaps_rollup::Rollup;
+    use crate::observer::linux::procfs::memory::BYTES_PER_KIBIBYTE;
+
     #[test]
     fn test_rollup() {
         let rollup =
