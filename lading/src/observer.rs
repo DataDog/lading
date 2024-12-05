@@ -8,18 +8,13 @@
 //! writes out key details about memory and CPU consumption into the capture
 //! data. On non-Linux systems the observer, if enabled, will emit a warning.
 
-use std::{io, sync::atomic::AtomicU64};
+use std::io;
 
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
 #[cfg(target_os = "linux")]
 mod linux;
-
-#[allow(dead_code)] // used on Linux
-/// Expose the process' current RSS consumption, allowing abstractions to be
-/// built on top in the Target implementation.
-pub(crate) static RSS_BYTES: AtomicU64 = AtomicU64::new(0);
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]

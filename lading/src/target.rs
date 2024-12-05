@@ -20,7 +20,6 @@ use std::{
     num::NonZeroI32,
     path::PathBuf,
     process::{ExitStatus, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -36,12 +35,8 @@ use rustc_hash::FxHashMap;
 use tokio::{process::Command, time};
 use tracing::{error, info};
 
+use crate::common::stdio;
 pub use crate::common::{Behavior, Output};
-use crate::{common::stdio, observer::RSS_BYTES};
-
-/// Expose the process' current RSS consumption, allowing abstractions to be
-/// built on top in the Target implementation.
-pub(crate) static RSS_BYTES_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Type used to receive the target PID once it is running.
 #[allow(clippy::module_name_repetitions)]
@@ -49,51 +44,6 @@ pub type TargetPidReceiver = tokio::sync::broadcast::Receiver<Option<i32>>;
 
 #[allow(clippy::module_name_repetitions)]
 type TargetPidSender = tokio::sync::broadcast::Sender<Option<i32>>;
-
-/// Errors produced by [`Meta`]
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum MetaError {
-    /// Unable to support byte limits greater than `u64::MAX`
-    #[error("unable to support bytes greater than u64::MAX")]
-    ByteLimitTooLarge,
-}
-
-/// Source for live metadata about the running target.
-#[derive(Debug, Clone, Copy)]
-pub struct Meta {}
-
-impl Meta {
-    /// Set the maximum RSS bytes limit
-    ///
-    /// # Errors
-    ///
-    /// Will fail if the `byte_unit::Byte` value given is larger than `u64::MAX`
-    /// bytes.
-    #[inline]
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn set_rss_bytes_limit(limit: byte_unit::Byte) -> Result<(), MetaError> {
-        let raw_limit: u128 = limit.get_bytes();
-        if raw_limit > u128::from(u64::MAX) {
-            return Err(MetaError::ByteLimitTooLarge);
-        }
-
-        gauge!("rss_bytes_limit").set(raw_limit as f64);
-
-        RSS_BYTES_LIMIT.store(raw_limit as u64, Ordering::Relaxed);
-        Ok(())
-    }
-
-    #[allow(dead_code)] // used on Linux
-    #[inline]
-    pub(crate) fn rss_bytes_limit_exceeded() -> bool {
-        let limit: u64 = RSS_BYTES_LIMIT.load(Ordering::Relaxed);
-        let current: u64 = RSS_BYTES.load(Ordering::Relaxed);
-
-        gauge!("rss_bytes_limit_overage").set(current.saturating_sub(limit) as f64);
-
-        current > limit
-    }
-}
 
 /// Errors produced by [`Server`]
 #[derive(thiserror::Error, Debug)]
