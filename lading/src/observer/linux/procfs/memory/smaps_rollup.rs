@@ -21,6 +21,21 @@ pub(crate) struct Rollup {
     pub(crate) pss_anon: Option<u64>,
     pub(crate) pss_file: Option<u64>,
     pub(crate) pss_shmem: Option<u64>,
+    pub(crate) shared_clean: Option<u64>,
+    pub(crate) shared_dirty: Option<u64>,
+    pub(crate) private_clean: Option<u64>,
+    pub(crate) private_dirty: Option<u64>,
+    pub(crate) referenced: Option<u64>,
+    pub(crate) anonymous: Option<u64>,
+    pub(crate) lazy_free: Option<u64>,
+    pub(crate) anon_huge_pages: Option<u64>,
+    pub(crate) shmem_pmd_mapped: Option<u64>,
+    pub(crate) file_pmd_mapped: Option<u64>,
+    pub(crate) shared_hugetlb: Option<u64>,
+    pub(crate) private_hugetlb: Option<u64>,
+    pub(crate) swap: Option<u64>,
+    pub(crate) swap_pss: Option<u64>,
+    pub(crate) locked: Option<u64>,
 }
 
 impl Rollup {
@@ -38,6 +53,7 @@ impl Rollup {
     }
 
     #[allow(clippy::similar_names)]
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn from_str(contents: &str) -> Result<Self, Error> {
         let mut lines = contents.lines();
         lines.next(); // skip header, doesn't have any useful information
@@ -49,6 +65,21 @@ impl Rollup {
         let mut pss_anon = None;
         let mut pss_file = None;
         let mut pss_shmem = None;
+        let mut shared_clean = None;
+        let mut shared_dirty = None;
+        let mut private_clean = None;
+        let mut private_dirty = None;
+        let mut referenced = None;
+        let mut anonymous = None;
+        let mut lazy_free = None;
+        let mut anon_huge_pages = None;
+        let mut shmem_pmd_mapped = None;
+        let mut file_pmd_mapped = None;
+        let mut shared_hugetlb = None;
+        let mut private_hugetlb = None;
+        let mut swap = None;
+        let mut swap_pss = None;
+        let mut locked = None;
 
         for line in lines {
             let mut chars = line.char_indices().peekable();
@@ -93,6 +124,51 @@ impl Rollup {
                 "Pss_Shmem:" => {
                     pss_shmem = Some(value_in_kibibytes()?);
                 }
+                "Shared_Clean:" => {
+                    shared_clean = Some(value_in_kibibytes()?);
+                }
+                "Shared_Dirty:" => {
+                    shared_dirty = Some(value_in_kibibytes()?);
+                }
+                "Private_Clean:" => {
+                    private_clean = Some(value_in_kibibytes()?);
+                }
+                "Private_Dirty:" => {
+                    private_dirty = Some(value_in_kibibytes()?);
+                }
+                "Referenced:" => {
+                    referenced = Some(value_in_kibibytes()?);
+                }
+                "Anonymous:" => {
+                    anonymous = Some(value_in_kibibytes()?);
+                }
+                "LazyFree:" => {
+                    lazy_free = Some(value_in_kibibytes()?);
+                }
+                "AnonHugePages:" => {
+                    anon_huge_pages = Some(value_in_kibibytes()?);
+                }
+                "ShmemPmdMapped:" => {
+                    shmem_pmd_mapped = Some(value_in_kibibytes()?);
+                }
+                "FilePmdMapped:" => {
+                    file_pmd_mapped = Some(value_in_kibibytes()?);
+                }
+                "Shared_Hugetlb:" => {
+                    shared_hugetlb = Some(value_in_kibibytes()?);
+                }
+                "Private_Hugetlb:" => {
+                    private_hugetlb = Some(value_in_kibibytes()?);
+                }
+                "Swap:" => {
+                    swap = Some(value_in_kibibytes()?);
+                }
+                "SwapPss:" => {
+                    swap_pss = Some(value_in_kibibytes()?);
+                }
+                "Locked:" => {
+                    locked = Some(value_in_kibibytes()?);
+                }
                 _ => {}
             }
         }
@@ -110,6 +186,21 @@ impl Rollup {
             pss_anon,
             pss_file,
             pss_shmem,
+            shared_clean,
+            shared_dirty,
+            private_clean,
+            private_dirty,
+            referenced,
+            anonymous,
+            lazy_free,
+            anon_huge_pages,
+            shmem_pmd_mapped,
+            file_pmd_mapped,
+            shared_hugetlb,
+            private_hugetlb,
+            swap,
+            swap_pss,
+            locked,
         })
     }
 }
@@ -151,6 +242,21 @@ mod test {
         assert_eq!(rollup.pss_anon, Some(310508 * BYTES_PER_KIBIBYTE));
         assert_eq!(rollup.pss_file, Some(1536 * BYTES_PER_KIBIBYTE));
         assert_eq!(rollup.pss_shmem, Some(0));
+        assert_eq!(rollup.shared_clean, Some(4 * BYTES_PER_KIBIBYTE));
+        assert_eq!(rollup.shared_dirty, Some(0));
+        assert_eq!(rollup.private_clean, Some(1536 * BYTES_PER_KIBIBYTE));
+        assert_eq!(rollup.private_dirty, Some(310508 * BYTES_PER_KIBIBYTE));
+        assert_eq!(rollup.referenced, Some(312048 * BYTES_PER_KIBIBYTE));
+        assert_eq!(rollup.anonymous, Some(310508 * BYTES_PER_KIBIBYTE));
+        assert_eq!(rollup.lazy_free, Some(0));
+        assert_eq!(rollup.anon_huge_pages, Some(0));
+        assert_eq!(rollup.shmem_pmd_mapped, Some(0));
+        assert_eq!(rollup.file_pmd_mapped, Some(0));
+        assert_eq!(rollup.shared_hugetlb, Some(0));
+        assert_eq!(rollup.private_hugetlb, Some(0));
+        assert_eq!(rollup.swap, Some(0));
+        assert_eq!(rollup.swap_pss, Some(0));
+        assert_eq!(rollup.locked, Some(0));
     }
 
     #[test]
@@ -173,5 +279,12 @@ mod test {
         assert_eq!(rollup.pss_anon, None);
         assert_eq!(rollup.pss_file, None);
         assert_eq!(rollup.pss_shmem, None);
+        assert_eq!(rollup.shmem_pmd_mapped, Some(0));
+        assert_eq!(rollup.file_pmd_mapped, Some(0));
+        assert_eq!(rollup.shared_hugetlb, Some(0));
+        assert_eq!(rollup.private_hugetlb, Some(0));
+        assert_eq!(rollup.swap, Some(0));
+        assert_eq!(rollup.swap_pss, Some(0));
+        assert_eq!(rollup.locked, Some(0));
     }
 }
