@@ -345,10 +345,10 @@ impl Sampler {
 
                     let measures = memory_regions.aggregate();
                     let labels = [
-                        ("pid", format!("{pid}")),
-                        ("exe", basename.clone()),
-                        ("cmdline", cmdline.clone()),
-                        ("comm", comm.clone()),
+                        (String::from("pid"), format!("{pid}")),
+                        (String::from("exe"), basename.clone()),
+                        (String::from("cmdline"), cmdline.clone()),
+                        (String::from("comm"), comm.clone()),
                     ];
 
                     gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
@@ -375,78 +375,11 @@ impl Sampler {
                     gauge!("smaps.locked.sum", &labels).set(measures.locked as f64);
 
                     // `/proc/{pid}/smaps_rollup`
-                    let rollup = match memory::smaps_rollup::Rollup::from_pid(pid) {
-                        Ok(rollup) => rollup,
-                        Err(e) => {
-                            // We don't want to bail out entirely if we can't read smap rollup
-                            // which will happen if we don't have permissions or, more
-                            // likely, the process has exited.
-                            warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
-                            return;
-                        }
-                    };
-
-                    gauge!("smaps_rollup.rss", &labels).set(rollup.rss as f64);
-                    gauge!("smaps_rollup.pss", &labels).set(rollup.pss as f64);
-                    if let Some(v) = rollup.pss_dirty {
-                        gauge!("smaps_rollup.pss_dirty", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_anon {
-                        gauge!("smaps_rollup.pss_anon", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_file {
-                        gauge!("smaps_rollup.pss_file", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_shmem {
-                        gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.swap {
-                        gauge!("smaps_rollup.swap", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.swap_pss {
-                        gauge!("smaps_rollup.swap_pss", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.shared_clean {
-                        gauge!("smaps_rollup.shared_clean", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.shared_dirty {
-                        gauge!("smaps_rollup.shared_dirty", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.private_clean {
-                        gauge!("smaps_rollup.private_clean", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.private_dirty {
-                        gauge!("smaps_rollup.private_dirty", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.referenced {
-                        gauge!("smaps_rollup.referenced", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.anonymous {
-                        gauge!("smaps_rollup.anonymous", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.lazy_free {
-                        gauge!("smaps_rollup.lazy_free", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.anon_huge_pages {
-                        gauge!("smaps_rollup.anon_huge_pages", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.shmem_pmd_mapped {
-                        gauge!("smaps_rollup.shmem_pmd_mapped", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.shared_hugetlb {
-                        gauge!("smaps_rollup.shared_hugetlb", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.private_hugetlb {
-                        gauge!("smaps_rollup.private_hugetlb", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.shared_hugetlb {
-                        gauge!("smaps_rollup.shared_hugetlb", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.file_pmd_mapped {
-                        gauge!("smaps_rollup.file_pmd_mapped", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.locked {
-                        gauge!("smaps_rollup.locked", &labels).set(v as f64);
+                    if let Err(err) = memory::smaps_rollup::poll(pid, &labels).await {
+                        // We don't want to bail out entirely if we can't read smap rollup
+                        // which will happen if we don't have permissions or, more
+                        // likely, the process has exited.
+                        warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {err}");
                     }
                 });
             }

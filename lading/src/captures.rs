@@ -201,7 +201,6 @@ impl CaptureManager {
                 .ok_or(Error::CapturePath)?
         );
         for line in lines.drain(..) {
-            info!("encoding: {line:?}");
             let pyld = serde_json::to_string(&line)?;
             self.capture_fp
                 .write_all(pyld.as_bytes())
