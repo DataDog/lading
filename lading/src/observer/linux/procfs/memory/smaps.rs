@@ -361,8 +361,8 @@ impl Regions {
 mod tests {
     use super::*;
 
-    const KERNEL_6_TWO_REGIONS: &str = "
-7fffa9f35000-7fffa9f39000 r--p 00000000 12:11 0                          [vvar]
+    const KERNEL_6_TWO_REGIONS: &str =
+        "7fffa9f35000-7fffa9f39000 r--p 00000000 12:11 0                          [vvar]
 Size:                 16 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
@@ -477,8 +477,7 @@ VmFlags:               rd ex mr mw me de sd";
 
     #[test]
     fn test_empty_pathname() {
-        let smap_region = "
-abcdefabcfed-abdcef123450 r-xp 10101010 12:34 0
+        let smap_region = "abcdefabcfed-abdcef123450 r-xp 10101010 12:34 0
 Size:                  80000000 kB
 KernelPageSize:        400 kB
 MMUPageSize:           4 kB
@@ -540,8 +539,8 @@ VmFlags:               rd ex mr mw me de sd";
 
     #[test]
     fn test_no_pss_dirty() {
-        let smap_region = "
-7ffeb825c000-7ffeb827d000 rw-p 00000000 00:00 0                          [stack]
+        let smap_region =
+            "7ffeb825c000-7ffeb827d000 rw-p 00000000 00:00 0                          [stack]
 Size:                  80000000 kB
 KernelPageSize:        400 kB
 MMUPageSize:           4 kB
@@ -603,8 +602,8 @@ VmFlags:               rd ex mr mw me de sd";
 
     #[test]
     fn test_agent_regions() {
-        let region = "
-7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
+        let region =
+            "7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
 Size:                  8 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
@@ -635,8 +634,7 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region.size, 8 * BYTES_PER_KIBIBYTE);
         assert_eq!(region.shared_clean, 8 * BYTES_PER_KIBIBYTE);
 
-        let region = "
-ffff3fddf000-ffff3fde4000 rw-p 0037f000 fe:01 9339677                    /opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so
+        let region = "ffff3fddf000-ffff3fde4000 rw-p 0037f000 fe:01 9339677                    /opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so
 Size:                 20 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
@@ -672,8 +670,8 @@ VmFlags:               rd wr mr mw me ac";
 
     #[test]
     fn test_varying_hex_len_mappings() {
-        let region = "
-7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
+        let region =
+            "7fffa9f39000-7fffa9f3b000 r-xp 00000000 00:00 0                          [vdso]
 Size:                  8 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
@@ -703,8 +701,7 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region.start, 0x7fffa9f39000);
         assert_eq!(region.end, 0x7fffa9f3b000);
 
-        let region = "
-00400000-0e8dd000 r-xp 00000000 00:00 0                          [vdso]
+        let region = "00400000-0e8dd000 r-xp 00000000 00:00 0                          [vdso]
 Size:                  8 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
@@ -735,8 +732,7 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region.start, 0x00400000);
         assert_eq!(region.end, 0x0e8dd000);
 
-        let region = "
-ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                          [vdso]
+        let region = "ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                          [vdso]
 Size:                  8 kB
 KernelPageSize:        4 kB
 MMUPageSize:           4 kB
