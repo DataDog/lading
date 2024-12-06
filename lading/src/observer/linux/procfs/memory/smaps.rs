@@ -350,9 +350,6 @@ fn aggregate_option(aggregate: &mut Option<u64>, value: Option<u64>) {
 }
 
 #[cfg(test)]
-#[allow(clippy::identity_op)]
-#[allow(clippy::erasing_op)]
-#[allow(clippy::unreadable_literal)]
 mod tests {
     use super::*;
 
@@ -416,10 +413,10 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "[vvar]");
-        assert_eq!(region_one.size, Some(16 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.pss, Some(0));
-        assert_eq!(region_one.swap, Some(7 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.rss, Some(0));
+        assert_eq!(region_one.size, 16 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, 0);
+        assert_eq!(region_one.swap, 7 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, Some(0)); // pss_dirty is optional
         assert_eq!(region_one.shared_clean, Some(0));
         assert_eq!(region_one.shared_dirty, Some(0));
@@ -438,10 +435,10 @@ VmFlags:               rd ex mr mw me de sd";
 
         let region_two = &regions.0[1];
         assert_eq!(region_two.pathname, "[vdso]");
-        assert_eq!(region_two.size, Some(8 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_two.pss, Some(2 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_two.swap, Some(0));
-        assert_eq!(region_two.rss, Some(8 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_two.size, 8 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.pss, 2 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_two.swap, 0);
+        assert_eq!(region_two.rss, 8 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_two.pss_dirty, Some(0));
         assert_eq!(region_two.shared_clean, Some(8 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_two.shared_dirty, Some(0));
@@ -492,10 +489,10 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "");
-        assert_eq!(region_one.size, Some(80000000 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.pss, Some(1 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.swap, Some(100000000000 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.rss, Some(0));
+        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, Some(2 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.shared_dirty, Some(4 * BYTES_PER_KIBIBYTE));
@@ -553,10 +550,10 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "[stack]");
-        assert_eq!(region_one.size, Some(80000000 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.pss, Some(1 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.swap, Some(100000000000 * BYTES_PER_KIBIBYTE));
-        assert_eq!(region_one.rss, Some(0));
+        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, None); // Still optional and missing
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.shared_dirty, Some(4 * BYTES_PER_KIBIBYTE));
@@ -611,7 +608,7 @@ VmFlags:               rd ex mr mw me de sd";
         let region = Region::from_str(region).expect("Parsing failed");
 
         assert_eq!(region.pathname, "[vdso]");
-        assert_eq!(region.size.unwrap(), 8 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region.size, 8 * BYTES_PER_KIBIBYTE);
         assert_eq!(region.shared_clean.unwrap(), 8 * BYTES_PER_KIBIBYTE);
 
         let region = "ffff3fddf000-ffff3fde4000 rw-p 0037f000 fe:01 9339677                    /opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so
@@ -644,7 +641,7 @@ VmFlags:               rd wr mr mw me ac";
         region.pathname,
         "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
     );
-        assert_eq!(region.size.unwrap(), 20 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
         assert_eq!(region.private_dirty.unwrap(), 20 * BYTES_PER_KIBIBYTE);
     }
 
