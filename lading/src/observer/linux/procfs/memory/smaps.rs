@@ -633,7 +633,7 @@ VmFlags:               rd ex mr mw me de sd";
 
         assert_eq!(region.pathname, "[vdso]");
         assert_eq!(region.size, 8 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region.shared_clean, Some(8 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region.shared_clean, 8 * BYTES_PER_KIBIBYTE);
 
         let region = "
 ffff3fddf000-ffff3fde4000 rw-p 0037f000 fe:01 9339677                    /opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so
@@ -667,7 +667,7 @@ VmFlags:               rd wr mr mw me ac";
         "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
     );
         assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region.private_dirty, Some(20 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region.private_dirty, 20 * BYTES_PER_KIBIBYTE);
     }
 
     #[test]
