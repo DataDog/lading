@@ -311,18 +311,11 @@ impl Sampler {
                             ("comm", comm.clone()),
                             ("pathname", pathname),
                         ];
-                        if let Some(m) = measures.rss {
-                            gauge!("smaps.rss.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.pss {
-                            gauge!("smaps.pss.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.size {
-                            gauge!("smaps.size.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.swap {
-                            gauge!("smaps.swap.by_pathname", &labels).set(m as f64);
-                        }
+                        gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
+                        gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
+                        gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
+                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
+
                         if let Some(m) = measures.private_clean {
                             gauge!("smaps.private_clean.by_pathname", &labels).set(m as f64);
                         }

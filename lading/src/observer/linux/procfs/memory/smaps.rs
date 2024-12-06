@@ -25,11 +25,11 @@ struct Region {
     // empty string indicates no pathname
     pub(crate) pathname: String,
 
-    // Values (all in bytes) - Made Optional
-    pub(crate) size: Option<u64>,
-    pub(crate) pss: Option<u64>,
-    pub(crate) swap: Option<u64>,
-    pub(crate) rss: Option<u64>,
+    // Values (all in bytes)
+    pub(crate) size: u64,
+    pub(crate) pss: u64,
+    pub(crate) swap: u64,
+    pub(crate) rss: u64,
     pub(crate) pss_dirty: Option<u64>, // only present in 6.0+
     pub(crate) shared_clean: Option<u64>,
     pub(crate) shared_dirty: Option<u64>,
@@ -103,7 +103,6 @@ impl Region {
             pathname
         };
 
-        // Initialize optional fields
         let mut size: Option<u64> = None;
         let mut pss: Option<u64> = None;
         let mut rss: Option<u64> = None;
@@ -210,6 +209,12 @@ impl Region {
             }
         }
 
+        let (Some(size), Some(pss), Some(rss), Some(swap)) = (size, pss, rss, swap) else {
+            return Err(Error::Parsing(format!(
+                "Could not parse all value fields from region: '{contents}'"
+            )));
+        };
+
         Ok(Region {
             pathname: pathname.unwrap_or_default(),
             size,
@@ -237,10 +242,10 @@ impl Region {
 
 #[derive(Default)]
 pub(crate) struct AggrMeasure {
-    pub(crate) size: Option<u64>,
-    pub(crate) pss: Option<u64>,
-    pub(crate) swap: Option<u64>,
-    pub(crate) rss: Option<u64>,
+    pub(crate) size: u64,
+    pub(crate) pss: u64,
+    pub(crate) swap: u64,
+    pub(crate) rss: u64,
     pub(crate) pss_dirty: Option<u64>,
     pub(crate) shared_clean: Option<u64>,
     pub(crate) shared_dirty: Option<u64>,
@@ -288,10 +293,10 @@ impl Regions {
             let pathname = region.pathname.clone();
 
             let entry = map.entry(pathname).or_default();
-            aggregate_option(&mut entry.size, region.size);
-            aggregate_option(&mut entry.pss, region.pss);
-            aggregate_option(&mut entry.swap, region.swap);
-            aggregate_option(&mut entry.rss, region.rss);
+            entry.size += region.size;
+            entry.pss += region.pss;
+            entry.swap += region.swap;
+            entry.rss += region.rss;
             aggregate_option(&mut entry.pss_dirty, region.pss_dirty);
             aggregate_option(&mut entry.shared_clean, region.shared_clean);
             aggregate_option(&mut entry.shared_dirty, region.shared_dirty);
