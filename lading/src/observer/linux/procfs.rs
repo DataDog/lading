@@ -311,36 +311,60 @@ impl Sampler {
                             ("comm", comm.clone()),
                             ("pathname", pathname),
                         ];
-                        gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
-                        gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
-                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
-                        gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
-                        gauge!("smaps.private_clean.by_pathname", &labels)
-                            .set(measures.private_clean as f64);
-                        gauge!("smaps.private_dirty.by_pathname", &labels)
-                            .set(measures.private_dirty as f64);
-                        gauge!("smaps.shared_clean.by_pathname", &labels)
-                            .set(measures.shared_clean as f64);
-                        gauge!("smaps.shared_dirty.by_pathname", &labels)
-                            .set(measures.shared_dirty as f64);
-                        gauge!("smaps.referenced.by_pathname", &labels)
-                            .set(measures.referenced as f64);
-                        gauge!("smaps.anonymous.by_pathname", &labels)
-                            .set(measures.anonymous as f64);
-                        gauge!("smaps.lazy_free.by_pathname", &labels)
-                            .set(measures.lazy_free as f64);
-                        gauge!("smaps.anon_huge_pages.by_pathname", &labels)
-                            .set(measures.anon_huge_pages as f64);
-                        gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels)
-                            .set(measures.shmem_pmd_mapped as f64);
-                        gauge!("smaps.shared_hugetlb.by_pathname", &labels)
-                            .set(measures.shared_hugetlb as f64);
-                        gauge!("smaps.private_hugetlb.by_pathname", &labels)
-                            .set(measures.private_hugetlb as f64);
-                        gauge!("smaps.file_pmd_mapped.by_pathname", &labels)
-                            .set(measures.file_pmd_mapped as f64);
-                        gauge!("smaps.locked.by_pathname", &labels).set(measures.locked as f64);
-                        gauge!("smaps.swap_pss.by_pathname", &labels).set(measures.swap_pss as f64);
+                        if let Some(m) = measures.rss {
+                            gauge!("smaps.rss.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.pss {
+                            gauge!("smaps.pss.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.size {
+                            gauge!("smaps.size.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.swap {
+                            gauge!("smaps.swap.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_clean {
+                            gauge!("smaps.private_clean.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_dirty {
+                            gauge!("smaps.private_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_clean {
+                            gauge!("smaps.shared_clean.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_dirty {
+                            gauge!("smaps.shared_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.referenced {
+                            gauge!("smaps.referenced.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anonymous {
+                            gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.lazy_free {
+                            gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anon_huge_pages {
+                            gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shmem_pmd_mapped {
+                            gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_hugetlb {
+                            gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_hugetlb {
+                            gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.file_pmd_mapped {
+                            gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.locked {
+                            gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.swap_pss {
+                            gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
+                        }
                     }
 
                     // `/proc/{pid}/smaps_rollup`
