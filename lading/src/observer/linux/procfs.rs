@@ -91,7 +91,7 @@ impl Sampler {
         let mut total_processes: u64 = 0;
         // We maintain a tally of the total RSS and PSS consumed by the parent
         // process and its children.
-        let mut total_rss: u64 = 0;
+        let mut aggr = memory::smaps_rollup::Aggregator::default();
 
         // Calculate the ticks since machine uptime. This will be important
         // later for calculating per-process uptime. Because we capture this one
@@ -270,7 +270,6 @@ impl Sampler {
             // Number of threads this process has active.
             gauge!("num_threads", &labels).set(stats.num_threads as f64);
 
-            total_rss += rss;
             total_processes += 1;
 
             // Also report memory data from `proc/status` as a reference point
@@ -358,7 +357,7 @@ impl Sampler {
                 }
 
                 // `/proc/{pid}/smaps_rollup`
-                if let Err(err) = memory::smaps_rollup::poll(pid, &labels).await {
+                if let Err(err) = memory::smaps_rollup::poll(pid, &labels, &mut aggr).await {
                     // We don't want to bail out entirely if we can't read smap rollup
                     // which will happen if we don't have permissions or, more
                     // likely, the process has exited.
@@ -420,7 +419,8 @@ impl Sampler {
 
         let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
 
-        gauge!("total_rss_bytes").set(total_rss as f64);
+        gauge!("total_rss_bytes").set(aggr.rss as f64);
+        gauge!("total_pss_bytes").set(aggr.pss as f64);
         gauge!("total_utime").set(total_sample.utime as f64);
         gauge!("total_stime").set(total_sample.stime as f64);
 
