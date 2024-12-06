@@ -112,7 +112,10 @@ impl Server {
         let target_pid = target_pid.expect("observer cannot be used in no-target mode");
 
         let mut sample_delay = tokio::time::interval(Duration::from_secs(1));
-        let mut sampler = Sampler::new(target_pid)?;
+        let mut sampler = Sampler::new(
+            target_pid,
+            vec![(String::from("focus"), String::from("target"))],
+        )?;
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
