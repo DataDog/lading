@@ -10,8 +10,6 @@ use procfs::{process::Process, Current};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, warn};
 
-use memory::{Regions, Rollup};
-
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
 #[derive(thiserror::Error, Debug)]
@@ -295,7 +293,7 @@ impl Sampler {
             if has_ptrace_perm {
                 joinset.spawn(async move {
                     // TODO this code reads smaps
-                    let memory_regions = match Regions::from_pid(pid) {
+                    let memory_regions = match memory::smaps::Regions::from_pid(pid) {
                         Ok(memory_regions) => memory_regions,
                         Err(e) => {
                             // We don't want to bail out entirely if we can't read stats
@@ -333,7 +331,7 @@ impl Sampler {
                     gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
 
                     // This code reads smaps_rollup
-                    let rollup = match Rollup::from_pid(pid) {
+                    let rollup = match memory::smaps_rollup::Rollup::from_pid(pid) {
                         Ok(rollup) => rollup,
                         Err(e) => {
                             // We don't want to bail out entirely if we can't read smap rollup
