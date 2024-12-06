@@ -16,8 +16,18 @@ pub(crate) enum Error {
     Parsing(String),
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Aggregator {
+    pub(crate) rss: u64,
+    pub(crate) pss: u64,
+}
+
 // Read `/proc/{pid}/smaps_rollup` and parse it directly into metrics.
-pub(crate) async fn poll(pid: i32, labels: &[(String, String)]) -> Result<(), Error> {
+pub(crate) async fn poll(
+    pid: i32,
+    labels: &[(String, String)],
+    aggr: &mut Aggregator,
+) -> Result<(), Error> {
     let path = format!("/proc/{pid}/smaps_rollup");
     // NOTE `read_to_string` uses as few IO operations as possible in its
     // implementation, so we might get the contents here in one go.
@@ -55,6 +65,11 @@ pub(crate) async fn poll(pid: i32, labels: &[(String, String)]) -> Result<(), Er
         let name_len = name.len();
         // Last character is a :, skip it.
         let field = name[..name_len - 1].to_snake_case();
+        match field.as_str() {
+            "rss" => aggr.rss += value_kb,
+            "pss" => aggr.pss += value_kb,
+            _ => { /* ignore other fields */ }
+        }
         let metric_name = format!("smaps_rollup.{field}");
         gauge!(metric_name, labels).set(value_kb as f64);
     }
