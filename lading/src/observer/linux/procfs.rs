@@ -1,4 +1,6 @@
 /// Sampler implementation for procfs filesystems
+mod memory;
+
 use std::{collections::VecDeque, io, sync::atomic::Ordering};
 
 use metrics::gauge;
@@ -8,8 +10,8 @@ use procfs::{process::Process, Current};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, warn};
 
-use crate::observer::memory::{Regions, Rollup};
 use crate::observer::RSS_BYTES;
+use memory::{Regions, Rollup};
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 

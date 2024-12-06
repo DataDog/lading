@@ -16,9 +16,6 @@ use serde::Deserialize;
 #[cfg(target_os = "linux")]
 mod linux;
 
-#[cfg(target_os = "linux")]
-mod memory;
-
 #[allow(dead_code)] // used on Linux
 /// Expose the process' current RSS consumption, allowing abstractions to be
 /// built on top in the Target implementation.
