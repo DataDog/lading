@@ -292,7 +292,7 @@ impl Sampler {
             // then we assume smaps operations will fail as well.
             if has_ptrace_perm {
                 joinset.spawn(async move {
-                    // TODO this code reads smaps
+                    // `/proc/{pid}/smaps`
                     let memory_regions = match memory::smaps::Regions::from_pid(pid) {
                         Ok(memory_regions) => memory_regions,
                         Err(e) => {
@@ -313,48 +313,59 @@ impl Sampler {
                         ];
                         gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
                         gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
-                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
                         gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
-                    }
+                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
 
-                    let measures = memory_regions.aggregate();
-                    let labels = [
-                        ("pid", format!("{pid}")),
-                        ("exe", basename.clone()),
-                        ("cmdline", cmdline.clone()),
-                        ("comm", comm.clone()),
-                    ];
-
-                    gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
-                    gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
-                    gauge!("smaps.size.sum", &labels).set(measures.size as f64);
-                    gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
-
-                    // This code reads smaps_rollup
-                    let rollup = match memory::smaps_rollup::Rollup::from_pid(pid) {
-                        Ok(rollup) => rollup,
-                        Err(e) => {
-                            // We don't want to bail out entirely if we can't read smap rollup
-                            // which will happen if we don't have permissions or, more
-                            // likely, the process has exited.
-                            warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {}", e);
-                            return;
+                        if let Some(m) = measures.private_clean {
+                            gauge!("smaps.private_clean.by_pathname", &labels).set(m as f64);
                         }
-                    };
+                        if let Some(m) = measures.private_dirty {
+                            gauge!("smaps.private_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_clean {
+                            gauge!("smaps.shared_clean.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_dirty {
+                            gauge!("smaps.shared_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.referenced {
+                            gauge!("smaps.referenced.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anonymous {
+                            gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.lazy_free {
+                            gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anon_huge_pages {
+                            gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shmem_pmd_mapped {
+                            gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_hugetlb {
+                            gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_hugetlb {
+                            gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.file_pmd_mapped {
+                            gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.locked {
+                            gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.swap_pss {
+                            gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
+                        }
+                    }
 
-                    gauge!("smaps_rollup.rss", &labels).set(rollup.rss as f64);
-                    gauge!("smaps_rollup.pss", &labels).set(rollup.pss as f64);
-                    if let Some(v) = rollup.pss_dirty {
-                        gauge!("smaps_rollup.pss_dirty", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_anon {
-                        gauge!("smaps_rollup.pss_anon", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_file {
-                        gauge!("smaps_rollup.pss_file", &labels).set(v as f64);
-                    }
-                    if let Some(v) = rollup.pss_shmem {
-                        gauge!("smaps_rollup.pss_shmem", &labels).set(v as f64);
+                    // `/proc/{pid}/smaps_rollup`
+                    if let Err(err) = memory::smaps_rollup::poll(pid, &labels).await {
+                        // We don't want to bail out entirely if we can't read smap rollup
+                        // which will happen if we don't have permissions or, more
+                        // likely, the process has exited.
+                        warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {err}");
                     }
                 });
             }

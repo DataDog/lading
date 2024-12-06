@@ -35,6 +35,7 @@ flate2 = { version = "1.0.34", default-features = false, features = [
 ] }
 futures = "0.3.31"
 fuser = { version = "0.15", optional = true }
+heck  = { version = "0.5", default-features = false }
 http = "0.2"
 http-serde = "1.1"
 hyper = { workspace = true, features = ["backports", "client", "deprecated", "http1", "http2", "server"] }
