@@ -120,25 +120,25 @@ impl Region {
             )));
         };
 
-        let mut size: Option<u64> = None;
-        let mut pss: Option<u64> = None;
-        let mut rss: Option<u64> = None;
-        let mut swap: Option<u64> = None;
+        let mut size: u64 = 0;
+        let mut pss: u64 = 0;
+        let mut rss: u64 = 0;
+        let mut swap: u64 = 0;
         let mut pss_dirty: Option<u64> = None;
-        let mut shared_clean: Option<u64> = None;
-        let mut shared_dirty: Option<u64> = None;
-        let mut private_clean: Option<u64> = None;
-        let mut private_dirty: Option<u64> = None;
-        let mut referenced: Option<u64> = None;
-        let mut anonymous: Option<u64> = None;
-        let mut lazy_free: Option<u64> = None;
-        let mut anon_huge_pages: Option<u64> = None;
-        let mut shmem_pmd_mapped: Option<u64> = None;
-        let mut file_pmd_mapped: Option<u64> = None;
-        let mut shared_hugetlb: Option<u64> = None;
-        let mut private_hugetlb: Option<u64> = None;
-        let mut swap_pss: Option<u64> = None;
-        let mut locked: Option<u64> = None;
+        let mut shared_clean: u64 = 0;
+        let mut shared_dirty: u64 = 0;
+        let mut private_clean: u64 = 0;
+        let mut private_dirty: u64 = 0;
+        let mut referenced: u64 = 0;
+        let mut anonymous: u64 = 0;
+        let mut lazy_free: u64 = 0;
+        let mut anon_huge_pages: u64 = 0;
+        let mut shmem_pmd_mapped: u64 = 0;
+        let mut file_pmd_mapped: u64 = 0;
+        let mut shared_hugetlb: u64 = 0;
+        let mut private_hugetlb: u64 = 0;
+        let mut swap_pss: u64 = 0;
+        let mut locked: u64 = 0;
 
         for line in lines {
             let mut chars = line.char_indices().peekable();
@@ -166,71 +166,65 @@ impl Region {
 
             match name {
                 "Rss:" => {
-                    rss = Some(value_in_kibibytes()?);
+                    rss = value_in_kibibytes()?;
                 }
                 "Pss:" => {
-                    pss = Some(value_in_kibibytes()?);
+                    pss = value_in_kibibytes()?;
                 }
                 "Size:" => {
-                    size = Some(value_in_kibibytes()?);
+                    size = value_in_kibibytes()?;
                 }
                 "Swap:" => {
-                    swap = Some(value_in_kibibytes()?);
+                    swap = value_in_kibibytes()?;
                 }
                 "Pss_Dirty:" => {
                     pss_dirty = Some(value_in_kibibytes()?);
                 }
                 "Shared_Clean:" => {
-                    shared_clean = Some(value_in_kibibytes()?);
+                    shared_clean = value_in_kibibytes()?;
                 }
                 "Shared_Dirty:" => {
-                    shared_dirty = Some(value_in_kibibytes()?);
+                    shared_dirty = value_in_kibibytes()?;
                 }
                 "Private_Clean:" => {
-                    private_clean = Some(value_in_kibibytes()?);
+                    private_clean = value_in_kibibytes()?;
                 }
                 "Private_Dirty:" => {
-                    private_dirty = Some(value_in_kibibytes()?);
+                    private_dirty = value_in_kibibytes()?;
                 }
                 "Referenced:" => {
-                    referenced = Some(value_in_kibibytes()?);
+                    referenced = value_in_kibibytes()?;
                 }
                 "Anonymous:" => {
-                    anonymous = Some(value_in_kibibytes()?);
+                    anonymous = value_in_kibibytes()?;
                 }
                 "LazyFree:" => {
-                    lazy_free = Some(value_in_kibibytes()?);
+                    lazy_free = value_in_kibibytes()?;
                 }
                 "AnonHugePages:" => {
-                    anon_huge_pages = Some(value_in_kibibytes()?);
+                    anon_huge_pages = value_in_kibibytes()?;
                 }
                 "ShmemPmdMapped:" => {
-                    shmem_pmd_mapped = Some(value_in_kibibytes()?);
+                    shmem_pmd_mapped = value_in_kibibytes()?;
                 }
                 "FilePmdMapped:" => {
-                    file_pmd_mapped = Some(value_in_kibibytes()?);
+                    file_pmd_mapped = value_in_kibibytes()?;
                 }
                 "Shared_Hugetlb:" => {
-                    shared_hugetlb = Some(value_in_kibibytes()?);
+                    shared_hugetlb = value_in_kibibytes()?;
                 }
                 "Private_Hugetlb:" => {
-                    private_hugetlb = Some(value_in_kibibytes()?);
+                    private_hugetlb = value_in_kibibytes()?;
                 }
                 "SwapPss:" => {
-                    swap_pss = Some(value_in_kibibytes()?);
+                    swap_pss = value_in_kibibytes()?;
                 }
                 "Locked:" => {
-                    locked = Some(value_in_kibibytes()?);
+                    locked = value_in_kibibytes()?;
                 }
                 _ => {}
             }
         }
-
-        let (Some(size), Some(pss), Some(rss), Some(swap)) = (size, pss, rss, swap) else {
-            return Err(Error::Parsing(format!(
-                "Could not parse all value fields from region: '{contents}'"
-            )));
-        };
 
         Ok(Region {
             start,
@@ -245,20 +239,20 @@ impl Region {
             swap,
             rss,
             pss_dirty,
-            shared_clean: shared_clean.unwrap_or(0),
-            shared_dirty: shared_dirty.unwrap_or(0),
-            private_clean: private_clean.unwrap_or(0),
-            private_dirty: private_dirty.unwrap_or(0),
-            referenced: referenced.unwrap_or(0),
-            anonymous: anonymous.unwrap_or(0),
-            lazy_free: lazy_free.unwrap_or(0),
-            anon_huge_pages: anon_huge_pages.unwrap_or(0),
-            shmem_pmd_mapped: shmem_pmd_mapped.unwrap_or(0),
-            file_pmd_mapped: file_pmd_mapped.unwrap_or(0),
-            shared_hugetlb: shared_hugetlb.unwrap_or(0),
-            private_hugetlb: private_hugetlb.unwrap_or(0),
-            swap_pss: swap_pss.unwrap_or(0),
-            locked: locked.unwrap_or(0),
+            shared_clean,
+            shared_dirty,
+            private_clean,
+            private_dirty,
+            referenced,
+            anonymous,
+            lazy_free,
+            anon_huge_pages,
+            shmem_pmd_mapped,
+            file_pmd_mapped,
+            shared_hugetlb,
+            private_hugetlb,
+            swap_pss,
+            locked,
         })
     }
 }
@@ -288,39 +282,23 @@ pub(crate) struct AggrMeasure {
 
 impl Regions {
     pub(crate) fn from_pid(pid: i32) -> Result<Self, Error> {
-        Regions::from_file(&format!("/proc/{pid}/smaps"))
+        let path = format!("/proc/{pid}/smaps");
+        let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
+
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+
+        Self::from_str(&contents)
     }
 
-    /// Returns a sum of all the fields from each region within this Regions
-    pub(crate) fn aggregate(&self) -> AggrMeasure {
-        let mut aggr = AggrMeasure::default();
+    fn from_str(contents: &str) -> Result<Self, Error> {
+        let str_regions = Self::into_region_strs(contents);
+        let regions = str_regions
+            .iter()
+            .map(|s| Region::from_str(s))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        for region in &self.0 {
-            aggr.size = aggr.size.saturating_add(region.size);
-            aggr.pss = aggr.pss.saturating_add(region.pss);
-            aggr.swap = aggr.swap.saturating_add(region.swap);
-            aggr.rss = aggr.rss.saturating_add(region.rss);
-
-            aggr.pss_dirty = aggr.pss_dirty.saturating_add(region.pss_dirty.unwrap_or(0));
-            aggr.shared_clean = aggr.shared_clean.saturating_add(region.shared_clean);
-            aggr.shared_dirty = aggr.shared_dirty.saturating_add(region.shared_dirty);
-            aggr.private_clean = aggr.private_clean.saturating_add(region.private_clean);
-            aggr.private_dirty = aggr.private_dirty.saturating_add(region.private_dirty);
-            aggr.referenced = aggr.referenced.saturating_add(region.referenced);
-            aggr.anonymous = aggr.anonymous.saturating_add(region.anonymous);
-            aggr.lazy_free = aggr.lazy_free.saturating_add(region.lazy_free);
-            aggr.anon_huge_pages = aggr.anon_huge_pages.saturating_add(region.anon_huge_pages);
-            aggr.shmem_pmd_mapped = aggr
-                .shmem_pmd_mapped
-                .saturating_add(region.shmem_pmd_mapped);
-            aggr.file_pmd_mapped = aggr.file_pmd_mapped.saturating_add(region.file_pmd_mapped);
-            aggr.shared_hugetlb = aggr.shared_hugetlb.saturating_add(region.shared_hugetlb);
-            aggr.private_hugetlb = aggr.private_hugetlb.saturating_add(region.private_hugetlb);
-            aggr.swap_pss = aggr.swap_pss.saturating_add(region.swap_pss);
-            aggr.locked = aggr.locked.saturating_add(region.locked);
-        }
-
-        aggr
+        Ok(Regions(regions))
     }
 
     pub(crate) fn aggregate_by_pathname(&self) -> Vec<(String, AggrMeasure)> {
@@ -354,15 +332,6 @@ impl Regions {
         map.into_iter().collect()
     }
 
-    fn from_file(path: &str) -> Result<Self, Error> {
-        let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
-
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        Self::from_str(&contents)
-    }
-
     fn into_region_strs(contents: &str) -> Vec<&str> {
         let mut str_regions = Vec::new();
         // split this smaps file into regions
@@ -382,16 +351,6 @@ impl Regions {
         };
 
         str_regions
-    }
-
-    fn from_str(contents: &str) -> Result<Self, Error> {
-        let str_regions = Self::into_region_strs(contents);
-        let regions = str_regions
-            .iter()
-            .map(|s| Region::from_str(s))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Regions(regions))
     }
 }
 

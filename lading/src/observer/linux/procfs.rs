@@ -343,37 +343,6 @@ impl Sampler {
                         gauge!("smaps.swap_pss.by_pathname", &labels).set(measures.swap_pss as f64);
                     }
 
-                    let measures = memory_regions.aggregate();
-                    let labels = [
-                        (String::from("pid"), format!("{pid}")),
-                        (String::from("exe"), basename.clone()),
-                        (String::from("cmdline"), cmdline.clone()),
-                        (String::from("comm"), comm.clone()),
-                    ];
-
-                    gauge!("smaps.rss.sum", &labels).set(measures.rss as f64);
-                    gauge!("smaps.pss.sum", &labels).set(measures.pss as f64);
-                    gauge!("smaps.size.sum", &labels).set(measures.size as f64);
-                    gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
-                    gauge!("smaps.shared_clean.sum", &labels).set(measures.shared_clean as f64);
-                    gauge!("smaps.shared_dirty.sum", &labels).set(measures.shared_dirty as f64);
-                    gauge!("smaps.private_clean.sum", &labels).set(measures.private_clean as f64);
-                    gauge!("smaps.private_dirty.sum", &labels).set(measures.private_dirty as f64);
-                    gauge!("smaps.referenced.sum", &labels).set(measures.referenced as f64);
-                    gauge!("smaps.anonymous.sum", &labels).set(measures.anonymous as f64);
-                    gauge!("smaps.lazy_free.sum", &labels).set(measures.lazy_free as f64);
-                    gauge!("smaps.anon_huge_pages.sum", &labels)
-                        .set(measures.anon_huge_pages as f64);
-                    gauge!("smaps.shmem_pmd_mapped.sum", &labels)
-                        .set(measures.shmem_pmd_mapped as f64);
-                    gauge!("smaps.file_pmd_mapped.sum", &labels)
-                        .set(measures.file_pmd_mapped as f64);
-                    gauge!("smaps.shared_hugetlb.sum", &labels).set(measures.shared_hugetlb as f64);
-                    gauge!("smaps.private_hugetlb.sum", &labels)
-                        .set(measures.private_hugetlb as f64);
-                    gauge!("smaps.swap_pss.sum", &labels).set(measures.swap_pss as f64);
-                    gauge!("smaps.locked.sum", &labels).set(measures.locked as f64);
-
                     // `/proc/{pid}/smaps_rollup`
                     if let Err(err) = memory::smaps_rollup::poll(pid, &labels).await {
                         // We don't want to bail out entirely if we can't read smap rollup
