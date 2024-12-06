@@ -50,8 +50,6 @@ enum Error {
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
     Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
-    #[error("Maximum RSS bytes limit exceeds u64::MAX {0}")]
-    Meta(#[from] lading::target::MetaError),
     #[error("Parsing Prometheus address failed: {0}")]
     PrometheusAddr(#[from] std::net::AddrParseError),
     #[error("Invalid capture path")]
@@ -179,9 +177,6 @@ struct Opts {
     /// the path to write target's stderr
     #[clap(long, default_value_t = default_target_behavior(), requires = "binary-target")]
     target_stderr_path: Behavior,
-    /// the maximum amount of RSS bytes the target may consume before lading backs off load
-    #[clap(long)]
-    target_rss_bytes_limit: Option<byte_unit::Byte>,
     /// path on disk to write captures, exclusive of prometheus-path and
     /// prometheus-addr
     #[clap(long)]
@@ -261,9 +256,6 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
 
     let mut config: Config = serde_yaml::from_str(&contents)?;
 
-    if let Some(rss_bytes_limit) = ops.target_rss_bytes_limit {
-        target::Meta::set_rss_bytes_limit(rss_bytes_limit)?;
-    }
     let target = if ops.no_target {
         None
     } else if let Some(pid) = ops.target_pid {

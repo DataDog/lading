@@ -1,7 +1,7 @@
 /// Sampler implementation for procfs filesystems
 mod memory;
 
-use std::{collections::VecDeque, io, sync::atomic::Ordering};
+use std::{collections::VecDeque, io};
 
 use metrics::gauge;
 use nix::errno::Errno;
@@ -10,7 +10,6 @@ use procfs::{process::Process, Current};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, warn};
 
-use crate::observer::RSS_BYTES;
 use memory::{Regions, Rollup};
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
@@ -332,6 +331,7 @@ impl Sampler {
             // then we assume smaps operations will fail as well.
             if has_ptrace_perm {
                 joinset.spawn(async move {
+                    // TODO this code reads smaps
                     let memory_regions = match Regions::from_pid(pid) {
                         Ok(memory_regions) => memory_regions,
                         Err(e) => {
@@ -369,6 +369,7 @@ impl Sampler {
                     gauge!("smaps.size.sum", &labels).set(measures.size as f64);
                     gauge!("smaps.swap.sum", &labels).set(measures.swap as f64);
 
+                    // This code reads smaps_rollup
                     let rollup = match Rollup::from_pid(pid) {
                         Ok(rollup) => rollup,
                         Err(e) => {
@@ -399,7 +400,6 @@ impl Sampler {
         }
 
         gauge!("num_processes").set(total_processes as f64);
-        RSS_BYTES.store(total_rss, Ordering::Relaxed); // stored for the purposes of throttling
 
         // Now we loop through our just collected samples and calculate CPU
         // utilization. This require memory and we will now reference -- and
