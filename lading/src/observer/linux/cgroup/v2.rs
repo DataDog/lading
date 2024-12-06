@@ -66,7 +66,6 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                     };
                                     let file_path = entry.path();
 
-                                    // If the file is not readable, skip it.
                                     match fs::read_to_string(&file_path).await {
                                         Ok(content) => {
                                             let content = content.trim();
