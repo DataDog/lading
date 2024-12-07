@@ -37,7 +37,7 @@ pub struct Config {
 pub struct Expvar {
     config: Config,
     shutdown: lading_signal::Watcher,
-    experiment_started: lading_signal::Watcher,
+    target_running: lading_signal::Watcher,
 }
 
 impl Expvar {
@@ -49,12 +49,12 @@ impl Expvar {
     pub(crate) fn new(
         config: Config,
         shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
     ) -> Self {
         Self {
             config,
             shutdown,
-            experiment_started,
+            target_running,
         }
     }
 
@@ -70,8 +70,8 @@ impl Expvar {
     ///
     /// None are known.
     pub(crate) async fn run(self) -> Result<(), Error> {
-        info!("Expvar target metrics scraper running, but waiting for warmup to complete");
-        self.experiment_started.recv().await; // block until experimental lading_signal::Watcher entered
+        info!("Expvar target metrics scraper running, but waiting for target to run");
+        self.target_running.recv().await; // block until experimental lading_signal::Watcher entered
         info!("Expvar target metrics scraper starting collection");
 
         let client = reqwest::Client::new();
