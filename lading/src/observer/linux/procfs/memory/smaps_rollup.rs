@@ -73,10 +73,6 @@ pub(crate) async fn poll(
             _ => { /* ignore other fields */ }
         }
         let metric_name = format!("smaps_rollup.{field}");
-        info!(
-            "line: {line}, value_bytes: {value_bytes}, bytes: {bytes}",
-            bytes = value_bytes as f64
-        );
         gauge!(metric_name, labels).set(value_bytes as f64);
     }
 
