@@ -80,8 +80,8 @@ impl Sampler {
     #[allow(
         clippy::similar_names,
         clippy::too_many_lines,
-        clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
         clippy::cast_possible_wrap
     )]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
@@ -89,16 +89,17 @@ impl Sampler {
         let mut samples: FxHashMap<ProcessIdentifier, Sample> = FxHashMap::default();
 
         let mut total_processes: u64 = 0;
-        // We maintain a tally of the total RSS and PSS consumed by the parent
-        // process and its children.
-        let mut aggr = memory::smaps_rollup::Aggregator::default();
-
         // Calculate the ticks since machine uptime. This will be important
         // later for calculating per-process uptime. Because we capture this one
         // we will be slightly out of date with each subsequent iteration of the
         // loop. We do not believe this to be an issue.
         let uptime_seconds: f64 = procfs::Uptime::current()?.uptime; // seconds since boot
-        let uptime_ticks: u64 = uptime_seconds.round() as u64 * self.ticks_per_second; // CPU-ticks since boot
+        let uptime_ticks: u64 =
+            (uptime_seconds.round() as u64).saturating_mul(self.ticks_per_second); // CPU-ticks since boot
+
+        // A tally of the total RSS and PSS consumed by the parent process and
+        // its children.
+        let mut aggr = memory::smaps_rollup::Aggregator::default();
 
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
@@ -270,7 +271,7 @@ impl Sampler {
             // Number of threads this process has active.
             gauge!("num_threads", &labels).set(stats.num_threads as f64);
 
-            total_processes += 1;
+            total_processes = total_processes.saturating_add(1);
 
             // Also report memory data from `proc/status` as a reference point
             report_status_field!(status, labels, vmrss);
@@ -282,10 +283,11 @@ impl Sampler {
             report_status_field!(status, labels, vmexe);
             report_status_field!(status, labels, vmlib);
 
-            // smaps and smaps_rollup are both governed by the same permission restrictions
-            // as /proc/[pid]/maps. Per man 5 proc:
-            // Permission to access this file is governed by a ptrace access mode PTRACE_MODE_READ_FSCREDS check; see ptrace(2).
-            // If a previous call to process.status() failed due to a lack of ptrace permissions,
+            // smaps and smaps_rollup are both governed by the same permission
+            // restrictions as /proc/[pid]/maps. Per man 5 proc: Permission to
+            // access this file is governed by a ptrace access mode
+            // PTRACE_MODE_READ_FSCREDS check; see ptrace(2). If a previous call
+            // to process.status() failed due to a lack of ptrace permissions,
             // then we assume smaps operations will fail as well.
             if has_ptrace_perm {
                 // `/proc/{pid}/smaps`
@@ -406,8 +408,8 @@ impl Sampler {
                 } = key;
 
                 Sample {
-                    utime: acc.utime + sample.utime,
-                    stime: acc.stime + sample.stime,
+                    utime: acc.utime.saturating_add(sample.utime),
+                    stime: acc.stime.saturating_add(sample.stime),
                     // use parent process uptime
                     uptime: if *pid == self.parent.pid() {
                         sample.uptime

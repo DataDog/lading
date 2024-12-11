@@ -45,7 +45,7 @@ pub(crate) async fn poll(
             continue;
         };
 
-        let value_kb = {
+        let value_bytes = {
             let value_token = next_token(line, &mut chars).ok_or(Error::Parsing(format!(
                 "Could not parse numeric value from line: {line}"
             )))?;
@@ -55,7 +55,7 @@ pub(crate) async fn poll(
             let numeric = value_token.parse::<u64>()?;
 
             match unit {
-                "kB" => Ok(numeric * BYTES_PER_KIBIBYTE),
+                "kB" => Ok(numeric.saturating_mul(BYTES_PER_KIBIBYTE)),
                 unknown => Err(Error::Parsing(format!(
                     "Unknown unit: {unknown} in line: {line}"
                 ))),
@@ -66,12 +66,12 @@ pub(crate) async fn poll(
         // Last character is a :, skip it.
         let field = name[..name_len - 1].to_snake_case();
         match field.as_str() {
-            "rss" => aggr.rss += value_kb,
-            "pss" => aggr.pss += value_kb,
+            "rss" => aggr.rss = aggr.rss.saturating_add(value_bytes),
+            "pss" => aggr.pss = aggr.pss.saturating_add(value_bytes),
             _ => { /* ignore other fields */ }
         }
         let metric_name = format!("smaps_rollup.{field}");
-        gauge!(metric_name, labels).set(value_kb as f64);
+        gauge!(metric_name, labels).set(value_bytes as f64);
     }
 
     Ok(())
