@@ -114,7 +114,13 @@ impl Sampler {
                 );
                 if let Err(err) = v2::poll(&cgroup_path, &self.labels).await {
                     error!(
-                        "Unable to poll cgroup metrics for {path}: {err}",
+                        "Unable to poll cgroup memory metrics for {path}: {err}",
+                        path = cgroup_path.to_string_lossy()
+                    );
+                }
+                if let Err(err) = v2::cpu::poll(&cgroup_path, &self.labels).await {
+                    error!(
+                        "Unable to poll cgroup CPU metrics for {path}: {err}",
                         path = cgroup_path.to_string_lossy()
                     );
                 }

@@ -1,3 +1,5 @@
+pub(crate) mod cpu;
+
 use core::f64;
 use std::{
     io,
