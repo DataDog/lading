@@ -41,6 +41,7 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         let period_val = period_str.parse::<f64>()?;
         max_val / period_val
     };
+    let limit_millicores = allowed_cores * 1000.0;
 
     // Read cpu.stat
     let cpu_stat = fs::read_to_string(group_prefix.join("cpu.stat")).await?;
@@ -90,14 +91,29 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
     if delta_time > 0 {
         let delta_time = delta_time as f64;
 
-        // Compute CPU usage as a percentage of the cgroup CPU allocation
-        let total_cpu = (delta_usage as f64 / delta_time) / allowed_cores * 100.0;
-        let user_cpu = (delta_user as f64 / delta_time) / allowed_cores * 100.0;
-        let system_cpu = (delta_system as f64 / delta_time) / allowed_cores * 100.0;
+        // Compute CPU usage as a fraction of a single CPU
+        let usage_fraction = delta_usage as f64 / delta_time;
+        let user_fraction = delta_user as f64 / delta_time;
+        let system_fraction = delta_system as f64 / delta_time;
 
+        // Convert usage to a percentage of the cores granted to the target.
+        let total_cpu = (usage_fraction / allowed_cores) * 100.0;
+        let user_cpu = (user_fraction / allowed_cores) * 100.0;
+        let system_cpu = (system_fraction / allowed_cores) * 100.0;
         gauge!("total_cpu_percentage", labels).set(total_cpu);
         gauge!("user_cpu_percentage", labels).set(user_cpu);
-        gauge!("kernel_cpu_percentage", labels).set(system_cpu);
+        gauge!("kernel_cpu_percentage", labels).set(system_cpu); // kernel is a misnomer, keeping for compatibility
+        gauge!("system_cpu_percentage", labels).set(system_cpu);
+
+        // Convert usage to kubernetes style millicores. These
+        let total_millicores = usage_fraction * 1000.0;
+        let user_millicores = user_fraction * 1000.0;
+        let system_millicores = system_fraction * 1000.0;
+        gauge!("total_cpu_usage_millicores", labels).set(total_millicores);
+        gauge!("user_cpu_usage_millicores", labels).set(user_millicores);
+        gauge!("kernel_cpu_usage_millicores", labels).set(system_millicores); // kernel is a misnomer, keeping for compatibility
+        gauge!("system_cpu_usage_millicores", labels).set(system_millicores);
+        gauge!("cpu_limit_millicores", labels).set(limit_millicores);
     }
 
     Ok(())
