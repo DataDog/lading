@@ -5,7 +5,7 @@ use std::{collections::VecDeque, io};
 
 use metrics::gauge;
 use nix::errno::Errno;
-use procfs::ProcError::PermissionDenied;
+use procfs::ProcError::{NotFound, PermissionDenied};
 use procfs::{process::Process, Current};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, info, warn};
@@ -178,7 +178,7 @@ impl Sampler {
                     }
                     String::new()
                 }
-                Err(NotFound(_)) => {
+                Err(NotFound(e)) => {
                     // The pid may have exited since we scanned it
                     info!("Failed to read exe symlink from a non-existent process. Skipping to the next process: {:?}", e);
                     continue;
@@ -374,7 +374,7 @@ impl Sampler {
                     // This explanation is justifiaction for checking the raw os error in the subsequent match rather than
                     // just filtering on ErrorKind::NotFound.
                     match err {
-                        Error::Io(io_err) => {
+                        memory::smaps_rollup::Error::Io(io_err) => {
                             if let Some(raw_os_error) = io_err.raw_os_error() {
                                 match raw_os_error {
                                     2 | 3 => {
