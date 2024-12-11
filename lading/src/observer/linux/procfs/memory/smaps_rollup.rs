@@ -2,8 +2,6 @@ use heck::ToSnakeCase;
 use metrics::gauge;
 use tokio::fs;
 
-use tracing::info;
-
 use super::{next_token, BYTES_PER_KIBIBYTE};
 
 #[derive(thiserror::Error, Debug)]
