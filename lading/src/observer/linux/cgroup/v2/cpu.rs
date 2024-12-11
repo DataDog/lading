@@ -5,8 +5,6 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tokio::fs;
 
-use tracing::info;
-
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
 pub(crate) enum Error {
@@ -35,7 +33,9 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
     let parts: Vec<&str> = cpu_max.split_whitespace().collect();
     let (max_str, period_str) = (parts[0], parts[1]);
     let allowed_cores = if max_str == "max" {
-        num_cpus::get() as f64
+        // If the target cgroup has no CPU limit we assume it has access to all
+        // physical cores.
+        num_cpus::get_physical() as f64
     } else {
         let max_val = max_str.parse::<f64>()?;
         let period_val = period_str.parse::<f64>()?;
@@ -60,43 +60,40 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         }
     }
 
-    // Get or initialize previous stats
+    // Get or initialize the previous stats. Note that the first time this is
+    // initialized we intentionally set last_instance to now to avoid scheduling
+    // shenanigans.
+    let now = Instant::now();
     let mut prev = PREV
         .get_or_init(|| {
             Mutex::new(PrevStats {
                 usage_usec,
                 user_usec,
                 system_usec,
-                last_instant: Instant::now(),
+                last_instant: now,
             })
         })
         .lock()
         .expect("could not lock stats, poisoned by my constituents");
 
-    let now = Instant::now();
-    let delta_time = now.duration_since(prev.last_instant).as_micros() as f64;
+    let delta_time = now.duration_since(prev.last_instant).as_micros();
     let delta_usage = usage_usec.saturating_sub(prev.usage_usec);
     let delta_user = user_usec.saturating_sub(prev.user_usec);
     let delta_system = system_usec.saturating_sub(prev.system_usec);
 
-    // Update previous stats
+    // Update previous stats and if there's a time delta calculate the CPU
+    // usage.
     prev.usage_usec = usage_usec;
     prev.user_usec = user_usec;
     prev.system_usec = system_usec;
     prev.last_instant = now;
+    if delta_time > 0 {
+        let delta_time = delta_time as f64;
 
-    if delta_time > 0.0 {
         // Compute CPU usage as a percentage of the cgroup CPU allocation
         let total_cpu = (delta_usage as f64 / delta_time) / allowed_cores * 100.0;
         let user_cpu = (delta_user as f64 / delta_time) / allowed_cores * 100.0;
         let system_cpu = (delta_system as f64 / delta_time) / allowed_cores * 100.0;
-
-        info!(
-            "cpu: {total_cpu:.2}%, user: {user_cpu:.2}%, system: {system_cpu:.2}%",
-            total_cpu = total_cpu,
-            user_cpu = user_cpu,
-            system_cpu = system_cpu
-        );
 
         gauge!("cgroup_total_cpu_percentage", labels).set(total_cpu);
         gauge!("cgroup_user_cpu_percentage", labels).set(user_cpu);
