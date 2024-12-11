@@ -54,10 +54,8 @@ struct ProcessIdentifier {
 #[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
-    num_cores: usize,
     ticks_per_second: u64,
     page_size: u64,
-    previous_samples: FxHashMap<ProcessIdentifier, Sample>,
     previous_totals: Sample,
     have_logged_perms_err: bool,
 }
@@ -68,10 +66,8 @@ impl Sampler {
 
         Ok(Self {
             parent,
-            num_cores: num_cpus::get(), // Cores, logical on Linux, obeying cgroup limits if present
             ticks_per_second: procfs::ticks_per_second(),
             page_size: procfs::page_size(),
-            previous_samples: FxHashMap::default(),
             previous_totals: Sample::default(),
             have_logged_perms_err: false,
         })
@@ -370,33 +366,6 @@ impl Sampler {
 
         gauge!("num_processes").set(total_processes as f64);
 
-        // Now we loop through our just collected samples and calculate CPU
-        // utilization. This require memory and we will now reference -- and
-        // update, when done -- the previous samples.
-        for (key, sample) in &samples {
-            let prev = self.previous_samples.remove(key).unwrap_or_default();
-
-            let calc = calculate_cpu_percentage(sample, &prev, self.num_cores);
-
-            let ProcessIdentifier {
-                pid,
-                exe,
-                cmdline,
-                comm,
-            } = key;
-
-            let labels = [
-                ("pid", format!("{pid}", pid = pid.clone())),
-                ("exe", exe.clone()),
-                ("cmdline", cmdline.clone()),
-                ("comm", comm.clone()),
-            ];
-
-            gauge!("cpu_percentage", &labels).set(calc.cpu);
-            gauge!("kernel_cpu_percentage", &labels).set(calc.kernel);
-            gauge!("user_cpu_percentage", &labels).set(calc.user);
-        }
-
         let total_sample = samples
             .iter()
             .fold(Sample::default(), |acc, (key, sample)| {
@@ -419,59 +388,13 @@ impl Sampler {
                 }
             });
 
-        let totals = calculate_cpu_percentage(&total_sample, &self.previous_totals, self.num_cores);
-
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
         gauge!("total_utime").set(total_sample.utime as f64);
         gauge!("total_stime").set(total_sample.stime as f64);
 
-        gauge!("total_cpu_percentage").set(totals.cpu);
-        gauge!("total_kernel_cpu_percentage").set(totals.kernel);
-        gauge!("total_user_cpu_percentage").set(totals.user);
-
         self.previous_totals = total_sample;
-        self.previous_samples = samples;
 
         Ok(())
     }
-}
-
-#[allow(clippy::struct_field_names)]
-struct CpuPercentage {
-    cpu: f64,
-    kernel: f64,
-    user: f64,
-}
-
-#[allow(clippy::similar_names)]
-#[inline]
-fn calculate_cpu_percentage(sample: &Sample, previous: &Sample, num_cores: usize) -> CpuPercentage {
-    let uptime_diff = sample.uptime - previous.uptime; // CPU-ticks
-    let stime_diff: u64 = sample.stime.saturating_sub(previous.stime); // CPU-ticks
-    let utime_diff: u64 = sample.utime.saturating_sub(previous.utime); // CPU-ticks
-    let time_diff: u64 =
-        (sample.stime + sample.utime).saturating_sub(previous.stime + previous.utime); // CPU-ticks
-
-    let user = percentage(utime_diff as f64, uptime_diff as f64, num_cores as f64);
-    let kernel = percentage(stime_diff as f64, uptime_diff as f64, num_cores as f64);
-    let cpu = percentage(time_diff as f64, uptime_diff as f64, num_cores as f64);
-
-    CpuPercentage { cpu, kernel, user }
-}
-
-#[inline]
-fn percentage(delta_ticks: f64, delta_time: f64, num_cores: f64) -> f64 {
-    // Takes (heavy) inspiration from Datadog Agent, see
-    // https://github.com/DataDog/datadog-agent/blob/8914a281cf6f9cfa867e0d72899c39afa51abce7/pkg/process/checks/process_nix.go
-    if delta_time == 0.0 {
-        return 0.0;
-    }
-
-    // `delta_time` is the number of scheduler ticks elapsed during this slice
-    // of time. `delta_ticks` is the number of ticks spent across all cores
-    // during this time.
-    let overall_percentage = (delta_ticks / delta_time) * 100.0;
-
-    overall_percentage.clamp(0.0, 100.0 * num_cores)
 }

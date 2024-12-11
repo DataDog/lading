@@ -95,9 +95,9 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         let user_cpu = (delta_user as f64 / delta_time) / allowed_cores * 100.0;
         let system_cpu = (delta_system as f64 / delta_time) / allowed_cores * 100.0;
 
-        gauge!("cgroup_total_cpu_percentage", labels).set(total_cpu);
-        gauge!("cgroup_user_cpu_percentage", labels).set(user_cpu);
-        gauge!("cgroup_system_cpu_percentage", labels).set(system_cpu);
+        gauge!("total_cpu_percentage", labels).set(total_cpu);
+        gauge!("user_cpu_percentage", labels).set(user_cpu);
+        gauge!("kernel_cpu_percentage", labels).set(system_cpu);
     }
 
     Ok(())
