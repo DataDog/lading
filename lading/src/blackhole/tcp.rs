@@ -63,13 +63,11 @@ impl Tcp {
 
     async fn handle_connection(socket: TcpStream, labels: &'static [(String, String)]) {
         let mut stream = ReaderStream::new(socket);
-        let bytes_received = counter!("bytes_received", labels);
-        let message_received = counter!("message_received", labels);
 
         while let Some(msg) = stream.next().await {
-            message_received.increment(1);
+            counter!("message_received", labels).increment(1);
             if let Ok(msg) = msg {
-                bytes_received.increment(msg.len() as u64);
+                counter!("bytes_received", labels).increment(msg.len() as u64);
             }
         }
     }
@@ -91,7 +89,6 @@ impl Tcp {
             .await
             .map_err(Error::Io)?;
 
-        let connection_accepted = counter!("connection_accepted", &self.metric_labels);
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
         let shutdown_wait = self.shutdown.recv();
@@ -100,7 +97,7 @@ impl Tcp {
             tokio::select! {
                 conn = listener.accept() => {
                     let (socket, _) = conn.map_err(Error::Io)?;
-                    connection_accepted.increment(1);
+                    counter!("connection_accepted", &self.metric_labels).increment(1);
                     tokio::spawn(
                         Self::handle_connection(socket, labels)
                     );
