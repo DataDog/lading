@@ -367,33 +367,8 @@ impl Sampler {
                     // We don't want to bail out entirely if we can't read smap rollup
                     // which will happen if we don't have permissions or, more
                     // likely, the process has exited.
-
-                    // For the later we expect to see one of two IO errors: The first being "No such process" (linux os error code 3)
-                    // which in Rust's implementation is mapped to std::io::ErrorKind::Uncategorized. The second being
-                    // "No such file or directory" (linux os error code 2) which is mapped to std::io::ErrorKind::NotFound.
-                    // This explanation is justifiaction for checking the raw os error in the subsequent match rather than
-                    // just filtering on ErrorKind::NotFound.
-                    match err {
-                        memory::smaps_rollup::Error::Io(io_err) => {
-                            if let Some(raw_os_error) = io_err.raw_os_error() {
-                                match raw_os_error {
-                                    2 | 3 => {
-                                        // Handle specific linux OS errors: 2 (ENOENT) and 3 (ESRCH)
-                                        warn!("Found linux OS error ({raw_os_error}) while processing `/proc/{pid}/smaps_rollup`, continuing to next pid: {io_err}");
-                                        continue;
-                                    }
-                                    _ => {
-                                        warn!("IO error while processing `/proc/{pid}/smaps_rollup`: {io_err}");
-                                    }
-                                }
-                            } else {
-                                warn!("Unhandled IO error without raw OS error code while processing `/proc/{pid}/smaps_rollup`: {io_err}");
-                            }
-                        }
-                        _ => {
-                            warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {err}");
-                        }
-                    }
+                    warn!("Couldn't process `/proc/{pid}/smaps_rollup`, skipping to next process: {err}");
+                    continue;
                 }
             }
         }
