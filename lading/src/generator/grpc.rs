@@ -269,11 +269,6 @@ impl Grpc {
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
         let rpc_path = self.rpc_path;
 
-        let requests_sent = counter!("requests_sent", &self.metric_labels);
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-        let request_ok = counter!("request_ok", &self.metric_labels);
-        let response_bytes = counter!("response_bytes", &self.metric_labels);
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
@@ -283,7 +278,7 @@ impl Grpc {
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
                     let block_length = blk.bytes.len();
-                    requests_sent.increment(1);
+                    counter!("requests_sent", &self.metric_labels).increment(1);
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
@@ -294,9 +289,9 @@ impl Grpc {
 
                     match res {
                         Ok(res) => {
-                            bytes_written.increment(block_length as u64);
-                            request_ok.increment(1);
-                            response_bytes.increment(res.into_inner() as u64);
+                            counter!("bytes_written", &self.metric_labels).increment(block_length as u64);
+                            counter!("request_ok", &self.metric_labels).increment(1);
+                            counter!("response_bytes", &self.metric_labels).increment(res.into_inner() as u64);
                         }
                         Err(err) => {
                             let mut error_labels = self.metric_labels.clone();
