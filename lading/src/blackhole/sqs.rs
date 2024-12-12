@@ -14,7 +14,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use metrics::{counter, Counter};
+use metrics::counter;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
@@ -97,18 +97,9 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let bytes_received = counter!("bytes_received", &self.metric_labels);
-        let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
-            let bytes_received = bytes_received.clone();
-            let requests_received = requests_received.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |req| {
-                    let bytes_received = bytes_received.clone();
-                    let requests_received = requests_received.clone();
-                    srv(req, requests_received, bytes_received)
-                }))
-            }
+            let metric_labels = self.metric_labels.clone();
+            async move { Ok::<_, hyper::Error>(service_fn(move |req| srv(req, metric_labels.clone()))) }
         });
         let svc = ServiceBuilder::new()
             .load_shed()
@@ -238,13 +229,12 @@ impl DeleteMessageBatch {
 
 async fn srv(
     req: Request<Body>,
-    requests_received: Counter,
-    bytes_received: Counter,
+    metric_labels: Vec<(String, String)>,
 ) -> Result<Response<Body>, Error> {
-    requests_received.increment(1);
+    counter!("requests_received", &metric_labels).increment(1);
 
     let bytes = req.collect().await?.to_bytes();
-    bytes_received.increment(bytes.len() as u64);
+    counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
 
     let action: Action = serde_qs::from_bytes(&bytes)?;
 

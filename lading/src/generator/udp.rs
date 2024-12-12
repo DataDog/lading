@@ -161,9 +161,6 @@ impl Udp {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-        let packets_sent = counter!("packets_sent", &self.metric_labels);
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
@@ -192,8 +189,8 @@ impl Udp {
                     let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match sock.send_to(&blk.bytes, self.addr).await {
                         Ok(bytes) => {
-                            bytes_written.increment(bytes as u64);
-                            packets_sent.increment(1);
+                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                            counter!("packets_sent", &self.metric_labels).increment(1);
                             connection = Some(sock);
                         }
                         Err(err) => {

@@ -101,6 +101,7 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         let user_cpu = (user_fraction / allowed_cores) * 100.0;
         let system_cpu = (system_fraction / allowed_cores) * 100.0;
         gauge!("total_cpu_percentage", labels).set(total_cpu);
+        gauge!("cpu_percentage", labels).set(total_cpu); // backward compatibility
         gauge!("user_cpu_percentage", labels).set(user_cpu);
         gauge!("kernel_cpu_percentage", labels).set(system_cpu); // kernel is a misnomer, keeping for compatibility
         gauge!("system_cpu_percentage", labels).set(system_cpu);

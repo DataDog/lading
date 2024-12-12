@@ -237,8 +237,6 @@ impl Child {
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-        let packets_sent = counter!("packets_sent", &self.metric_labels);
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
@@ -258,8 +256,8 @@ impl Child {
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     match socket.send(&blk.bytes).await {
                         Ok(bytes) => {
-                            bytes_written.increment(bytes as u64);
-                            packets_sent.increment(1);
+                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                            counter!("packets_sent", &self.metric_labels).increment(1);
                         }
                         Err(err) => {
                             debug!("write failed: {}", err);

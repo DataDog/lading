@@ -16,7 +16,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use metrics::{counter, Counter};
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
@@ -127,14 +127,13 @@ struct KinesisPutRecordBatchResponse {
 #[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(
     status: StatusCode,
-    bytes_received: Counter,
-    requests_received: Counter,
+    metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
     req: Request<Body>,
     headers: HeaderMap,
     response_delay: Duration,
 ) -> Result<Response<Body>, hyper::Error> {
-    requests_received.increment(1);
+    counter!("requests_received", &metric_labels).increment(1);
 
     let (parts, body) = req.into_parts();
 
@@ -143,7 +142,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            bytes_received.increment(body.len() as u64);
+            counter!("bytes_received", &metric_labels).increment(body.len() as u64);
 
             tokio::time::sleep(response_delay).await;
 
@@ -234,11 +233,8 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let bytes_received = counter!("bytes_received", &self.metric_labels);
-        let requests_received = counter!("requests_received", &self.metric_labels);
         let service = make_service_fn(|_: &AddrStream| {
-            let bytes_received = bytes_received.clone();
-            let requests_received = requests_received.clone();
+            let metric_labels = self.metric_labels.clone();
             let body_bytes = self.body_bytes.clone();
             let headers = self.headers.clone();
             async move {
@@ -246,8 +242,7 @@ impl Http {
                     debug!("REQUEST: {:?}", request);
                     srv(
                         self.status,
-                        bytes_received.clone(),
-                        requests_received.clone(),
+                        metric_labels.clone(),
                         body_bytes.clone(),
                         request,
                         headers.clone(),

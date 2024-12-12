@@ -152,9 +152,6 @@ impl UnixStream {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-        let packets_sent = counter!("packets_sent", &self.metric_labels);
-
         let mut current_connection = None;
 
         let shutdown_wait = self.shutdown.recv();
@@ -206,8 +203,8 @@ impl UnixStream {
                             // if the readiness event is a false positive.
                             match stream.try_write(&blk.bytes[blk_offset..]) {
                                 Ok(bytes) => {
-                                    bytes_written.increment(bytes as u64);
-                                    packets_sent.increment(1);
+                                    counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                                    counter!("packets_sent", &self.metric_labels).increment(1);
                                     blk_offset += bytes;
                                 }
                                 Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
