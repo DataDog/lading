@@ -1,11 +1,11 @@
 /// Code to read cgroup information.
 pub(crate) mod v2;
 
-use std::{collections::VecDeque, io};
+use std::{collections::VecDeque, io, path::PathBuf};
 
 use nix::errno::Errno;
 use procfs::process::Process;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{debug, error, trace};
 
 #[derive(thiserror::Error, Debug)]
@@ -27,16 +27,27 @@ pub enum Error {
 }
 
 #[derive(Debug)]
+struct CgroupInfo {
+    cpu_sampler: v2::cpu::Sampler,
+}
+
+#[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
+    cgroup_info: FxHashMap<PathBuf, CgroupInfo>,
     labels: Vec<(String, String)>,
 }
 
 impl Sampler {
     pub(crate) fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
+        let cgroup_info = FxHashMap::default();
 
-        Ok(Self { parent, labels })
+        Ok(Self {
+            parent,
+            cgroup_info,
+            labels,
+        })
     }
 
     #[allow(clippy::cast_possible_wrap)]
@@ -108,17 +119,26 @@ impl Sampler {
 
             // Now iterate the cgroups and collect samples.
             for cgroup_path in cgroups {
-                debug!(
-                    "Polling cgroup metrics for {path}",
-                    path = cgroup_path.to_string_lossy()
-                );
+                // If we haven't seen this cgroup before, initialize its CgroupInfo.
+                self.cgroup_info
+                    .entry(cgroup_path.clone())
+                    .or_insert_with(|| CgroupInfo {
+                        cpu_sampler: v2::cpu::Sampler::new(),
+                    });
+
                 if let Err(err) = v2::poll(&cgroup_path, &self.labels).await {
                     error!(
                         "Unable to poll cgroup memory metrics for {path}: {err}",
                         path = cgroup_path.to_string_lossy()
                     );
                 }
-                if let Err(err) = v2::cpu::poll(&cgroup_path, &self.labels).await {
+                // SAFETY: We just inserted this entry, so it must exist.
+                let cinfo = self
+                    .cgroup_info
+                    .get_mut(&cgroup_path)
+                    .expect("catastrophic programming error");
+
+                if let Err(err) = cinfo.cpu_sampler.poll(&cgroup_path, &self.labels).await {
                     error!(
                         "Unable to poll cgroup CPU metrics for {path}: {err}",
                         path = cgroup_path.to_string_lossy()
