@@ -60,13 +60,18 @@ struct ProcessInfo {
 #[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
+    process_info: FxHashMap<i32, ProcessInfo>,
 }
 
 impl Sampler {
     pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
+        let process_info = FxHashMap::default();
 
-        Ok(Self { parent })
+        Ok(Self {
+            parent,
+            process_info,
+        })
     }
 
     #[allow(
@@ -77,8 +82,6 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
-        let mut process_info: FxHashMap<i32, ProcessInfo> = FxHashMap::default();
-
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = memory::smaps_rollup::Aggregator::default();
@@ -136,7 +139,7 @@ impl Sampler {
             }
 
             // If we haven't seen this process before, initialize its ProcessInfo.
-            match process_info.entry(pid) {
+            match self.process_info.entry(pid) {
                 Entry::Occupied(_) => { /* Already initialized */ }
                 Entry::Vacant(entry) => {
                     let exe = proc_exe(pid).await?;
@@ -156,7 +159,8 @@ impl Sampler {
             }
 
             // SAFETY: We've just inserted this pid into the map.
-            let pinfo = process_info
+            let pinfo = self
+                .process_info
                 .get_mut(&pid)
                 .expect("catastrophic programming error");
 
