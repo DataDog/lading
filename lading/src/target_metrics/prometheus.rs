@@ -270,8 +270,7 @@ pub(crate) async fn scrape_metrics(
                     }
                 };
 
-                let handle = gauge!(format!("target/{name}"), &all_labels.unwrap_or_default());
-                handle.set(value);
+                gauge!(format!("target/{name}"), &all_labels.unwrap_or_default()).set(value);
             }
             Some(MetricType::Counter) => {
                 let value: f64 = match value.parse() {
@@ -296,8 +295,7 @@ pub(crate) async fn scrape_metrics(
                 };
 
                 trace!("counter: {name} = {value}");
-                let handle = counter!(format!("target/{name}"), &all_labels.unwrap_or_default());
-                handle.absolute(value);
+                counter!(format!("target/{name}"), &all_labels.unwrap_or_default()).absolute(value);
             }
             Some(_) => {
                 trace!("unsupported metric type: {name} = {value}");

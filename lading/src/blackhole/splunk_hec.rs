@@ -22,6 +22,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, Server, StatusCode,
 };
+use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
@@ -91,7 +92,7 @@ async fn srv(
     req: Request<Body>,
     labels: Arc<Vec<(String, String)>>,
 ) -> Result<Response<Body>, Error> {
-    metrics::counter!("requests_received", &*labels).increment(1);
+    counter!("requests_received", &*labels).increment(1);
 
     let (parts, body) = req.into_parts();
     let bytes = body.collect().await?.to_bytes();
@@ -99,7 +100,7 @@ async fn srv(
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            metrics::counter!("bytes_received", &*labels).increment(body.len() as u64);
+            counter!("bytes_received", &*labels).increment(body.len() as u64);
 
             let mut okay = Response::default();
             *okay.status_mut() = StatusCode::OK;

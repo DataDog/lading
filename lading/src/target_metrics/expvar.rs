@@ -107,11 +107,11 @@ impl Expvar {
                     let val = json.pointer(var_name).and_then(serde_json::Value::as_f64);
                     if let Some(val) = val {
                         trace!("expvar: {} = {}", var_name, val);
-                        let handle = gauge!(
+                        gauge!(
                             format!("target/{name}", name = var_name.trim_start_matches('/'),),
                             &all_labels
-                        );
-                        handle.set(val);
+                        )
+                        .set(val);
                     }
                 }
             }

@@ -152,14 +152,14 @@ impl CaptureManager {
                 // TODO we're allocating the same small strings over and over most likely
                 labels.insert(lbl.key().into(), lbl.value().into());
             }
-            let value: f64 = f64::from_bits(counter.get_inner().load(Ordering::Relaxed));
+            let value: u64 = counter.get_inner().load(Ordering::Relaxed);
             let line = json::Line {
                 run_id: self.run_id,
                 time: now_ms,
                 fetch_index: self.fetch_index,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
-                value: json::LineValue::Float(value),
+                value: json::LineValue::Int(value),
                 labels,
             };
             lines.push(line);

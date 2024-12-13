@@ -151,8 +151,6 @@ impl Tcp {
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
         thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
-        let bytes_written = counter!("bytes_written", &self.metric_labels);
-        let packets_sent = counter!("packets_sent", &self.metric_labels);
         let mut current_connection = None;
 
         let shutdown_wait = self.shutdown.recv();
@@ -183,8 +181,8 @@ impl Tcp {
                     let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match connection.write_all(&blk.bytes).await {
                         Ok(()) => {
-                            bytes_written.increment(u64::from(blk.total_bytes.get()));
-                            packets_sent.increment(1);
+                            counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
+                            counter!("packets_sent", &self.metric_labels).increment(1);
                         }
                         Err(err) => {
                             trace!("write failed: {}", err);
