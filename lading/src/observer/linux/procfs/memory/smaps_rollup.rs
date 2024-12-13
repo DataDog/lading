@@ -25,7 +25,7 @@ pub(crate) struct Aggregator {
 // Read `/proc/{pid}/smaps_rollup` and parse it directly into metrics.
 pub(crate) async fn poll(
     pid: i32,
-    labels: &[(String, String)],
+    labels: &[(&'static str, String)],
     aggr: &mut Aggregator,
 ) -> Result<(), Error> {
     let path = format!("/proc/{pid}/smaps_rollup");

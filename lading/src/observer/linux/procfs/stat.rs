@@ -1,6 +1,4 @@
 use metrics::gauge;
-use once_cell::sync::OnceCell;
-use std::sync::Mutex;
 use tokio::fs;
 
 use crate::observer::linux::cgroup;
@@ -19,7 +17,7 @@ pub enum Error {
     Cgroup(#[from] cgroup::v2::Error),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[allow(clippy::struct_field_names)] // The _ticks is useful even if clippy doesn't like it.
 struct Stats {
     user_ticks: u64,
@@ -37,72 +35,78 @@ struct CpuUtilization {
     system_cpu_millicores: f64,
 }
 
-static PREV: OnceCell<Mutex<Stats>> = OnceCell::new();
+#[derive(Debug)]
+pub(crate) struct Sampler {
+    ticks_per_second: f64,
+    prev: Stats,
+}
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub(crate) async fn poll(
-    pid: i32,
-    uptime_secs: f64,
-    labels: &[(String, String)],
-) -> Result<(), Error> {
-    let group_prefix = cgroup::v2::get_path(pid).await?;
-
-    // Read cpu.max (cgroup v2)
-    let cpu_max = fs::read_to_string(group_prefix.join("cpu.max")).await?;
-    let parts: Vec<&str> = cpu_max.split_whitespace().collect();
-    let (max_str, period_str) = (parts[0], parts[1]);
-    let allowed_cores = if max_str == "max" {
-        // If the target cgroup has no CPU limit we assume it has access to all
-        // physical cores.
-        num_cpus::get_physical() as f64
-    } else {
-        let max_val = max_str.parse::<f64>()?;
-        let period_val = period_str.parse::<f64>()?;
-        max_val / period_val
-    };
-    let limit_millicores = allowed_cores * 1000.0;
-
-    // Read `/proc/<PID>/stat`
-    let stat_contents = fs::read_to_string(format!("/proc/{pid}/stat")).await?;
-    let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
-    assert!(cur_pid == pid);
-
-    // See sysconf(3).
-    let ticks_per_second = unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64;
-
-    // Get or initialize the previous stats. Note that the first time this is
-    // initialized we intentionally set last_instance to now to avoid scheduling
-    // shenanigans.
-    let cur_stats = Stats {
-        user_ticks: utime_ticks,
-        system_ticks: stime_ticks,
-        uptime_ticks: (uptime_secs * ticks_per_second).round() as u64,
-    };
-
-    let mut prev = PREV
-        .get_or_init(|| Mutex::new(cur_stats))
-        .lock()
-        .expect("/proc/pid/stat previous state lock poisoned");
-
-    if let Some(util) = compute_cpu_usage(*prev, cur_stats, allowed_cores) {
-        // NOTE these metric names are paired with names in cgroup/v2/cpu.rs and
-        // must remain consistent. If you change these, change those.
-        gauge!("stat.total_cpu_percentage", labels).set(util.total_cpu_percentage);
-        gauge!("stat.cpu_percentage", labels).set(util.total_cpu_percentage); // backward compatibility
-        gauge!("stat.user_cpu_percentage", labels).set(util.user_cpu_percentage);
-        gauge!("stat.kernel_cpu_percentage", labels).set(util.system_cpu_percentage); // kernel is a misnomer, keeping for compatibility
-        gauge!("stat.system_cpu_percentage", labels).set(util.system_cpu_percentage);
-
-        gauge!("stat.total_cpu_usage_millicores", labels).set(util.total_cpu_millicores);
-        gauge!("stat.user_cpu_usage_millicores", labels).set(util.user_cpu_millicores);
-        gauge!("stat.kernel_cpu_usage_millicores", labels).set(util.system_cpu_millicores); // kernel is a misnomer
-        gauge!("stat.system_cpu_usage_millicores", labels).set(util.system_cpu_millicores);
-        gauge!("stat.cpu_limit_millicores", labels).set(limit_millicores);
+impl Sampler {
+    pub(crate) fn new() -> Self {
+        Self {
+            ticks_per_second: unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64,
+            prev: Stats::default(),
+        }
     }
 
-    *prev = cur_stats;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) async fn poll(
+        &mut self,
+        pid: i32,
+        uptime_secs: f64,
+        labels: &[(&'static str, String)],
+    ) -> Result<(), Error> {
+        let group_prefix = cgroup::v2::get_path(pid).await?;
 
-    Ok(())
+        // Read cpu.max (cgroup v2)
+        let cpu_max = fs::read_to_string(group_prefix.join("cpu.max")).await?;
+        let parts: Vec<&str> = cpu_max.split_whitespace().collect();
+        let (max_str, period_str) = (parts[0], parts[1]);
+        let allowed_cores = if max_str == "max" {
+            // If the target cgroup has no CPU limit we assume it has access to all
+            // physical cores.
+            num_cpus::get_physical() as f64
+        } else {
+            let max_val = max_str.parse::<f64>()?;
+            let period_val = period_str.parse::<f64>()?;
+            max_val / period_val
+        };
+        let limit_millicores = allowed_cores * 1000.0;
+
+        // Read `/proc/<PID>/stat`
+        let stat_contents = fs::read_to_string(format!("/proc/{pid}/stat")).await?;
+        let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
+        assert!(cur_pid == pid);
+
+        // Get or initialize the previous stats. Note that the first time this is
+        // initialized we intentionally set last_instance to now to avoid scheduling
+        // shenanigans.
+        let cur_stats = Stats {
+            user_ticks: utime_ticks,
+            system_ticks: stime_ticks,
+            uptime_ticks: (uptime_secs * self.ticks_per_second).round() as u64,
+        };
+
+        if let Some(util) = compute_cpu_usage(self.prev, cur_stats, allowed_cores) {
+            // NOTE these metric names are paired with names in cgroup/v2/cpu.rs and
+            // must remain consistent. If you change these, change those.
+            gauge!("stat.total_cpu_percentage", labels).set(util.total_cpu_percentage);
+            gauge!("stat.cpu_percentage", labels).set(util.total_cpu_percentage); // backward compatibility
+            gauge!("stat.user_cpu_percentage", labels).set(util.user_cpu_percentage);
+            gauge!("stat.kernel_cpu_percentage", labels).set(util.system_cpu_percentage); // kernel is a misnomer, keeping for compatibility
+            gauge!("stat.system_cpu_percentage", labels).set(util.system_cpu_percentage);
+
+            gauge!("stat.total_cpu_usage_millicores", labels).set(util.total_cpu_millicores);
+            gauge!("stat.user_cpu_usage_millicores", labels).set(util.user_cpu_millicores);
+            gauge!("stat.kernel_cpu_usage_millicores", labels).set(util.system_cpu_millicores); // kernel is a misnomer
+            gauge!("stat.system_cpu_usage_millicores", labels).set(util.system_cpu_millicores);
+            gauge!("stat.cpu_limit_millicores", labels).set(limit_millicores);
+        }
+
+        self.prev = cur_stats;
+
+        Ok(())
+    }
 }
 
 /// Parse `/proc/<pid>/stat` and extracts:

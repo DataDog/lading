@@ -2,12 +2,15 @@
 mod memory;
 mod stat;
 
-use std::{collections::VecDeque, io};
+use std::{
+    collections::{hash_map::Entry, VecDeque},
+    io,
+};
 
 use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, warn};
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
@@ -46,6 +49,15 @@ macro_rules! report_status_field {
 }
 
 #[derive(Debug)]
+struct ProcessInfo {
+    cmdline: String,
+    exe: String,
+    comm: String,
+    pid_s: String,
+    stat_sampler: stat::Sampler,
+}
+
+#[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
 }
@@ -65,6 +77,8 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
+        let mut proccess_info: FxHashMap<i32, ProcessInfo> = FxHashMap::default();
+
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = memory::smaps_rollup::Aggregator::default();
@@ -121,15 +135,36 @@ impl Sampler {
                 continue;
             }
 
-            // Construct labels and then start ripping data into metrics.
-            let exe = proc_exe(pid).await?;
-            let comm = proc_comm(pid).await?;
-            let cmdline = proc_cmdline(pid).await?;
-            let labels = [
-                (String::from("pid"), format!("{pid}")),
-                (String::from("exe"), exe.clone()),
-                (String::from("cmdline"), cmdline.clone()),
-                (String::from("comm"), comm.clone()),
+            // If we haven't seen this process before, initialize its ProcessInfo.
+            match proccess_info.entry(pid) {
+                Entry::Occupied(_) => { /* Already initialized */ }
+                Entry::Vacant(entry) => {
+                    let exe = proc_exe(pid).await?;
+                    let comm = proc_comm(pid).await?;
+                    let cmdline = proc_cmdline(pid).await?;
+                    let pid_s = format!("{pid}");
+                    let stat_sampler = stat::Sampler::new();
+
+                    entry.insert(ProcessInfo {
+                        cmdline,
+                        exe,
+                        comm,
+                        pid_s,
+                        stat_sampler,
+                    });
+                }
+            }
+
+            // SAFETY: We've just inserted this pid into the map.
+            let pinfo = proccess_info
+                .get_mut(&pid)
+                .expect("catastrophic programming error");
+
+            let labels: [(&'static str, String); 4] = [
+                ("pid", pinfo.pid_s.clone()),
+                ("exe", pinfo.exe.clone()),
+                ("cmdline", pinfo.cmdline.clone()),
+                ("comm", pinfo.comm.clone()),
             ];
 
             // `/proc/{pid}/status`
@@ -145,7 +180,7 @@ impl Sampler {
             let uptime = proc_uptime().await?;
 
             // `/proc/{pid}/stat`, most especially per-process CPU data.
-            if let Err(e) = stat::poll(pid, uptime, &labels).await {
+            if let Err(e) = pinfo.stat_sampler.poll(pid, uptime, &labels).await {
                 // We don't want to bail out entirely if we can't read stats
                 // which will happen if we don't have permissions or, more
                 // likely, the process has exited.
@@ -157,11 +192,11 @@ impl Sampler {
             match memory::smaps::Regions::from_pid(pid) {
                 Ok(memory_regions) => {
                     for (pathname, measures) in memory_regions.aggregate_by_pathname() {
-                        let labels = [
-                            ("pid", format!("{pid}")),
-                            ("exe", exe.clone()),
-                            ("cmdline", cmdline.clone()),
-                            ("comm", comm.clone()),
+                        let labels: [(&'static str, String); 5] = [
+                            ("pid", pinfo.pid_s.clone()),
+                            ("exe", pinfo.exe.clone()),
+                            ("cmdline", pinfo.cmdline.clone()),
+                            ("comm", pinfo.comm.clone()),
                             ("pathname", pathname),
                         ];
                         gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
