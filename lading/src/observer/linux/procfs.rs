@@ -77,7 +77,7 @@ impl Sampler {
         clippy::cast_possible_wrap
     )]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
-        let mut proccess_info: FxHashMap<i32, ProcessInfo> = FxHashMap::default();
+        let mut process_info: FxHashMap<i32, ProcessInfo> = FxHashMap::default();
 
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
@@ -136,7 +136,7 @@ impl Sampler {
             }
 
             // If we haven't seen this process before, initialize its ProcessInfo.
-            match proccess_info.entry(pid) {
+            match process_info.entry(pid) {
                 Entry::Occupied(_) => { /* Already initialized */ }
                 Entry::Vacant(entry) => {
                     let exe = proc_exe(pid).await?;
@@ -156,7 +156,7 @@ impl Sampler {
             }
 
             // SAFETY: We've just inserted this pid into the map.
-            let pinfo = proccess_info
+            let pinfo = process_info
                 .get_mut(&pid)
                 .expect("catastrophic programming error");
 
