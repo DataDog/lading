@@ -120,7 +120,8 @@ impl Sampler {
             // Now iterate the cgroups and collect samples.
             for cgroup_path in cgroups {
                 // If we haven't seen this cgroup before, initialize its CgroupInfo.
-                self.cgroup_info
+                let cinfo = self
+                    .cgroup_info
                     .entry(cgroup_path.clone())
                     .or_insert_with(|| CgroupInfo {
                         cpu_sampler: v2::cpu::Sampler::new(),
@@ -132,11 +133,6 @@ impl Sampler {
                         path = cgroup_path.to_string_lossy()
                     );
                 }
-                // SAFETY: We just inserted this entry, so it must exist.
-                let cinfo = self
-                    .cgroup_info
-                    .get_mut(&cgroup_path)
-                    .expect("catastrophic programming error");
 
                 if let Err(err) = cinfo.cpu_sampler.poll(&cgroup_path, &self.labels).await {
                     error!(
