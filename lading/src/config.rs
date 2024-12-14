@@ -1,7 +1,7 @@
 //! This module controls configuration parsing from the end user, providing a
 //! convenience mechanism for the rest of the program. Crashes are most likely
 //! to originate from this code, intentionally.
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
@@ -51,6 +51,12 @@ pub struct Config {
     pub inspector: Option<inspector::Config>,
 }
 
+/// Default value for [`Telemetry::Log::expiration`]
+#[must_use]
+pub fn default_expiration() -> Duration {
+    Duration::MAX
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -80,6 +86,9 @@ pub enum Telemetry {
         path: PathBuf,
         /// Additional labels to include in every metric
         global_labels: FxHashMap<String, String>,
+        /// The time metrics that have not been written to will take to expire.
+        #[serde(default = "default_expiration")]
+        expiration: Duration,
     },
 }
 

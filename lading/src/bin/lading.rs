@@ -11,7 +11,7 @@ use clap::{ArgGroup, Parser, Subcommand};
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{Config, Telemetry},
+    config::{default_expiration, Config, Telemetry},
     generator::{self, process_tree},
     inspector, observer,
     target::{self, Behavior, Output},
@@ -301,6 +301,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
+            expiration: default_expiration(),
         };
     } else {
         match config.telemetry {
@@ -380,12 +381,14 @@ async fn inner_main(
         Telemetry::Log {
             path,
             global_labels,
+            expiration,
         } => {
             let mut capture_manager = CaptureManager::new(
                 path,
                 shutdown_watcher.register()?,
                 experiment_started_watcher.clone(),
                 target_running_watcher.clone(),
+                expiration,
             )
             .await?;
             for (k, v) in global_labels {
