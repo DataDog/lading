@@ -65,7 +65,7 @@ pub struct Prometheus {
     config: Config,
     client: reqwest::Client,
     shutdown: lading_signal::Watcher,
-    experiment_started: lading_signal::Watcher,
+    target_running: lading_signal::Watcher,
 }
 
 impl Prometheus {
@@ -77,14 +77,14 @@ impl Prometheus {
     pub(crate) fn new(
         config: Config,
         shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
     ) -> Self {
         let client = reqwest::Client::new();
         Self {
             config,
             client,
             shutdown,
-            experiment_started,
+            target_running,
         }
     }
 
@@ -103,8 +103,8 @@ impl Prometheus {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(self) -> Result<(), Error> {
-        info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
-        self.experiment_started.recv().await;
+        info!("Prometheus target metrics scraper running, but waiting for target to run");
+        self.target_running.recv().await;
         info!("Prometheus target metrics scraper starting collection");
 
         let client = self.client;
@@ -376,7 +376,7 @@ mod tests {
         let server_uri = format!("http://{addr}/metrics");
 
         let (shutdown_watcher, _) = lading_signal::signal();
-        let (experiment_started_watcher, experiment_started_broadcaster) = lading_signal::signal();
+        let (target_running_watcher, target_running_broadcast) = lading_signal::signal();
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
@@ -384,14 +384,14 @@ mod tests {
                 tags,
             },
             shutdown_watcher,
-            experiment_started_watcher,
+            target_running_watcher,
         );
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
         dr.install().expect("failed to install recorder");
 
-        experiment_started_broadcaster.signal();
+        target_running_broadcast.signal();
 
         p.scrape_metrics().await;
 
