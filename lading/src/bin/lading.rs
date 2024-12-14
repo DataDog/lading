@@ -11,7 +11,7 @@ use clap::{ArgGroup, Parser, Subcommand};
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{default_expiration, Config, Telemetry},
+    config::{Config, Telemetry},
     generator::{self, process_tree},
     inspector, observer,
     target::{self, Behavior, Output},
@@ -181,6 +181,9 @@ struct Opts {
     /// prometheus-addr
     #[clap(long)]
     capture_path: Option<String>,
+    /// time that capture metrics will expire by if they are not seen again, only useful when capture-path is set
+    #[clap(long)]
+    capture_expiriation_seconds: Option<u64>,
     /// address to bind prometheus exporter to, exclusive of prometheus-path and
     /// promtheus-addr
     #[clap(long)]
@@ -301,7 +304,7 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
-            expiration: default_expiration(),
+            expiration: Duration::from_secs(ops.capture_expiriation_seconds.unwrap_or(u64::MAX)),
         };
     } else {
         match config.telemetry {
