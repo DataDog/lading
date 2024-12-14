@@ -84,6 +84,7 @@ impl CaptureManager {
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
+        expiration: Duration,
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
@@ -93,7 +94,7 @@ impl CaptureManager {
             recency: Recency::new(
                 quanta::Clock::new(),
                 MetricKindMask::GAUGE | MetricKindMask::COUNTER,
-                Some(Duration::from_secs(3)),
+                Some(expiration),
             ),
         };
 
