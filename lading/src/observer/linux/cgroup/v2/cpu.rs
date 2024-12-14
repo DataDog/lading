@@ -96,6 +96,9 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         let user_fraction = delta_user as f64 / delta_time;
         let system_fraction = delta_system as f64 / delta_time;
 
+        // NOTE these metric names are paired with names in procfs/stat.rs and
+        // must remain consistent. If you change these, change those.
+
         // Convert usage to a percentage of the cores granted to the target.
         let total_cpu = (usage_fraction / allowed_cores) * 100.0;
         let user_cpu = (user_fraction / allowed_cores) * 100.0;
@@ -106,7 +109,7 @@ pub(crate) async fn poll(group_prefix: &Path, labels: &[(String, String)]) -> Re
         gauge!("kernel_cpu_percentage", labels).set(system_cpu); // kernel is a misnomer, keeping for compatibility
         gauge!("system_cpu_percentage", labels).set(system_cpu);
 
-        // Convert usage to kubernetes style millicores. These
+        // Convert usage to kubernetes style millicores.
         let total_millicores = usage_fraction * 1000.0;
         let user_millicores = user_fraction * 1000.0;
         let system_millicores = system_fraction * 1000.0;
