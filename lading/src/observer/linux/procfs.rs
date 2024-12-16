@@ -1,6 +1,7 @@
 /// Sampler implementation for procfs filesystems
 mod memory;
 mod stat;
+mod uptime;
 
 use std::{
     collections::{hash_map::Entry, VecDeque},
@@ -31,12 +32,9 @@ pub enum Error {
     /// Wrapper for [`stat::Error`]
     #[error("Unable to read stat: {0}")]
     Stat(#[from] stat::Error),
-    /// Unable to parse /proc/uptime
-    #[error("/proc/uptime malformed: {0}")]
-    MalformedUptime(&'static str),
-    /// Unable to parse floating point
-    #[error("Float Parsing: {0}")]
-    ParseFloat(#[from] std::num::ParseFloatError),
+    /// Wrapper for [`uptime::Error`]
+    #[error("Unable to read uptime: {0}")]
+    Uptime(#[from] uptime::Error),
 }
 
 macro_rules! report_status_field {
@@ -181,7 +179,7 @@ impl Sampler {
             report_status_field!(status, labels, vmexe);
             report_status_field!(status, labels, vmlib);
 
-            let uptime = proc_uptime().await?;
+            let uptime = uptime::poll().await?;
 
             // `/proc/{pid}/stat`, most especially per-process CPU data.
             if let Err(e) = pinfo.stat_sampler.poll(pid, uptime, &labels).await {
@@ -323,42 +321,4 @@ async fn proc_cmdline(pid: i32) -> Result<String, Error> {
         parts.join(" ")
     };
     Ok(res)
-}
-
-/// Read `/proc/uptime`
-async fn proc_uptime() -> Result<f64, Error> {
-    let buf = tokio::fs::read_to_string("/proc/uptime").await?;
-    let uptime_secs = proc_uptime_inner(&buf)?;
-    Ok(uptime_secs)
-}
-
-/// Parse `/proc/uptime` to extract total uptime in seconds.
-///
-/// # Errors
-///
-/// Function errors if the file is malformed.
-#[inline]
-fn proc_uptime_inner(contents: &str) -> Result<f64, Error> {
-    // TODO this should probably be scooted up to procfs.rs. Implies the
-    // `proc_*` functions there need a test component, making this an inner
-    // function eventually.
-
-    let fields: Vec<&str> = contents.split_whitespace().collect();
-    if fields.is_empty() {
-        return Err(Error::MalformedUptime("/proc/uptime empty"));
-    }
-    let uptime_secs = fields[0].parse::<f64>()?;
-    Ok(uptime_secs)
-}
-
-#[cfg(test)]
-mod test {
-    use super::proc_uptime_inner;
-
-    #[test]
-    fn parse_uptime_basic() {
-        let line = "12345.67 4321.00\n";
-        let uptime = proc_uptime_inner(line).unwrap();
-        assert!((uptime - 12345.67).abs() < f64::EPSILON);
-    }
 }
