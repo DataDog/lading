@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Parse nearly the complete field list of smaps/smaps_rollup in the Linux observer. 
 - Metrics storage is now generational, expiring unwritten metrics by configuration parameter `expiration`. 
+- Requests sent to the 'http' blackhole will now record the `path` of the HTTP
+  request as a tag of the `bytes_received` and `requests_received` metrics.
 ## Removed
 - Removed the unused target-rss-byte-limit from the command line, internal stub of. 
 ## Changed

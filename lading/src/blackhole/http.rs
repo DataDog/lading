@@ -127,15 +127,18 @@ struct KinesisPutRecordBatchResponse {
 #[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(
     status: StatusCode,
-    metric_labels: Vec<(String, String)>,
+    mut metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
     req: Request<Body>,
     headers: HeaderMap,
     response_delay: Duration,
 ) -> Result<Response<Body>, hyper::Error> {
-    counter!("requests_received", &metric_labels).increment(1);
-
     let (parts, body) = req.into_parts();
+    if let Some(path_and_query) = parts.uri.path_and_query() {
+        metric_labels.push(("path".to_string(), path_and_query.path().to_string()));
+    }
+
+    counter!("requests_received", &metric_labels).increment(1);
 
     let bytes = body.collect().await?.to_bytes();
 
