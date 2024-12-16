@@ -4,19 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.25.0]
 ## Added
-- Parse nearly the complete field list of smaps/smaps_rollup in the Linux observer. 
-- Metrics storage is now generational, expiring unwritten metrics by configuration parameter `expiration`. 
+- Parse nearly the complete field list of smaps/smaps_rollup in the Linux observer.
+- Metrics storage is now generational, expiring unwritten metrics by configuration parameter `expiration`.
 - Requests sent to the 'http' blackhole will now record the `path` of the HTTP
   request as a tag of the `bytes_received` and `requests_received` metrics.
 ## Removed
-- Removed the unused target-rss-byte-limit from the command line, internal stub of. 
+- Removed the unused target-rss-byte-limit from the command line, internal stub of.
 ## Changed
 - logrotate_fs is now behind a feature flag and not enabled in the default
   build. It remains enabled in the release artifact.
 - The build now includes http1 and http2 support. Actual usage and availability may vary.
-- CPU data now sourced from cgroup v2 on Linux, memory data expanded significantly. 
+- CPU data now sourced from cgroup v2 on Linux, memory data expanded significantly.
 - CPU data now also includes kubernetes style 'millicore' calculations.
 
 ## [0.24.0]
