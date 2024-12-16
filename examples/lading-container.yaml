@@ -1,0 +1,9 @@
+generator:
+  - container:
+      repository: ghcr.io/scottopell/randomreader
+      tag: latest
+      args: [ "--buffer-size-mb", "10" ]
+
+blackhole:
+  - http:
+      binding_addr: "0.0.0.0:8080"

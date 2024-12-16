@@ -15,6 +15,7 @@ use tracing::{error, warn};
 
 use crate::target::TargetPidReceiver;
 
+pub mod container;
 pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
@@ -67,6 +68,9 @@ pub enum Error {
     /// See [`crate::generator::procfs::Error`] for details.
     #[error(transparent)]
     ProcFs(#[from] procfs::Error),
+    /// See [`crate::generator::container::Error`] for details.
+    #[error(transparent)]
+    Container(#[from] container::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -120,6 +124,8 @@ pub enum Inner {
     ProcessTree(process_tree::Config),
     /// See [`crate::generator::procfs::Config`] for details.
     ProcFs(procfs::Config),
+    /// See [`crate::generator::container::Config`] for details.
+    Container(container::Config),
 }
 
 #[derive(Debug)]
@@ -152,6 +158,8 @@ pub enum Server {
     ProcessTree(process_tree::ProcessTree),
     /// See [`crate::generator::procfs::Procfs`] for details.
     ProcFs(procfs::ProcFs),
+    /// See [`crate::generator::container::Container`] for details.
+    Container(container::Container),
 }
 
 impl Server {
@@ -204,6 +212,9 @@ impl Server {
                 Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
             }
             Inner::ProcFs(conf) => Self::ProcFs(procfs::ProcFs::new(&conf, shutdown)?),
+            Inner::Container(conf) => {
+                Self::Container(container::Container::new(config.general, &conf, shutdown)?)
+            }
         };
         Ok(srv)
     }
@@ -237,6 +248,8 @@ impl Server {
             Server::PassthruFile(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,
             Server::ProcFs(inner) => inner.spin().await?,
+            // Run the container generator
+            Server::Container(inner) => inner.spin().await?,
         };
 
         Ok(())
