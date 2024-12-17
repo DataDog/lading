@@ -130,17 +130,17 @@ impl FromStr for CliKeyValues {
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
-        .args(&["target-path", "target-pid", "target-container", "no-target"]),
+        .args(&["target_path", "target_pid", "target_container", "no_target"]),
 ))]
 #[clap(group(
     ArgGroup::new("telemetry")
         .required(true)
-        .args(&["capture-path", "prometheus-addr", "prometheus-path"]),
+        .args(&["capture_path", "prometheus_addr", "prometheus_path"]),
 ))]
 #[clap(group(
      ArgGroup::new("experiment-duration")
            .required(false)
-           .args(&["experiment-duration-seconds", "experiment-duration-infinite"]),
+           .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
 ))]
 struct Opts {
     /// path on disk to the configuration file
