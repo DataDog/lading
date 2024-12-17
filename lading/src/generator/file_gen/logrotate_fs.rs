@@ -24,7 +24,7 @@ use std::{
     time::Duration,
 };
 use tokio::task::{self, JoinError};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 mod model;
 
