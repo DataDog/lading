@@ -92,7 +92,8 @@ jobs:
 
       - name: Create and Push Multiarch Manifest
         run: |
+          FINAL_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
           docker buildx imagetools create \
-            --tag ${{ steps.meta.outputs.tags }} \
-            ${{ steps.meta.outputs.tags }}-amd64 \
-            ${{ steps.meta.outputs.tags }}-arm64
+            --tag "$FINAL_TAG" \
+            "$FINAL_TAG-amd64" \
+            "$FINAL_TAG-arm64"
