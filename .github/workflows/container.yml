@@ -43,10 +43,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=pr,prefix=pr-
+            # Tag event (pushing a git tag that starts with v), produce a
+            # semver tag
             type=semver,pattern={{version}},event=tag,prefix=v
-            type=semver,pattern={{major}}.{{minor}},event=tag,prefix=v
-            type=semver,pattern={{major}},event=tag,prefix=v
+            # All other push events (no PR, no semver tag), produce a SHA tag
             type=sha,format=long
 
       - name: Build and push Docker image
@@ -84,10 +84,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=pr,prefix=pr-
+            # Tag event (pushing a git tag that starts with v), produce a
+            # semver tag
             type=semver,pattern={{version}},event=tag,prefix=v
-            type=semver,pattern={{major}}.{{minor}},event=tag,prefix=v
-            type=semver,pattern={{major}},event=tag,prefix=v
+            # All other push events (no PR, no semver tag), produce a SHA tag
             type=sha,format=long
 
       - name: Create and Push Multiarch Manifest
