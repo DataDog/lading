@@ -29,6 +29,7 @@ clap = { version = "4.5", default-features = false, features = [
   "std",
   "suggestions",
   "derive",
+  "help",
 ] }
 flate2 = { version = "1.0.34", default-features = false, features = [
   "rust_backend",
