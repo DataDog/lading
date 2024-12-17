@@ -94,7 +94,7 @@ async-pidfd = "0.1"
 [dev-dependencies]
 tempfile = "3.13"
 warp = "0.3"
-proptest = "1.5"
+proptest = "1.6"
 
 [features]
 default = []
