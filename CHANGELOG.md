@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - The `bytes_received` metric in the HTTP blackhole now tracks wire bytes, the
   former metric is preserved with `decoded_bytes_received`.
+- Base image is now bookworm, updated from bullseye.
 
 ## [0.25.1]
 ## Removed
