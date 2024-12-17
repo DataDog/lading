@@ -41,13 +41,13 @@ jobs:
         uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         id: meta
         with:
-          tags: |
-            type=sha,format=long
-            type=ref,prefix=pr-,event=pr
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=semver,pattern={{major}},event=tag
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr,prefix=pr-
+            type=semver,pattern={{version}},event=tag,prefix=v
+            type=semver,pattern={{major}}.{{minor}},event=tag,prefix=v
+            type=semver,pattern={{major}},event=tag,prefix=v
+            type=sha,format=long
 
       - name: Build and push Docker image
         uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
@@ -82,13 +82,13 @@ jobs:
         uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         id: meta
         with:
-          tags: |
-            type=sha,format=long
-            type=ref,prefix=pr-,event=pr
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=semver,pattern={{major}},event=tag
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr,prefix=pr-
+            type=semver,pattern={{version}},event=tag,prefix=v
+            type=semver,pattern={{major}}.{{minor}},event=tag,prefix=v
+            type=semver,pattern={{major}},event=tag,prefix=v
+            type=sha,format=long
 
       - name: Create and Push Multiarch Manifest
         run: |
