@@ -24,7 +24,7 @@ use std::{
     time::Duration,
 };
 use tokio::task::{self, JoinError};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 mod model;
 
@@ -294,7 +294,7 @@ impl Filesystem for LogrotateFS {
             }
             error!("lookup: getattr_helper returned None for inode {}", ino);
         } else {
-            error!("lookup: state.lookup returned None for name {}", name_str);
+            warn!("lookup: state.lookup returned None for name {}", name_str);
         }
         reply.error(ENOENT);
     }
