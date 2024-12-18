@@ -13,7 +13,10 @@ jobs:
     runs-on: ubuntu-20.04
     permissions:
       contents: read
-      packages: write
+      packages: read
+    outputs:
+      FINAL_TAG: ${{ steps.tags.outputs.FINAL_TAG }}
+      SHA_TAG: ${{ steps.tags.outputs.SHA_TAG }}
 
     steps:
       - name: Log in to Container Registry
@@ -39,6 +42,7 @@ jobs:
             type=sha,format=long
 
       - name: Determine Final Tag
+        id: tags
         run: |
           ALL_TAGS="${{ steps.meta.outputs.tags }}"
           SEMVER_TAG=$(echo "$ALL_TAGS" | grep '^ghcr.io/.*:v' || true)
@@ -50,15 +54,17 @@ jobs:
             FINAL_TAG="$SHA_TAG"
           fi
 
-          echo "SHA_TAG=$SHA_TAG" >> $GITHUB_ENV
-          echo "FINAL_TAG=$FINAL_TAG" >> $GITHUB_ENV
+          # Use output variables to pass to other jobs
+          echo "::set-output name=SHA_TAG::$SHA_TAG"
+          echo "::set-output name=FINAL_TAG::$FINAL_TAG"
 
       - name: Debug Tags
         run: |
-          echo "SHA_TAG: $SHA_TAG"
-          echo "FINAL_TAG: $FINAL_TAG"
+          echo "SHA_TAG: ${{ steps.tags.outputs.SHA_TAG }}"
+          echo "FINAL_TAG: ${{ steps.tags.outputs.FINAL_TAG }}"
 
   build:
+    needs: tagging
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -88,19 +94,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata for Docker
-        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+        uses: docker/metadata-action@v5.6.1
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Produce a SHA tag
             type=sha,format=long
 
       - name: Build and push Docker image
         uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
         with:
           file: Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.arch }}
+          tags: ${{ needs.tagging.outputs.SHA_TAG }}-${{ matrix.arch }}
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
@@ -108,7 +113,9 @@ jobs:
 
   manifest:
     name: Create Multi-Arch Manifest
-    needs: build
+    needs: 
+      - tagging
+      - build
     runs-on: ubuntu-20.04
     permissions:
       contents: read
@@ -125,41 +132,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
-      - name: Extract Docker Metadata
-        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
-        id: meta
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            # Tag event (pushing a git tag that starts with v), produce a
-            # semver tag
-            type=semver,pattern={{version}},event=tag,prefix=v
-            # All other push events (no PR, no semver tag), produce a SHA tag
-            type=sha,format=long
-
-      - name: Determine Final Tag
-        run: |
-          ALL_TAGS="${{ steps.meta.outputs.tags }}"
-          SHA_TAG=$(echo "$ALL_TAGS" | grep sha-)
-          SEMVER_TAG=$(echo "$ALL_TAGS" | grep '^ghcr.io/.*:v')
-
-          if [ -n "$SEMVER_TAG" ]; then
-            FINAL_TAG="$SEMVER_TAG"
-          else
-            FINAL_TAG="$SHA_TAG"
-          fi
-
-          echo "SHA_TAG=$SHA_TAG" >> $GITHUB_ENV
-          echo "FINAL_TAG=$FINAL_TAG" >> $GITHUB_ENV
-
-      - name: Debug Tags
-        run: |
-          echo "SHA_TAG: $SHA_TAG"
-          echo "FINAL_TAG: $FINAL_TAG"
-
       - name: Create and Push Multiarch Manifest
         run: |
           docker buildx imagetools create \
-            --tag "$FINAL_TAG" \
-            "$SHA_TAG-amd64" \
-            "$SHA_TAG-arm64"
+            --tag "${{ needs.tagging.outputs.FINAL_TAG }}" \
+            "${{ needs.tagging.outputs.SHA_TAG }}-amd64" \
+            "${{ needs.tagging.outputs.SHA_TAG }}-arm64"
