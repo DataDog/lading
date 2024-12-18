@@ -43,10 +43,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag event (pushing a git tag that starts with v), produce a
-            # semver tag
-            type=semver,pattern={{version}},event=tag,prefix=v
-            # All other push events (no PR, no semver tag), produce a SHA tag
+            # Produce a SHA tag
             type=sha,format=long
 
       - name: Build and push Docker image
@@ -90,10 +87,29 @@ jobs:
             # All other push events (no PR, no semver tag), produce a SHA tag
             type=sha,format=long
 
+      - name: Determine Final Tag
+        run: |
+          ALL_TAGS="${{ steps.meta.outputs.tags }}"
+          SHA_TAG=$(echo "$ALL_TAGS" | grep sha-)
+          SEMVER_TAG=$(echo "$ALL_TAGS" | grep '^ghcr.io/.*:v')
+
+          if [ -n "$SEMVER_TAG" ]; then
+            FINAL_TAG="$SEMVER_TAG"
+          else
+            FINAL_TAG="$SHA_TAG"
+          fi
+
+          echo "SHA_TAG=$SHA_TAG" >> $GITHUB_ENV
+          echo "FINAL_TAG=$FINAL_TAG" >> $GITHUB_ENV
+
+      - name: Debug Tags
+        run: |
+          echo "SHA_TAG: $SHA_TAG"
+          echo "FINAL_TAG: $FINAL_TAG"
+
       - name: Create and Push Multiarch Manifest
         run: |
-          FINAL_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
           docker buildx imagetools create \
             --tag "$FINAL_TAG" \
-            "$FINAL_TAG-amd64" \
-            "$FINAL_TAG-arm64"
+            "$SHA_TAG-amd64" \
+            "$SHA_TAG-arm64"
