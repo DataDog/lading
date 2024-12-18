@@ -45,7 +45,7 @@ jobs:
         id: tags
         run: |
           ALL_TAGS="${{ steps.meta.outputs.tags }}"
-          SEMVER_TAG=$(echo "$ALL_TAGS" | grep -E '^ghcr.io/.+:[0-9]+\.[0-9]+\.[0-9]+' || true)
+          SEMVER_TAG=$(echo "$ALL_TAGS" | grep -E '^ghcr.io/.+:[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?' || true)
           SHA_TAG=$(echo "$ALL_TAGS" | grep sha- || true)
 
           if [ -n "$SEMVER_TAG" ]; then
