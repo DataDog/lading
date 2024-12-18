@@ -118,6 +118,8 @@ impl Sampler {
                     }
                 }
             }
+            // Update the process_info map to only hold processes seen by the current poll call.
+            self.process_info.retain(|pid, _| pids.contains(pid));
 
             let pid = process.pid();
 
@@ -254,7 +256,8 @@ impl Sampler {
                     // We don't want to bail out entirely if we can't read stats
                     // which will happen if we don't have permissions or, more
                     // likely, the process has exited.
-                    warn!("Couldn't process `/proc/{pid}/smaps`: {err}");
+                    warn!("Couldn't process `/proc/{pid}/smaps`, reading next process: {err}");
+                    continue;
                 }
             }
 
@@ -263,7 +266,8 @@ impl Sampler {
                 // We don't want to bail out entirely if we can't read smap rollup
                 // which will happen if we don't have permissions or, more
                 // likely, the process has exited.
-                warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {err}");
+                warn!("Couldn't process `/proc/{pid}/smaps_rollup`, reading next process: {err}");
+                continue;
             }
         }
         // END pid loop
