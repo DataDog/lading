@@ -35,9 +35,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag event (pushing a git tag that starts with v), produce a
-            # semver tag
-            type=semver,pattern={{version}},event=tag,prefix=v
+            # Tag event produce a semver tag. This will capture tags that begin
+            # vX.Y.Z and X.Y.Z.
+            type=semver,pattern={{version}},event=tag
             # All other push events (no PR, no semver tag), produce a SHA tag
             type=sha,format=long
 
