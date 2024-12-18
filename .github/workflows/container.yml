@@ -41,8 +41,8 @@ jobs:
       - name: Determine Final Tag
         run: |
           ALL_TAGS="${{ steps.meta.outputs.tags }}"
-          SHA_TAG=$(echo "$ALL_TAGS" | grep sha-)
-          SEMVER_TAG=$(echo "$ALL_TAGS" | grep '^ghcr.io/.*:v')
+          SEMVER_TAG=$(echo "$ALL_TAGS" | grep '^ghcr.io/.*:v' || true)
+          SHA_TAG=$(echo "$ALL_TAGS" | grep sha- || true)
 
           if [ -n "$SEMVER_TAG" ]; then
             FINAL_TAG="$SEMVER_TAG"
