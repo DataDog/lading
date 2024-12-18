@@ -27,7 +27,7 @@ thiserror = { version = "1.0" }
 tokio = { version = "1.41" }
 # If you update tonic, search for tonic-build in sub-crates and update their
 # version.
-tonic = { version = "0.9", default-features = false, features = [] }
+tonic = { version = "0.12", default-features = false, features = [] }
 tower = { version = "0.5", default-features = false }
 tracing = { version = "0.1" }
 uuid = { version = "1.11", default-features = false, features = [
