@@ -9,7 +9,7 @@ env:
 
 jobs:
   tagging:
-    name: Debug Multi-Arch Manifest
+    name: Determine Tags
     runs-on: ubuntu-20.04
     permissions:
       contents: read
@@ -54,9 +54,8 @@ jobs:
             FINAL_TAG="$SHA_TAG"
           fi
 
-          # Use output variables to pass to other jobs
-          echo "::set-output name=SHA_TAG::$SHA_TAG"
-          echo "::set-output name=FINAL_TAG::$FINAL_TAG"
+          echo "SHA_TAG=$SHA_TAG" >> $GITHUB_OUTPUT
+          echo "FINAL_TAG=$FINAL_TAG" >> $GITHUB_OUTPUT
 
       - name: Debug Tags
         run: |
