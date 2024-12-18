@@ -127,7 +127,7 @@ impl Sampler {
             let status = match process.status() {
                 Ok(status) => status,
                 Err(e) => {
-                    warn!("Couldn't read status: {:?}", e);
+                    warn!("Couldn't read status: {:?}, reading next process", e);
                     // The pid may have exited since we scanned it or we may not
                     // have sufficient permission.
                     continue;
@@ -142,19 +142,31 @@ impl Sampler {
             match self.process_info.entry(pid) {
                 Entry::Occupied(_) => { /* Already initialized */ }
                 Entry::Vacant(entry) => {
-                    let exe = proc_exe(pid).await?;
-                    let comm = proc_comm(pid).await?;
-                    let cmdline = proc_cmdline(pid).await?;
-                    let pid_s = format!("{pid}");
-                    let stat_sampler = stat::Sampler::new();
+                    let process_info = {
+                        let exe = proc_exe(pid).await?;
+                        let comm = proc_comm(pid).await?;
+                        let cmdline = proc_cmdline(pid).await?;
+                        let pid_s = format!("{pid}");
+                        let stat_sampler = stat::Sampler::new();
 
-                    entry.insert(ProcessInfo {
-                        cmdline,
-                        exe,
-                        comm,
-                        pid_s,
-                        stat_sampler,
-                    });
+                        Ok(ProcessInfo {
+                            cmdline,
+                            exe,
+                            comm,
+                            pid_s,
+                            stat_sampler,
+                        })
+                    };
+
+                    match process_info {
+                        Ok(info) => {
+                            entry.insert(info);
+                        }
+                        Err(e) => {
+                            warn!("Couldn't create process_info entry for `/proc/{pid}`, reading next process: {e}");
+                            continue;
+                        }
+                    }
                 }
             }
 
@@ -188,7 +200,7 @@ impl Sampler {
                 // We don't want to bail out entirely if we can't read stats
                 // which will happen if we don't have permissions or, more
                 // likely, the process has exited.
-                warn!("Couldn't process `/proc/{pid}/stat`: {e}");
+                warn!("Couldn't process `/proc/{pid}/stat`, reading next process: {e}");
                 continue;
             }
 
