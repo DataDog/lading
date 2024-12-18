@@ -10,7 +10,6 @@ env:
 jobs:
   tagging:
     name: Debug Multi-Arch Manifest
-    needs: build
     runs-on: ubuntu-20.04
     permissions:
       contents: read
