@@ -134,6 +134,13 @@ impl Sampler {
         Ok(())
     }
 
+    #[allow(
+        clippy::similar_names,
+        clippy::too_many_lines,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap
+    )]
     async fn handle_process(
         &mut self,
         process: Process,
