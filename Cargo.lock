@@ -1575,7 +1575,7 @@ dependencies = [
  "serde_qs",
  "serde_yaml",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -1615,7 +1615,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tuple",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "time",
  "tokio",
  "tracing",
@@ -1626,7 +1626,7 @@ name = "lading-signal"
 version = "0.1.0"
 dependencies = [
  "loom",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "tokio",
  "tracing",
 ]
@@ -1637,7 +1637,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.7",
  "tokio",
 ]
 
