@@ -10,6 +10,8 @@ members = [
 ]
 
 [workspace.dependencies]
+axum = { version = "0.7", default-features = false }
+axum-server = { version = "0.7", default-features = false }
 bytes = { version = "1.8", default-features = false, features = ["std"] }
 byte-unit = { version = "4.0", features = ["serde"] }
 metrics = { version = "0.23.0" }

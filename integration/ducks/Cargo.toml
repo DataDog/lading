@@ -8,10 +8,11 @@ license = "MIT"
 publish = false
 
 [dependencies]
+axum = { workspace = true, features = ["tokio", "http1", "http2"] }
+axum-server = { workspace = true }
 anyhow = "1.0"
 bytes = { workspace = true }
 entropy = "0.4"
-hyper = { workspace = true, features = ["server", "backports", "deprecated"] }
 once_cell = { workspace = true }
 shared = { path = "../shared" }
 sketches-ddsketch = "0.3"
@@ -29,11 +30,6 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true, default-features = false, features = [
   "transport",
   "prost",
-] }
-tower = { workspace = true, features = [
-  "timeout",
-  "limit",
-  "load-shed",
 ] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }

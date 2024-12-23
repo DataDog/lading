@@ -14,13 +14,13 @@
 //! - Receive data on other protocols & formats
 
 use anyhow::Context;
-use bytes::BytesMut;
-use hyper::{
-    body::HttpBody,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, StatusCode,
+use axum::{
+    http::{Method, StatusCode},
+    response::IntoResponse,
+    routing::any,
+    Router,
 };
+use bytes::BytesMut;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -39,7 +39,6 @@ use tokio::{
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
 use tonic::Status;
-use tower::ServiceBuilder;
 use tracing::{debug, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
@@ -124,33 +123,6 @@ impl From<&SocketCounters> for SocketMetrics {
     }
 }
 
-#[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
-    let (parts, body) = req.into_parts();
-    let body = body.collect().await?.to_bytes();
-
-    {
-        let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
-        let mut m = metric.lock().await;
-        m.request_count += 1;
-
-        m.total_bytes = body.len() as u64;
-        m.entropy.add(entropy::metric_entropy(&body) as f64);
-
-        m.body_size.add(body.len() as f64);
-
-        let method_counter = m.methods.entry(parts.method).or_default();
-        *method_counter += 1;
-    }
-
-    let mut okay = hyper::Response::default();
-    *okay.status_mut() = StatusCode::OK;
-
-    let body_bytes = vec![];
-    *okay.body_mut() = Body::from(body_bytes);
-    Ok(okay)
-}
-
 /// Tracks state for a ducks instance
 pub struct DucksTarget {
     /// Shutdown channel. Send on this to exit the process immediately.
@@ -190,11 +162,9 @@ impl IntegrationTarget for DucksTarget {
 
         match config.listen {
             shared::ListenConfig::Http => {
-                // bind to a random open TCP port
-                let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                let addr = AddrIncoming::bind(&bind_addr)
-                    .map_err(|_e| Status::internal("unable to bind a port"))?;
-                let port = addr.local_addr().port() as u32;
+                // Bind a random open TCP port on localhost
+                let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+                let port = addr.port() as u32;
                 tokio::spawn(Self::http_listen(config, addr));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
@@ -254,25 +224,37 @@ impl IntegrationTarget for DucksTarget {
     }
 }
 
+#[tracing::instrument(level = "trace")]
+async fn req_handle(method: Method, body: axum::body::Bytes) -> impl IntoResponse {
+    if let Some(metric) = HTTP_COUNTERS.get() {
+        let mut m = metric.lock().await;
+        m.request_count += 1;
+
+        m.total_bytes += body.len() as u64;
+        m.entropy.add(entropy::metric_entropy(&body) as f64);
+
+        m.body_size.add(body.len() as f64);
+
+        let method_counter = m.methods.entry(method.clone()).or_default();
+        *method_counter += 1;
+    } else {
+        warn!("HTTP_COUNTERS not initialized");
+    }
+
+    (StatusCode::OK, body)
+}
+
 impl DucksTarget {
-    async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
+    async fn http_listen(_config: DucksConfig, addr: SocketAddr) -> Result<(), anyhow::Error> {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
-                trace!("REQUEST: {:?}", request);
-                http_req_handler(request)
-            }))
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(1_000)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+        let app = Router::new().route("/*path", any(req_handle));
 
-        let server = hyper::Server::builder(addr).serve(svc);
-        server.await?;
+        axum_server::bind(addr)
+            .serve(app.into_make_service())
+            .await?;
+
         Ok(())
     }
 
