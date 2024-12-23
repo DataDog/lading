@@ -249,7 +249,9 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let app = Router::new().route("/*path", any(req_handle));
+        let app = Router::new()
+            .route("/", any(req_handle))
+            .route("/*path", any(req_handle));
 
         axum_server::bind(addr)
             .serve(app.into_make_service())
