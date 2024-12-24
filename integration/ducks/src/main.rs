@@ -34,7 +34,7 @@ use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncReadExt,
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener},
+    net::{TcpStream, UdpSocket, UnixListener},
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
@@ -165,13 +165,14 @@ impl IntegrationTarget for DucksTarget {
                 // Bind a random open TCP port on localhost
                 let addr = SocketAddr::from(([127, 0, 0, 1], 0));
                 let port = addr.port() as u32;
-                tokio::spawn(Self::http_listen(config, addr));
+                let listener = std::net::TcpListener::bind(addr)?;
+                tokio::spawn(Self::http_listen(config, listener));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
             shared::ListenConfig::None => Ok(tonic::Response::new(ListenInfo { port: 0 })),
             shared::ListenConfig::Tcp => {
-                let listener = TcpListener::bind("127.0.0.1:0").await?;
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
                 let port = listener.local_addr()?.port() as u32;
                 tokio::spawn(Self::tcp_listen(config, listener));
 
@@ -245,7 +246,10 @@ async fn req_handle(method: Method, body: axum::body::Bytes) -> impl IntoRespons
 }
 
 impl DucksTarget {
-    async fn http_listen(_config: DucksConfig, addr: SocketAddr) -> Result<(), anyhow::Error> {
+    async fn http_listen(
+        _config: DucksConfig,
+        listener: std::net::TcpListener,
+    ) -> Result<(), anyhow::Error> {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
@@ -253,7 +257,7 @@ impl DucksTarget {
             .route("/", any(req_handle))
             .route("/*path", any(req_handle));
 
-        axum_server::bind(addr)
+        axum_server::from_tcp(listener)
             .serve(app.into_make_service())
             .await?;
 
@@ -284,7 +288,10 @@ impl DucksTarget {
         }
     }
 
-    async fn tcp_listen(_config: DucksConfig, incoming: TcpListener) -> Result<(), anyhow::Error> {
+    async fn tcp_listen(
+        _config: DucksConfig,
+        incoming: tokio::net::TcpListener,
+    ) -> Result<(), anyhow::Error> {
         debug!("TCP listener active on {}", incoming.local_addr()?);
         TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
 
