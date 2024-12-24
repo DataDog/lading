@@ -297,20 +297,6 @@ impl DucksTarget {
         }
         while (join_set.join_next().await).is_some() {}
 
-        // let service = make_service_fn(|_: &AddrStream| async move {
-        //     Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
-        //         trace!("REQUEST: {:?}", request);
-        //         http_req_handler(request)
-        //     }))
-        // });
-        // let svc = ServiceBuilder::new()
-        //     .load_shed()
-        //     .concurrency_limit(1_000)
-        //     .timeout(Duration::from_secs(1))
-        //     .service(service);
-
-        // let server = hyper::Server::builder(addr).serve(svc);
-        // server.await?;
         Ok(())
     }
 
