@@ -23,6 +23,8 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
 
+use http_body_util::BodyExt;
+
 pub mod blackhole;
 pub mod captures;
 pub(crate) mod codec;
@@ -33,3 +35,12 @@ pub mod inspector;
 pub mod observer;
 pub mod target;
 pub mod target_metrics;
+
+#[inline]
+pub(crate) fn full<T: Into<bytes::Bytes>>(
+    chunk: T,
+) -> http_body_util::combinators::BoxBody<bytes::Bytes, hyper::Error> {
+    http_body_util::Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
