@@ -37,8 +37,9 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
-use hyper::body::to_bytes;
-use hyper::server::conn::Http;
+use hyper::body::{to_bytes, HttpBody};
+use hyper::server::conn::http1::Builder as Http;
+use tonic::body::BoxBody;
 use tonic::transport::Server;
 use tonic::Status;
 use tower::ServiceBuilder;
@@ -127,9 +128,9 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler<B>(req: Request<B>) -> Result<Response<BoxBody>, hyper::Error>
+async fn http_req_handler<B>(req: Request<B>) -> Result<Response<tonic::body::BoxBody>, hyper::Error>
 where
-    B: HttpBody<Data = hyper::body::Bytes, Error = hyper::Error> + Send + 'static,
+    B: hyper::body::HttpBody<Data = hyper::body::Bytes, Error = hyper::Error> + Send + 'static,
 {
     let (parts, body) = req.into_parts();
     let body_bytes = hyper::body::to_bytes(body).await?;
@@ -260,7 +261,7 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let make_svc = service_fn(move |request: Request<Body>| {
+        let make_svc = service_fn(move |request: Request<dyn Body<Data = hyper::body::Bytes, Error = hyper::Error>>| {
             trace!("REQUEST: {:?}", request);
             http_req_handler(request)
         });
