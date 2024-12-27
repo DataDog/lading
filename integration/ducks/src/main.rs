@@ -16,8 +16,8 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::HttpBody,
-    server::conn::{AddrIncoming, AddrStream},
+    body::Body as HyperBody,
+    server::conn::AddrIncoming,
     service::{make_service_fn, service_fn},
     Body, Method, Request, StatusCode,
 };
@@ -271,7 +271,7 @@ impl DucksTarget {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let server = hyper::Server::builder(addr).serve(svc);
+        let server = tonic::transport::Server::builder().add_service(svc).serve_with_incoming(addr);
         server.await?;
         Ok(())
     }
