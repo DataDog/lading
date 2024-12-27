@@ -24,7 +24,12 @@ use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
 };
-use hyper_util::client::legacy::{Client, ClientBuilder, HttpConnector};
+use http_body_util::BodyExt;
+use hyper::body::Body;
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client},
+    rt::TokioExecutor,
+};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
@@ -248,7 +253,7 @@ impl SplunkHec {
     /// Function will panic if it is unable to create HTTP requests for the
     /// target.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let client: Client<HttpConnector, Body> = Client::builder()
+        let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(self.parallel_connections as usize)
             .retry_canceled_requests(false)
             .build_http();
@@ -283,10 +288,10 @@ impl SplunkHec {
                     let uri = uri.clone();
 
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let body = Body::from(blk.bytes.clone());
+                    let body = crate::full(blk.bytes.clone());
                     let block_length = blk.bytes.len();
 
-                    let request: Request<Body> = Request::builder()
+                    let request = Request::builder()
                         .method(Method::POST)
                         .uri(uri)
                         .header(AUTHORIZATION, format!("Splunk {}", self.token))
@@ -317,15 +322,20 @@ impl SplunkHec {
     }
 }
 
-async fn send_hec_request(
+async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,
     labels: Vec<(String, String)>,
     channel: Channel,
-    client: Client<HttpConnector>,
-    request: Request<Body>,
+    client: Client<HttpConnector, B>,
+    request: Request<B>,
     shutdown: lading_signal::Watcher,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    B: Body + Send + 'static + Unpin,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     counter!("requests_sent", &labels).increment(1);
     let work = client.request(request);
 
@@ -340,7 +350,7 @@ async fn send_hec_request(
                         let mut status_labels = labels.clone();
                         status_labels.push(("status_code".to_string(), status.as_u16().to_string()));
                         counter!("request_ok", &status_labels).increment(1);
-                        let body_bytes = body.collect().await?.to_bytes();
+                        let body_bytes = body.boxed().collect().await?.to_bytes();
                         let hec_ack_response =
                             serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("unable to parse response body");
                         channel.send(ready(hec_ack_response.ack_id)).await?;
