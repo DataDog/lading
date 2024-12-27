@@ -16,6 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -141,7 +142,7 @@ async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hy
 
     let mut resp = hyper::Response::default();
     *resp.status_mut() = StatusCode::OK;
-    *resp.body_mut() = Ok(okay)
+    *resp.body_mut() = Ok(BoxBody::empty())
 }
 
 /// Tracks state for a ducks instance
@@ -256,7 +257,7 @@ impl DucksTarget {
             http_req_handler(request)
         });
 
-        let server = Server::bind(&addr).serve(make_svc);
+        let server = Server::builder(addr).serve(make_svc);
         server.await?;
         Ok(())
     }
