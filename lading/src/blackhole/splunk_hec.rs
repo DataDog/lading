@@ -201,7 +201,7 @@ impl SplunkHec {
         pin!(shutdown);
         loop {
             tokio::select! {
-                _ = &mut shutdown => {
+                () = &mut shutdown => {
                     info!("shutdown signal received");
                     break;
                 }
