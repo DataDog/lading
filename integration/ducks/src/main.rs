@@ -15,8 +15,8 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
-use hyper::{service::service_fn, Method, Request, Response, StatusCode};
-use hyper::Server as HyperServer;
+use hyper::{service::service_fn, Method, Request, Response, StatusCode, Body};
+use tonic::transport::Server as HyperServer;
 use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use shared::{
@@ -36,7 +36,6 @@ use tokio::{
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
 use tonic::body::BoxBody;
-use tonic::transport::Server;
 use tonic::Status;
 use tracing::{debug, trace, warn};
 
@@ -125,7 +124,7 @@ impl From<&SocketCounters> for SocketMetrics {
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body_bytes = hyper::body::to_bytes(body).await?;
+    let body_bytes = body.to_bytes().await?;
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
@@ -141,7 +140,7 @@ async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hy
         *method_counter += 1;
     }
 
-    let mut resp = Response::new(BoxBody::from(hyper::Body::empty()));
+    let mut resp = Response::new(BoxBody::from(Body::empty()));
     *resp.status_mut() = StatusCode::OK;
     Ok(resp)
 }
@@ -344,7 +343,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = DucksTarget { shutdown_tx };
 
-    let rpc_server = Server::builder()
+    let rpc_server = HyperServer::builder()
         .add_service(IntegrationTargetServer::new(server))
         .serve_with_incoming(ducks_comm);
 
