@@ -1,6 +1,7 @@
 syntax = "proto3";
 package integration_api;
 import "google/protobuf/empty.proto";
+import "google/protobuf/descriptor.proto";
 
 // Integration test target service. This is hosted by Ducks.
 service IntegrationTarget {
