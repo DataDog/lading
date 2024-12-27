@@ -2,7 +2,7 @@ use std::io::Read;
 
 use bytes::{Buf, Bytes};
 use flate2::read::{MultiGzDecoder, ZlibDecoder};
-use hyper::{body::Body, StatusCode};
+use hyper::{body::Body as HyperBody, StatusCode};
 
 /// decode decodes a HTTP request body based on its Content-Encoding header.
 /// Only identity, gzip, and deflate are currently supported content encodings.
@@ -24,7 +24,7 @@ use hyper::{body::Body, StatusCode};
 pub(crate) fn decode(
     content_encoding: Option<&hyper::header::HeaderValue>,
     mut body: Bytes,
-) -> Result<Bytes, hyper::Response<hyper::Body>> {
+) -> Result<Bytes, hyper::Response<HyperBody>> {
     if let Some(content_encoding) = content_encoding {
         let content_encoding = String::from_utf8_lossy(content_encoding.as_bytes());
 
@@ -76,7 +76,7 @@ pub(crate) fn decode(
 fn encoding_error_to_response(
     encoding: &str,
     error: impl std::error::Error,
-) -> hyper::Response<Body> {
+) -> hyper::Response<HyperBody> {
     hyper::Response::builder()
         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         .body(hyper::Body::from(format!(

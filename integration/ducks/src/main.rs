@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::Body as HyperBody,
+    body::Body,
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
@@ -126,7 +126,7 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
+async fn http_req_handler(req: Request<HyperBody>) -> Result<hyper::Response<HyperBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
     let body = body.collect().await?.to_bytes();
 
@@ -148,7 +148,7 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
     *okay.status_mut() = StatusCode::OK;
 
     let body_bytes = vec![];
-    *okay.body_mut() = Body::from(body_bytes);
+    *okay.body_mut() = HyperBody::from(body_bytes);
     Ok(okay)
 }
 
