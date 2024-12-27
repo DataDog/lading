@@ -36,7 +36,8 @@ uuid = { version = "1.11", default-features = false, features = [
 ] }
 once_cell = { version = "1.20" }
 hyper = { version = "1.5.2", default-features = false }
-http = "0.2"
+http = "1.2.0"
+http-serde = "2.1.1"
 
 
 [profile.release]
