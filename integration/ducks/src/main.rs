@@ -16,6 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use hyper::Server as HyperServer;
 use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
 use shared::{
@@ -124,7 +125,7 @@ impl From<&SocketCounters> for SocketMetrics {
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body_bytes = body.boxed().await?.to_bytes();
+    let body_bytes = hyper::body::to_bytes(body).await?;
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
@@ -140,9 +141,9 @@ async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hy
         *method_counter += 1;
     }
 
-    let mut resp = hyper::Response::default();
+    let mut resp = Response::new(BoxBody::from(hyper::Body::empty()));
     *resp.status_mut() = StatusCode::OK;
-    *resp.body_mut() = Ok(BoxBody::empty())
+    Ok(resp)
 }
 
 /// Tracks state for a ducks instance
@@ -257,7 +258,7 @@ impl DucksTarget {
             http_req_handler(request)
         });
 
-        let server = Server::builder(addr).serve(make_svc);
+        let server = HyperServer::bind(&addr).serve(make_svc);
         server.await?;
         Ok(())
     }
@@ -313,7 +314,7 @@ impl DucksTarget {
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
-                m.entropy.add(entropy::metric_entropy(buf) as f64);
+                m.entropy.add(entropy::metric_entropy(&buf) as f64);
             }
         }
     }
@@ -343,7 +344,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = DucksTarget { shutdown_tx };
 
-    let rpc_server = tonic::transport::Server::builder()
+    let rpc_server = Server::builder()
         .add_service(IntegrationTargetServer::new(server))
         .serve_with_incoming(ducks_comm);
 
