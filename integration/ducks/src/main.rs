@@ -126,7 +126,12 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<HyperBody>) -> Result<hyper::Response<HyperBody>, hyper::Error> {
+async fn http_req_handler<B>(req: Request<B>) -> Result<Response<BoxBody>, hyper::Error>
+where
+    B: HttpBody + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let (parts, body) = req.into_parts();
     let body = body.collect().await?.to_bytes();
 
@@ -147,8 +152,7 @@ async fn http_req_handler(req: Request<HyperBody>) -> Result<hyper::Response<Hyp
     let mut okay = hyper::Response::default();
     *okay.status_mut() = StatusCode::OK;
 
-    let body_bytes = vec![];
-    *okay.body_mut() = HyperBody::from(body_bytes);
+    *okay.body_mut() = BoxBody::from(vec![]);
     Ok(okay)
 }
 

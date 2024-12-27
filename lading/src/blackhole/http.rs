@@ -10,7 +10,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
-    body::Body as HyperBody,
+    body::{Body as HyperBody, BoxBody},
     service::service_fn,
     Request, Response, Server, StatusCode,
 };
@@ -131,7 +131,7 @@ async fn srv(
     req: Request<HyperBody>,
     headers: HeaderMap,
     response_delay: Duration,
-) -> Result<Response<HyperBody>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
     let (parts, body) = req.into_parts();
@@ -149,7 +149,7 @@ async fn srv(
             let mut okay = Response::default();
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = HyperBody::from(body_bytes);
+            *okay.body_mut() = BoxBody::from(body_bytes);
             Ok(okay)
         }
     }
