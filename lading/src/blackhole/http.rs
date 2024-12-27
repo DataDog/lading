@@ -10,11 +10,11 @@ use std::{net::SocketAddr, time::Duration};
 
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
-    body::HttpBody,
+    body::{Body, HttpBody},
     header,
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
+    Request, Response, Server, StatusCode,
 };
 use metrics::counter;
 use serde::{Deserialize, Serialize};

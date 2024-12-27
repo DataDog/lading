@@ -2,7 +2,7 @@ use std::io::Read;
 
 use bytes::{Buf, Bytes};
 use flate2::read::{MultiGzDecoder, ZlibDecoder};
-use hyper::{Body, StatusCode};
+use hyper::{body::Body, StatusCode};
 
 /// decode decodes a HTTP request body based on its Content-Encoding header.
 /// Only identity, gzip, and deflate are currently supported content encodings.

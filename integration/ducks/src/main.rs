@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::Body as HyperBody,
+    body::{Body as HyperBody},
     service::{make_service_fn, service_fn},
     Method, Request, Response, StatusCode,
 };
