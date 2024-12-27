@@ -4,7 +4,8 @@ use tonic::{IntoRequest, Request};
 
 #[allow(clippy::derive_partial_eq_without_eq)]
 pub mod integration_api {
-    use tonic::IntoRequest;
+    use tonic::{IntoRequest, Request};
+    use integration_api::Empty;
 
     tonic::include_proto!("integration_api");
 
