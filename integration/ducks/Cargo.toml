@@ -11,7 +11,7 @@ publish = false
 anyhow = "1.0"
 bytes = { workspace = true }
 entropy = "0.4"
-hyper = { workspace = true, features = ["http1", "server"] }
+hyper = { version = "1.5.2", features = ["http1", "server"] }
 once_cell = { workspace = true }
 shared = { path = "../shared" }
 sketches-ddsketch = "0.3"
