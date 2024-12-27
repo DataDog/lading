@@ -24,7 +24,7 @@ use hyper_util::{
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinSet;
+use tokio::{pin, task::JoinSet};
 use tracing::{debug, error, info};
 
 use super::General;
@@ -197,9 +197,11 @@ impl SplunkHec {
         let mut join_set = JoinSet::new();
         let labels = Arc::new(self.metric_labels.clone());
 
+        let shutdown = self.shutdown.recv();
+        pin!(shutdown);
         loop {
             tokio::select! {
-                _ = self.shutdown.recv() => {
+                _ = &mut shutdown => {
                     info!("shutdown signal received");
                     break;
                 }
@@ -213,6 +215,7 @@ impl SplunkHec {
                     };
 
                     let labels = Arc::clone(&labels);
+                    let sem = Arc::clone(&sem);
                     join_set.spawn(async move {
                         debug!("Accepted connection from {addr}");
                         let permit = match sem.acquire_owned().await {
@@ -222,7 +225,8 @@ impl SplunkHec {
                                 return;
                             }
                         };
-                        let serve_future = auto::Builder::new(TokioExecutor::new())
+                        let builder = auto::Builder::new(TokioExecutor::new());
+                        let serve_future = builder
                         .serve_connection(TokioIo::new(stream), service_fn(move |req| {
                             let labels = Arc::clone(&labels);
                             srv(req, labels)
