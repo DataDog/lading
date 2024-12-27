@@ -61,7 +61,7 @@ pub(crate) fn decode(
                 encoding => {
                     return Err(hyper::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                        .body(hyper::Body::from(format!(
+                        .body(BoxBody::from(format!(
                             "Unsupported encoding type: {encoding}"
                         )))
                         .expect("failed to build response"))

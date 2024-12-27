@@ -128,7 +128,7 @@ async fn srv(
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
-    req: Request<HyperBody>,
+    req: Request<BoxBody>,
     headers: HeaderMap,
     response_delay: Duration,
 ) -> Result<Response<BoxBody>, hyper::Error> {
@@ -146,10 +146,9 @@ async fn srv(
 
             tokio::time::sleep(response_delay).await;
 
-            let mut okay = Response::default();
+            let mut okay = Response::new(BoxBody::from(body_bytes));
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = BoxBody::from(body_bytes);
             Ok(okay)
         }
     }

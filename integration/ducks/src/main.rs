@@ -140,19 +140,17 @@ where
         let mut m = metric.lock().await;
         m.request_count += 1;
 
-        m.total_bytes = body.len() as u64;
-        m.entropy.add(entropy::metric_entropy(&body) as f64);
+        m.total_bytes = body_bytes.len() as u64;
+        m.entropy.add(entropy::metric_entropy(&body_bytes) as f64);
 
-        m.body_size.add(body.len() as f64);
+        m.body_size.add(body_bytes.len() as f64);
 
         let method_counter = m.methods.entry(parts.method).or_default();
         *method_counter += 1;
     }
 
-    let mut okay = hyper::Response::default();
+    let mut okay = Response::new(BoxBody::from(vec![]));
     *okay.status_mut() = StatusCode::OK;
-
-    *okay.body_mut() = BoxBody::from(vec![]);
     Ok(okay)
 }
 
