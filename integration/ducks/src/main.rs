@@ -16,8 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::{to_bytes, Body, HttpBody},
-    server::Server,
+    body::Body,
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
@@ -38,7 +37,8 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
-use tonic::body::BoxBody;
+use hyper::body::to_bytes;
+use hyper::server::conn::Http;
 use tonic::transport::Server;
 use tonic::Status;
 use tower::ServiceBuilder;
@@ -260,7 +260,7 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let make_svc = service_fn(move |request: Request<HyperBody>| {
+        let make_svc = service_fn(move |request: Request<Body>| {
             trace!("REQUEST: {:?}", request);
             http_req_handler(request)
         });
