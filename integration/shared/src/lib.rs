@@ -1,9 +1,10 @@
 use integration_api::TestConfig;
 use serde::{Deserialize, Serialize};
+use tonic::IntoRequest;
+use tonic::Request;
 
 #[allow(clippy::derive_partial_eq_without_eq)]
 pub mod integration_api {
-    use tonic::{IntoRequest, Request};
     tonic::include_proto!("integration_api");
 }
 

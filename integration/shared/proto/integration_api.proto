@@ -1,24 +1,24 @@
 syntax = "proto3";
 package integration_api;
-import "google/protobuf/empty.proto";
-import "google/protobuf/descriptor.proto";
 
 // Integration test target service. This is hosted by Ducks.
 service IntegrationTarget {
   // (Not implemented) Get a stream of log messages from the target
   //
   // this is necessary for modes where ducks is launched by lading
-  rpc GetLogs (google.protobuf.Empty) returns (stream LogMessage) {}
+  rpc GetLogs (Empty) returns (stream LogMessage) {}
 
   // Launch a test endpoint
   rpc StartTest (TestConfig) returns (ListenInfo) {}
 
   // Request all recorded metrics
-  rpc GetMetrics (google.protobuf.Empty) returns (Metrics) {}
+  rpc GetMetrics (Empty) returns (Metrics) {}
 
   // Shut down all operations and exit
-  rpc Shutdown (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc Shutdown (Empty) returns (Empty) {}
 }
+
+message Empty {}
 
 // Holds a json-serialized [`DucksConfig`]
 message TestConfig {

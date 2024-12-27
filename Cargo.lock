@@ -716,6 +716,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "entropy",
+ "http-body-util",
  "hyper 1.5.2",
  "once_cell",
  "shared",
@@ -1668,7 +1669,7 @@ dependencies = [
  "opentelemetry-proto",
  "proptest",
  "proptest-derive",
- "prost 0.11.9",
+ "prost 0.13.4",
  "rand",
  "rmp-serde",
  "rustc-hash",
@@ -2329,7 +2330,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0f3e5beed80eb580c68e2c600937ac2c4eedabdfd5ef1e5b7ea4f3fba84497b"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools",
  "log",
  "multimap",
@@ -2830,7 +2831,7 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
- "prost 0.11.9",
+ "prost 0.13.4",
  "serde",
  "serde_json",
  "tonic 0.12.3",
