@@ -24,7 +24,7 @@ use http::{
     header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
 };
-use hyper::{body::HttpBody, client::HttpConnector, Body, Client};
+use hyper_util::client::legacy::{Client, ClientBuilder, HttpConnector};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;

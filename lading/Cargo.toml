@@ -41,7 +41,7 @@ http = "1.2"
 http-serde = "2.1"
 hyper = { version = "1.5", features = ["client", "http1", "http2", "server"] }
 http-body-util = "0.1"
-hyper-util = "0.1"
+hyper-util = { version = "0.1", features = ["default", "client", "client-legacy"] }
 is_executable = "1.0.4"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }

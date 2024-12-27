@@ -18,7 +18,7 @@ use hyper_util::{
 };
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::Semaphore, task::JoinSet};
+use tokio::{pin, sync::Semaphore, task::JoinSet};
 use tracing::{debug, error, info};
 
 use super::General;
@@ -243,9 +243,12 @@ impl Http {
         let listener = tokio::net::TcpListener::bind(self.httpd_addr).await?;
         let sem = Arc::new(Semaphore::new(self.concurrency_limit));
         let mut join_set = JoinSet::new();
+
+        let shutdown = self.shutdown.recv();
+        pin!(shutdown);
         loop {
             tokio::select! {
-                _ = self.shutdown.recv() => {
+                _ = &mut shutdown => {
                     info!("shutdown signal received");
                     break;
                 }
@@ -264,6 +267,7 @@ impl Http {
                     let headers = self.headers.clone();
                     let status = self.status;
                     let response_delay = self.response_delay;
+                    let sem = Arc::clone(&sem);
 
                     join_set.spawn(async move {
                         debug!("Accepted connection from {addr}");
@@ -274,7 +278,9 @@ impl Http {
                                 return;
                             }
                         };
-                        let serve_future = auto::Builder::new(TokioExecutor::new())
+
+                        let builder = auto::Builder::new(TokioExecutor::new());
+                        let serve_future = builder
                             .serve_connection(
                                 TokioIo::new(stream),
                                 service_fn(move |req: Request<hyper::body::Incoming>| {
