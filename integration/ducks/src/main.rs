@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Ducks is an integration testing target for lading.
 //!
 //! Ducks exists to enable correctness testing on lading. Any high-level
@@ -15,12 +16,9 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
-use hyper::{
-    body::HttpBody,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, StatusCode,
-};
+use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use hyper::body::{Body, to_bytes};
+use hyper::Server as HyperServer;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -38,8 +36,8 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
+use tonic::body::BoxBody;
 use tonic::Status;
-use tower::ServiceBuilder;
 use tracing::{debug, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
@@ -125,30 +123,27 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
+async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body = body.collect().await?.to_bytes();
+    let body_bytes = to_bytes(body).await?;
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
         let mut m = metric.lock().await;
         m.request_count += 1;
 
-        m.total_bytes = body.len() as u64;
-        m.entropy.add(entropy::metric_entropy(&body) as f64);
+        m.total_bytes = body_bytes.len() as u64;
+        m.entropy.add(entropy::metric_entropy(&body_bytes) as f64);
 
-        m.body_size.add(body.len() as f64);
+        m.body_size.add(body_bytes.len() as f64);
 
         let method_counter = m.methods.entry(parts.method).or_default();
         *method_counter += 1;
     }
 
-    let mut okay = hyper::Response::default();
-    *okay.status_mut() = StatusCode::OK;
-
-    let body_bytes = vec![];
-    *okay.body_mut() = Body::from(body_bytes);
-    Ok(okay)
+    let mut resp = Response::new(BoxBody::from(Body::empty()));
+    *resp.status_mut() = StatusCode::OK;
+    Ok(resp)
 }
 
 /// Tracks state for a ducks instance
@@ -192,10 +187,9 @@ impl IntegrationTarget for DucksTarget {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
                 let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                let addr = AddrIncoming::bind(&bind_addr)
-                    .map_err(|_e| Status::internal("unable to bind a port"))?;
-                let port = addr.local_addr().port() as u32;
-                tokio::spawn(Self::http_listen(config, addr));
+                let listener = TcpListener::bind(bind_addr).await?;
+                let port = listener.local_addr()?.port() as u32;
+                tokio::spawn(Self::http_listen(config, listener.local_addr()?));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
@@ -255,23 +249,16 @@ impl IntegrationTarget for DucksTarget {
 }
 
 impl DucksTarget {
-    async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
+    async fn http_listen(_config: DucksConfig, addr: SocketAddr) -> Result<(), anyhow::Error> {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
-                trace!("REQUEST: {:?}", request);
-                http_req_handler(request)
-            }))
+        let make_svc = service_fn(move |request: Request<BoxBody>| {
+            trace!("REQUEST: {:?}", request);
+            http_req_handler(request)
         });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(1_000)
-            .timeout(Duration::from_secs(1))
-            .service(service);
 
-        let server = hyper::Server::builder(addr).serve(svc);
+        let server = HyperServer::bind(&addr).serve(make_svc);
         server.await?;
         Ok(())
     }
@@ -327,7 +314,7 @@ impl DucksTarget {
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
-                m.entropy.add(entropy::metric_entropy(buf) as f64);
+                m.entropy.add(entropy::metric_entropy(&buf) as f64);
             }
         }
     }
@@ -357,7 +344,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = DucksTarget { shutdown_tx };
 
-    let rpc_server = tonic::transport::Server::builder()
+    let rpc_server = HyperServer::builder()
         .add_service(IntegrationTargetServer::new(server))
         .serve_with_incoming(ducks_comm);
 

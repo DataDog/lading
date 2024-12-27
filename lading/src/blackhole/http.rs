@@ -8,16 +8,17 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
+use http::{header, HeaderMap, status::InvalidStatusCode, header::InvalidHeaderValue};
+use tonic::body::BoxBody;
 use hyper::{
-    body::HttpBody,
-    header,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
+    body::{Body, to_bytes},
+    service::service_fn,
+    Request, Response,
+    server::Server, StatusCode,
 };
 use metrics::counter;
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
@@ -30,6 +31,9 @@ fn default_concurrent_requests_max() -> usize {
 /// Errors produced by [`Http`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Wrapper around [`std::io::Error`].
+    #[error("Io error: {0}")]
+    Io(#[from] ::std::io::Error),
     /// Wrapper for [`hyper::Error`].
     #[error("HTTP server error: {0}")]
     Hyper(hyper::Error),
@@ -129,15 +133,15 @@ async fn srv(
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
-    req: Request<Body>,
+    req: Request<BoxBody>,
     headers: HeaderMap,
     response_delay: Duration,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<Response<BoxBody>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
     let (parts, body) = req.into_parts();
 
-    let bytes = body.collect().await?.to_bytes();
+    let bytes = hyper::body::to_bytes(body).await?;
     counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
@@ -147,10 +151,9 @@ async fn srv(
 
             tokio::time::sleep(response_delay).await;
 
-            let mut okay = Response::default();
+            let mut okay = Response::new(BoxBody::from(body_bytes));
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = Body::from(body_bytes);
             Ok(okay)
         }
     }
@@ -234,23 +237,16 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| {
-            let metric_labels = self.metric_labels.clone();
-            let body_bytes = self.body_bytes.clone();
-            let headers = self.headers.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |request| {
-                    debug!("REQUEST: {:?}", request);
-                    srv(
-                        self.status,
-                        metric_labels.clone(),
-                        body_bytes.clone(),
-                        request,
-                        headers.clone(),
-                        self.response_delay,
-                    )
-                }))
-            }
+        let service = service_fn(move |request| {
+            debug!("REQUEST: {:?}", request);
+            srv(
+                self.status,
+                self.metric_labels.clone(),
+                self.body_bytes.clone(),
+                request,
+                self.headers.clone(),
+                self.response_delay,
+            )
         });
         let svc = ServiceBuilder::new()
             .load_shed()
@@ -258,14 +254,8 @@ impl Http {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .map_err(Error::Hyper)?;
-
-        let server = Server::builder(addr).serve(svc);
+        let listener = TcpListener::bind(self.httpd_addr).await?;
+        let server = Server::from_tcp(listener)?.serve(service);
         tokio::select! {
             res = server => {
                 error!("server shutdown unexpectedly");

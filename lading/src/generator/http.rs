@@ -193,7 +193,7 @@ impl Http {
     /// Function will panic if it is unable to create HTTP requests for the
     /// target.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let client: Client<HttpConnector, Body> = Client::builder()
+        let client: Client<HttpConnector, BoxBody> = Client::builder()
             .pool_max_idle_per_host(self.parallel_connections as usize)
             .retry_canceled_requests(false)
             .build_http();
@@ -217,7 +217,7 @@ impl Http {
             let body = Body::from(blk.bytes.clone());
             let block_length = blk.bytes.len();
 
-            let mut request: Request<Body> = Request::builder()
+            let mut request: Request<BoxBody> = Request::builder()
                 .method(method.clone())
                 .uri(&uri)
                 .header(CONTENT_LENGTH, block_length)

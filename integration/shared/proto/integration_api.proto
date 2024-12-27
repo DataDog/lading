@@ -18,6 +18,8 @@ service IntegrationTarget {
   rpc Shutdown (Empty) returns (Empty) {}
 }
 
+message Empty {}
+
 // Holds a json-serialized [`DucksConfig`]
 message TestConfig {
   string json_blob = 1;
@@ -26,8 +28,6 @@ message TestConfig {
 message ListenInfo {
   uint32 port = 1;
 }
-
-message Empty {}
 
 message LogMessage {
   string message = 1;
