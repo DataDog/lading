@@ -271,7 +271,7 @@ impl DucksTarget {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let server = tonic::transport::Server::builder().add_service(svc).serve_with_incoming(addr);
+        let server = Server::builder().add_service(svc).serve_with_incoming(addr);
         server.await?;
         Ok(())
     }
