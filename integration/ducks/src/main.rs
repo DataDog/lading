@@ -17,7 +17,7 @@ use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
     body::Body as HyperBody,
-    service::service_fn,
+    service::{make_service_fn, service_fn},
     Method, Request, Response, StatusCode,
 };
 use hyper::server::Server;
@@ -193,7 +193,9 @@ impl IntegrationTarget for DucksTarget {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
                 let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                tokio::spawn(Self::http_listen(config, bind_addr));
+                let listener = TcpListener::bind(bind_addr).await?;
+                let port = listener.local_addr()?.port() as u32;
+                tokio::spawn(Self::http_listen(config, listener.local_addr()?));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
@@ -257,17 +259,16 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let service = service_fn(move |request: Request<HyperBody>| {
-            trace!("REQUEST: {:?}", request);
-            http_req_handler(request)
+        let make_svc = make_service_fn(|_conn| {
+            async {
+                Ok::<_, hyper::Error>(service_fn(move |request: Request<HyperBody>| {
+                    trace!("REQUEST: {:?}", request);
+                    http_req_handler(request)
+                }))
+            }
         });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(1_000)
-            .timeout(Duration::from_secs(1))
-            .service(service);
 
-        let server = Server::bind(&addr).serve(service);
+        let server = Server::bind(&addr).serve(make_svc);
         server.await?;
         Ok(())
     }
