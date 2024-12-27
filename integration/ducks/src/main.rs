@@ -15,12 +15,13 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
+use tonic::body::BoxBody;
 use hyper::{
-    body::{Body as HyperBody, BoxBody, HttpBody},
+    body::{Body, to_bytes, HttpBody},
     service::service_fn,
     Method, Request, Response, StatusCode,
+    server::Server,
 };
-use hyper::Server;
 use tonic::transport::Server;
 use once_cell::sync::OnceCell;
 use shared::{
@@ -128,9 +129,7 @@ impl From<&SocketCounters> for SocketMetrics {
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler<B>(req: Request<B>) -> Result<Response<BoxBody>, hyper::Error>
 where
-    B: HttpBody + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    B: HttpBody<Data = hyper::body::Bytes, Error = hyper::Error> + Send + 'static,
 {
     let (parts, body) = req.into_parts();
     let body_bytes = hyper::body::to_bytes(body).await?;

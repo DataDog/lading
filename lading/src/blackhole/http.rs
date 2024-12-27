@@ -8,11 +8,13 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
+use http::{header, HeaderMap, status::InvalidStatusCode, header::InvalidHeaderValue};
+use tonic::body::BoxBody;
 use hyper::{
-    body::{Body as HyperBody, BoxBody},
+    body::{Body, to_bytes},
     service::service_fn,
-    Request, Response, Server, StatusCode,
+    Request, Response,
+    server::Server, StatusCode,
 };
 use metrics::counter;
 use serde::{Deserialize, Serialize};
