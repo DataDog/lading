@@ -15,14 +15,12 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
-use tonic::body::BoxBody;
 use hyper::{
-    body::{Body, to_bytes, HttpBody},
+    body::{to_bytes, Body, HttpBody},
+    server::Server,
     service::service_fn,
     Method, Request, Response, StatusCode,
-    server::Server,
 };
-use tonic::transport::Server;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -40,6 +38,8 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
+use tonic::body::BoxBody;
+use tonic::transport::Server;
 use tonic::Status;
 use tower::ServiceBuilder;
 use tracing::{debug, trace, warn};
