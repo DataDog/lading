@@ -21,6 +21,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Method, Request, StatusCode,
 };
+use tonic::transport::Server;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
