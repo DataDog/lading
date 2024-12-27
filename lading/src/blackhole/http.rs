@@ -14,9 +14,9 @@ use hyper::{
     service::service_fn,
     Request, Response, Server, StatusCode,
 };
-use tokio::net::TcpListener;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tracing::{debug, error, info};
 
@@ -29,6 +29,9 @@ fn default_concurrent_requests_max() -> usize {
 /// Errors produced by [`Http`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Wrapper around [`std::io::Error`].
+    #[error("Io error: {0}")]
+    Io(#[from] ::std::io::Error),
     /// Wrapper for [`hyper::Error`].
     #[error("HTTP server error: {0}")]
     Hyper(hyper::Error),
