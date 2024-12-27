@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::to_bytes,
+    body::aggregate,
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
@@ -128,7 +128,7 @@ impl From<&SocketCounters> for SocketMetrics {
 async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error>
 {
     let (parts, body) = req.into_parts();
-    let body_bytes = hyper::body::to_bytes(body).await?;
+    let body_bytes = hyper::body::aggregate(body).await?.to_bytes();
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
@@ -144,7 +144,7 @@ async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hy
         *method_counter += 1;
     }
 
-    let mut okay = Response::new(BoxBody::from(vec![]));
+    let mut okay = Response::new(BoxBody::new(http_body_util::Empty::new()));
     *okay.status_mut() = StatusCode::OK;
     Ok(okay)
 }
