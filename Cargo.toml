@@ -35,7 +35,7 @@ uuid = { version = "1.11", default-features = false, features = [
   "serde",
 ] }
 once_cell = { version = "1.20" }
-hyper = { version = "0.14", default-features = false }
+hyper = { version = "1.5.2", default-features = false }
 
 
 [profile.release]
