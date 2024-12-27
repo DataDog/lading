@@ -6,20 +6,14 @@
 //! `requests_received`: Total messages received
 //!
 
-use std::{fmt::Write, net::SocketAddr, sync::Arc};
-
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{service::service_fn, Request, Response, StatusCode};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto,
-};
+use hyper::{Request, Response, StatusCode};
 use metrics::counter;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use tokio::{pin, sync::Semaphore, task::JoinSet};
-use tracing::{debug, error, info};
+use std::{fmt::Write, net::SocketAddr};
+use tracing::{debug, error};
 
 use super::General;
 
@@ -41,6 +35,9 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 fn default_concurrent_requests_max() -> usize {
@@ -100,65 +97,21 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let listener = tokio::net::TcpListener::bind(self.httpd_addr).await?;
-        let sem = Arc::new(Semaphore::new(self.concurrency_limit));
-        let mut join_set = JoinSet::new();
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            move || {
+                let metric_labels = self.metric_labels.clone();
 
-        let shutdown = self.shutdown.recv();
-        pin!(shutdown);
-        loop {
-            tokio::select! {
-                () = &mut shutdown => {
-                    info!("shutdown signal received");
-                    break;
-                }
+                hyper::service::service_fn(move |req| {
+                    debug!("REQUEST: {:?}", req);
+                    srv(req, metric_labels.clone())
+                })
+            },
+        )
+        .await?;
 
-                incoming = listener.accept() => {
-                    let (stream, addr) = match incoming {
-                        Ok((s,a)) => (s,a),
-                        Err(e) => {
-                            error!("accept error: {e}");
-                            continue;
-                        }
-                    };
-
-                    let metric_labels = self.metric_labels.clone();
-                    let sem = Arc::clone(&sem);
-
-                    join_set.spawn(async move {
-                        debug!("Accepted connection from {addr}");
-                        let permit = match sem.acquire_owned().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                error!("Semaphore closed: {e}");
-                                return;
-                            }
-                        };
-
-                        let builder = auto::Builder::new(TokioExecutor::new());
-                        let serve_future = builder
-                            .serve_connection(
-                                TokioIo::new(stream),
-                                service_fn(move |req: Request<hyper::body::Incoming>| {
-                                    debug!("REQUEST: {:?}", req);
-                                     srv(
-                                        req,
-                                        metric_labels.clone(),
-
-                                    )
-                                })
-                            );
-
-                        if let Err(e) = serve_future.await {
-                            error!("Error serving {addr}: {e}");
-                        }
-                        drop(permit);
-                    });
-                }
-            }
-        }
-        drop(listener);
-        while join_set.join_next().await.is_some() {}
         Ok(())
     }
 }
@@ -268,41 +221,112 @@ impl DeleteMessageBatch {
 async fn srv(
     req: Request<hyper::body::Incoming>,
     metric_labels: Vec<(String, String)>,
-) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
     let (_, body) = req.into_parts();
-
     let bytes = body.boxed().collect().await?.to_bytes();
     counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
 
-    let action: Action = serde_qs::from_bytes(&bytes)?;
+    let action = match serde_qs::from_bytes::<Action>(&bytes) {
+        Ok(a) => a,
+        Err(e) => {
+            let msg = format!("SQS parse error: {e}");
+            return Ok(build_response(
+                StatusCode::BAD_REQUEST,
+                Some("text/plain"),
+                msg.into_bytes(),
+            ));
+        }
+    };
 
     match action.action.as_str() {
         "ReceiveMessage" => {
-            let action: ReceiveMessage = serde_qs::from_bytes(&bytes)?;
-            let num_messages = action.max_number_of_messages;
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-type", "text/html")
-                .body(crate::full(generate_receive_message_response(num_messages)))?)
+            let num_messages = match serde_qs::from_bytes::<ReceiveMessage>(&bytes) {
+                Ok(rm) => rm.max_number_of_messages,
+                Err(e) => {
+                    let msg = format!("ReceiveMessage parse error: {e}");
+                    return Ok(build_response(
+                        StatusCode::BAD_REQUEST,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            let body_str = generate_receive_message_response(num_messages);
+            Ok(build_response(StatusCode::OK, Some("text/html"), body_str))
         }
-        "DeleteMessage" => Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/html")
-            .body(crate::full(generate_delete_message_response()))?),
+
+        "DeleteMessage" => {
+            let body_str = generate_delete_message_response();
+            Ok(build_response(StatusCode::OK, Some("text/html"), body_str))
+        }
+
         "DeleteMessageBatch" => {
-            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)?;
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-type", "text/html")
-                .body(crate::full(action.generate_response()?))?)
+            let batch = match serde_qs::from_bytes::<DeleteMessageBatch>(&bytes) {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = format!("DeleteMessageBatch parse error: {e}");
+                    return Ok(build_response(
+                        StatusCode::BAD_REQUEST,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            let response_str = match batch.generate_response() {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = format!("DeleteMessageBatch formatting error: {e}");
+                    return Ok(build_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            Ok(build_response(
+                StatusCode::OK,
+                Some("text/html"),
+                response_str,
+            ))
         }
-        action => {
-            debug!("Unknown action: {action:?}");
-            Ok(Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(crate::full(vec![]))?)
+
+        other => {
+            debug!("Unknown action: {other:?}");
+            Ok(build_response(
+                StatusCode::NOT_IMPLEMENTED,
+                None,
+                Vec::new(),
+            ))
+        }
+    }
+}
+
+fn build_response(
+    status: StatusCode,
+    content_type: Option<&str>,
+    body: impl Into<Bytes>,
+) -> Response<BoxBody<Bytes, hyper::Error>> {
+    let mut builder = Response::builder().status(status);
+    if let Some(ct) = content_type {
+        builder = builder.header("content-type", ct);
+    }
+    match builder.body(crate::full(body)) {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Error building response: {e}");
+            match Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("content-type", "text/plain")
+                .body(crate::full(b"Internal error building response".to_vec()))
+            {
+                Ok(r) => r,
+                Err(inner_err) => {
+                    // Building a fallback failed, panic.
+                    panic!("Catastrophic error: {inner_err}");
+                }
+            }
         }
     }
 }
