@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::{Body, to_bytes},
+    body::to_bytes,
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
@@ -125,7 +125,7 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<Response<tonic::body::BoxBody>, hyper::Error>
+async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error>
 {
     let (parts, body) = req.into_parts();
     let body_bytes = hyper::body::to_bytes(body).await?;
@@ -256,7 +256,7 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let make_svc = service_fn(move |request: Request<Body>| {
+        let make_svc = service_fn(move |request: Request<BoxBody>| {
             trace!("REQUEST: {:?}", request);
             http_req_handler(request)
         });
