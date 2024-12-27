@@ -156,7 +156,7 @@ async fn srv(
             let mut okay = Response::default();
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = crate::full(body);
+            *okay.body_mut() = crate::full(body_bytes);
             Ok(okay)
         }
     }
