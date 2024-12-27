@@ -15,11 +15,7 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
-use hyper::{
-    body::aggregate,
-    service::service_fn,
-    Method, Request, Response, StatusCode,
-};
+use hyper::{service::service_fn, Method, Request, Response, StatusCode};
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -125,10 +121,9 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error>
-{
+async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body_bytes = hyper::body::aggregate(body).await?.to_bytes();
+    let body_bytes = body.boxed().await?.to_bytes();
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
@@ -144,9 +139,9 @@ async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hy
         *method_counter += 1;
     }
 
-    let mut okay = Response::new(BoxBody::new(http_body_util::Empty::new()));
-    *okay.status_mut() = StatusCode::OK;
-    Ok(okay)
+    let mut resp = hyper::Response::default();
+    *resp.status_mut() = StatusCode::OK;
+    *resp.body_mut() = Ok(okay)
 }
 
 /// Tracks state for a ducks instance
