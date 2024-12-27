@@ -258,9 +258,8 @@ impl DucksTarget {
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
         let service = service_fn(move |request: Request<HyperBody>| {
-                trace!("REQUEST: {:?}", request);
-                http_req_handler(request)
-            }))
+            trace!("REQUEST: {:?}", request);
+            http_req_handler(request)
         });
         let svc = ServiceBuilder::new()
             .load_shed()
