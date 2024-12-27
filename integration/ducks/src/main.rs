@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Ducks is an integration testing target for lading.
 //!
 //! Ducks exists to enable correctness testing on lading. Any high-level
@@ -15,9 +16,9 @@
 
 use anyhow::Context;
 use bytes::BytesMut;
-use hyper::{service::service_fn, Method, Request, Response, StatusCode, Body};
-use tonic::transport::Server as HyperServer;
-use http_body_util::BodyExt;
+use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use hyper::body::{Body, to_bytes};
+use hyper::Server as HyperServer;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -124,7 +125,7 @@ impl From<&SocketCounters> for SocketMetrics {
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(req: Request<BoxBody>) -> Result<Response<BoxBody>, hyper::Error> {
     let (parts, body) = req.into_parts();
-    let body_bytes = body.to_bytes().await?;
+    let body_bytes = to_bytes(body).await?;
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
