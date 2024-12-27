@@ -16,7 +16,7 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::Body,
+    body::{Body as HyperBody, BoxBody, HttpBody},
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
@@ -133,7 +133,7 @@ where
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let (parts, body) = req.into_parts();
-    let body = body.collect().await?.to_bytes();
+    let body_bytes = hyper::body::to_bytes(body).await?;
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");

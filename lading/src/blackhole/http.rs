@@ -136,7 +136,7 @@ async fn srv(
 
     let (parts, body) = req.into_parts();
 
-    let bytes = body.collect().await?.to_bytes();
+    let bytes = hyper::body::to_bytes(body).await?;
     counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
