@@ -22,12 +22,12 @@ tokio = { version = "1.41", features = [
   "time",
   "net",
 ] }
-tonic = { version = "0.12", default-features = false, features = [
+tonic = { workspace = true, default-features = false, features = [
   "transport",
   "prost",
 ] }
-hyper-util = "0.1"
-tower = { version = "0.5", features = [
+hyper-util = { workspace = true }
+tower = { workspace = true, features = [
   "timeout",
   "limit",
   "load-shed",
