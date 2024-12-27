@@ -17,10 +17,10 @@ use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
     body::Body as HyperBody,
-    server::conn::AddrIncoming,
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, StatusCode,
+    service::service_fn,
+    Method, Request, Response, StatusCode,
 };
+use hyper::server::Server;
 use tonic::transport::Server;
 use once_cell::sync::OnceCell;
 use shared::{
@@ -193,10 +193,7 @@ impl IntegrationTarget for DucksTarget {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
                 let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                let addr = AddrIncoming::bind(&bind_addr)
-                    .map_err(|_e| Status::internal("unable to bind a port"))?;
-                let port = addr.local_addr().port() as u32;
-                tokio::spawn(Self::http_listen(config, addr));
+                tokio::spawn(Self::http_listen(config, bind_addr));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
@@ -256,12 +253,11 @@ impl IntegrationTarget for DucksTarget {
 }
 
 impl DucksTarget {
-    async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
+    async fn http_listen(_config: DucksConfig, addr: SocketAddr) -> Result<(), anyhow::Error> {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
+        let service = service_fn(move |request: Request<HyperBody>| {
                 trace!("REQUEST: {:?}", request);
                 http_req_handler(request)
             }))
@@ -272,7 +268,7 @@ impl DucksTarget {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let server = Server::builder().add_service(svc).serve_with_incoming(addr);
+        let server = Server::bind(&addr).serve(service);
         server.await?;
         Ok(())
     }
