@@ -16,11 +16,11 @@
 use anyhow::Context;
 use bytes::BytesMut;
 use hyper::{
-    body::{Body as HyperBody},
-    service::{make_service_fn, service_fn},
+    body::Body as HyperBody,
+    service::service_fn,
     Method, Request, Response, StatusCode,
 };
-use hyper::server::Server;
+use hyper::Server;
 use tonic::transport::Server;
 use once_cell::sync::OnceCell;
 use shared::{
@@ -259,13 +259,9 @@ impl DucksTarget {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let make_svc = make_service_fn(|_conn| {
-            async {
-                Ok::<_, hyper::Error>(service_fn(move |request: Request<HyperBody>| {
-                    trace!("REQUEST: {:?}", request);
-                    http_req_handler(request)
-                }))
-            }
+        let make_svc = service_fn(move |request: Request<HyperBody>| {
+            trace!("REQUEST: {:?}", request);
+            http_req_handler(request)
         });
 
         let server = Server::bind(&addr).serve(make_svc);

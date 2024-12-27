@@ -10,12 +10,11 @@ use std::{net::SocketAddr, time::Duration};
 
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use hyper::{
-    body::{Body, HttpBody},
-    header,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
+    body::Body,
+    service::service_fn,
     Request, Response, Server, StatusCode,
 };
+use tokio::net::TcpListener;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
@@ -234,23 +233,16 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| {
-            let metric_labels = self.metric_labels.clone();
-            let body_bytes = self.body_bytes.clone();
-            let headers = self.headers.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |request| {
-                    debug!("REQUEST: {:?}", request);
-                    srv(
-                        self.status,
-                        metric_labels.clone(),
-                        body_bytes.clone(),
-                        request,
-                        headers.clone(),
-                        self.response_delay,
-                    )
-                }))
-            }
+        let service = service_fn(move |request| {
+            debug!("REQUEST: {:?}", request);
+            srv(
+                self.status,
+                self.metric_labels.clone(),
+                self.body_bytes.clone(),
+                request,
+                self.headers.clone(),
+                self.response_delay,
+            )
         });
         let svc = ServiceBuilder::new()
             .load_shed()
@@ -258,14 +250,8 @@ impl Http {
             .timeout(Duration::from_secs(1))
             .service(service);
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .map_err(Error::Hyper)?;
-
-        let server = Server::builder(addr).serve(svc);
+        let listener = TcpListener::bind(self.httpd_addr).await?;
+        let server = Server::from_tcp(listener)?.serve(service);
         tokio::select! {
             res = server => {
                 error!("server shutdown unexpectedly");
