@@ -71,6 +71,13 @@ where
                 let service_factory = make_service.clone();
 
                 join_set.spawn(async move {
+                    // NOTE we are paying the cost for allocating a socket et al
+                    // here and then immediately dropping the connection. If we
+                    // wanted to be more resource spare we should not accept the
+                    // connection before the semaphore is known to have capacity.
+                    //
+                    // Doesn't matter really for lading -- so far as we can tell
+                    // -- but it's not strictly speaking good behavior.
                     let permit = match sem.try_acquire() {
                         Ok(p) => p,
                         Err(TryAcquireError::Closed) => {
