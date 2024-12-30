@@ -7,8 +7,13 @@ use hyper_util::{
 };
 use lading_signal::Watcher;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{net::TcpListener, pin, sync::Semaphore, task::JoinSet};
-use tracing::{debug, error, info};
+use tokio::{
+    net::TcpListener,
+    pin,
+    sync::{Semaphore, TryAcquireError},
+    task::JoinSet,
+};
+use tracing::{debug, error, info, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -66,10 +71,15 @@ where
 
                 join_set.spawn(async move {
                     debug!("Accepted connection from {addr}");
-                    let permit = match sem.acquire_owned().await {
+                    let permit = match sem.try_acquire() {
                         Ok(p) => p,
-                        Err(e) => {
-                            error!("Semaphore closed: {e}");
+                        Err(TryAcquireError::Closed) => {
+                            error!("Semaphore closed");
+                            return;
+                        }
+                        Err(TryAcquireError::NoPermits) => {
+                            warn!("httpd over connection capacity, load shedding");
+                            drop(stream);
                             return;
                         }
                     };
