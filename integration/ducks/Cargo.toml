@@ -11,9 +11,9 @@ publish = false
 anyhow = "1.0"
 bytes = { workspace = true }
 entropy = "0.4"
-http-body-util = "0.1"
-hyper = { version = "1.5", features = ["server"] }
-hyper-util = "0.1"
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["server"] }
+hyper-util = { workspace = true }
 once_cell = { workspace = true }
 shared = { path = "../shared" }
 sketches-ddsketch = "0.3"
@@ -28,7 +28,7 @@ tokio = { workspace = true, features = [
   "net",
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.12", default-features = false, features = [
+tonic = { workspace = true, default-features = false, features = [
   "transport",
   "prost",
 ] }

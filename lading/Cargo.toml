@@ -37,11 +37,11 @@ flate2 = { version = "1.0.34", default-features = false, features = [
 futures = "0.3.31"
 fuser = { version = "0.15", optional = true }
 heck  = { version = "0.5", default-features = false }
-http = "1.2"
+http = { workspace = true }
+http-body-util = { workspace = true }
 http-serde = "2.1"
-hyper = { version = "1.5", features = ["client", "http1", "http2", "server"] }
-http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["default", "client", "client-legacy"] }
+hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
 is_executable = "1.0.4"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
