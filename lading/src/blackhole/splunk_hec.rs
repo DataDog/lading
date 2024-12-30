@@ -16,16 +16,11 @@ use std::{
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{header, service::service_fn, Method, Request, Response, StatusCode};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto,
-};
+use hyper::{header, Method, Request, Response, StatusCode};
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use tokio::{pin, task::JoinSet};
-use tracing::{debug, error, info};
+use tracing::debug;
 
 use super::General;
 
@@ -47,6 +42,9 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +91,7 @@ struct HecResponse {
 async fn srv(
     req: Request<hyper::body::Incoming>,
     labels: Arc<Vec<(String, String)>>,
-) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, Error> {
+) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &*labels).increment(1);
 
     let (parts, body) = req.into_parts();
@@ -105,9 +103,9 @@ async fn srv(
         Ok(body) => {
             counter!("decoded_bytes_received", &*labels).increment(body.len() as u64);
 
-            let mut okay = Response::default();
-            *okay.status_mut() = StatusCode::OK;
-            okay.headers_mut().insert(
+            let mut resp = Response::default();
+            *resp.status_mut() = StatusCode::OK;
+            resp.headers_mut().insert(
                 header::CONTENT_TYPE,
                 header::HeaderValue::from_static("application/json"),
             );
@@ -122,30 +120,43 @@ async fn srv(
                     | "/services/collector/raw/1.0",
                 ) => {
                     let ack_id = ACK_ID.fetch_add(1, Ordering::Relaxed);
-                    let body_bytes = serde_json::to_vec(&HecResponse {
+                    match serde_json::to_vec(&HecResponse {
                         text: "Success",
                         code: 0,
                         ack_id,
-                    })?;
-                    *okay.body_mut() = crate::full(body_bytes);
+                    }) {
+                        Ok(b) => {
+                            *resp.body_mut() = crate::full(b);
+                        }
+                        Err(_e) => {
+                            *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                            *resp.body_mut() = crate::full(vec![]);
+                        }
+                    }
                 }
                 // Path for querying indexer acknowledgements
                 (Method::POST, "/services/collector/ack") => {
                     match serde_json::from_slice::<HecAckRequest>(&body) {
                         Ok(ack_request) => {
-                            let body_bytes =
-                                serde_json::to_vec(&HecAckResponse::from(ack_request))?;
-                            *okay.body_mut() = crate::full(body_bytes);
+                            match serde_json::to_vec(&HecAckResponse::from(ack_request)) {
+                                Ok(b) => {
+                                    *resp.body_mut() = crate::full(b);
+                                }
+                                Err(_e) => {
+                                    *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                    *resp.body_mut() = crate::full(vec![]);
+                                }
+                            }
                         }
                         Err(_) => {
-                            *okay.status_mut() = StatusCode::BAD_REQUEST;
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
                         }
                     }
                 }
                 _ => {}
             }
 
-            Ok(okay)
+            Ok(resp)
         }
     }
 }
@@ -192,57 +203,22 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let listener = tokio::net::TcpListener::bind(&self.httpd_addr).await?;
-        let sem = Arc::new(tokio::sync::Semaphore::new(self.concurrency_limit));
-        let mut join_set = JoinSet::new();
-        let labels = Arc::new(self.metric_labels.clone());
+        let metric_labels = Arc::new(self.metric_labels.clone());
 
-        let shutdown = self.shutdown.recv();
-        pin!(shutdown);
-        loop {
-            tokio::select! {
-                () = &mut shutdown => {
-                    info!("shutdown signal received");
-                    break;
-                }
-                incoming = listener.accept() => {
-                    let (stream, addr) = match incoming {
-                        Ok((s,a)) => (s,a),
-                        Err(e) => {
-                            error!("accept error: {e}");
-                            continue;
-                        }
-                    };
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            move || {
+                let metric_labels = Arc::clone(&metric_labels);
+                hyper::service::service_fn(move |req| {
+                    debug!("REQUEST: {:?}", req);
+                    srv(req, Arc::clone(&metric_labels))
+                })
+            },
+        )
+        .await?;
 
-                    let labels = Arc::clone(&labels);
-                    let sem = Arc::clone(&sem);
-                    join_set.spawn(async move {
-                        debug!("Accepted connection from {addr}");
-                        let permit = match sem.acquire_owned().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                error!("Semaphore closed: {e}");
-                                return;
-                            }
-                        };
-                        let builder = auto::Builder::new(TokioExecutor::new());
-                        let serve_future = builder
-                        .serve_connection(TokioIo::new(stream), service_fn(move |req| {
-                            let labels = Arc::clone(&labels);
-                            srv(req, labels)
-                        }));
-
-                        if let Err(e) = serve_future.await {
-                            error!("Error serving: {e}");
-                        }
-                        drop(permit);
-                    });
-                }
-            }
-        }
-
-        drop(listener);
-        while join_set.join_next().await.is_some() {}
         Ok(())
     }
 }

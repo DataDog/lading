@@ -6,20 +6,14 @@
 //! `requests_received`: Total requests received
 //!
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
 use bytes::Bytes;
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
 use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{header, service::service_fn, Request, Response, StatusCode};
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto,
-};
+use hyper::{header, Request, Response, StatusCode};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use tokio::{pin, sync::Semaphore, task::JoinSet};
-use tracing::{debug, error, info};
+use std::{net::SocketAddr, time::Duration};
+use tracing::{debug, error};
 
 use super::General;
 
@@ -42,9 +36,9 @@ pub enum Error {
     /// Failed to deserialize the configuration.
     #[error("Failed to deserialize the configuration: {0}")]
     Serde(#[from] serde_json::Error),
-    /// Wrapper for [`std::io::Error`].
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 /// Body variant supported by this blackhole.
@@ -240,72 +234,32 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let listener = tokio::net::TcpListener::bind(self.httpd_addr).await?;
-        let sem = Arc::new(Semaphore::new(self.concurrency_limit));
-        let mut join_set = JoinSet::new();
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            move || {
+                let metric_labels = self.metric_labels.clone();
+                let body_bytes = self.body_bytes.clone();
+                let headers = self.headers.clone();
+                let status = self.status;
+                let response_delay = self.response_delay;
 
-        let shutdown = self.shutdown.recv();
-        pin!(shutdown);
-        loop {
-            tokio::select! {
-                () = &mut shutdown => {
-                    info!("shutdown signal received");
-                    break;
-                }
+                hyper::service::service_fn(move |req| {
+                    debug!("REQUEST: {:?}", req);
+                    srv(
+                        status,
+                        metric_labels.clone(),
+                        body_bytes.clone(),
+                        req,
+                        headers.clone(),
+                        response_delay,
+                    )
+                })
+            },
+        )
+        .await?;
 
-                incoming = listener.accept() => {
-                    let (stream, addr) = match incoming {
-                        Ok((s,a)) => (s,a),
-                        Err(e) => {
-                            error!("accept error: {e}");
-                            continue;
-                        }
-                    };
-
-                    let metric_labels = self.metric_labels.clone();
-                    let body_bytes = self.body_bytes.clone();
-                    let headers = self.headers.clone();
-                    let status = self.status;
-                    let response_delay = self.response_delay;
-                    let sem = Arc::clone(&sem);
-
-                    join_set.spawn(async move {
-                        debug!("Accepted connection from {addr}");
-                        let permit = match sem.acquire_owned().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                error!("Semaphore closed: {e}");
-                                return;
-                            }
-                        };
-
-                        let builder = auto::Builder::new(TokioExecutor::new());
-                        let serve_future = builder
-                            .serve_connection(
-                                TokioIo::new(stream),
-                                service_fn(move |req: Request<hyper::body::Incoming>| {
-                                    debug!("REQUEST: {:?}", req);
-                                     srv(
-                                        status,
-                                        metric_labels.clone(),
-                                        body_bytes.clone(),
-                                        req,
-                                        headers.clone(),
-                                        response_delay,
-                                    )
-                                })
-                            );
-
-                        if let Err(e) = serve_future.await {
-                            error!("Error serving {addr}: {e}");
-                        }
-                        drop(permit);
-                    });
-                }
-            }
-        }
-        drop(listener);
-        while join_set.join_next().await.is_some() {}
         Ok(())
     }
 }
