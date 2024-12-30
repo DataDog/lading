@@ -34,7 +34,7 @@ where
     // The bounds on `S` per
     // https://docs.rs/hyper/latest/hyper/service/trait.Service.html and then
     // made concrete per
-    // https://docs.rs/hyper-util/latest/hyper_util/server/conn/auto/struct.Builder.html#method.serve_connection.
+    // https://docs.rs/hyper-util/latest/hyper_util/server/conn/auto/struct.Builder.html#method.serve_connection
     S: Service<
             hyper::Request<hyper::body::Incoming>,
             Response = hyper::Response<BoxBody<Bytes, hyper::Error>>,
