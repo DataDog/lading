@@ -6,19 +6,19 @@
 //! `requests_received`: Total requests received
 //!
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use bytes::Bytes;
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
-use hyper::{
-    body::HttpBody,
-    header,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{header, service::service_fn, Request, Response, StatusCode};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto,
 };
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use tower::ServiceBuilder;
+use tokio::{pin, sync::Semaphore, task::JoinSet};
 use tracing::{debug, error, info};
 
 use super::General;
@@ -42,6 +42,9 @@ pub enum Error {
     /// Failed to deserialize the configuration.
     #[error("Failed to deserialize the configuration: {0}")]
     Serde(#[from] serde_json::Error),
+    /// Wrapper for [`std::io::Error`].
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Body variant supported by this blackhole.
@@ -129,18 +132,21 @@ async fn srv(
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
-    req: Request<Body>,
+    req: Request<hyper::body::Incoming>,
     headers: HeaderMap,
     response_delay: Duration,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
+    // Split into parts
     let (parts, body) = req.into_parts();
 
-    let bytes = body.collect().await?.to_bytes();
-    counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
+    // Convert the `Body` into `Bytes`
+    let body: Bytes = body.boxed().collect().await?.to_bytes();
 
-    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
+    counter!("bytes_received", &metric_labels).increment(body.len() as u64);
+
+    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(response),
         Ok(body) => {
             counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
@@ -150,7 +156,7 @@ async fn srv(
             let mut okay = Response::default();
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = Body::from(body_bytes);
+            *okay.body_mut() = crate::full(body_bytes);
             Ok(okay)
         }
     }
@@ -234,48 +240,73 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| {
-            let metric_labels = self.metric_labels.clone();
-            let body_bytes = self.body_bytes.clone();
-            let headers = self.headers.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |request| {
-                    debug!("REQUEST: {:?}", request);
-                    srv(
-                        self.status,
-                        metric_labels.clone(),
-                        body_bytes.clone(),
-                        request,
-                        headers.clone(),
-                        self.response_delay,
-                    )
-                }))
-            }
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(self.concurrency_limit)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+        let listener = tokio::net::TcpListener::bind(self.httpd_addr).await?;
+        let sem = Arc::new(Semaphore::new(self.concurrency_limit));
+        let mut join_set = JoinSet::new();
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .map_err(Error::Hyper)?;
+        let shutdown = self.shutdown.recv();
+        pin!(shutdown);
+        loop {
+            tokio::select! {
+                () = &mut shutdown => {
+                    info!("shutdown signal received");
+                    break;
+                }
 
-        let server = Server::builder(addr).serve(svc);
-        tokio::select! {
-            res = server => {
-                error!("server shutdown unexpectedly");
-                 res.map_err(Error::Hyper)
-            }
-            () = self.shutdown.recv() => {
-                info!("shutdown signal received");
-                Ok(())
+                incoming = listener.accept() => {
+                    let (stream, addr) = match incoming {
+                        Ok((s,a)) => (s,a),
+                        Err(e) => {
+                            error!("accept error: {e}");
+                            continue;
+                        }
+                    };
+
+                    let metric_labels = self.metric_labels.clone();
+                    let body_bytes = self.body_bytes.clone();
+                    let headers = self.headers.clone();
+                    let status = self.status;
+                    let response_delay = self.response_delay;
+                    let sem = Arc::clone(&sem);
+
+                    join_set.spawn(async move {
+                        debug!("Accepted connection from {addr}");
+                        let permit = match sem.acquire_owned().await {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!("Semaphore closed: {e}");
+                                return;
+                            }
+                        };
+
+                        let builder = auto::Builder::new(TokioExecutor::new());
+                        let serve_future = builder
+                            .serve_connection(
+                                TokioIo::new(stream),
+                                service_fn(move |req: Request<hyper::body::Incoming>| {
+                                    debug!("REQUEST: {:?}", req);
+                                     srv(
+                                        status,
+                                        metric_labels.clone(),
+                                        body_bytes.clone(),
+                                        req,
+                                        headers.clone(),
+                                        response_delay,
+                                    )
+                                })
+                            );
+
+                        if let Err(e) = serve_future.await {
+                            error!("Error serving {addr}: {e}");
+                        }
+                        drop(permit);
+                    });
+                }
             }
         }
+        drop(listener);
+        while join_set.join_next().await.is_some() {}
+        Ok(())
     }
 }
 

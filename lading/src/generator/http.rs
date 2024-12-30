@@ -14,11 +14,8 @@
 use std::{num::NonZeroU32, thread};
 
 use byte_unit::ByteError;
-use hyper::{
-    client::{Client, HttpConnector},
-    header::CONTENT_LENGTH,
-    Body, HeaderMap, Request, Uri,
-};
+use hyper::{header::CONTENT_LENGTH, HeaderMap, Request, Uri};
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
@@ -193,7 +190,7 @@ impl Http {
     /// Function will panic if it is unable to create HTTP requests for the
     /// target.
     pub async fn spin(mut self) -> Result<(), Error> {
-        let client: Client<HttpConnector, Body> = Client::builder()
+        let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(self.parallel_connections as usize)
             .retry_canceled_requests(false)
             .build_http();
@@ -214,10 +211,10 @@ impl Http {
             let blk = rcv.next().await.expect("block cache should never be empty");
             let total_bytes = blk.total_bytes;
 
-            let body = Body::from(blk.bytes.clone());
+            let body = crate::full(blk.bytes.clone());
             let block_length = blk.bytes.len();
 
-            let mut request: Request<Body> = Request::builder()
+            let mut request = Request::builder()
                 .method(method.clone())
                 .uri(&uri)
                 .header(CONTENT_LENGTH, block_length)
