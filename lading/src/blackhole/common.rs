@@ -65,12 +65,12 @@ where
                         continue;
                     }
                 };
+                debug!("Accepted connection from {addr}");
 
                 let sem = Arc::clone(&sem);
                 let service_factory = make_service.clone();
 
                 join_set.spawn(async move {
-                    debug!("Accepted connection from {addr}");
                     let permit = match sem.try_acquire() {
                         Ok(p) => p,
                         Err(TryAcquireError::Closed) => {
