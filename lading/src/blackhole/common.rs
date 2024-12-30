@@ -55,7 +55,9 @@ where
     let shutdown_fut = shutdown.recv();
     pin!(shutdown_fut);
     loop {
-        gauge!("connection.current", &labels).set(sem.available_permits() as f64);
+        let claimed_permits = concurrency_limit - sem.available_permits();
+
+        gauge!("connection.current", &labels).set(claimed_permits as f64);
         tokio::select! {
             () = &mut shutdown_fut => {
                 info!("Shutdown signal received, stopping accept loop.");
