@@ -8,10 +8,7 @@
 
 use std::{
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use bytes::Bytes;
@@ -20,7 +17,6 @@ use hyper::{header, Method, Request, Response, StatusCode};
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use super::General;
 
@@ -90,7 +86,7 @@ struct HecResponse {
 
 async fn srv(
     req: Request<hyper::body::Incoming>,
-    labels: Arc<Vec<(String, String)>>,
+    labels: Vec<(String, String)>,
 ) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &*labels).increment(1);
 
@@ -203,18 +199,14 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let metric_labels = Arc::new(self.metric_labels.clone());
-
         crate::blackhole::common::run_httpd(
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,
+            self.metric_labels.clone(),
             move || {
-                let metric_labels = Arc::clone(&metric_labels);
-                hyper::service::service_fn(move |req| {
-                    debug!("REQUEST: {:?}", req);
-                    srv(req, Arc::clone(&metric_labels))
-                })
+                let metric_labels = self.metric_labels.clone();
+                hyper::service::service_fn(move |req| srv(req, metric_labels.clone()))
             },
         )
         .await?;

@@ -6,6 +6,7 @@ use hyper_util::{
     server::conn::auto,
 };
 use lading_signal::Watcher;
+use metrics::gauge;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpListener,
@@ -26,6 +27,7 @@ pub(crate) async fn run_httpd<SF, S>(
     addr: SocketAddr,
     concurrency_limit: usize,
     shutdown: Watcher,
+    labels: Vec<(String, String)>,
     make_service: SF,
 ) -> Result<(), Error>
 where
@@ -48,9 +50,12 @@ where
     let sem = Arc::new(Semaphore::new(concurrency_limit));
     let mut join_set = JoinSet::new();
 
+    gauge!("connection.limit", &labels).set(concurrency_limit as f64);
+
     let shutdown_fut = shutdown.recv();
     pin!(shutdown_fut);
     loop {
+        gauge!("connection.current", &labels).set(sem.available_permits() as f64);
         tokio::select! {
             () = &mut shutdown_fut => {
                 info!("Shutdown signal received, stopping accept loop.");
