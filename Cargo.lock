@@ -1652,7 +1652,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic 0.12.3",
- "tower 0.5.2",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -3308,10 +3307,8 @@ dependencies = [
  "pin-project-lite",
  "sync_wrapper 1.0.2",
  "tokio",
- "tokio-util",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]

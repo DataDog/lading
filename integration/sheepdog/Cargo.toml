@@ -27,11 +27,6 @@ tonic = { workspace = true, default-features = false, features = [
   "prost",
 ] }
 hyper-util = { workspace = true }
-tower = { workspace = true, features = [
-  "timeout",
-  "limit",
-  "load-shed",
-  "util"
-] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
