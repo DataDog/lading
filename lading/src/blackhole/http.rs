@@ -13,7 +13,7 @@ use hyper::{header, Request, Response, StatusCode};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
-use tracing::{debug, error};
+use tracing::error;
 
 use super::General;
 
@@ -238,6 +238,7 @@ impl Http {
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,
+            self.metric_labels.clone(),
             move || {
                 let metric_labels = self.metric_labels.clone();
                 let body_bytes = self.body_bytes.clone();
@@ -246,7 +247,6 @@ impl Http {
                 let response_delay = self.response_delay;
 
                 hyper::service::service_fn(move |req| {
-                    debug!("REQUEST: {:?}", req);
                     srv(
                         status,
                         metric_labels.clone(),

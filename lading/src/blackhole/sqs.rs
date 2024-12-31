@@ -101,13 +101,10 @@ impl Sqs {
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,
+            self.metric_labels.clone(),
             move || {
                 let metric_labels = self.metric_labels.clone();
-
-                hyper::service::service_fn(move |req| {
-                    debug!("REQUEST: {:?}", req);
-                    srv(req, metric_labels.clone())
-                })
+                hyper::service::service_fn(move |req| srv(req, metric_labels.clone()))
             },
         )
         .await?;
