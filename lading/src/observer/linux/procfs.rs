@@ -167,12 +167,35 @@ impl Sampler {
         match self.process_info.entry(pid) {
             Entry::Occupied(_) => { /* Already initialized */ }
             Entry::Vacant(entry) => {
-                let exe = proc_exe(pid).await?;
-                let comm = proc_comm(pid).await?;
-                let cmdline = proc_cmdline(pid).await?;
+                let exe = match proc_exe(pid).await {
+                    Ok(exe) => exe,
+                    Err(e) => {
+                        warn!("Couldn't read exe for pid {}: {:?}", pid, e);
+                        // The pid may have exited since we scanned it or we may not
+                        // have sufficient permission.
+                        return Ok(());
+                    }
+                };
+                let comm = match proc_comm(pid).await {
+                    Ok(comm) => comm,
+                    Err(e) => {
+                        warn!("Couldn't read comm for pid {}: {:?}", pid, e);
+                        // The pid may have exited since we scanned it or we may not
+                        // have sufficient permission.
+                        return Ok(());
+                    }
+                };
+                let cmdline = match proc_cmdline(pid).await {
+                    Ok(cmdline) => cmdline,
+                    Err(e) => {
+                        warn!("Couldn't read cmdline for pid {}: {:?}", pid, e);
+                        // The pid may have exited since we scanned it or we may not
+                        // have sufficient permission.
+                        return Ok(());
+                    }
+                };
                 let pid_s = format!("{pid}");
                 let stat_sampler = stat::Sampler::new();
-
                 entry.insert(ProcessInfo {
                     cmdline,
                     exe,
