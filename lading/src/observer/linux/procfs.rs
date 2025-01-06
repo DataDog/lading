@@ -91,7 +91,6 @@ impl Sampler {
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
         processes.push_back(Process::new(self.parent.pid())?);
 
-        // BEGIN pid loop
         while let Some(process) = processes.pop_back() {
             // Search for child processes. This is done by querying for every
             // thread of `process` and inspecting each child of the thread. Note
@@ -126,7 +125,6 @@ impl Sampler {
                 warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
             }
         }
-        // END pid loop
 
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
