@@ -374,7 +374,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serde_urlencoded",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
  "tokio",
  "tokio-util",
  "tower-service",
@@ -1647,7 +1647,7 @@ dependencies = [
  "serde_qs",
  "serde_yaml",
  "tempfile",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -1686,7 +1686,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tuple",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
  "time",
  "tokio",
  "tracing",
@@ -1697,7 +1697,7 @@ name = "lading-signal"
 version = "0.1.0"
 dependencies = [
  "loom",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
  "tokio",
  "tracing",
 ]
@@ -1708,7 +1708,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "serde",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
  "tokio",
 ]
 
@@ -3024,11 +3024,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.9"
+version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f072643fd0190df67a8bab670c20ef5d8737177d6ac6b2e9a236cb096206b2cc"
+checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
 dependencies = [
- "thiserror-impl 2.0.9",
+ "thiserror-impl 2.0.11",
 ]
 
 [[package]]
@@ -3044,9 +3044,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.9"
+version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b50fa271071aae2e6ee85f842e2e28ba8cd2c5fb67f11fcb1fd70b276f9e7d4"
+checksum = "26afc1baea8a989337eeb52b6e72a039780ce45c3edfcc9c5b9d112feeb173c2"
 dependencies = [
  "proc-macro2",
  "quote",
