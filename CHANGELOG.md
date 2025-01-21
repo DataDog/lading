@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - The `splunk_hec` generator now only requires responses to have an `ackId` when
   `acknowledgements` are enabled.
+- cgroup.v2 PSI metrics are now parsed.
 
 ## [0.25.3]
 ## Changed
