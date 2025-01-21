@@ -102,9 +102,12 @@ impl Expvar {
                     }
                 };
 
-                let Ok(json) = resp.json::<Value>().await else {
-                    info!("failed to parse expvar json");
-                    continue;
+                let json = match resp.json::<Value>().await {
+                    Ok(json) => json, // Successfully parsed JSON
+                    Err(err) => {
+                        info!("Failed to parse expvar JSON: {}", err);
+                        continue; // Skip the iteration on error
+                    }
                 };
 
                 // Add lading labels including user defined tags for this endpoint
