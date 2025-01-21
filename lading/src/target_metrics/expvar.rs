@@ -88,15 +88,18 @@ impl Expvar {
 
         let server = async move {
             loop {
-                tokio::time::sleep(self.sample_period).await;
-                let Ok(resp) = client
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let resp = match client
                     .get(&self.config.uri)
                     .timeout(self.sample_period)
                     .send()
                     .await
-                else {
-                    info!("failed to get expvar uri");
-                    continue;
+                {
+                    Ok(resp) => resp, // If successful, return the response
+                    Err(err) => {
+                        info!("Failed to get expvar URI: {}", err);
+                        continue; // Skip the iteration on error
+                    }
                 };
 
                 let Ok(json) = resp.json::<Value>().await else {
