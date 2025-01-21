@@ -352,7 +352,7 @@ where
                         counter!("request_ok", &status_labels).increment(1);
                         let body_bytes = body.boxed().collect().await?.to_bytes();
                         let hec_ack_response =
-                            serde_json::from_slice::<HecAckResponse>(&body_bytes).expect("unable to parse response body");
+                            serde_json::from_slice::<HecResponse>(&body_bytes).expect("unable to parse response body");
                         channel.send(ready(hec_ack_response.ack_id)).await?;
                     }
                     Err(err) => {
@@ -376,11 +376,11 @@ where
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
-struct HecAckResponse {
+struct HecResponse {
     #[allow(dead_code)]
     text: String,
     #[allow(dead_code)]
     code: u8,
     #[serde(rename = "ackId")]
-    ack_id: u64,
+    ack_id: Option<u64>,
 }

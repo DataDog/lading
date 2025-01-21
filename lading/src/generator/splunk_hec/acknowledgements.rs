@@ -54,11 +54,13 @@ impl Channel {
 
     pub(crate) async fn send<Fut>(&self, msg: Fut) -> Result<(), Error>
     where
-        Fut: Future<Output = AckId>,
+        Fut: Future<Output = Option<AckId>>,
     {
         match self {
             Self::NoAck { .. } => Ok(()),
-            Self::Ack { tx, .. } => Ok(tx.send(msg.await).await?),
+            Self::Ack { tx, .. } => Ok(tx
+                .send(msg.await.expect("acknowledgemnts enabled, should have id"))
+                .await?),
         }
     }
 }
