@@ -79,7 +79,7 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                 if let Err(err) =
                                                     parse_pressure(&content, &metric_prefix, labels)
                                                 {
-                                                    debug!("[{path}] Failed to parse PSI contents: {err:?}",
+                                                    warn!("[{path}] Failed to parse PSI contents: {err:?}",
                                                         path = file_path.to_string_lossy()
                                                     );
                                                 }
