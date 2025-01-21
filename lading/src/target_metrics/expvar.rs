@@ -80,7 +80,11 @@ impl Expvar {
             self.sample_period
         );
 
-        let client = reqwest::Client::new();
+        // Disable certificate validation
+        let client = reqwest::ClientBuilder::new()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("Failed to build http/https client");
 
         let server = async move {
             loop {
