@@ -22,6 +22,10 @@ pub enum Error {
     SocketAddr(#[from] std::net::AddrParseError),
 }
 
+fn default_sample_period() -> Duration {
+    Duration::from_millis(1_000)
+}
+
 /// Main configuration struct for this program
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +40,9 @@ pub struct Config {
     /// The observer that watches the target
     #[serde(skip_deserializing)]
     pub observer: observer::Config,
+    /// The period on which target observations -- if any -- are made.
+    #[serde(default = "default_sample_period")]
+    pub sample_period_milliseconds: Duration,
     /// The program being targetted by this rig
     #[serde(skip_deserializing)]
     pub target: Option<target::Config>,
@@ -187,6 +194,7 @@ blackhole:
                 observer: observer::Config::default(),
                 inspector: Option::default(),
                 target_metrics: Option::default(),
+                sample_period_milliseconds: Duration::from_millis(1_000),
             },
         );
         Ok(())

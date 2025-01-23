@@ -90,9 +90,11 @@ impl Server {
         clippy::cast_sign_loss
     )]
     #[cfg(target_os = "linux")]
-    pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
-        use std::time::Duration;
-
+    pub async fn run(
+        self,
+        mut pid_snd: TargetPidReceiver,
+        sample_period: std::time::Duration,
+    ) -> Result<(), Error> {
         use crate::observer::linux::Sampler;
 
         let target_pid = pid_snd
@@ -103,7 +105,7 @@ impl Server {
 
         let target_pid = target_pid.expect("observer cannot be used in no-target mode");
 
-        let mut sample_delay = tokio::time::interval(Duration::from_secs(1));
+        let mut sample_delay = tokio::time::interval(sample_period);
         let mut sampler = Sampler::new(
             target_pid,
             vec![(String::from("focus"), String::from("target"))],
