@@ -461,11 +461,14 @@ async fn inner_main(
     // TARGET METRICS
     //
     if let Some(cfgs) = config.target_metrics {
+        let sample_period = Duration::from_millis(config.sample_period_milliseconds);
+
         for cfg in cfgs {
             let metrics_server = target_metrics::Server::new(
                 cfg,
                 shutdown_watcher.clone(),
                 experiment_started_watcher.clone(),
+                sample_period,
             );
             tokio::spawn(async {
                 match metrics_server.run().await {

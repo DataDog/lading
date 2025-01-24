@@ -5,6 +5,7 @@
 //!
 
 use serde::Deserialize;
+use tokio::time::Duration;
 
 pub mod expvar;
 pub mod prometheus;
@@ -49,15 +50,20 @@ impl Server {
         config: Config,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
+        sample_period: Duration,
     ) -> Self {
         match config {
-            Config::Expvar(conf) => {
-                Self::Expvar(expvar::Expvar::new(conf, shutdown, experiment_started))
-            }
+            Config::Expvar(conf) => Self::Expvar(expvar::Expvar::new(
+                conf,
+                shutdown,
+                experiment_started,
+                sample_period,
+            )),
             Config::Prometheus(conf) => Self::Prometheus(prometheus::Prometheus::new(
                 conf,
                 shutdown,
                 experiment_started,
+                sample_period,
             )),
         }
     }

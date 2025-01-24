@@ -6,8 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ## Added
-- Introduced the ability for users to configure observer sample rate,
-  configuration option `sample_period_milliseconds`. 
+- Introduced the ability for users to configure lading's sample rate,
+  configuration option `sample_period_milliseconds` in `lading.yaml`.
 
 ## [0.25.4]
 ## Changed
