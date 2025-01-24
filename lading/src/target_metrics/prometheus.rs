@@ -383,6 +383,7 @@ mod tests {
 
         let (shutdown_watcher, _) = lading_signal::signal();
         let (experiment_started_watcher, experiment_started_broadcaster) = lading_signal::signal();
+        let sample_period = Duration::from_secs(1);
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
@@ -391,6 +392,7 @@ mod tests {
             },
             shutdown_watcher,
             experiment_started_watcher,
+            sample_period,
         );
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
