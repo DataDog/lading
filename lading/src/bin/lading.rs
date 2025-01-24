@@ -485,7 +485,8 @@ async fn inner_main(
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown_watcher.clone())?;
-        osrv_joinset.spawn(observer_server.run(obs_rcv));
+        let sample_period = Duration::from_millis(config.sample_period_milliseconds);
+        osrv_joinset.spawn(observer_server.run(obs_rcv, sample_period));
 
         //
         // TARGET
