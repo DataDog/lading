@@ -194,7 +194,7 @@ blackhole:
                 observer: observer::Config::default(),
                 inspector: Option::default(),
                 target_metrics: Option::default(),
-                sample_period_milliseconds: Duration::from_millis(1_000),
+                sample_period_milliseconds: 1_000,
             },
         );
         Ok(())
