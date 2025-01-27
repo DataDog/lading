@@ -6,20 +6,14 @@
 //! `requests_received`: Total messages received
 //!
 
-use std::{fmt::Write, net::SocketAddr};
-
-use hyper::{
-    body::HttpBody,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
-};
+use bytes::Bytes;
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{Request, Response, StatusCode};
 use metrics::counter;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use tokio::time::Duration;
-use tower::ServiceBuilder;
-use tracing::{debug, error, info};
+use std::{fmt::Write, net::SocketAddr};
+use tracing::{debug, error};
 
 use super::General;
 
@@ -38,6 +32,12 @@ pub enum Error {
     /// Wrapper for [`hyper::http::Error`].
     #[error(transparent)]
     Http(#[from] hyper::http::Error),
+    /// Wrapper for [`std::io::Error`].
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 fn default_concurrent_requests_max() -> usize {
@@ -97,31 +97,19 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| {
-            let metric_labels = self.metric_labels.clone();
-            async move { Ok::<_, hyper::Error>(service_fn(move |req| srv(req, metric_labels.clone()))) }
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(self.concurrency_limit)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            self.metric_labels.clone(),
+            move || {
+                let metric_labels = self.metric_labels.clone();
+                hyper::service::service_fn(move |req| srv(req, metric_labels.clone()))
+            },
+        )
+        .await?;
 
-        let addr = AddrIncoming::bind(&self.httpd_addr).map(|mut addr| {
-            addr.set_keepalive(Some(Duration::from_secs(60)));
-            addr
-        })?;
-        let server = Server::builder(addr).serve(svc);
-        tokio::select! {
-            res = server => {
-                error!("server shutdown unexpectedly");
-                res.map_err(Error::Hyper)
-            }
-            () = self.shutdown.recv() => {
-                info!("shutdown signal received");
-                Ok(())
-            }
-        }
+        Ok(())
     }
 }
 
@@ -228,41 +216,114 @@ impl DeleteMessageBatch {
 }
 
 async fn srv(
-    req: Request<Body>,
+    req: Request<hyper::body::Incoming>,
     metric_labels: Vec<(String, String)>,
-) -> Result<Response<Body>, Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
-    let bytes = req.collect().await?.to_bytes();
+    let (_, body) = req.into_parts();
+    let bytes = body.boxed().collect().await?.to_bytes();
     counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
 
-    let action: Action = serde_qs::from_bytes(&bytes)?;
+    let action = match serde_qs::from_bytes::<Action>(&bytes) {
+        Ok(a) => a,
+        Err(e) => {
+            let msg = format!("SQS parse error: {e}");
+            return Ok(build_response(
+                StatusCode::BAD_REQUEST,
+                Some("text/plain"),
+                msg.into_bytes(),
+            ));
+        }
+    };
 
     match action.action.as_str() {
         "ReceiveMessage" => {
-            let action: ReceiveMessage = serde_qs::from_bytes(&bytes)?;
-            let num_messages = action.max_number_of_messages;
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-type", "text/html")
-                .body(Body::from(generate_receive_message_response(num_messages)))?)
+            let num_messages = match serde_qs::from_bytes::<ReceiveMessage>(&bytes) {
+                Ok(rm) => rm.max_number_of_messages,
+                Err(e) => {
+                    let msg = format!("ReceiveMessage parse error: {e}");
+                    return Ok(build_response(
+                        StatusCode::BAD_REQUEST,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            let body_str = generate_receive_message_response(num_messages);
+            Ok(build_response(StatusCode::OK, Some("text/html"), body_str))
         }
-        "DeleteMessage" => Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/html")
-            .body(Body::from(generate_delete_message_response()))?),
+
+        "DeleteMessage" => {
+            let body_str = generate_delete_message_response();
+            Ok(build_response(StatusCode::OK, Some("text/html"), body_str))
+        }
+
         "DeleteMessageBatch" => {
-            let action: DeleteMessageBatch = serde_qs::from_bytes(&bytes)?;
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-type", "text/html")
-                .body(Body::from(action.generate_response()?))?)
+            let batch = match serde_qs::from_bytes::<DeleteMessageBatch>(&bytes) {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = format!("DeleteMessageBatch parse error: {e}");
+                    return Ok(build_response(
+                        StatusCode::BAD_REQUEST,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            let response_str = match batch.generate_response() {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = format!("DeleteMessageBatch formatting error: {e}");
+                    return Ok(build_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Some("text/plain"),
+                        msg,
+                    ));
+                }
+            };
+            Ok(build_response(
+                StatusCode::OK,
+                Some("text/html"),
+                response_str,
+            ))
         }
-        action => {
-            debug!("Unknown action: {action:?}");
-            Ok(Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Body::from(vec![]))?)
+
+        other => {
+            debug!("Unknown action: {other:?}");
+            Ok(build_response(
+                StatusCode::NOT_IMPLEMENTED,
+                None,
+                Vec::new(),
+            ))
+        }
+    }
+}
+
+fn build_response(
+    status: StatusCode,
+    content_type: Option<&str>,
+    body: impl Into<Bytes>,
+) -> Response<BoxBody<Bytes, hyper::Error>> {
+    let mut builder = Response::builder().status(status);
+    if let Some(ct) = content_type {
+        builder = builder.header("content-type", ct);
+    }
+    match builder.body(crate::full(body)) {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Error building response: {e}");
+            match Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("content-type", "text/plain")
+                .body(crate::full(b"Internal error building response".to_vec()))
+            {
+                Ok(r) => r,
+                Err(inner_err) => {
+                    // Building a fallback failed, panic.
+                    panic!("Catastrophic error: {inner_err}");
+                }
+            }
         }
     }
 }

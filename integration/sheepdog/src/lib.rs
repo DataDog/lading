@@ -27,6 +27,7 @@ use std::{
 };
 
 use anyhow::Context;
+use hyper_util::rt::TokioIo;
 use shared::{
     integration_api::{self, integration_target_client::IntegrationTargetClient},
     DucksConfig,
@@ -175,7 +176,12 @@ impl IntegrationTest {
         }
         let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
             .connect_with_connector(tower::service_fn(move |_| {
-                UnixStream::connect(ducks_comm_file.clone())
+                let ducks_comm_file = ducks_comm_file.clone();
+                async move {
+                    let sock = UnixStream::connect(ducks_comm_file).await?;
+                    // Wrap the raw UnixStream in a TokioIo wrapper
+                    Ok::<_, std::io::Error>(TokioIo::new(sock))
+                }
             }))
             .await
             .context("Failed to connect to `ducks` integration test target binary")?;

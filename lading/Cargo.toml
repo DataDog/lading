@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.25.0"
+version = "0.25.4"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
   "George Hahn <george.hahn@datadoghq.com>",
@@ -22,13 +22,14 @@ lading-signal = { version = "0.1", path = "../lading_signal" }
 
 async-compression = { version = "0.4.17", features = ["tokio", "zstd"] }
 average = { version = "0.15", default-features = false, features = [] }
-bollard = { version = "0.17", default-features = false, features = [] }
+bollard = { version = "0.18", default-features = false, features = ["pipe", "http"] }
 byte-unit = { workspace = true }
 bytes = { workspace = true, features = ["std"] }
-clap = { version = "3.2", default-features = false, features = [
+clap = { version = "4.5", default-features = false, features = [
   "std",
   "suggestions",
   "derive",
+  "help",
 ] }
 flate2 = { version = "1.0.34", default-features = false, features = [
   "rust_backend",
@@ -36,9 +37,11 @@ flate2 = { version = "1.0.34", default-features = false, features = [
 futures = "0.3.31"
 fuser = { version = "0.15", optional = true }
 heck  = { version = "0.5", default-features = false }
-http = "0.2"
-http-serde = "1.1"
-hyper = { workspace = true, features = ["backports", "client", "deprecated", "http1", "http2", "server"] }
+http = { workspace = true }
+http-body-util = { workspace = true }
+http-serde = "2.1"
+hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
 is_executable = "1.0.4"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
@@ -75,12 +78,7 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tonic = { version = "0.9" }
-tower = { version = "0.4", default-features = false, features = [
-  "timeout",
-  "limit",
-  "load-shed",
-] }
+tonic = { version = "0.12" }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
@@ -92,9 +90,9 @@ procfs = { version = "0.17", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.13"
+tempfile = "3.15"
 warp = "0.3"
-proptest = "1.5"
+proptest = "1.6"
 
 [features]
 default = []

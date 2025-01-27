@@ -14,13 +14,14 @@
 //! - Receive data on other protocols & formats
 
 use anyhow::Context;
+use bytes::Bytes;
 use bytes::BytesMut;
-use hyper::{
-    body::HttpBody,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, StatusCode,
-};
+use http_body_util::Full;
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{service::service_fn, Method, Request, StatusCode};
+use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::TokioIo;
+use hyper_util::server::conn::auto;
 use once_cell::sync::OnceCell;
 use shared::{
     integration_api::{
@@ -32,6 +33,7 @@ use shared::{
 };
 use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket, UnixListener},
@@ -39,7 +41,7 @@ use tokio::{
 };
 use tokio_stream::{wrappers::UnixListenerStream, Stream};
 use tonic::Status;
-use tower::ServiceBuilder;
+use tracing::error;
 use tracing::{debug, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
@@ -125,9 +127,14 @@ impl From<&SocketCounters> for SocketMetrics {
 }
 
 #[tracing::instrument(level = "trace")]
-async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, hyper::Error> {
+async fn http_req_handler(
+    req: Request<hyper::body::Incoming>,
+) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    // Split into parts
     let (parts, body) = req.into_parts();
-    let body = body.collect().await?.to_bytes();
+
+    // Convert the `Body` into `Bytes`
+    let body = body.boxed().collect().await?.to_bytes();
 
     {
         let metric = HTTP_COUNTERS.get().expect("HTTP_COUNTERS not initialized");
@@ -143,12 +150,17 @@ async fn http_req_handler(req: Request<Body>) -> Result<hyper::Response<Body>, h
         *method_counter += 1;
     }
 
-    let mut okay = hyper::Response::default();
-    *okay.status_mut() = StatusCode::OK;
+    // Create a simple OK response
+    let mut resp = hyper::Response::default();
+    *resp.status_mut() = StatusCode::OK;
+    *resp.body_mut() = full(body);
+    Ok(resp)
+}
 
-    let body_bytes = vec![];
-    *okay.body_mut() = Body::from(body_bytes);
-    Ok(okay)
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
 }
 
 /// Tracks state for a ducks instance
@@ -191,11 +203,10 @@ impl IntegrationTarget for DucksTarget {
         match config.listen {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
-                let bind_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                let addr = AddrIncoming::bind(&bind_addr)
-                    .map_err(|_e| Status::internal("unable to bind a port"))?;
-                let port = addr.local_addr().port() as u32;
-                tokio::spawn(Self::http_listen(config, addr));
+                let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+                let listener = tokio::net::TcpListener::bind(addr).await?;
+                let port = listener.local_addr()?.port() as u32;
+                tokio::spawn(Self::http_listen(config, listener));
 
                 Ok(tonic::Response::new(ListenInfo { port }))
             }
@@ -255,24 +266,37 @@ impl IntegrationTarget for DucksTarget {
 }
 
 impl DucksTarget {
-    async fn http_listen(_config: DucksConfig, addr: AddrIncoming) -> Result<(), anyhow::Error> {
+    async fn http_listen(
+        _config: DucksConfig,
+        listener: tokio::net::TcpListener,
+    ) -> Result<(), anyhow::Error> {
         debug!("HTTP listener active");
         HTTP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(HttpCounters::default())));
 
-        let service = make_service_fn(|_: &AddrStream| async move {
-            Ok::<_, hyper::Error>(service_fn(move |request: Request<Body>| {
-                trace!("REQUEST: {:?}", request);
-                http_req_handler(request)
-            }))
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(1_000)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+        let mut join_set = JoinSet::new();
+        loop {
+            let (stream, addr) = match listener.accept().await {
+                Ok(x) => x,
+                Err(e) => {
+                    error!("failed to accept connection: {e}");
+                    break;
+                }
+            };
 
-        let server = hyper::Server::builder(addr).serve(svc);
-        server.await?;
+            let serve_connection = async move {
+                let result = auto::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(stream), service_fn(http_req_handler))
+                    .await;
+
+                if let Err(e) = result {
+                    error!("error serving {addr}: {e}");
+                }
+            };
+
+            join_set.spawn(serve_connection);
+        }
+        while (join_set.join_next().await).is_some() {}
+
         Ok(())
     }
 

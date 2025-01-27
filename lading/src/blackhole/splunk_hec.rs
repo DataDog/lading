@@ -8,25 +8,15 @@
 
 use std::{
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
-use hyper::{
-    body::HttpBody,
-    header,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, Response, Server, StatusCode,
-};
+use bytes::Bytes;
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{header, Method, Request, Response, StatusCode};
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use tower::ServiceBuilder;
-use tracing::{error, info};
 
 use super::General;
 
@@ -45,6 +35,12 @@ pub enum Error {
     /// Deserialization Error
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
+    /// Wrapper for [`std::io::Error`].
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -89,22 +85,23 @@ struct HecResponse {
 }
 
 async fn srv(
-    req: Request<Body>,
-    labels: Arc<Vec<(String, String)>>,
-) -> Result<Response<Body>, Error> {
+    req: Request<hyper::body::Incoming>,
+    labels: Vec<(String, String)>,
+) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &*labels).increment(1);
 
     let (parts, body) = req.into_parts();
-    let bytes = body.collect().await?.to_bytes();
+    let bytes = body.boxed().collect().await?.to_bytes();
+    counter!("bytes_received", &*labels).increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
         Ok(body) => {
-            counter!("bytes_received", &*labels).increment(body.len() as u64);
+            counter!("decoded_bytes_received", &*labels).increment(body.len() as u64);
 
-            let mut okay = Response::default();
-            *okay.status_mut() = StatusCode::OK;
-            okay.headers_mut().insert(
+            let mut resp = Response::default();
+            *resp.status_mut() = StatusCode::OK;
+            resp.headers_mut().insert(
                 header::CONTENT_TYPE,
                 header::HeaderValue::from_static("application/json"),
             );
@@ -119,30 +116,43 @@ async fn srv(
                     | "/services/collector/raw/1.0",
                 ) => {
                     let ack_id = ACK_ID.fetch_add(1, Ordering::Relaxed);
-                    let body_bytes = serde_json::to_vec(&HecResponse {
+                    match serde_json::to_vec(&HecResponse {
                         text: "Success",
                         code: 0,
                         ack_id,
-                    })?;
-                    *okay.body_mut() = Body::from(body_bytes);
+                    }) {
+                        Ok(b) => {
+                            *resp.body_mut() = crate::full(b);
+                        }
+                        Err(_e) => {
+                            *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                            *resp.body_mut() = crate::full(vec![]);
+                        }
+                    }
                 }
                 // Path for querying indexer acknowledgements
                 (Method::POST, "/services/collector/ack") => {
                     match serde_json::from_slice::<HecAckRequest>(&body) {
                         Ok(ack_request) => {
-                            let body_bytes =
-                                serde_json::to_vec(&HecAckResponse::from(ack_request))?;
-                            *okay.body_mut() = Body::from(body_bytes);
+                            match serde_json::to_vec(&HecAckResponse::from(ack_request)) {
+                                Ok(b) => {
+                                    *resp.body_mut() = crate::full(b);
+                                }
+                                Err(_e) => {
+                                    *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                    *resp.body_mut() = crate::full(vec![]);
+                                }
+                            }
                         }
                         Err(_) => {
-                            *okay.status_mut() = StatusCode::BAD_REQUEST;
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
                         }
                     }
                 }
                 _ => {}
             }
 
-            Ok(okay)
+            Ok(resp)
         }
     }
 }
@@ -189,38 +199,18 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let labels = Arc::new(self.metric_labels.clone());
-        let service = make_service_fn(|_: &AddrStream| {
-            let labels = labels.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |req| {
-                    let labels = Arc::clone(&labels);
-                    srv(req, labels)
-                }))
-            }
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(self.concurrency_limit)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            self.metric_labels.clone(),
+            move || {
+                let metric_labels = self.metric_labels.clone();
+                hyper::service::service_fn(move |req| srv(req, metric_labels.clone()))
+            },
+        )
+        .await?;
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .map_err(Error::Hyper)?;
-        let server = Server::builder(addr).serve(svc);
-        tokio::select! {
-            res = server => {
-                error!("server shutdown unexpectedly");
-                res.map_err(Error::Hyper)
-            }
-            () = self.shutdown.recv() => {
-                info!("shutdown signal received");
-                Ok(())
-            }
-        }
+        Ok(())
     }
 }

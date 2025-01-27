@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod common;
 pub mod http;
 pub mod splunk_hec;
 pub mod sqs;

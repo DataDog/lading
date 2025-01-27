@@ -6,20 +6,14 @@
 //! `requests_received`: Total requests received
 //!
 
-use std::{net::SocketAddr, time::Duration};
-
+use bytes::Bytes;
 use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
-use hyper::{
-    body::HttpBody,
-    header,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server, StatusCode,
-};
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{header, Request, Response, StatusCode};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use tower::ServiceBuilder;
-use tracing::{debug, error, info};
+use std::{net::SocketAddr, time::Duration};
+use tracing::error;
 
 use super::General;
 
@@ -42,6 +36,9 @@ pub enum Error {
     /// Failed to deserialize the configuration.
     #[error("Failed to deserialize the configuration: {0}")]
     Serde(#[from] serde_json::Error),
+    /// Wrapper for [`crate::blackhole::common::Error`].
+    #[error(transparent)]
+    Common(#[from] crate::blackhole::common::Error),
 }
 
 /// Body variant supported by this blackhole.
@@ -127,32 +124,33 @@ struct KinesisPutRecordBatchResponse {
 #[allow(clippy::borrow_interior_mutable_const)]
 async fn srv(
     status: StatusCode,
-    mut metric_labels: Vec<(String, String)>,
+    metric_labels: Vec<(String, String)>,
     body_bytes: Vec<u8>,
-    req: Request<Body>,
+    req: Request<hyper::body::Incoming>,
     headers: HeaderMap,
     response_delay: Duration,
-) -> Result<Response<Body>, hyper::Error> {
-    let (parts, body) = req.into_parts();
-    if let Some(path_and_query) = parts.uri.path_and_query() {
-        metric_labels.push(("path".to_string(), path_and_query.path().to_string()));
-    }
-
+) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
-    let bytes = body.collect().await?.to_bytes();
+    // Split into parts
+    let (parts, body) = req.into_parts();
 
-    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
+    // Convert the `Body` into `Bytes`
+    let body: Bytes = body.boxed().collect().await?.to_bytes();
+
+    counter!("bytes_received", &metric_labels).increment(body.len() as u64);
+
+    match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(response),
         Ok(body) => {
-            counter!("bytes_received", &metric_labels).increment(body.len() as u64);
+            counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
 
             tokio::time::sleep(response_delay).await;
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
             *okay.headers_mut() = headers;
-            *okay.body_mut() = Body::from(body_bytes);
+            *okay.body_mut() = crate::full(body_bytes);
             Ok(okay)
         }
     }
@@ -236,48 +234,33 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        let service = make_service_fn(|_: &AddrStream| {
-            let metric_labels = self.metric_labels.clone();
-            let body_bytes = self.body_bytes.clone();
-            let headers = self.headers.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |request| {
-                    debug!("REQUEST: {:?}", request);
+        crate::blackhole::common::run_httpd(
+            self.httpd_addr,
+            self.concurrency_limit,
+            self.shutdown,
+            self.metric_labels.clone(),
+            move || {
+                let metric_labels = self.metric_labels.clone();
+                let body_bytes = self.body_bytes.clone();
+                let headers = self.headers.clone();
+                let status = self.status;
+                let response_delay = self.response_delay;
+
+                hyper::service::service_fn(move |req| {
                     srv(
-                        self.status,
+                        status,
                         metric_labels.clone(),
                         body_bytes.clone(),
-                        request,
+                        req,
                         headers.clone(),
-                        self.response_delay,
+                        response_delay,
                     )
-                }))
-            }
-        });
-        let svc = ServiceBuilder::new()
-            .load_shed()
-            .concurrency_limit(self.concurrency_limit)
-            .timeout(Duration::from_secs(1))
-            .service(service);
+                })
+            },
+        )
+        .await?;
 
-        let addr = AddrIncoming::bind(&self.httpd_addr)
-            .map(|mut addr| {
-                addr.set_keepalive(Some(Duration::from_secs(60)));
-                addr
-            })
-            .map_err(Error::Hyper)?;
-
-        let server = Server::builder(addr).serve(svc);
-        tokio::select! {
-            res = server => {
-                error!("server shutdown unexpectedly");
-                 res.map_err(Error::Hyper)
-            }
-            () = self.shutdown.recv() => {
-                info!("shutdown signal received");
-                Ok(())
-            }
-        }
+        Ok(())
     }
 }
 

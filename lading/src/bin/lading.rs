@@ -130,17 +130,17 @@ impl FromStr for CliKeyValues {
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
-        .args(&["target-path", "target-pid", "target-container", "no-target"]),
+        .args(&["target_path", "target_pid", "target_container", "no_target"]),
 ))]
 #[clap(group(
     ArgGroup::new("telemetry")
         .required(true)
-        .args(&["capture-path", "prometheus-addr", "prometheus-path"]),
+        .args(&["capture_path", "prometheus_addr", "prometheus_path"]),
 ))]
 #[clap(group(
      ArgGroup::new("experiment-duration")
            .required(false)
-           .args(&["experiment-duration-seconds", "experiment-duration-infinite"]),
+           .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
 ))]
 struct Opts {
     /// path on disk to the configuration file
@@ -461,11 +461,14 @@ async fn inner_main(
     // TARGET METRICS
     //
     if let Some(cfgs) = config.target_metrics {
+        let sample_period = Duration::from_millis(config.sample_period_milliseconds);
+
         for cfg in cfgs {
             let metrics_server = target_metrics::Server::new(
                 cfg,
                 shutdown_watcher.clone(),
                 experiment_started_watcher.clone(),
+                sample_period,
             );
             tokio::spawn(async {
                 match metrics_server.run().await {
@@ -485,7 +488,8 @@ async fn inner_main(
     if let Some(target) = config.target {
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown_watcher.clone())?;
-        osrv_joinset.spawn(observer_server.run(obs_rcv));
+        let sample_period = Duration::from_millis(config.sample_period_milliseconds);
+        osrv_joinset.spawn(observer_server.run(obs_rcv, sample_period));
 
         //
         // TARGET

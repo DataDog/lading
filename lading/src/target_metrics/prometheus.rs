@@ -66,6 +66,7 @@ pub struct Prometheus {
     client: reqwest::Client,
     shutdown: lading_signal::Watcher,
     experiment_started: lading_signal::Watcher,
+    sample_period: Duration,
 }
 
 impl Prometheus {
@@ -78,6 +79,7 @@ impl Prometheus {
         config: Config,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
+        sample_period: Duration,
     ) -> Self {
         let client = reqwest::Client::new();
         Self {
@@ -85,6 +87,7 @@ impl Prometheus {
             client,
             shutdown,
             experiment_started,
+            sample_period,
         }
     }
 
@@ -105,7 +108,10 @@ impl Prometheus {
     pub(crate) async fn run(self) -> Result<(), Error> {
         info!("Prometheus target metrics scraper running, but waiting for warmup to complete");
         self.experiment_started.recv().await;
-        info!("Prometheus target metrics scraper starting collection");
+        info!(
+            "Prometheus target metrics scraper starting collection at {:?} interval",
+            self.sample_period
+        );
 
         let client = self.client;
         let uri = self.config.uri;
@@ -115,7 +121,7 @@ impl Prometheus {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
 
-        let mut poll = tokio::time::interval(Duration::from_secs(1));
+        let mut poll = tokio::time::interval(self.sample_period);
 
         loop {
             tokio::select! {
@@ -377,6 +383,7 @@ mod tests {
 
         let (shutdown_watcher, _) = lading_signal::signal();
         let (experiment_started_watcher, experiment_started_broadcaster) = lading_signal::signal();
+        let sample_period = Duration::from_secs(1);
         let p = Prometheus::new(
             Config {
                 uri: server_uri,
@@ -385,6 +392,7 @@ mod tests {
             },
             shutdown_watcher,
             experiment_started_watcher,
+            sample_period,
         );
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
