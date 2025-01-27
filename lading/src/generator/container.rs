@@ -16,7 +16,6 @@ use bollard::image::CreateImageOptions;
 use bollard::secret::ContainerCreateResponse;
 use bollard::Docker;
 use serde::{Deserialize, Serialize};
-use tokio::pin;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -64,8 +63,9 @@ impl Container {
     ///
     /// Will return an error if config parsing fails or runtime setup fails
     /// in the future. For now, always succeeds.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(
-        general: General,
+        _general: General,
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
