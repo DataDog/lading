@@ -88,7 +88,7 @@ impl Expvar {
 
         let server = async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(self.sample_period).await;
                 let resp = match client
                     .get(&self.config.uri)
                     .timeout(self.sample_period)
