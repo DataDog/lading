@@ -1,7 +1,7 @@
 //! Expvar target metrics fetcher
 //!
 //! This module scrapes Go expvar formatted metrics from the target software.
-//! The metrics are formatted as a JSON tree that is fetched over HTTP.
+//! The metrics are formatted as a JSON tree that is fetched over HTTP or HTTPS.
 
 use std::time::Duration;
 
