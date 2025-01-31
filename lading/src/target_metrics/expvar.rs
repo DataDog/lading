@@ -1,7 +1,7 @@
 //! Expvar target metrics fetcher
 //!
 //! This module scrapes Go expvar formatted metrics from the target software.
-//! The metrics are formatted as a JSON tree that is fetched over HTTP.
+//! The metrics are formatted as a JSON tree that is fetched over HTTP or HTTPS.
 
 use std::time::Duration;
 
@@ -80,24 +80,34 @@ impl Expvar {
             self.sample_period
         );
 
-        let client = reqwest::Client::new();
+        // Disable certificate validation
+        let client = reqwest::ClientBuilder::new()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("Failed to build http/https client");
 
         let server = async move {
             loop {
                 tokio::time::sleep(self.sample_period).await;
-                let Ok(resp) = client
+                let resp = match client
                     .get(&self.config.uri)
                     .timeout(self.sample_period)
                     .send()
                     .await
-                else {
-                    info!("failed to get expvar uri");
-                    continue;
+                {
+                    Ok(resp) => resp, // If successful, return the response
+                    Err(err) => {
+                        info!("Failed to get expvar URI: {}", err);
+                        continue; // Skip the iteration on error
+                    }
                 };
 
-                let Ok(json) = resp.json::<Value>().await else {
-                    info!("failed to parse expvar json");
-                    continue;
+                let json = match resp.json::<Value>().await {
+                    Ok(json) => json, // Successfully parsed JSON
+                    Err(err) => {
+                        info!("Failed to parse expvar JSON: {}", err);
+                        continue; // Skip the iteration on error
+                    }
                 };
 
                 // Add lading labels including user defined tags for this endpoint

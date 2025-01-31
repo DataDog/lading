@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.25.4"
+version = "0.25.5"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
   "George Hahn <george.hahn@datadoghq.com>",
@@ -58,7 +58,7 @@ rand = { workspace = true, default-features = false, features = [
   "std_rng",
 ] }
 regex = { version = "1.11" }
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
