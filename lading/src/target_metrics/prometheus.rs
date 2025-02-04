@@ -277,7 +277,7 @@ pub(crate) async fn scrape_metrics(
                 };
 
                 if value.is_nan() {
-                    warn!("Skipping NaN guage value");
+                    warn!("Skipping NaN gauge value");
                     continue;
                 }
 
