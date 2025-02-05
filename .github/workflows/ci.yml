@@ -19,7 +19,7 @@ jobs:
             protobuf: true
             fuse: true
             components: ""
-            command: cargo check --all-features
+            command: cargo check --locked --all-features
           - tool: fmt
             protobuf: true
             fuse: true
@@ -74,9 +74,8 @@ jobs:
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
-      - run: cargo test -p sheepdog
+      - run: cargo test --locked -p sheepdog
         timeout-minutes: 30
-
 
   kani:
     name: Kani Proofs
