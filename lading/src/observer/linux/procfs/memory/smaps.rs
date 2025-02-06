@@ -731,4 +731,40 @@ VmFlags:               rd ex mr mw me de sd";
 
         let _region = Region::from_str(region).expect("Parsing failed");
     }
+
+    #[test]
+    fn test_pathnames_with_whitespace() {
+        let region =
+            "7514356d1000-7514356d3000 rw-p 00000000 00:00 0                          [anon: glibc: loader malloc]
+Size:                  8 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                   8 kB
+Pss:                   8 kB
+Pss_Dirty:             8 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         8 kB
+Referenced:            8 kB
+Anonymous:             8 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+ProtectionKey:         0
+VmFlags: rd wr mr mw me ac sd";
+        let parsed_region = Region::from_str(region).expect("Parsing failed");
+
+        assert!(parsed_region
+            .pathname
+            .contains("anon: glibc: loader malloc"));
+    }
 }
