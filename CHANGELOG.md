@@ -5,15 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## Added
+## Fixed
+- `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
+- Fixes issue when parsing `NaN` values from a prometheus endpoint
 
 ## [0.25.5]
 ## Added
 - Introduced the ability for users to configure lading's sample rate,
   configuration option `sample_period_milliseconds` in `lading.yaml`.
 - Users can now configure expvar scraping on https endpoints, skipping certificate validation.
-- `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
-- Fixes issue when parsing `NaN` values from a prometheus endpoint
 
 ## [0.25.4]
 ## Changed
