@@ -67,9 +67,11 @@ impl Region {
             let mut offset: Option<u64> = None;
             let mut dev: Option<String> = None;
             let mut inode: Option<u64> = None;
-            let mut pathname: Option<String> = None;
+            let pathname: Option<String> = None;
+            let mut pathname_tokens = vec![];
 
             let mut chars = metadata_line.char_indices().peekable();
+            let mut entered_pathname = false;
 
             loop {
                 let token = next_token(metadata_line, &mut chars);
@@ -93,14 +95,15 @@ impl Region {
                     dev = Some(token.to_string());
                 } else if inode.is_none() {
                     inode = Some(token.parse::<u64>()?);
-                } else if pathname.is_none() {
-                    pathname = Some(token.to_string());
+                } else if pathname.is_none() || entered_pathname {
+                    entered_pathname = true;
+                    pathname_tokens.push(token);
                 } else {
                     break;
                 }
             }
 
-            pathname
+            pathname_tokens.join(" ")
         };
 
         let mut size: Option<u64> = None;
@@ -216,7 +219,7 @@ impl Region {
         };
 
         Ok(Region {
-            pathname: pathname.unwrap_or_default(),
+            pathname,
             size,
             pss,
             swap,
@@ -763,8 +766,6 @@ ProtectionKey:         0
 VmFlags: rd wr mr mw me ac sd";
         let parsed_region = Region::from_str(region).expect("Parsing failed");
 
-        assert!(parsed_region
-            .pathname
-            .contains("anon: glibc: loader malloc"));
+        assert_eq!(parsed_region.pathname, ("[anon: glibc: loader malloc]"));
     }
 }
