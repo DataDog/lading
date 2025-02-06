@@ -276,6 +276,11 @@ pub(crate) async fn scrape_metrics(
                     }
                 };
 
+                if value.is_nan() {
+                    warn!("Skipping NaN gauge value");
+                    continue;
+                }
+
                 gauge!(format!("target/{name}"), &all_labels.unwrap_or_default()).set(value);
             }
             Some(MetricType::Counter) => {
@@ -286,6 +291,11 @@ pub(crate) async fn scrape_metrics(
                         continue;
                     }
                 };
+
+                if value.is_nan() {
+                    warn!("Skipping NaN counter value");
+                    continue;
+                }
 
                 let value = if value < 0.0 {
                     warn!("Negative counter value unhandled");
