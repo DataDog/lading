@@ -1,0 +1,9 @@
+generator:
+  - container:
+      repository: busybox
+      tag: latest
+      args:
+        - sleep
+        - infinity
+
+blackhole: []

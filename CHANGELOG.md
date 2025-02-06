@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ## Added
+- Introduce a `container` generator able to generate an arbitrary number
+  of docker containers
 
 ## [0.25.5]
 ## Added
