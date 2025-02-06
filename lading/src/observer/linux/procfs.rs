@@ -79,7 +79,7 @@ impl Sampler {
         clippy::cast_possible_truncation,
         clippy::cast_possible_wrap
     )]
-    pub(crate) async fn poll(&mut self) -> Result<(), Error> {
+    pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = memory::smaps_rollup::Aggregator::default();
@@ -121,7 +121,7 @@ impl Sampler {
             self.process_info.retain(|pid, _| pids.contains(pid));
 
             let pid = process.pid();
-            if let Err(e) = self.handle_process(process, &mut aggr).await {
+            if let Err(e) = self.handle_process(process, &mut aggr, include_smaps).await {
                 warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
             }
         }
@@ -143,6 +143,7 @@ impl Sampler {
         &mut self,
         process: Process,
         aggr: &mut memory::smaps_rollup::Aggregator,
+        include_smaps: bool,
     ) -> Result<(), Error> {
         let pid = process.pid();
 
@@ -238,72 +239,73 @@ impl Sampler {
             return Ok(());
         }
 
-        // `/proc/{pid}/smaps`
-        match memory::smaps::Regions::from_pid(pid) {
-            Ok(memory_regions) => {
-                for (pathname, measures) in memory_regions.aggregate_by_pathname() {
-                    let labels: [(&'static str, String); 5] = [
-                        ("pid", pinfo.pid_s.clone()),
-                        ("exe", pinfo.exe.clone()),
-                        ("cmdline", pinfo.cmdline.clone()),
-                        ("comm", pinfo.comm.clone()),
-                        ("pathname", pathname),
-                    ];
-                    gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
-                    gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
-                    gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
-                    gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
+        if include_smaps {
+            // `/proc/{pid}/smaps`
+            match memory::smaps::Regions::from_pid(pid) {
+                Ok(memory_regions) => {
+                    for (pathname, measures) in memory_regions.aggregate_by_pathname() {
+                        let labels: [(&'static str, String); 5] = [
+                            ("pid", pinfo.pid_s.clone()),
+                            ("exe", pinfo.exe.clone()),
+                            ("cmdline", pinfo.cmdline.clone()),
+                            ("comm", pinfo.comm.clone()),
+                            ("pathname", pathname),
+                        ];
+                        gauge!("smaps.rss.by_pathname", &labels).set(measures.rss as f64);
+                        gauge!("smaps.pss.by_pathname", &labels).set(measures.pss as f64);
+                        gauge!("smaps.swap.by_pathname", &labels).set(measures.swap as f64);
+                        gauge!("smaps.size.by_pathname", &labels).set(measures.size as f64);
 
-                    if let Some(m) = measures.private_clean {
-                        gauge!("smaps.private_clean.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.private_dirty {
-                        gauge!("smaps.private_dirty.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.shared_clean {
-                        gauge!("smaps.shared_clean.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.shared_dirty {
-                        gauge!("smaps.shared_dirty.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.referenced {
-                        gauge!("smaps.referenced.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.anonymous {
-                        gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.lazy_free {
-                        gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.anon_huge_pages {
-                        gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.shmem_pmd_mapped {
-                        gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.shared_hugetlb {
-                        gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.private_hugetlb {
-                        gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.file_pmd_mapped {
-                        gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.locked {
-                        gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
-                    }
-                    if let Some(m) = measures.swap_pss {
-                        gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
+                        if let Some(m) = measures.private_clean {
+                            gauge!("smaps.private_clean.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_dirty {
+                            gauge!("smaps.private_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_clean {
+                            gauge!("smaps.shared_clean.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_dirty {
+                            gauge!("smaps.shared_dirty.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.referenced {
+                            gauge!("smaps.referenced.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anonymous {
+                            gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.lazy_free {
+                            gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.anon_huge_pages {
+                            gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shmem_pmd_mapped {
+                            gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.shared_hugetlb {
+                            gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.private_hugetlb {
+                            gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.file_pmd_mapped {
+                            gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.locked {
+                            gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
+                        }
+                        if let Some(m) = measures.swap_pss {
+                            gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
+                        }
                     }
                 }
-            }
-            Err(err) => {
-                // We don't want to bail out entirely if we can't read stats
-                // which will happen if we don't have permissions or, more
-                // likely, the process has exited.
-                warn!("Couldn't process `/proc/{pid}/smaps`: {err}");
-                return Ok(());
+                Err(err) => {
+                    // We don't want to bail out entirely if we can't read stats
+                    // which will happen if we don't have permissions or, more
+                    // likely, the process has exited.
+                    warn!("Couldn't process `/proc/{pid}/smaps`: {err}");
+                }
             }
         }
 

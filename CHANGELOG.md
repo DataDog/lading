@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 - `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
 - Fixes issue when parsing `NaN` values from a prometheus endpoint
+## Changed
+- smaps data is scraped every tenth sample to reduce capture size.
 
 ## [0.25.5]
 ## Added
