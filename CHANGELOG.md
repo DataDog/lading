@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduced the ability for users to configure lading's sample rate,
   configuration option `sample_period_milliseconds` in `lading.yaml`.
 - Users can now configure expvar scraping on https endpoints, skipping certificate validation.
+- `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
 
 ## [0.25.4]
 ## Changed
