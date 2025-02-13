@@ -190,7 +190,7 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
 
 #[inline]
 pub(crate) fn single_value(content: &str, metric_prefix: String, labels: &[(String, String)]) {
-    // Content is a single-vaue file with an integer value.
+    // Content is a single-value file with an integer value.
     if content == "max" {
         gauge!(metric_prefix, labels).set(f64::MAX);
     } else if let Ok(value) = content.parse::<f64>() {
