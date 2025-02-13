@@ -100,7 +100,11 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     | "memory.oom.group"
                                                     | "memory.peak",
                                                 ) => {
-                                                    single_value(content, metric_prefix, labels);
+                                                    single_value_gauge(
+                                                        content,
+                                                        metric_prefix,
+                                                        labels,
+                                                    );
                                                 }
                                                 Some(
                                                     "cpu.pressure" | "io.pressure"
@@ -189,7 +193,11 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
 }
 
 #[inline]
-pub(crate) fn single_value(content: &str, metric_prefix: String, labels: &[(String, String)]) {
+pub(crate) fn single_value_gauge(
+    content: &str,
+    metric_prefix: String,
+    labels: &[(String, String)],
+) {
     // Content is a single-value file with an integer value.
     if content == "max" {
         gauge!(metric_prefix, labels).set(f64::MAX);
