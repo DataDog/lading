@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 - `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
 - Fixes issue when parsing `NaN` values from a prometheus endpoint
+- Linux cgroup v2 observer now correctly sets known-counter values as counters in telemetry.
 ## Changed
 - smaps data is scraped every tenth sample to reduce capture size.
 
