@@ -433,7 +433,7 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.file_pmd_mapped, Some(0));
         assert_eq!(region_one.shared_hugetlb, Some(0));
         assert_eq!(region_one.private_hugetlb, Some(0));
-        assert_eq!(region_one.swap_pss, Some(1 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.swap_pss, Some(BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.locked, Some(0));
 
         let region_two = &regions.0[1];
@@ -492,9 +492,9 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "");
-        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.size, 80_000_000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100_000_000_000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, Some(2 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
@@ -510,13 +510,13 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.shared_hugetlb, Some(130 * BYTES_PER_KIBIBYTE));
         assert_eq!(
             region_one.private_hugetlb,
-            Some(140140140140 * BYTES_PER_KIBIBYTE)
+            Some(140_140_140_140 * BYTES_PER_KIBIBYTE)
         );
         assert_eq!(
             region_one.swap_pss,
-            Some(10000000000000000 * BYTES_PER_KIBIBYTE)
+            Some(10_000_000_000_000_000 * BYTES_PER_KIBIBYTE)
         );
-        assert_eq!(region_one.locked, Some(1000000000 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.locked, Some(1_000_000_000 * BYTES_PER_KIBIBYTE));
     }
 
     #[test]
@@ -553,9 +553,9 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "[stack]");
-        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.size, 80_000_000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100_000_000_000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, None); // Still optional and missing
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
@@ -571,13 +571,13 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.shared_hugetlb, Some(130 * BYTES_PER_KIBIBYTE));
         assert_eq!(
             region_one.private_hugetlb,
-            Some(140140140140 * BYTES_PER_KIBIBYTE)
+            Some(140_140_140_140 * BYTES_PER_KIBIBYTE)
         );
         assert_eq!(
             region_one.swap_pss,
-            Some(10000000000000000 * BYTES_PER_KIBIBYTE)
+            Some(10_000_000_000_000_000 * BYTES_PER_KIBIBYTE)
         );
-        assert_eq!(region_one.locked, Some(1000000000 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.locked, Some(1_000_000_000 * BYTES_PER_KIBIBYTE));
     }
 
     #[test]

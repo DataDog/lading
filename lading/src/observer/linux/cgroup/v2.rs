@@ -83,33 +83,31 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                         "Failed to parse file name: {file_name:?}"
                                                     );
                                                 }
-                                                Some("memory.current") => {
+                                                Some(
+                                                    "memory.current"
+                                                    | "memory.high"
+                                                    | "memory.low"
+                                                    | "memory.max"
+                                                    | "memory.min"
+                                                    | "memory.swap.current"
+                                                    | "memory.swap.high"
+                                                    | "memory.swap.max"
+                                                    | "memory.swap.peak"
+                                                    | "memory.zswap.current"
+                                                    | "memory.zswap.max"
+                                                    | "memory.zswap.writeback"
+                                                    | "cpu.idle"
+                                                    | "memory.oom.group"
+                                                    | "memory.peak",
+                                                ) => {
                                                     single_value(content, metric_prefix, labels);
                                                 }
-                                                Some("memory.events" | "memory.events.local") => {
-                                                    kv_counter(content, &metric_prefix, labels);
-                                                }
-                                                Some("memory.high") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.low") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.max") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.min") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.oom.group") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.peak") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.pressure") => {
+                                                Some(
+                                                    "cpu.pressure" | "io.pressure"
+                                                    | "memory.pressure",
+                                                ) => {
                                                     if let Err(err) = parse_pressure(
-                                                        &content,
+                                                        content,
                                                         &metric_prefix,
                                                         labels,
                                                     ) {
@@ -117,61 +115,18 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     );
                                                     }
                                                 }
+                                                Some(
+                                                    "memory.events"
+                                                    | "memory.events.local"
+                                                    | "memory.swap.events",
+                                                ) => {
+                                                    kv_counter(content, &metric_prefix, labels);
+                                                }
                                                 Some("memory.stat") => {
-                                                    memory::stat(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.swap.current") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.swap.events") => {
-                                                    kv_counter(&content, &metric_prefix, labels);
-                                                }
-                                                Some("memory.swap.high") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.swap.max") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.swap.peak") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.zswap.current") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.zswap.max") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("memory.zswap.writeback") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("cpu.idle") => {
-                                                    single_value(&content, metric_prefix, labels);
+                                                    memory::stat(content, &metric_prefix, labels);
                                                 }
                                                 Some("cpu.max" | "cpu.stat") => {
                                                     // cpu.max and cpu.stat are handled specially in v2/cpu
-                                                }
-                                                Some("cpu.pressure") => {
-                                                    if let Err(err) = parse_pressure(
-                                                        &content,
-                                                        &metric_prefix,
-                                                        labels,
-                                                    ) {
-                                                        warn!("[{metric_prefix}] Failed to parse PSI contents: {err:?}",
-                                                    );
-                                                    }
-                                                }
-                                                Some("cpu.weight") => {
-                                                    single_value(&content, metric_prefix, labels);
-                                                }
-                                                Some("io.pressure") => {
-                                                    if let Err(err) = parse_pressure(
-                                                        &content,
-                                                        &metric_prefix,
-                                                        labels,
-                                                    ) {
-                                                        warn!("[{metric_prefix}] Failed to parse PSI contents: {err:?}",
-                                                    );
-                                                    }
                                                 }
                                                 Some(unknown) => {
                                                     warn!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");

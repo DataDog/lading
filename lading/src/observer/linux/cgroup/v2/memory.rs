@@ -1,13 +1,11 @@
 //! Parser functions for memory cgroup v2.
 //!
-//! Functions map to https://www.kernel.org/doc/Documentation/cgroup-v2.txt.
+//! Functions map to [Linux docs](https://www.kernel.org/doc/Documentation/cgroup-v2.txt).
 
 use std::str::FromStr;
 
 use metrics::{counter, gauge};
 use tracing::warn;
-
-use crate::observer::linux::cgroup::v2::parse_pressure;
 
 /// Memory events
 ///
@@ -47,7 +45,7 @@ pub(crate) fn events(content: &str, metric_prefix: String, labels: &[(String, St
 /// * `pgdeactivate`
 /// * `pglazyfree`
 /// * `pglazyfreed`
-pub(crate) fn stat(content: &str, metric_prefix: String, labels: &[(String, String)]) {
+pub(crate) fn stat(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
     let counter_keys = [
         "pgfault",
         "pgmajfault",
@@ -72,12 +70,11 @@ pub(crate) fn stat(content: &str, metric_prefix: String, labels: &[(String, Stri
                 continue;
             }
         };
-        let value_str = match parts.next() {
-            Some(v) => v,
-            None => {
-                warn!("[{metric_prefix}] missing value in key/value pair, skipping");
-                continue;
-            }
+        let value_str = if let Some(v) = parts.next() {
+            v
+        } else {
+            warn!("[{metric_prefix}] missing value in key/value pair, skipping");
+            continue;
         };
 
         if counter_keys.contains(&key) {
@@ -112,13 +109,13 @@ pub(crate) fn single_value(content: &str, metric_prefix: String, labels: &[(Stri
 pub(crate) fn kv_gauge(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
     kv::<_, f64>(content, metric_prefix, labels, |metric, labels, value| {
         gauge!(metric, labels).set(value);
-    })
+    });
 }
 
 pub(crate) fn kv_counter(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
     kv::<_, u64>(content, metric_prefix, labels, |metric, labels, value| {
         counter!(metric, labels).absolute(value);
-    })
+    });
 }
 
 fn kv<F, T>(content: &str, metric_prefix: &str, labels: &[(String, String)], f: F)

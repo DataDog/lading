@@ -541,7 +541,7 @@ mod tests {
         let snapshot = run_scrape_and_parse_metrics(GAUGE_LABEL_WITH_SPACES, tags).await;
 
         assert_eq!(snapshot.len(), 1);
-        dbg!(&snapshot);
+        &snapshot;
 
         let metric = snapshot
             .get(&CompositeKey::new(
