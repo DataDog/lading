@@ -5,10 +5,10 @@ use core::f64;
 use std::{
     io,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
-use memory::{kv_counter, kv_gauge, single_value};
-use metrics::gauge;
+use metrics::{counter, gauge};
 use tokio::fs;
 use tracing::{debug, error, warn};
 
@@ -126,7 +126,16 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     memory::stat(content, &metric_prefix, labels);
                                                 }
                                                 Some("cpu.max" | "cpu.stat") => {
-                                                    // cpu.max and cpu.stat are handled specially in v2/cpu
+                                                    // cpu.max and cpu.stat are
+                                                    // handled specially in
+                                                    // v2/cpu
+                                                    //
+                                                    // NOTE cpu.max could be
+                                                    // handled here, cpu.stat
+                                                    // needs to be handled much
+                                                    // like memory.stat _and_ we
+                                                    // need to do the millicore
+                                                    // computation on top.
                                                 }
                                                 Some(unknown) => {
                                                     warn!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
@@ -176,6 +185,59 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
     }
 
     Ok(())
+}
+
+#[inline]
+pub(crate) fn single_value(content: &str, metric_prefix: String, labels: &[(String, String)]) {
+    // Content is a single-vaue file with an integer value.
+    if content == "max" {
+        gauge!(metric_prefix, labels).set(f64::MAX);
+    } else if let Ok(value) = content.parse::<f64>() {
+        gauge!(metric_prefix, labels).set(value);
+    } else {
+        warn!("[{metric_prefix}] Failed to parse: {content}");
+    }
+}
+
+#[inline]
+pub(crate) fn kv_gauge(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
+    kv::<_, f64>(content, metric_prefix, labels, |metric, labels, value| {
+        gauge!(metric, labels).set(value);
+    });
+}
+
+#[inline]
+pub(crate) fn kv_counter(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
+    kv::<_, u64>(content, metric_prefix, labels, |metric, labels, value| {
+        counter!(metric, labels).absolute(value);
+    });
+}
+
+#[inline]
+fn kv<F, T>(content: &str, metric_prefix: &str, labels: &[(String, String)], f: F)
+where
+    F: Fn(String, &[(String, String)], T),
+    T: FromStr + num_traits::bounds::Bounded,
+{
+    for line in content.lines() {
+        let mut parts = line.split_whitespace();
+        if let Some(key) = parts.next() {
+            if let Some(value_str) = parts.next() {
+                let metric_name = format!("{metric_prefix}.{key}");
+                if content == "max" {
+                    f(metric_name, labels, T::max_value());
+                } else if let Ok(value) = value_str.parse::<T>() {
+                    f(metric_name, labels, value);
+                } else {
+                    warn!("[{metric_prefix}] Failed to parse {key}: {content}");
+                }
+            } else {
+                warn!("[{metric_prefix}] missing value in key/value pair, skipping");
+            }
+        } else {
+            warn!("[{metric_prefix}] missing value in key/value pair, skipping");
+        }
+    }
 }
 
 fn parse_pressure(content: &str, prefix: &str, labels: &[(String, String)]) -> Result<(), Error> {
