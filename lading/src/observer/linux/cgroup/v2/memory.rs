@@ -63,16 +63,11 @@ pub(crate) fn stat(content: &str, metric_prefix: &str, labels: &[(String, String
 
     for line in content.lines() {
         let mut parts = line.split_whitespace();
-        let key = match parts.next() {
-            Some(k) => k,
-            None => {
-                // empty line, skip it
-                continue;
-            }
+        let Some(key) = parts.next() else {
+            // empty line, skip it
+            continue;
         };
-        let value_str = if let Some(v) = parts.next() {
-            v
-        } else {
+        let Some(value_str) = parts.next() else {
             warn!("[{metric_prefix}] missing value in key/value pair, skipping");
             continue;
         };
