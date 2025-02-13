@@ -1,9 +1,9 @@
 pub(crate) mod cpu;
+pub(crate) mod io;
 pub(crate) mod memory;
 
 use core::f64;
 use std::{
-    io,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -15,7 +15,7 @@ use tracing::{debug, error, warn};
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("IO error: {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("Parse int error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
     #[error("Parse float error: {0}")]
@@ -118,24 +118,25 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                 Some(
                                                     "memory.events"
                                                     | "memory.events.local"
-                                                    | "memory.swap.events",
+                                                    | "memory.swap.events"
+                                                    | "cpu.stat",
                                                 ) => {
                                                     kv_counter(content, &metric_prefix, labels);
                                                 }
                                                 Some("memory.stat") => {
                                                     memory::stat(content, &metric_prefix, labels);
                                                 }
-                                                Some("cpu.max" | "cpu.stat") => {
-                                                    // cpu.max and cpu.stat are
-                                                    // handled specially in
-                                                    // v2/cpu
-                                                    //
-                                                    // NOTE cpu.max could be
-                                                    // handled here, cpu.stat
-                                                    // needs to be handled much
-                                                    // like memory.stat _and_ we
-                                                    // need to do the millicore
-                                                    // computation on top.
+                                                Some("cpu.max") => {
+                                                    // cpu.max is handled
+                                                    // specially in v2/cpu.rs.
+                                                    // cpu.stat is read there to
+                                                    // compute derived metrics.
+                                                }
+                                                Some("io.max") => {
+                                                    io::max(content, &metric_prefix, labels);
+                                                }
+                                                Some("io.stat") => {
+                                                    io::stat(content, &metric_prefix, labels);
                                                 }
                                                 Some(unknown) => {
                                                     warn!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
