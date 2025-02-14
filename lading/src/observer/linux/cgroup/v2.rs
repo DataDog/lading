@@ -143,7 +143,7 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     io::stat(content, &metric_prefix, labels);
                                                 }
                                                 Some(unknown) => {
-                                                    warn!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
+                                                    debug!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
                                                     if content == "max" {
                                                         gauge!(metric_prefix, labels).set(f64::MAX);
                                                     } else if let Ok(value) = content.parse::<f64>()
@@ -238,13 +238,13 @@ where
                 } else if let Ok(value) = value_str.parse::<T>() {
                     f(metric_name, labels, value);
                 } else {
-                    warn!("[{metric_prefix}] Failed to parse {key}: {content}");
+                    debug!("[{metric_prefix}] Failed to parse {key}: {content}");
                 }
             } else {
-                warn!("[{metric_prefix}] missing value in key/value pair, skipping");
+                debug!("[{metric_prefix}] missing value in key/value pair, skipping");
             }
         } else {
-            warn!("[{metric_prefix}] missing value in key/value pair, skipping");
+            debug!("[{metric_prefix}] missing value in key/value pair, skipping");
         }
     }
 }
