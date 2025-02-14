@@ -1686,6 +1686,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "nix",
+ "num-traits",
  "num_cpus",
  "once_cell",
  "procfs",

@@ -1,19 +1,21 @@
 pub(crate) mod cpu;
+pub(crate) mod io;
+pub(crate) mod memory;
 
 use core::f64;
 use std::{
-    io,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
-use metrics::gauge;
+use metrics::{counter, gauge};
 use tokio::fs;
 use tracing::{debug, error, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("IO error: {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("Parse int error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
     #[error("Parse float error: {0}")]
@@ -48,6 +50,8 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 }
 
 /// Polls for any cgroup metrics that can be read, v2 version.
+#[tracing::instrument(skip_all)]
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
     // Read all files in the cgroup `path` and create metrics for them. If we
     // lack permissions to read we skip the file. We do not use ? to allow for
@@ -72,47 +76,82 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
 
                                     match fs::read_to_string(&file_path).await {
                                         Ok(content) => {
-                                            if file_name == "memory.pressure"
-                                                || file_name == "io.pressure"
-                                                || file_name == "cpu.pressure"
-                                            {
-                                                if let Err(err) =
-                                                    parse_pressure(&content, &metric_prefix, labels)
-                                                {
-                                                    warn!("[{path}] Failed to parse PSI contents: {err:?}",
-                                                        path = file_path.to_string_lossy()
+                                            let content = content.trim();
+                                            match file_name.to_str() {
+                                                None => {
+                                                    error!(
+                                                        "Failed to parse file name: {file_name:?}"
                                                     );
                                                 }
-                                                continue;
-                                            }
-
-                                            let content = content.trim();
-                                            // The format of cgroupv2 interface
-                                            // files is defined here:
-                                            // https://docs.kernel.org/admin-guide/cgroup-v2.html#interface-files
-                                            //
-                                            // This implementation parses only new-line separated files with a
-                                            // single value which may be "max" or a number. It also parses
-                                            // key-value pairs of the "flat keyed" style.
-
-                                            // Single value
-                                            if content == "max" {
-                                                gauge!(metric_prefix, labels).set(f64::MAX);
-                                            } else if let Ok(value) = content.parse::<f64>() {
-                                                gauge!(metric_prefix, labels).set(value);
-                                            } else {
-                                                // Flat keyed style key-value pairs
-                                                if kv_pairs(
-                                                    &file_path,
-                                                    content,
-                                                    &metric_prefix,
-                                                    labels,
-                                                )
-                                                .is_err()
-                                                {
-                                                    // File may fail to parse, for instance cgroup.controllers
-                                                    // is a list of strings.
-                                                    continue;
+                                                Some(
+                                                    "memory.current"
+                                                    | "memory.high"
+                                                    | "memory.low"
+                                                    | "memory.max"
+                                                    | "memory.min"
+                                                    | "memory.swap.current"
+                                                    | "memory.swap.high"
+                                                    | "memory.swap.max"
+                                                    | "memory.swap.peak"
+                                                    | "memory.zswap.current"
+                                                    | "memory.zswap.max"
+                                                    | "memory.zswap.writeback"
+                                                    | "cpu.idle"
+                                                    | "memory.oom.group"
+                                                    | "memory.peak",
+                                                ) => {
+                                                    single_value_gauge(
+                                                        content,
+                                                        metric_prefix,
+                                                        labels,
+                                                    );
+                                                }
+                                                Some(
+                                                    "cpu.pressure" | "io.pressure"
+                                                    | "memory.pressure",
+                                                ) => {
+                                                    if let Err(err) = parse_pressure(
+                                                        content,
+                                                        &metric_prefix,
+                                                        labels,
+                                                    ) {
+                                                        warn!("[{metric_prefix}] Failed to parse PSI contents: {err:?}",
+                                                    );
+                                                    }
+                                                }
+                                                Some(
+                                                    "memory.events"
+                                                    | "memory.events.local"
+                                                    | "memory.swap.events"
+                                                    | "cpu.stat",
+                                                ) => {
+                                                    kv_counter(content, &metric_prefix, labels);
+                                                }
+                                                Some("memory.stat") => {
+                                                    memory::stat(content, &metric_prefix, labels);
+                                                }
+                                                Some("cpu.max") => {
+                                                    // cpu.max is handled
+                                                    // specially in v2/cpu.rs.
+                                                    // cpu.stat is read there to
+                                                    // compute derived metrics.
+                                                }
+                                                Some("io.max") => {
+                                                    io::max(content, &metric_prefix, labels);
+                                                }
+                                                Some("io.stat") => {
+                                                    io::stat(content, &metric_prefix, labels);
+                                                }
+                                                Some(unknown) => {
+                                                    debug!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
+                                                    if content == "max" {
+                                                        gauge!(metric_prefix, labels).set(f64::MAX);
+                                                    } else if let Ok(value) = content.parse::<f64>()
+                                                    {
+                                                        gauge!(metric_prefix, labels).set(value);
+                                                    } else {
+                                                        kv_gauge(content, &metric_prefix, labels);
+                                                    }
                                                 }
                                             }
                                         }
@@ -153,38 +192,61 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
     Ok(())
 }
 
-fn kv_pairs(
-    file_path: &Path,
+#[inline]
+pub(crate) fn single_value_gauge(
     content: &str,
-    metric_prefix: &str,
+    metric_prefix: String,
     labels: &[(String, String)],
-) -> Result<(), Error> {
+) {
+    // Content is a single-value file with an integer value.
+    if content == "max" {
+        gauge!(metric_prefix, labels).set(f64::MAX);
+    } else if let Ok(value) = content.parse::<f64>() {
+        gauge!(metric_prefix, labels).set(value);
+    } else {
+        warn!("[{metric_prefix}] Failed to parse: {content}");
+    }
+}
+
+#[inline]
+pub(crate) fn kv_gauge(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
+    kv::<_, f64>(content, metric_prefix, labels, |metric, labels, value| {
+        gauge!(metric, labels).set(value);
+    });
+}
+
+#[inline]
+pub(crate) fn kv_counter(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
+    kv::<_, u64>(content, metric_prefix, labels, |metric, labels, value| {
+        counter!(metric, labels).absolute(value);
+    });
+}
+
+#[inline]
+fn kv<F, T>(content: &str, metric_prefix: &str, labels: &[(String, String)], f: F)
+where
+    F: Fn(String, &[(String, String)], T),
+    T: FromStr + num_traits::bounds::Bounded,
+{
     for line in content.lines() {
         let mut parts = line.split_whitespace();
         if let Some(key) = parts.next() {
             if let Some(value_str) = parts.next() {
-                let value: f64 = match value_str {
-                    "max" => f64::MAX,
-                    s => s.parse()?,
-                };
                 let metric_name = format!("{metric_prefix}.{key}");
-                gauge!(metric_name, labels).set(value);
+                if content == "max" {
+                    f(metric_name, labels, T::max_value());
+                } else if let Ok(value) = value_str.parse::<T>() {
+                    f(metric_name, labels, value);
+                } else {
+                    debug!("[{metric_prefix}] Failed to parse {key}: {content}");
+                }
             } else {
-                debug!(
-                    "[{path}] missing value in key/value pair, skipping",
-                    path = file_path.to_string_lossy(),
-                );
-                return Ok(());
+                debug!("[{metric_prefix}] missing value in key/value pair, skipping");
             }
         } else {
-            debug!(
-                "[{path} missing key in key/value pair, skipping",
-                path = file_path.to_string_lossy(),
-            );
-            return Ok(());
+            debug!("[{metric_prefix}] missing value in key/value pair, skipping");
         }
     }
-    Ok(())
 }
 
 fn parse_pressure(content: &str, prefix: &str, labels: &[(String, String)]) -> Result<(), Error> {
