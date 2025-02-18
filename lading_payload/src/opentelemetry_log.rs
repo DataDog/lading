@@ -28,8 +28,8 @@ impl ExportLogsServiceRequest {
         opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
             resource_logs: vec![v1::ResourceLogs {
                 resource: None,
-                instrumentation_library_logs: vec![v1::InstrumentationLibraryLogs {
-                    instrumentation_library: None,
+                scope_logs: vec![v1::ScopeLogs {
+                    scope: None,
                     log_records: self.0.into_iter().map(|log| log.0).collect(),
                     schema_url: String::new(),
                 }],
@@ -80,7 +80,7 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
                 observed_time_unix_nano: rng.gen(),
                 severity_number: rng.gen_range(1..=24),
                 severity_text: String::new(),
-                name: String::new(),
+                event_name: String::new(),
                 body: Some(AnyValue {
                     value: Some(any_value::Value::StringValue(body)),
                 }),

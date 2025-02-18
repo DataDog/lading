@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux cgroup v2 observer now correctly sets known-counter values as counters in telemetry.
 ## Changed
 - smaps data is scraped every tenth sample to reduce capture size.
+- Bumped `opentelemetry-proto` to `0.28.0`.
+- Bumped `prost` to `0.13.0`.
 
 ## [0.25.5]
 ## Added

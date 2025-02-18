@@ -24,8 +24,8 @@ impl ExportTraceServiceRequest {
         opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest {
             resource_spans: [v1::ResourceSpans {
                 resource: None,
-                instrumentation_library_spans: [v1::InstrumentationLibrarySpans {
-                    instrumentation_library: None,
+                scope_spans: [v1::ScopeSpans {
+                    scope: None,
                     spans: self.0.into_iter().map(|span| span.0).collect(),
                     schema_url: String::new(),
                 }]
@@ -99,6 +99,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
             links: Vec::new(),
             dropped_links_count: 0,
             status: None,
+            flags: 0,
         }))
     }
 }

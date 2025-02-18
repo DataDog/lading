@@ -26,8 +26,8 @@ impl ExportMetricsServiceRequest {
         opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
             resource_metrics: vec![v1::ResourceMetrics {
                 resource: None,
-                instrumentation_library_metrics: vec![v1::InstrumentationLibraryMetrics {
-                    instrumentation_library: None,
+                scope_metrics: vec![v1::ScopeMetrics {
+                    scope: None,
                     metrics: self.0.into_iter().map(|metric| metric.0).collect(),
                     schema_url: String::new(),
                 }],
@@ -161,6 +161,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
             description: String::from(description),
             unit: String::from(unit),
             data,
+            metadata: Vec::new(),
         }))
     }
 }
