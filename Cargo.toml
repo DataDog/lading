@@ -18,7 +18,7 @@ metrics-exporter-prometheus = { version = "0.15.3", default-features = false, fe
   "http-listener",
   "uds-listener",
 ] }
-prost = "0.11"
+prost = "0.13"
 rand = { version = "0.8", default-features = false }
 rustc-hash = { version = "1.1" }
 serde = { version = "1.0", features = ["std", "derive"] }
@@ -44,7 +44,7 @@ hyper-util = { version = "0.1", default-features = false }
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
-codegen-units = 1 # Increases compile time but improves optmization alternatives.
+codegen-units = 1 # Increases compile time but improves optimization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
 
