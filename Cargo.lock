@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.25.5"
+version = "0.25.6"
 dependencies = [
  "async-compression",
  "async-pidfd",
