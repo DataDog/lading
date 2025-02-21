@@ -24,7 +24,7 @@ use byte_unit::{Byte, ByteError};
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::{prelude::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -208,12 +208,12 @@ impl Server {
             };
 
             let mut dir_path = config.root.clone();
-            let depth = rng.gen_range(0..config.max_depth);
+            let depth = rng.random_range(0..config.max_depth);
             for _ in 0..depth {
-                dir_path.push(format!("{}", rng.gen::<u16>()));
+                dir_path.push(format!("{}", rng.random::<u16>()));
             }
 
-            let file_name = format!("{}.log", rng.gen::<u64>());
+            let file_name = format!("{}.log", rng.random::<u64>());
             let mut basename = dir_path.clone();
             basename.push(&file_name);
 

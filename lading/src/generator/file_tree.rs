@@ -12,8 +12,8 @@
 
 use lading_throttle::Throttle;
 use rand::{
-    distributions::{Alphanumeric, DistString},
-    seq::SliceRandom,
+    distr::{Alphanumeric, SampleString},
+    seq::IndexedMutRandom,
 };
 use std::{
     collections::VecDeque,
@@ -24,9 +24,9 @@ use std::{
     str,
 };
 
-use rand::{prelude::StdRng, SeedableRng};
+use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::{fs::create_dir, fs::rename, fs::File};
+use tokio::{fs::File, fs::create_dir, fs::rename};
 use tracing::info;
 
 static FILE_EXTENSION: &str = "txt";

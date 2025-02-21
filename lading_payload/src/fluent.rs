@@ -8,7 +8,7 @@ use rand::Rng;
 use rustc_hash::FxHashMap;
 use serde_tuple::Serialize_tuple;
 
-use crate::{common::strings, Error, Generator};
+use crate::{Error, Generator, common::strings};
 
 #[derive(Debug, Clone)]
 /// Fluent payload
@@ -36,11 +36,11 @@ impl<'a> Generator<'a> for Fluent {
     where
         R: rand::Rng + ?Sized,
     {
-        match rng.gen_range(0..2) {
+        match rng.random_range(0..2) {
             0 => {
                 let mut rec = FxHashMap::default();
                 rec.insert("message", record_value(rng, &self.str_pool));
-                for _ in 0..rng.gen_range(0..128) {
+                for _ in 0..rng.random_range(0..128) {
                     let key = self
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
@@ -53,7 +53,7 @@ impl<'a> Generator<'a> for Fluent {
                         .str_pool
                         .of_size_range(rng, 1_u8..16)
                         .ok_or(Error::StringGenerate)?,
-                    time: rng.gen(),
+                    time: rng.random(),
                     record: rec,
                 }))
             }
@@ -63,7 +63,7 @@ impl<'a> Generator<'a> for Fluent {
                     let mut rec = FxHashMap::default();
                     rec.insert("message", record_value(rng, &self.str_pool));
                     rec.insert("event", record_value(rng, &self.str_pool));
-                    for _ in 0..rng.gen_range(0..128) {
+                    for _ in 0..rng.random_range(0..128) {
                         let key = self
                             .str_pool
                             .of_size_range(rng, 1_u8..16)
@@ -72,7 +72,7 @@ impl<'a> Generator<'a> for Fluent {
                         rec.insert(key, val);
                     }
                     entries.push(Entry {
-                        time: rng.gen(),
+                        time: rng.random(),
                         record: rec,
                     });
                 }
@@ -121,7 +121,7 @@ fn record_value<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> RecordValue<
 where
     R: rand::Rng + ?Sized,
 {
-    match rng.gen_range(0..2) {
+    match rng.random_range(0..2) {
         0 => RecordValue::String(
             str_pool
                 .of_size_range(rng, 1_u8..16)
@@ -131,11 +131,11 @@ where
             let s: std::hash::BuildHasherDefault<rustc_hash::FxHasher> =
                 std::hash::BuildHasherDefault::default();
             let mut obj = FxHashMap::with_capacity_and_hasher(128, s);
-            for _ in 0..rng.gen_range(0..128) {
+            for _ in 0..rng.random_range(0..128) {
                 let key = str_pool
                     .of_size_range(rng, 1_u8..16)
                     .expect("failed to generate string");
-                let val = rng.gen();
+                let val = rng.random();
 
                 obj.insert(key, val);
             }
@@ -207,7 +207,7 @@ impl crate::Serialize for Fluent {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{Fluent, Serialize};
 

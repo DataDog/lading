@@ -1,11 +1,11 @@
 //! `DogStatsD` event.
 use std::{fmt, ops::Range, rc::Rc};
 
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
-use crate::{common::strings, Error, Generator};
+use crate::{Error, Generator, common::strings};
 
-use super::{choose_or_not_fn, common, ConfRange};
+use super::{ConfRange, choose_or_not_fn, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
@@ -33,7 +33,7 @@ impl<'a> Generator<'a> for EventGenerator {
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .ok_or(Error::StringGenerate)?;
-        let tags = if rng.gen() {
+        let tags = if rng.random() {
             Some(self.tags_generator.generate(&mut rng)?)
         } else {
             None
@@ -44,7 +44,7 @@ impl<'a> Generator<'a> for EventGenerator {
             text_utf8_length: text.len(),
             title,
             text,
-            timestamp_second: rng.gen(),
+            timestamp_second: rng.random_bool(0.5).then(|| rng.random()),
             hostname: choose_or_not_fn(&mut rng, |r| {
                 self.str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
@@ -53,12 +53,12 @@ impl<'a> Generator<'a> for EventGenerator {
                 self.str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
-            priority: rng.gen(),
+            priority: rng.random_bool(0.5).then(|| rng.random()),
             source_type_name: choose_or_not_fn(&mut rng, |r| {
                 self.str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
-            alert_type: rng.gen(),
+            alert_type: rng.random_bool(0.5).then(|| rng.random()),
             tags,
         })
     }
@@ -91,7 +91,7 @@ pub struct Event<'a> {
     pub tags: Option<common::tags::Tagset>,
 }
 
-impl<'a> fmt::Display for Event<'a> {
+impl fmt::Display for Event<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(
@@ -146,12 +146,12 @@ pub enum Priority {
     Low,
 }
 
-impl Distribution<Priority> for Standard {
+impl Distribution<Priority> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Priority
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..2) {
+        match rng.random_range(0..2) {
             0 => Priority::Low,
             1 => Priority::Normal,
             _ => unreachable!(),
@@ -181,12 +181,12 @@ pub enum Alert {
     Success,
 }
 
-impl Distribution<Alert> for Standard {
+impl Distribution<Alert> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Alert
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..4) {
+        match rng.random_range(0..4) {
             0 => Alert::Error,
             1 => Alert::Warning,
             2 => Alert::Info,

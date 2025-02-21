@@ -76,8 +76,8 @@ impl<'a> Generator<'a> for OpentelemetryLogs {
         Ok(
             #[allow(deprecated)]
             LogRecord(v1::LogRecord {
-                time_unix_nano: rng.gen(),
-                observed_time_unix_nano: rng.gen(),
+                time_unix_nano: rng.random(),
+                observed_time_unix_nano: rng.random(),
                 severity_number: rng.gen_range(1..=24),
                 severity_text: String::new(),
                 event_name: String::new(),

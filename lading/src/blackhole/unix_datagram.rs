@@ -75,7 +75,7 @@ impl UnixDatagram {
         // socket, ignore any errors.
         let _res = tokio::fs::remove_file(&self.path).map_err(Error::Io);
         let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
-        let mut buf = [0; 65536];
+        let mut buf = vec![0; 65536];
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);

@@ -126,7 +126,7 @@ impl Prometheus {
         loop {
             tokio::select! {
                 _ = poll.tick() => {
-                    scrape_metrics(&client, &uri, &tags, &metrics).await;
+                    scrape_metrics(&client, &uri, tags.as_ref(), metrics.as_ref()).await;
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
@@ -156,8 +156,8 @@ impl Prometheus {
 pub(crate) async fn scrape_metrics(
     client: &reqwest::Client,
     uri: &str,
-    tags: &Option<FxHashMap<String, String>>,
-    metrics: &Option<Vec<String>>,
+    tags: Option<&FxHashMap<String, String>>,
+    metrics: Option<&Vec<String>>,
 ) {
     let Ok(resp) = client.get(uri).timeout(Duration::from_secs(1)).send().await else {
         info!("failed to get Prometheus uri");
@@ -176,11 +176,7 @@ pub(crate) async fn scrape_metrics(
     // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
     for line in text.lines().filter_map(|l| {
         let line = l.trim();
-        if line.is_empty() {
-            None
-        } else {
-            Some(line)
-        }
+        if line.is_empty() { None } else { Some(line) }
     }) {
         if line.starts_with("# HELP") {
             continue;

@@ -75,7 +75,7 @@ impl Udp {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
             .map_err(Error::Io)?;
-        let mut buf = [0; 65536];
+        let mut buf = vec![0; 65536];
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);

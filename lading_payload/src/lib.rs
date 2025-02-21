@@ -25,7 +25,7 @@ use std::{
     path::PathBuf,
 };
 
-use rand::{distributions::WeightedError, Rng};
+use rand::{Rng, distr::weighted};
 use serde::{Deserialize, Serialize as SerdeSerialize};
 
 pub mod block;
@@ -78,9 +78,9 @@ pub enum Error {
     /// Serialization failed
     #[error("Serialization failed")]
     Serialize,
-    /// See [`WeightedError`]
+    /// See [`weighted::Error`]
     #[error(transparent)]
-    Weights(#[from] WeightedError),
+    Weights(#[from] weighted::Error),
 }
 
 /// To serialize into bytes

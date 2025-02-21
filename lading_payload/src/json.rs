@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use crate::Error;
 
@@ -23,7 +23,7 @@ pub struct Member {
     pub(crate) byte_parade: Vec<u8>,
 }
 
-impl Distribution<Member> for Standard {
+impl Distribution<Member> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Member
     where
         R: Rng + ?Sized,
@@ -31,10 +31,10 @@ impl Distribution<Member> for Standard {
         let max = SIZES.choose(rng).expect("failed to choose size");
 
         Member {
-            id: rng.gen(),
-            name: rng.gen(),
-            seed: rng.gen(),
-            byte_parade: rng.sample_iter(Standard).take(*max).collect(),
+            id: rng.random(),
+            name: rng.random(),
+            seed: rng.random(),
+            byte_parade: rng.sample_iter(StandardUniform).take(*max).collect(),
         }
     }
 }
@@ -52,7 +52,7 @@ impl<'a> Generator<'a> for Json {
     where
         R: rand::Rng + ?Sized,
     {
-        Ok(rng.gen())
+        Ok(rng.random())
     }
 }
 
@@ -84,7 +84,7 @@ impl crate::Serialize for Json {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::Member;
     use crate::{Json, Serialize};

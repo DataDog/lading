@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use serde::{Deserialize, Serialize};
 
 use crate::Error;
@@ -22,12 +22,12 @@ const SERVICES: [&str; 7] = [
     "bigger-monitor",
 ];
 const MESSAGES: [&str; 5] = [
-"Es war ein Mann im Lande Uz, der hieß Hiob. Derselbe war schlecht und recht, gottesfürchtig und mied das Böse.",
-"Und zeugte sieben Söhne und drei Töchter;",
-"und seines Viehs waren siebentausend Schafe, dreitausend Kamele, fünfhundert Joch Rinder und fünfhundert Eselinnen, und er hatte viel Gesinde; und er war herrlicher denn alle, die gegen Morgen wohnten.",
-"Und seine Söhne gingen und machten ein Mahl, ein jeglicher in seinem Hause auf seinen Tag, und sandten hin und luden ihre drei Schwestern, mit ihnen zu essen und zu trinken",
-"Und wenn die Tage des Mahls um waren, sandte Hiob hin und heiligte sie und machte sich des Morgens früh auf und opferte Brandopfer nach ihrer aller Zahl; denn Hiob gedachte: Meine Söhne möchten gesündigt und Gott abgesagt haben in ihrem Herzen. Also tat Hiob allezeit.",
-    ];
+    "Es war ein Mann im Lande Uz, der hieß Hiob. Derselbe war schlecht und recht, gottesfürchtig und mied das Böse.",
+    "Und zeugte sieben Söhne und drei Töchter;",
+    "und seines Viehs waren siebentausend Schafe, dreitausend Kamele, fünfhundert Joch Rinder und fünfhundert Eselinnen, und er hatte viel Gesinde; und er war herrlicher denn alle, die gegen Morgen wohnten.",
+    "Und seine Söhne gingen und machten ein Mahl, ein jeglicher in seinem Hause auf seinen Tag, und sandten hin und luden ihre drei Schwestern, mit ihnen zu essen und zu trinken",
+    "Und wenn die Tage des Mahls um waren, sandte Hiob hin und heiligte sie und machte sich des Morgens früh auf und opferte Brandopfer nach ihrer aller Zahl; denn Hiob gedachte: Meine Söhne möchten gesündigt und Gott abgesagt haben in ihrem Herzen. Also tat Hiob allezeit.",
+];
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Attrs {
@@ -47,7 +47,7 @@ struct Attrs {
     pub(crate) aws_account: String,
 }
 
-impl Distribution<Attrs> for Standard {
+impl Distribution<Attrs> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Attrs
     where
         R: Rng + ?Sized,
@@ -82,7 +82,7 @@ struct Event {
     attrs: Attrs,
 }
 
-impl Distribution<Event> for Standard {
+impl Distribution<Event> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Event
     where
         R: Rng + ?Sized,
@@ -90,7 +90,7 @@ impl Distribution<Event> for Standard {
         Event {
             timestamp: 1_606_215_269.333_915,
             message: String::from(*MESSAGES.choose(rng).expect("failed to choose messages")),
-            attrs: rng.gen(),
+            attrs: rng.random(),
         }
     }
 }
@@ -103,14 +103,14 @@ struct Member {
     pub(crate) index: String,
 }
 
-impl Distribution<Member> for Standard {
+impl Distribution<Member> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Member
     where
         R: Rng + ?Sized,
     {
         Member {
-            event: rng.gen(),
-            time: rng.gen(),
+            event: rng.random(),
+            time: rng.random(),
             host: String::from(*SYSTEM_IDS.choose(rng).expect("failed to choose system ids")),
             index: String::from(*PARTITIONS.choose(rng).expect("failed to choose partitions")),
         }
@@ -159,7 +159,7 @@ impl crate::Serialize for SplunkHec {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let member: Member = rng.gen();
+            let member: Member = rng.random();
             let encoding = match self.encoding {
                 Encoding::Text => {
                     let event = member.event;
@@ -188,7 +188,7 @@ impl crate::Serialize for SplunkHec {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::Member;
     use crate::{Serialize, SplunkHec};

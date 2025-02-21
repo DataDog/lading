@@ -1,9 +1,9 @@
 //! Apache common payload.
 
-use crate::{common::strings, Error, Generator};
+use crate::{Error, Generator, common::strings};
 
 use core::fmt;
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use std::io::Write;
 
 const PATH_NAMES: [&str; 25] = [
@@ -22,7 +22,7 @@ const STATUS_CODES: [u16; 64] = [
 #[derive(Debug)]
 struct StatusCode(u16);
 
-impl Distribution<StatusCode> for Standard {
+impl Distribution<StatusCode> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> StatusCode
     where
         R: Rng + ?Sized,
@@ -45,12 +45,12 @@ enum Protocol {
     Http22,
 }
 
-impl Distribution<Protocol> for Standard {
+impl Distribution<Protocol> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Protocol
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..6) {
+        match rng.random_range(0..6) {
             0 => Protocol::Http10,
             1 => Protocol::Http11,
             2 => Protocol::Http12,
@@ -81,12 +81,12 @@ struct Path {
     components: [Option<&'static str>; 16],
 }
 
-impl Distribution<Path> for Standard {
+impl Distribution<Path> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Path
     where
         R: Rng + ?Sized,
     {
-        let total_components: usize = rng.gen_range(1..=16);
+        let total_components: usize = rng.random_range(1..=16);
         let mut components = [None; 16];
 
         for idx in components.iter_mut().take(total_components) {
@@ -122,12 +122,12 @@ enum Month {
     December,
 }
 
-impl Distribution<Month> for Standard {
+impl Distribution<Month> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Month
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..12) {
+        match rng.random_range(0..12) {
             0 => Month::January,
             1 => Month::February,
             2 => Month::March,
@@ -156,19 +156,19 @@ struct Timestamp {
     timezone: u8,
 }
 
-impl Distribution<Timestamp> for Standard {
+impl Distribution<Timestamp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Timestamp
     where
         R: Rng + ?Sized,
     {
         Timestamp {
-            day: rng.gen(),
-            month: rng.gen(),
-            year: rng.gen(),
-            hour: rng.gen(),
-            minute: rng.gen(),
-            second: rng.gen(),
-            timezone: rng.gen(),
+            day: rng.random(),
+            month: rng.random(),
+            year: rng.random(),
+            hour: rng.random(),
+            minute: rng.random(),
+            second: rng.random(),
+            timezone: rng.random(),
         }
     }
 }
@@ -211,16 +211,16 @@ struct IpV4 {
     three: u8,
 }
 
-impl Distribution<IpV4> for Standard {
+impl Distribution<IpV4> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> IpV4
     where
         R: Rng + ?Sized,
     {
         IpV4 {
-            zero: rng.gen(),
-            one: rng.gen(),
-            two: rng.gen(),
-            three: rng.gen(),
+            zero: rng.random(),
+            one: rng.random(),
+            two: rng.random(),
+            three: rng.random(),
         }
     }
 }
@@ -240,12 +240,12 @@ enum Method {
     Patch,
 }
 
-impl Distribution<Method> for Standard {
+impl Distribution<Method> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Method
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..5) {
+        match rng.random_range(0..5) {
             0 => Method::Get,
             1 => Method::Put,
             2 => Method::Post,
@@ -281,7 +281,7 @@ pub(crate) struct Member<'a> {
     bytes_out: u16,
 }
 
-impl<'a> fmt::Display for Member<'a> {
+impl fmt::Display for Member<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -325,17 +325,17 @@ impl<'a> Generator<'a> for ApacheCommon {
         R: rand::Rng + ?Sized,
     {
         Ok(Member {
-            host: rng.gen(),
+            host: rng.random(),
             user: self
                 .str_pool
                 .of_size_range(&mut rng, 1_u16..16_u16)
                 .ok_or(Error::StringGenerate)?,
-            timestamp: rng.gen(),
-            method: rng.gen(),
-            path: rng.gen(),
-            protocol: rng.gen(),
-            status_code: rng.gen(),
-            bytes_out: rng.gen(),
+            timestamp: rng.random(),
+            method: rng.random(),
+            path: rng.random(),
+            protocol: rng.random(),
+            status_code: rng.random(),
+            bytes_out: rng.random(),
         })
     }
 }
@@ -366,7 +366,7 @@ impl crate::Serialize for ApacheCommon {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{ApacheCommon, Serialize};
 

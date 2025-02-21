@@ -1,4 +1,4 @@
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
@@ -21,19 +21,19 @@ pub struct Io {
     cancelled_write_bytes: u64,
 }
 
-impl Distribution<Io> for Standard {
+impl Distribution<Io> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Io
     where
         R: Rng + ?Sized,
     {
         Io {
-            rchar: rng.gen(),
-            wchar: rng.gen(),
-            syscr: rng.gen(),
-            syscw: rng.gen(),
-            read_bytes: rng.gen(),
-            write_bytes: rng.gen(),
-            cancelled_write_bytes: rng.gen(),
+            rchar: rng.random(),
+            wchar: rng.random(),
+            syscr: rng.random(),
+            syscw: rng.random(),
+            read_bytes: rng.random(),
+            write_bytes: rng.random(),
+            cancelled_write_bytes: rng.random(),
         }
     }
 }
@@ -127,12 +127,12 @@ impl State {
     }
 }
 
-impl Distribution<State> for Standard {
+impl Distribution<State> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> State
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..9) {
+        match rng.random_range(0..9) {
             0 => State::Running,
             1 => State::Sleeping,
             2 => State::DiskSleep,
