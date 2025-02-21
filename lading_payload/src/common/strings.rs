@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use rand::distributions::uniform::SampleUniform;
+use rand::distr::uniform::SampleUniform;
 
 const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -45,7 +45,7 @@ impl Pool {
     {
         let mut inner = String::new();
 
-        let mut idx: usize = rng.gen();
+        let mut idx: usize = rng.random::<u32>() as usize;
         let cap = alphabet.len();
 
         if !alphabet.is_empty() {
@@ -53,7 +53,7 @@ impl Pool {
             for _ in 0..bytes {
                 inner.push(unsafe {
                     let c = alphabet[idx % cap];
-                    idx = idx.wrapping_add(rng.gen());
+                    idx = idx.wrapping_add(rng.random::<u32>() as usize);
                     // Safety: `chars` is not empty so choose will never return
                     // None and the values passed in `alphabet` will always be
                     // valid.
@@ -76,7 +76,7 @@ impl Pool {
         }
 
         let max_lower_idx = self.inner.len() - bytes;
-        let lower_idx = rng.gen_range(0..max_lower_idx);
+        let lower_idx = rng.random_range(0..max_lower_idx);
         let upper_idx = lower_idx + bytes;
 
         Some(&self.inner[lower_idx..upper_idx])
@@ -97,7 +97,7 @@ impl Pool {
         }
 
         let max_lower_idx = self.inner.len() - bytes;
-        let lower_idx = rng.gen_range(0..max_lower_idx);
+        let lower_idx = rng.random_range(0..max_lower_idx);
         let upper_idx = lower_idx + bytes;
 
         Some((&self.inner[lower_idx..upper_idx], (lower_idx, bytes)))
@@ -114,7 +114,7 @@ impl Pool {
         R: rand::Rng + ?Sized,
         T: Into<usize> + Copy + PartialOrd + SampleUniform,
     {
-        let bytes: usize = rng.gen_range(bytes_range).into();
+        let bytes: usize = rng.random_range(bytes_range).into();
         self.of_size(rng, bytes)
     }
 
@@ -135,8 +135,8 @@ impl Pool {
 mod test {
     use proptest::prelude::*;
 
-    use super::{Pool, ALPHANUM};
-    use rand::{rngs::SmallRng, SeedableRng};
+    use super::{ALPHANUM, Pool};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     // Ensure that no returned string ever has a non-alphabet character.
     proptest! {

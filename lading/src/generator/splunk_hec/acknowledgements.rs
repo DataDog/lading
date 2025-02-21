@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::Future;
-use http::{header::AUTHORIZATION, Method, Request, StatusCode, Uri};
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http::{Method, Request, StatusCode, Uri, header::AUTHORIZATION};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use metrics::counter;
@@ -48,7 +48,7 @@ pub(crate) enum Channel {
 impl Channel {
     pub(crate) fn id(&self) -> &str {
         match self {
-            Self::Ack { ref id, .. } | Self::NoAck { ref id, .. } => id,
+            Self::Ack { id, .. } | Self::NoAck { id, .. } => id,
         }
     }
 
@@ -145,7 +145,7 @@ impl AckService {
     /// Spawn a tokio task that will continuously query
     /// to check on a particular Splunk channel's ack id statuses. The task
     /// receives new ack ids from [`super::worker::Worker`]
-    pub(crate) async fn spin<'a>(
+    pub(crate) async fn spin(
         self,
         channel_id: String,
         mut ack_rx: Receiver<AckId>,
@@ -214,11 +214,10 @@ async fn ack_request(
 
                 let mut ack_ids_acked: u32 = 0;
                 // Remove successfully acked ack ids
-                for acked_ack_id in
-                    ack_status
-                        .acks
-                        .into_iter()
-                        .filter_map(|(ack_id, acked)| if acked { Some(ack_id) } else { None })
+                for acked_ack_id in ack_status
+                    .acks
+                    .into_iter()
+                    .filter_map(|(ack_id, acked)| if acked { Some(ack_id) } else { None })
                 {
                     ack_ids.remove(&acked_ack_id);
                     ack_ids_acked += 1;

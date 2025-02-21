@@ -2,11 +2,11 @@
 
 use std::io::Write;
 
-use rand::{seq::SliceRandom, Rng};
+use rand::{Rng, seq::IndexedRandom};
 use rmp_serde::Serializer;
 use rustc_hash::FxHashMap;
 
-use crate::{common::strings, Error, Generator};
+use crate::{Error, Generator, common::strings};
 use serde::Serialize;
 
 const SERVICES: [&str; 7] = [
@@ -157,11 +157,11 @@ impl<'a> Generator<'a> for TraceAgent {
     where
         R: rand::Rng + ?Sized,
     {
-        let total_metrics = rng.gen_range(0..6);
+        let total_metrics = rng.random_range(0..6);
         let mut metrics: FxHashMap<&'static str, f64> = FxHashMap::default();
         for _ in 0..total_metrics {}
         for k in TAG_NAMES.choose_multiple(rng, total_metrics) {
-            metrics.insert(*k, rng.gen());
+            metrics.insert(*k, rng.random());
         }
 
         let name = self
@@ -177,12 +177,12 @@ impl<'a> Generator<'a> for TraceAgent {
             service: SERVICES.choose(rng).expect("failed to choose service"),
             name,
             resource,
-            trace_id: rng.gen(),
-            span_id: rng.gen(),
-            parent_id: rng.gen(),
-            start: rng.gen(),
-            duration: rng.gen(),
-            error: rng.gen_range(0..=1),
+            trace_id: rng.random(),
+            span_id: rng.random(),
+            parent_id: rng.random(),
+            start: rng.random(),
+            duration: rng.random(),
+            error: rng.random_range(0..=1),
             meta: FxHashMap::default(),
             metrics,
             kind: SERVICE_KIND
@@ -210,7 +210,7 @@ impl crate::Serialize for TraceAgent {
         let mut members: Vec<Vec<Span>> = vec![];
         let mut remaining: u16 = 10_000;
         while remaining > 0 {
-            let total = rng.gen_range(0..=remaining);
+            let total = rng.random_range(0..=remaining);
             let spans: Vec<Span> = (0..total)
                 .map(|_| self.generate(&mut rng).expect("Generate failed"))
                 .collect();
@@ -268,7 +268,7 @@ impl crate::Serialize for TraceAgent {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{Serialize, TraceAgent};
 

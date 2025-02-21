@@ -2,9 +2,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use rand::distributions::Distribution;
 use rand::Rng;
-use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use rand::distr::Distribution;
+use rand::seq::IndexedRandom;
+use rand::{SeedableRng, rngs::SmallRng};
 use tracing::warn;
 
 use crate::dogstatsd::common::OpenClosed01;
@@ -96,13 +97,15 @@ impl Generator {
         }
 
         if !(MIN_UNIQUE_TAG_RATIO..=MAX_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            return Err(Error::InvalidConstruction(
-                format!("Unique tag ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"),
-            ));
+            return Err(Error::InvalidConstruction(format!(
+                "Unique tag ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"
+            )));
         }
 
         if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            warn!("unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in non-unique tagsets");
+            warn!(
+                "unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in non-unique tagsets"
+            );
         }
 
         let rng = SmallRng::seed_from_u64(seed);
@@ -186,7 +189,7 @@ impl<'a> crate::Generator<'a> for Generator {
                 // subtract 1 to account for delimiter
                 let desired_size = self.tag_length.sample(&mut *rng) as usize - 1;
                 // randomly split this between two strings
-                let key_size = rng.gen_range(1..desired_size);
+                let key_size = rng.random_range(1..desired_size);
                 let value_size = desired_size - key_size;
 
                 let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
@@ -209,18 +212,18 @@ impl<'a> crate::Generator<'a> for Generator {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{hash_map::RandomState, BTreeSet, HashMap};
+    use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
     use std::hash::BuildHasher;
     use std::hash::Hasher;
     use std::rc::Rc;
 
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
+    use crate::Generator;
     use crate::common::strings::Pool;
     use crate::dogstatsd::common::tags::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
-    use crate::dogstatsd::{tags, ConfRange};
-    use crate::Generator;
+    use crate::dogstatsd::{ConfRange, tags};
 
     /// given a list of tagsets, this returns the number of unique timeseries that they represent
     /// in dogstatsd terms, if we assume a constant metric name,

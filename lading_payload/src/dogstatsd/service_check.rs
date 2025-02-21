@@ -1,7 +1,7 @@
 //! `DogStatsD` service check.
 use std::fmt;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use crate::{Error, Generator};
 
@@ -29,7 +29,7 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
         let name = self.names.choose(&mut rng).expect("failed to choose name");
         let hostname = choose_or_not_ref(&mut rng, &self.small_strings).map(String::as_str);
         let message = choose_or_not_ref(&mut rng, &self.texts_or_messages).map(String::as_str);
-        let tags = if rng.gen() {
+        let tags = if rng.random() {
             Some(self.tags_generator.generate(&mut rng)?)
         } else {
             None
@@ -37,8 +37,8 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
 
         Ok(ServiceCheck {
             name,
-            status: rng.gen(),
-            timestamp_second: rng.gen(),
+            status: rng.random(),
+            timestamp_second: rng.random_bool(0.5).then(|| rng.random()),
             hostname,
             tags,
             message,
@@ -63,7 +63,7 @@ pub struct ServiceCheck<'a> {
     pub message: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for ServiceCheck<'a> {
+impl fmt::Display for ServiceCheck<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         write!(
@@ -111,12 +111,12 @@ pub enum Status {
     Unknown,
 }
 
-impl Distribution<Status> for Standard {
+impl Distribution<Status> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Status
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..4) {
+        match rng.random_range(0..4) {
             0 => Status::Ok,
             1 => Status::Warning,
             2 => Status::Critical,

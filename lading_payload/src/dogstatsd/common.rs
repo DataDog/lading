@@ -1,9 +1,9 @@
 use std::fmt;
 
 use rand::{
-    distributions::{OpenClosed01, Standard, Uniform},
-    prelude::Distribution,
     Rng,
+    distr::{OpenClosed01, StandardUniform, Uniform},
+    prelude::Distribution,
 };
 
 use crate::{Error, Generator};
@@ -43,8 +43,10 @@ impl NumValueGenerator {
             },
             ConfRange::Inclusive { min, max } => Self::Uniform {
                 float_probability: conf.float_probability,
-                int_distr: Uniform::new_inclusive(min, max),
-                float_distr: Uniform::new_inclusive(min as f64, max as f64),
+                int_distr: Uniform::new_inclusive(min, max)
+                    .expect("unable to compute uniform value"),
+                float_distr: Uniform::new_inclusive(min as f64, max as f64)
+                    .expect("unable to compute uniform value"),
             },
         }
     }
@@ -122,14 +124,14 @@ impl TryFrom<f32> for ZeroToOne {
     }
 }
 
-impl Distribution<ZeroToOne> for Standard {
+impl Distribution<ZeroToOne> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> ZeroToOne
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..=1) {
+        match rng.random_range(0..=1) {
             0 => ZeroToOne::One,
-            1 => ZeroToOne::Frac(rng.gen()),
+            1 => ZeroToOne::Frac(rng.random()),
             _ => unreachable!(),
         }
     }
