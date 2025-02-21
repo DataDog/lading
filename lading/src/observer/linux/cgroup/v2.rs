@@ -69,7 +69,9 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                         format!("cgroup.v2.{s}")
                                     } else {
                                         // Skip files with non-UTF-8 names
-                                        warn!("Encountered non-UTF-8 file name in cgroup v2 directory. What a weird thing to happen.");
+                                        warn!(
+                                            "Encountered non-UTF-8 file name in cgroup v2 directory. What a weird thing to happen."
+                                        );
                                         continue;
                                     };
                                     let file_path = entry.path();
@@ -78,11 +80,6 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                         Ok(content) => {
                                             let content = content.trim();
                                             match file_name.to_str() {
-                                                None => {
-                                                    error!(
-                                                        "Failed to parse file name: {file_name:?}"
-                                                    );
-                                                }
                                                 Some(
                                                     "memory.current"
                                                     | "memory.high"
@@ -115,8 +112,9 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                         &metric_prefix,
                                                         labels,
                                                     ) {
-                                                        warn!("[{metric_prefix}] Failed to parse PSI contents: {err:?}",
-                                                    );
+                                                        warn!(
+                                                            "[{metric_prefix}] Failed to parse PSI contents: {err:?}",
+                                                        );
                                                     }
                                                 }
                                                 Some(
@@ -143,7 +141,9 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     io::stat(content, &metric_prefix, labels);
                                                 }
                                                 Some(unknown) => {
-                                                    debug!("Heuristicly parsing of unknown cgroup v2 file: {unknown}");
+                                                    debug!(
+                                                        "Heuristicly parsing of unknown cgroup v2 file: {unknown}"
+                                                    );
                                                     if content == "max" {
                                                         gauge!(metric_prefix, labels).set(f64::MAX);
                                                     } else if let Ok(value) = content.parse::<f64>()
@@ -152,6 +152,11 @@ pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Resul
                                                     } else {
                                                         kv_gauge(content, &metric_prefix, labels);
                                                     }
+                                                }
+                                                None => {
+                                                    error!(
+                                                        "Failed to parse file name: {file_name:?}"
+                                                    );
                                                 }
                                             }
                                         }
