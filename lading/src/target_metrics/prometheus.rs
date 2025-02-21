@@ -141,8 +141,8 @@ impl Prometheus {
         scrape_metrics(
             &self.client,
             &self.config.uri,
-            &self.config.tags,
-            &self.config.metrics,
+            self.config.tags.as_ref(),
+            self.config.metrics.as_ref(),
         )
         .await;
     }

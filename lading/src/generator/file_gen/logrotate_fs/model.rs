@@ -1057,7 +1057,7 @@ mod test {
 
     fn random_inode<R>(rng: &mut R, state: &State) -> Inode
     where
-        R: Rng,
+        R: rand::Rng,
     {
         if state.nodes.is_empty() {
             state.root_inode
@@ -1068,7 +1068,7 @@ mod test {
 
     fn random_name<R>(rng: &mut R, state: &State) -> String
     where
-        R: Rng,
+        R: rand::Rng,
     {
         let names: Vec<String> = state
             .nodes
