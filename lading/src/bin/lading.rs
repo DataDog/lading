@@ -227,7 +227,7 @@ enum ExtraCommands {
 #[clap(group(
     ArgGroup::new("config")
         .required(true)
-        .args(&["config-path", "config-content"]),
+        .args(&["config_path", "config_content"]),
 ))]
 struct ProcessTreeGen {
     /// path on disk to the configuration file
