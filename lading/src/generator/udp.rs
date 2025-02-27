@@ -21,7 +21,7 @@ use std::{
 use byte_unit::{Byte, ByteError, ByteUnit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, info, trace};

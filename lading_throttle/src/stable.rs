@@ -140,7 +140,7 @@ impl Valve {
 
 #[cfg(kani)]
 mod verification {
-    use crate::stable::{Valve, INTERVAL_TICKS};
+    use crate::stable::{INTERVAL_TICKS, Valve};
     use std::num::NonZeroU32;
 
     /// Capacity requests that are too large always error.

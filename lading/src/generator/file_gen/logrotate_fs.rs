@@ -6,13 +6,13 @@
 
 use crate::generator;
 use fuser::{
-    spawn_mount2, BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEntry, Request,
+    BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
+    ReplyEntry, Request, spawn_mount2,
 };
 use lading_payload::block;
 use metrics::counter;
 use nix::libc::{self, ENOENT};
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,

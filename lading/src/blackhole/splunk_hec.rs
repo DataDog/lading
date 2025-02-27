@@ -12,8 +12,8 @@ use std::{
 };
 
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{header, Method, Request, Response, StatusCode};
+use http_body_util::{BodyExt, combinators::BoxBody};
+use hyper::{Method, Request, Response, StatusCode, header};
 use metrics::counter;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};

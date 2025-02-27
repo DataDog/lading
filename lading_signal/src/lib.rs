@@ -15,17 +15,17 @@
 
 #[cfg(not(loom))]
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 
 #[cfg(loom)]
 use loom::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 
-use tokio::sync::{broadcast, Notify};
+use tokio::sync::{Notify, broadcast};
 use tracing::info;
 
 /// Construct a `Watcher` and `Broadcaster` pair.

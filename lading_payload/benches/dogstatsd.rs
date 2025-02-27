@@ -1,7 +1,7 @@
-use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
-use lading_payload::{dogstatsd, Serialize};
-use rand::{rngs::SmallRng, SeedableRng};
+use lading_payload::{Serialize, dogstatsd};
+use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 fn dogstatsd_setup(c: &mut Criterion) {

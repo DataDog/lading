@@ -16,16 +16,16 @@ use std::{convert::TryFrom, num::NonZeroU32, thread, time::Duration};
 
 use byte_unit::ByteError;
 use bytes::{Buf, BufMut, Bytes};
-use http::{uri::PathAndQuery, Uri};
+use http::{Uri, uri::PathAndQuery};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tonic::{
-    codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
     Request, Response, Status,
+    codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
 };
 use tracing::{debug, info};
 

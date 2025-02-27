@@ -14,14 +14,14 @@
 use std::{num::NonZeroU32, thread};
 
 use byte_unit::ByteError;
-use hyper::{header::CONTENT_LENGTH, HeaderMap, Request, Uri};
+use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
-use rand::{prelude::StdRng, SeedableRng};
+use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tracing::info;
 
 use crate::common::PeekableReceiver;

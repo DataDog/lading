@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rand::{prelude::IteratorRandom, Rng};
+use rand::{Rng, prelude::IteratorRandom};
 use tracing::debug;
 
 #[derive(Debug)]
