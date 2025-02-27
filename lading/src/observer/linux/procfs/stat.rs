@@ -63,9 +63,9 @@ impl Sampler {
         let parts: Vec<&str> = cpu_max.split_whitespace().collect();
         let (max_str, period_str) = (parts[0], parts[1]);
         let allowed_cores = if max_str == "max" {
-            // If the target cgroup has no CPU limit we assume it has access to all
-            // physical cores.
-            num_cpus::get_physical() as f64
+            // If the target cgroup has no CPU limit we assume it has access to
+            // all cores.
+            num_cpus::get() as f64
         } else {
             let max_val = max_str.parse::<f64>()?;
             let period_val = period_str.parse::<f64>()?;
