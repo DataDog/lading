@@ -483,7 +483,8 @@ fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
     let mut exited: Option<Pid> = None;
 
     for pid in pids.iter() {
-        if let Ok(WaitStatus::StillAlive) = waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {} else {
+        if let Ok(WaitStatus::StillAlive) = waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {
+        } else {
             exited = Some(*pid);
             break;
         }

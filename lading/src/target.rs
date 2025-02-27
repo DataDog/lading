@@ -28,7 +28,7 @@ use lading_signal::Broadcaster;
 use metrics::gauge;
 use nix::{
     errno::Errno,
-    sys::signal::{kill, SIGTERM},
+    sys::signal::{SIGTERM, kill},
     unistd::Pid,
 };
 use rustc_hash::FxHashMap;

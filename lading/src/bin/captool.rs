@@ -1,16 +1,16 @@
-use std::collections::{hash_map::RandomState, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
 
 use async_compression::tokio::bufread::ZstdDecoder;
-use average::{concatenate, Estimate, Max, Min, Variance};
+use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
 use lading_capture::json::{Line, MetricKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::LinesStream;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 

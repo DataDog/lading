@@ -13,8 +13,8 @@ use std::str::FromStr;
 use std::{fs::File, io::Write, num::NonZeroU32, path::PathBuf};
 
 use lading_payload::procfs;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 #[derive(::thiserror::Error, Debug)]

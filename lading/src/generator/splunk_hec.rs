@@ -21,22 +21,22 @@ use std::{future::ready, num::NonZeroU32, thread, time::Duration};
 use acknowledgements::Channels;
 use byte_unit::ByteError;
 use http::{
-    header::{AUTHORIZATION, CONTENT_LENGTH},
     Method, Request, Uri,
+    header::{AUTHORIZATION, CONTENT_LENGTH},
 };
 use http_body_util::BodyExt;
 use hyper::body::Body;
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
-use rand::{prelude::StdRng, SeedableRng};
+use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, Semaphore, SemaphorePermit},
+    sync::{Semaphore, SemaphorePermit, mpsc},
     time::timeout,
 };
 use tracing::info;

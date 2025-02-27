@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use byte_unit::ByteError;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, warn};

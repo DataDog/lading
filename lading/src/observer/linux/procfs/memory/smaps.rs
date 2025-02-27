@@ -641,9 +641,9 @@ VmFlags:               rd wr mr mw me ac";
 
         let region = Region::from_str(region).expect("Parsing failed");
         assert_eq!(
-        region.pathname,
-        "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
-    );
+            region.pathname,
+            "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
+        );
         assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
         assert_eq!(region.private_dirty.unwrap(), 20 * BYTES_PER_KIBIBYTE);
     }

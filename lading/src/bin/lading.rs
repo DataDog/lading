@@ -20,17 +20,17 @@ use lading::{
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use tokio::{
     runtime::Builder,
     signal,
     sync::broadcast,
-    time::{self, sleep, Duration},
+    time::{self, Duration, sleep},
 };
-use tracing::{debug, error, info, info_span, warn, Instrument};
-use tracing_subscriber::{util::SubscriberInitExt, EnvFilter};
+use tracing::{Instrument, debug, error, info, info_span, warn};
+use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

@@ -29,8 +29,8 @@ use std::{
 use anyhow::Context;
 use hyper_util::rt::TokioIo;
 use shared::{
-    integration_api::{self, integration_target_client::IntegrationTargetClient},
     DucksConfig,
+    integration_api::{self, integration_target_client::IntegrationTargetClient},
 };
 use tempfile::TempDir;
 use tokio::{net::UnixStream, process::Command};

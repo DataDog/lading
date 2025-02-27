@@ -4,7 +4,7 @@ mod stat;
 mod uptime;
 
 use std::{
-    collections::{hash_map::Entry, VecDeque},
+    collections::{VecDeque, hash_map::Entry},
     io,
 };
 

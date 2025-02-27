@@ -7,9 +7,9 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
-use crate::{common::strings, Error};
+use crate::{Error, common::strings};
 use opentelemetry_proto::tonic::{
-    common::v1::{any_value, AnyValue},
+    common::v1::{AnyValue, any_value},
     logs::v1,
 };
 use prost::Message;
@@ -134,7 +134,7 @@ mod test {
     use crate::Serialize;
     use proptest::prelude::*;
     use prost::Message;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

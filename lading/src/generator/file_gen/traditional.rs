@@ -17,8 +17,8 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     thread,
 };
@@ -27,7 +27,7 @@ use byte_unit::{Byte, ByteError};
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::{prelude::StdRng, SeedableRng};
+use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
