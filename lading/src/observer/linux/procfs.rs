@@ -90,6 +90,7 @@ impl Sampler {
         let mut pids: FxHashSet<i32> = FxHashSet::default();
         let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
         processes.push_back(Process::new(self.parent.pid())?);
+        pids.insert(self.parent.pid());
 
         while let Some(process) = processes.pop_back() {
             // Search for child processes. This is done by querying for every
@@ -117,14 +118,15 @@ impl Sampler {
                     }
                 }
             }
-            // Update the process_info map to only hold processes seen by the current poll call.
-            self.process_info.retain(|pid, _| pids.contains(pid));
 
             let pid = process.pid();
             if let Err(e) = self.handle_process(process, &mut aggr, include_smaps).await {
                 warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
             }
         }
+
+        // Update the process_info map to only hold processes seen by the current poll call.
+        self.process_info.retain(|pid, _| pids.contains(pid));
 
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
