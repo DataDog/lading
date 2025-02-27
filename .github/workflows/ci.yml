@@ -25,7 +25,7 @@ jobs:
             protobuf: true
             fuse: true
             components: "rustfmt"
-            command: cargo fmt --all -- --check --all-features
+            command: cargo fmt --all -- --check
           - tool: clippy
             protobuf: true
             fuse: true
