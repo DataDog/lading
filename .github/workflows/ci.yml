@@ -14,6 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        tool: [check, fmt, clippy]
         include:
           - tool: check
             protobuf: true
