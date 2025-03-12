@@ -403,7 +403,7 @@ async fn write_bytes(
     maximum_bytes_per_log: u64,
     names: &[PathBuf],
     last_name: &Path,
-    labels: &[(String, String)],
+    _labels: &[(String, String)],
 ) -> Result<(), Error> {
     let total_bytes = u64::from(blk.total_bytes.get());
 

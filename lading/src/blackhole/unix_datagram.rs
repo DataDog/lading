@@ -36,7 +36,7 @@ pub struct Config {
 pub struct UnixDatagram {
     path: PathBuf,
     shutdown: lading_signal::Watcher,
-    metric_labels: Vec<(String, String)>,
+    _metric_labels: Vec<(String, String)>,
 }
 
 impl UnixDatagram {
@@ -54,7 +54,7 @@ impl UnixDatagram {
         Self {
             path: config.path,
             shutdown,
-            metric_labels,
+            _metric_labels: metric_labels,
         }
     }
 
