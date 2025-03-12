@@ -67,7 +67,10 @@ impl Tcp {
         while let Some(msg) = stream.next().await {
             counter!("message_received", labels).increment(1);
             if let Ok(msg) = msg {
-                counter!("bytes_received", labels).increment(msg.len() as u64);
+                // This metric must be written with a single context or it will
+                // crash analysis. The simple way to accomplish that is to
+                // attach no labels to it.
+                counter!("bytes_received").increment(msg.len() as u64);
             }
         }
     }

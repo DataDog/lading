@@ -225,7 +225,10 @@ async fn srv(
 
     let (_, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
+
+    // This metric must be written with a single context or it will crash
+    // analysis. The simple way to accomplish that is to attach no labels to it.
+    counter!("bytes_received").increment(bytes.len() as u64);
 
     let action = match serde_qs::from_bytes::<Action>(&bytes) {
         Ok(a) => a,

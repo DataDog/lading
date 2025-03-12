@@ -84,7 +84,11 @@ impl Udp {
                 packet = socket.recv_from(&mut buf) => {
                     let (bytes, _) = packet.map_err(Error::Io)?;
                     counter!("packet_received", &self.metric_labels).increment(1);
-                    counter!("bytes_received", &self.metric_labels).increment(bytes as u64);
+
+                    // This metric must be written with a single context or it
+                    // will crash analysis. The simple way to accomplish that is
+                    // to attach no labels to it.
+                    counter!("bytes_received").increment(bytes as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
