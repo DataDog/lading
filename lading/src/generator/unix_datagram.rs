@@ -256,7 +256,11 @@ impl Child {
                     let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     match socket.send(&blk.bytes).await {
                         Ok(bytes) => {
-                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                            // This metric must be written with a single context
+                            // or it will crash analysis. The simple way to
+                            // accomplish that is to attach no labels to it.
+                            counter!("bytes_written").increment(bytes as u64);
+
                             counter!("packets_sent", &self.metric_labels).increment(1);
                         }
                         Err(err) => {

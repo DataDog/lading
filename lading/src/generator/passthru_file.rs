@@ -178,7 +178,10 @@ impl PassthruFile {
                     let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
                     match current_file.write_all(&blk.bytes).await {
                         Ok(()) => {
-                            counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
+                            // This metric must be written with a single context
+                            // or it will crash analysis. The simple way to
+                            // accomplish that is to attach no labels to it.
+                            counter!("bytes_written").increment(u64::from(blk.total_bytes.get()));
                         }
                         Err(err) => {
                             warn!("write failed: {}", err);

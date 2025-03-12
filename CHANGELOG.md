@@ -6,8 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ## Fixed
-- Component name labels have been removed from the `bytes_received` metric to
-  fix egress throughput optimization goal analysis.
+- Labels have been removed from the `bytes_received` and `bytes_written` metrics
+   to fix some scenarios where they could break optimization goal analysis.
 ## Changed
 - Lading now built with edition 2024
 

@@ -411,7 +411,11 @@ async fn write_bytes(
         fp.write_all(&blk.bytes)
             .await
             .map_err(|err| Error::IoWriteAll { err })?;
-        counter!("bytes_written", labels).increment(total_bytes);
+
+        // This metric must be written with a single context or it will crash
+        // analysis. The simple way to accomplish that is to attach no labels to
+        // it.
+        counter!("bytes_written").increment(total_bytes);
         *total_bytes_written += total_bytes;
     }
 

@@ -236,7 +236,11 @@ impl Http {
                         counter!("requests_sent", &labels).increment(1);
                         match client.request(request).await {
                             Ok(response) => {
-                                counter!("bytes_written", &labels).increment(block_length as u64);
+                                // This metric must be written with a single
+                                // context or it will crash analysis. The simple
+                                // way to accomplish that is to attach no labels
+                                // to it.
+                                counter!("bytes_written").increment(block_length as u64);
                                 let status = response.status();
                                 let mut status_labels = labels.clone();
                                 status_labels
