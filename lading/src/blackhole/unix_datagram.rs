@@ -36,7 +36,7 @@ pub struct Config {
 pub struct UnixDatagram {
     path: PathBuf,
     shutdown: lading_signal::Watcher,
-    metric_labels: Vec<(String, String)>,
+    _metric_labels: Vec<(String, String)>,
 }
 
 impl UnixDatagram {
@@ -54,7 +54,7 @@ impl UnixDatagram {
         Self {
             path: config.path,
             shutdown,
-            metric_labels,
+            _metric_labels: metric_labels,
         }
     }
 
@@ -83,7 +83,10 @@ impl UnixDatagram {
             tokio::select! {
                 res = socket.recv(&mut buf) => {
                     let n: usize = res.map_err(Error::Io)?;
-                    counter!("bytes_received", &self.metric_labels).increment(n as u64);
+                    // This metric must be written with a single context or it
+                    // will crash analysis. The simple way to accomplish that is
+                    // to attach no labels to it.
+                    counter!("bytes_received").increment(n as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

@@ -92,7 +92,10 @@ async fn srv(
 
     let (parts, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &*labels).increment(bytes.len() as u64);
+
+    // This metric must be written with a single context or it will crash
+    // analysis. The simple way to accomplish that is to attach no labels to it.
+    counter!("bytes_received").increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(response),
