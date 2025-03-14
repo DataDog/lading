@@ -34,7 +34,7 @@ uuid = { version = "1.15", default-features = false, features = [
   "v4",
   "serde",
 ] }
-once_cell = { version = "1.20" }
+once_cell = { version = "1.21" }
 
 http = { version = "1.2" }
 http-body-util = { version = "0.1" }
