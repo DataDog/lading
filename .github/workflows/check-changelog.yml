@@ -25,10 +25,12 @@ jobs:
     - name: Check if CHANGELOG.md was modified
       id: changelog-check
       if: steps.label-check.outputs.has_label == 'false'
-      uses: tj-actions/changed-files@dcc7a0cba800f454d79fff4b993e8c3555bcc0a8 # v45.0.7
-      with:
-        files: |
-          CHANGELOG.md
+      run: |
+          if git diff --quiet HEAD^ -- CHANGELOG.md; then
+              echo "any_changed=false" >> $GITHUB_OUTPUT
+          else
+              echo "any_changed=true" >> $GITHUB_OUTPUT
+          fi
 
     - name: Assert CHANGELOG.md is modified
       uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
