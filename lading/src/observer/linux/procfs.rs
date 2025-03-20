@@ -83,6 +83,8 @@ impl Sampler {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = memory::smaps_rollup::Aggregator::default();
+        let mut processes_found: i32 = 0;
+        let mut pids_skipped: FxHashSet<i32> = FxHashSet::default();
 
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
@@ -119,9 +121,18 @@ impl Sampler {
                 }
             }
 
+            processes_found += 1;
             let pid = process.pid();
-            if let Err(e) = self.handle_process(process, &mut aggr, include_smaps).await {
-                warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
+            match self.handle_process(process, &mut aggr, include_smaps).await {
+                Ok(false) => {
+                    pids_skipped.insert(pid);
+                }
+                Err(e) => {
+                    warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
+                }
+                _ => {
+                    // handled successfully
+                }
             }
         }
 
@@ -130,10 +141,22 @@ impl Sampler {
 
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
+        gauge!("processes_found").set(processes_found as f64);
+
+        // If we skipped any processes, log a warning.
+        if !pids_skipped.is_empty() {
+            warn!(
+                "Skipped {} processes: {:?}",
+                pids_skipped.len(),
+                pids_skipped
+            );
+        }
 
         Ok(())
     }
 
+    /// Handle a process. Returns true if the process was handled successfully,
+    /// false if it was skipped for any reason.    
     #[allow(
         clippy::similar_names,
         clippy::too_many_lines,
@@ -146,7 +169,7 @@ impl Sampler {
         process: Process,
         aggr: &mut memory::smaps_rollup::Aggregator,
         include_smaps: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let pid = process.pid();
 
         // `/proc/{pid}/status`
@@ -156,12 +179,12 @@ impl Sampler {
                 warn!("Couldn't read status: {:?}", e);
                 // The pid may have exited since we scanned it or we may not
                 // have sufficient permission.
-                return Ok(());
+                return Ok(false);
             }
         };
         if status.tgid != pid {
             // This is a thread, not a process and we do not wish to scan it.
-            return Ok(());
+            return Ok(false);
         }
 
         // If we haven't seen this process before, initialize its ProcessInfo.
@@ -174,7 +197,7 @@ impl Sampler {
                         warn!("Couldn't read exe for pid {}: {:?}", pid, e);
                         // The pid may have exited since we scanned it or we may not
                         // have sufficient permission.
-                        return Ok(());
+                        return Ok(false);
                     }
                 };
                 let comm = match proc_comm(pid).await {
@@ -183,7 +206,7 @@ impl Sampler {
                         warn!("Couldn't read comm for pid {}: {:?}", pid, e);
                         // The pid may have exited since we scanned it or we may not
                         // have sufficient permission.
-                        return Ok(());
+                        return Ok(false);
                     }
                 };
                 let cmdline = match proc_cmdline(pid).await {
@@ -192,7 +215,7 @@ impl Sampler {
                         warn!("Couldn't read cmdline for pid {}: {:?}", pid, e);
                         // The pid may have exited since we scanned it or we may not
                         // have sufficient permission.
-                        return Ok(());
+                        return Ok(false);
                     }
                 };
                 let pid_s = format!("{pid}");
@@ -238,7 +261,7 @@ impl Sampler {
             // which will happen if we don't have permissions or, more
             // likely, the process has exited.
             warn!("Couldn't process `/proc/{pid}/stat`: {e}");
-            return Ok(());
+            return Ok(false);
         }
 
         if include_smaps {
@@ -317,10 +340,10 @@ impl Sampler {
             // which will happen if we don't have permissions or, more
             // likely, the process has exited.
             warn!("Couldn't process `/proc/{pid}/smaps_rollup`: {err}");
-            return Ok(());
+            return Ok(false);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 
