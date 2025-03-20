@@ -15,7 +15,7 @@
 			"installDockerBuildx": "true"
 		},
 		"ghcr.io/devcontainers/features/rust:1": {
-			"version": "1.70",
+			"version": "1.85",
 			"profile": "complete"
 		},
 		"ghcr.io/devcontainers/features/git:1": {
