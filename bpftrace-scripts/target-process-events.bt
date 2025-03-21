@@ -1,0 +1,116 @@
+#!/usr/bin/env bpftrace
+
+// This bpftrace script tracks events for the target process and its children
+// It will automatically use the TARGET_PID environment variable set by Lading
+
+BEGIN {
+    printf("Starting bpftrace monitoring for target process\n");
+
+    // Get the target PID from environment variable set by Lading
+    @target_pid = atoi(env("TARGET_PID"));
+
+    if (@target_pid > 0) {
+        printf("Monitoring process with PID %d and its children\n", @target_pid);
+    } else {
+        printf("No target PID provided or running in no-target mode\n");
+        printf("Will monitor all process events system-wide\n");
+        @target_pid = 0; // Use 0 to indicate monitoring all processes
+    }
+
+    // Initialize counters
+    @process_starts = 0;
+    @process_exits = 0;
+    @signals_received = 0;
+    @target_cpu_migrations = 0;
+}
+
+// Track process creation
+tracepoint:syscalls:sys_enter_execve
+{
+    $pid = pid;
+    $ppid = ppid;
+
+    // Only track the target process tree or all processes if @target_pid is 0
+    if (@target_pid == 0 || $pid == @target_pid || $ppid == @target_pid) {
+        @process_starts++;
+        printf("EXEC: %s (PID: %d, PPID: %d, ARGS: ", comm, $pid, $ppid);
+
+        // Print command line arguments when available
+        $argsp = args->argv;
+        if ($argsp) {
+            $arg_idx = 0;
+            while ($arg_idx < 3) {  // Limit to first 3 args to avoid overwhelming output
+                $argp = *($argsp + $arg_idx);
+                if ($argp == 0) {
+                    break;
+                }
+                printf("%s ", str($argp));
+                $arg_idx++;
+            }
+            if (*($argsp + $arg_idx) != 0) {
+                printf("...");  // Indicate if more args were present
+            }
+        }
+        printf(")\n");
+    }
+}
+
+// Track process exit
+tracepoint:syscalls:sys_exit_exit,
+tracepoint:syscalls:sys_exit_exit_group
+{
+    $pid = pid;
+
+    // Only track the target process tree or all processes if @target_pid is 0
+    if (@target_pid == 0 || $pid == @target_pid || pid_tree($pid, @target_pid)) {
+        @process_exits++;
+        printf("EXIT: %s (PID: %d, Exit Code: %d)\n", comm, $pid, args->error);
+    }
+}
+
+// Track signals received by the target process
+tracepoint:signal:signal_deliver
+/ @target_pid == 0 || pid == @target_pid /
+{
+    @signals_received++;
+    printf("SIGNAL: Process %s (PID: %d) received signal %d (%s)\n",
+           comm, pid, args->sig, sig_name(args->sig));
+}
+
+// Track CPU migrations for the target process
+tracepoint:sched:sched_migrate_task
+/ @target_pid == 0 || args->pid == @target_pid /
+{
+    @target_cpu_migrations++;
+    printf("CPU_MIGRATION: Process %s (PID: %d) moved from CPU %d to CPU %d\n",
+           comm, args->pid, args->orig_cpu, args->dest_cpu);
+}
+
+// Track major page faults (useful to see memory pressure)
+software:major-faults
+/ @target_pid == 0 || pid == @target_pid /
+{
+    printf("MAJOR_FAULT: Process %s (PID: %d) had a major page fault\n", comm, pid);
+}
+
+// Print summary when exiting
+END {
+    printf("\n=== Process Monitoring Summary ===\n");
+    printf("Process creations: %d\n", @process_starts);
+    printf("Process exits: %d\n", @process_exits);
+    printf("Signals received: %d\n", @signals_received);
+    printf("CPU migrations: %d\n", @target_cpu_migrations);
+    printf("Monitoring complete\n");
+}
+
+// Helper function to check if a process is in the target's process tree
+function pid_tree(pid, target) {
+    $ppid = pid_parent(pid);
+    if ($ppid == 0) {
+        return 0;
+    }
+    if ($ppid == target) {
+        return 1;
+    }
+    return pid_tree($ppid, target);
+}

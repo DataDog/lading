@@ -435,10 +435,67 @@ async fn inner_main(
     //
     if let Some(inspector_conf) = config.inspector {
         if !disable_inspector {
+            // Check for platform compatibility if the command looks like bpftrace
+            if inspector_conf
+                .command
+                .to_string_lossy()
+                .contains("bpftrace")
+            {
+                #[cfg(not(target_os = "linux"))]
+                {
+                    warn!(
+                        "bpftrace is only available on Linux. Current OS: {}",
+                        std::env::consts::OS
+                    );
+                    warn!("The inspector configured to use bpftrace will fail on this platform.");
+                    warn!("Consider running this configuration in a Linux VM or container.");
+                }
+            }
+
             let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server =
-                inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
-            let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
+
+            // Check if the inspector command exists before attempting to run it
+            if !inspector_conf.command.exists() {
+                error!("Inspector command not found: {:?}", inspector_conf.command);
+                error!("Please ensure the command is installed and in the PATH.");
+                if inspector_conf
+                    .command
+                    .to_string_lossy()
+                    .contains("bpftrace")
+                {
+                    error!(
+                        "bpftrace can be installed with: apt-get install bpftrace (Debian/Ubuntu) or yum install bpftrace (RHEL/CentOS)"
+                    );
+                }
+            } else {
+                let inspector_server =
+                    inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
+                let _isrv = tokio::spawn(async {
+                    match inspector_server.run(tgt_rcv).await {
+                        Ok(status) => {
+                            if status.success() {
+                                debug!("inspector shut down successfully with status: {}", status);
+                            } else {
+                                warn!("inspector exited with non-zero status: {}", status);
+                            }
+                        }
+                        Err(err) => {
+                            error!("inspector failed with error: {:?}", err);
+                            if let inspector::Error::Io(ref io_err) = err {
+                                if io_err.kind() == std::io::ErrorKind::NotFound {
+                                    error!(
+                                        "Command not found. Please check if it's installed correctly."
+                                    );
+                                } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                                    error!(
+                                        "Permission denied. bpftrace may require root privileges."
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+            }
         }
     }
 

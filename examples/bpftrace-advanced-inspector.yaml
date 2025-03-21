@@ -1,0 +1,44 @@
+generator:
+  - tcp:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      addr: "0.0.0.0:8282"
+      variant: "syslog5424"
+      bytes_per_second: "10 Mb"
+      maximum_prebuild_cache_size_bytes: "32 Mb"
+
+# This blackhole simply provides an endpoint to receive traffic
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:8282"
+
+# This advanced inspector configuration uses a standalone bpftrace script
+# that focuses on tracking the target process and its children
+inspector:
+  # Path to bpftrace executable
+  command: /usr/bin/bpftrace
+  # Using our standalone script file instead of inline script
+  arguments:
+    - "/usr/share/lading/bpftrace-scripts/target-process-events.bt"
+  # Environment variables for the bpftrace process
+  environment_variables:
+    BPFTRACE_STRLEN: "128"  # Increase string length for command arguments
+    BPFTRACE_NO_USER_SYMBOLS: "1"  # Performance optimization
+    BPFTRACE_PERF_RB_PAGES: "64"  # Increase buffer size for high-volume events
+    # Optional: Use this to filter only certain processes by name (regex)
+    # BPFTRACE_FILTER_COMM: "(bash|python|node)"
+  # Output configuration for inspector process
+  output:
+    # Log the bpftrace output to files with timestamps
+    stdout: "/tmp/lading-target-process-events.log"
+    stderr: "/tmp/lading-bpftrace-errors.log"
+
+# Set a longer sample period to reduce overhead
+sample_period_milliseconds: 2000
+
+# Optional target metrics configuration to gather system metrics
+# This works alongside the bpftrace inspector
+target_metrics:
+  - prometheus_scrape:
+      scrape_interval_seconds: 15
+      targets:
+        - "http://localhost:9100/metrics"  # Node exporter metrics if available

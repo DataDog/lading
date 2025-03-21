@@ -113,6 +113,8 @@ impl Server {
 
         let config = self.config;
 
+        let cmd_path = &config.command.to_string_lossy().to_string();
+
         let mut target_cmd = Command::new(config.command);
         let mut environment_variables = config.environment_variables.clone();
         if let Some(pid) = target_pid {
@@ -129,18 +131,54 @@ impl Server {
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(environment_variables.iter());
-        let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
+
+        info!("Starting inspector command: {:?}", cmd_path);
+
+        // Try to spawn the command and provide detailed error information
+        let mut target_child = match target_cmd.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        error!("Inspector command not found: {:?}", cmd_path);
+                        error!("Please ensure the command is installed and in the PATH");
+                    }
+                    std::io::ErrorKind::PermissionDenied => {
+                        error!("Permission denied when executing: {:?}", cmd_path);
+                        error!(
+                            "This may require elevated permissions (sudo) or executable permissions on the file"
+                        );
+                    }
+                    _ => {
+                        error!(
+                            "Failed to start inspector command: {:?} - {}",
+                            cmd_path, err
+                        );
+                    }
+                }
+                return Err(Error::Io(err));
+            }
+        };
 
         let target_wait = target_child.wait();
         tokio::select! {
             res = target_wait => {
                 match res {
                     Ok(status) => {
-                        error!("child exited with status: {}", status);
+                        if status.success() {
+                            info!("Inspector exited successfully");
+                        } else {
+                            error!("Inspector exited with non-zero status: {}", status);
+                            if let Some(code) = status.code() {
+                                error!("Exit code: {}", code);
+                            } else {
+                                error!("Process terminated by signal");
+                            }
+                        }
                         Ok(status)
                     }
                     Err(err) => {
-                        error!("child exited with error: {}", err);
+                        error!("Inspector process error: {}", err);
                         Err(Error::Io(err))
                     }
                 }

@@ -1,0 +1,34 @@
+generator:
+  - tcp:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      addr: "0.0.0.0:8282"
+      variant: "syslog5424"
+      bytes_per_second: "10 Mb"
+      maximum_prebuild_cache_size_bytes: "32 Mb"
+
+# This blackhole simply provides an endpoint to receive traffic
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:8282"
+
+# The inspector configuration uses bpftrace to monitor process starts and stops system-wide
+# This will show process creation and exit events while Lading is running
+inspector:
+  # Path to bpftrace executable
+  command: /usr/bin/bpftrace
+  # Arguments for bpftrace script
+  arguments:
+    - "-e"
+    - "tracepoint:syscalls:sys_enter_execve { printf(\"EXEC: %s (PID: %d, PPID: %d) at %u\\n\", comm, pid, ppid, nsecs); } tracepoint:syscalls:sys_exit_exit,tracepoint:syscalls:sys_exit_exit_group { printf(\"EXIT: %s (PID: %d) at %u\\n\", comm, pid, nsecs); }"
+  # Environment variables for the bpftrace process
+  environment_variables:
+    BPFTRACE_STRLEN: "64"  # Increase string length for full command names
+    BPFTRACE_NO_USER_SYMBOLS: "1"  # Performance optimization
+  # Output configuration for inspector process
+  output:
+    # Log the bpftrace output to files
+    stdout: "/tmp/lading-process-events.log"
+    stderr: "quiet"
+
+# Set a longer sample period to reduce overhead
+sample_period_milliseconds: 2000
