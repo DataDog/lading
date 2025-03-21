@@ -4,7 +4,7 @@ The `lading` project is a tool for measuring the performance behavior of
 long-running programs -- daemons, often -- using synthetic, repeatable load
 generation across a variety of protocols. The ambition is to be a worry-free
 component of a larger performance testing strategy for complex programs. The
-[Vector][vector] project uses lading in their 'soak' tests.
+[Datadog Agent][agent] project uses lading in their 'Regression Detector' tests.
 
 ## Operating Model
 
@@ -71,6 +71,7 @@ blackhole in this configuration responds with an empty body 200 OK.
 
 `lading` supports three types of targets, binary launch mode, PID watch mode,
 and container watch mode.
+
 In binary launch mode, `lading` acts like a wrapper around the target. To use
 this mode, one specifies where on disk the configuration is, the path to the
 target and its arguments. `--target-stderr-path` and `--target-stdout-path`
@@ -83,17 +84,19 @@ system. `lading` does not handle any target orchestration in this mode. The
 target should be launched before running `lading` and terminated once `lading`
 exits.
 
-Container watch mode is identical to PID watch mode except that the docker socket
-is polled to find the container's PID instead of the user needing to specify it manually.
+Container watch mode is identical to PID watch mode except that the docker
+socket is polled to find the container's PID instead of the user needing to
+specify it manually.
 
 The data `lading` captures at runtime can be pulled by polling `lading`'s
-prometheus endpoint -- configurable with `--prometheus-addr` / `--prometheus-path`
--- or can be written to disk by lading by specifying `--capture-path`. The
-captured data, when written to disk, is newline delimited json payloads.
+prometheus endpoint -- configurable with `--prometheus-addr` /
+`--prometheus-path` -- or can be written to disk by lading by specifying
+`--capture-path`. The captured data, when written to disk, is newline delimited
+json payloads.
 
 Logs about lading's operation can be controlled using the standard `RUST_LOG`
-environment variable. eg `RUST_LOG=debug ./lading` will emit logs at `debug`
-and above (ie, `info`, `warn`, `error`).
+environment variable. eg `RUST_LOG=debug ./lading` will emit logs at `debug` and
+above (ie, `info`, `warn`, `error`).
 
 ## Development Setup
 
@@ -148,4 +151,5 @@ Licensed under the [MIT license][mit-license].
 [contributing]: CONTRIBUTING.md
 [mit-license]: LICENSE
 [vector]: github.com/vectordotdev/vector
+[agent]: github.com/DataDog/datadog-agent
 [fluent]: https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1
