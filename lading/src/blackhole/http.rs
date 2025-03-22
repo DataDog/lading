@@ -138,7 +138,9 @@ async fn srv(
     // Convert the `Body` into `Bytes`
     let body: Bytes = body.boxed().collect().await?.to_bytes();
 
-    counter!("bytes_received", &metric_labels).increment(body.len() as u64);
+    // This metric must be written with a single context or it will crash
+    // analysis. The simple way to accomplish that is to attach no labels to it.
+    counter!("bytes_received").increment(body.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(response),

@@ -289,7 +289,11 @@ impl Grpc {
 
                     match res {
                         Ok(res) => {
-                            counter!("bytes_written", &self.metric_labels).increment(block_length as u64);
+                            // This metric must be written with a single context
+                            // or it will crash analysis. The simple way to
+                            // accomplish that is to attach no labels to it.
+                            counter!("bytes_written").increment(block_length as u64);
+
                             counter!("request_ok", &self.metric_labels).increment(1);
                             counter!("response_bytes", &self.metric_labels).increment(res.into_inner() as u64);
                         }
