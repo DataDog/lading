@@ -141,7 +141,7 @@ impl Sampler {
 
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
-        gauge!("processes_found").set(f64::from(processes_found));
+        gauge!("processes_found").set(processes_found as f64);
 
         // If we skipped any processes, log a warning.
         if !pids_skipped.is_empty() {
