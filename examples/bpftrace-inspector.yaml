@@ -22,13 +22,12 @@ inspector:
     - "tracepoint:syscalls:sys_enter_execve { printf(\"EXEC: %s (PID: %d, PPID: %d) at %u\\n\", comm, pid, ppid, nsecs); } tracepoint:syscalls:sys_exit_exit,tracepoint:syscalls:sys_exit_exit_group { printf(\"EXIT: %s (PID: %d) at %u\\n\", comm, pid, nsecs); }"
   # Environment variables for the bpftrace process
   environment_variables:
-    BPFTRACE_STRLEN: "64"  # Increase string length for full command names
-    BPFTRACE_NO_USER_SYMBOLS: "1"  # Performance optimization
+    BPFTRACE_MAX_STRLEN: "64"  # Increase string length for full command names
   # Output configuration for inspector process
   output:
     # Log the bpftrace output to files
     stdout: "/tmp/lading-process-events.log"
-    stderr: "quiet"
+    stderr: "/tmp/lading-process-events-stderr.log"
 
 # Set a longer sample period to reduce overhead
 sample_period_milliseconds: 2000
