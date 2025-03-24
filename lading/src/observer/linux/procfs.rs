@@ -124,14 +124,14 @@ impl Sampler {
             processes_found += 1;
             let pid = process.pid();
             match self.handle_process(process, &mut aggr, include_smaps).await {
+                Ok(true) => {
+                    // handled successfully
+                }
                 Ok(false) => {
                     pids_skipped.insert(pid);
                 }
                 Err(e) => {
                     warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
-                }
-                _ => {
-                    // handled successfully
                 }
             }
         }
