@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ## Changed
+
+## [0.25.7]
+## Changed
 - Lading now built with edition 2024
 - Removed use of compromised `tj-actions/changed-files` action from project's GitHub CI configuration
 - Fixed devcontainer configuration to ensure the `rust-analyzer` can run successfully within IDEs
