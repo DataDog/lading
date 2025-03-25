@@ -77,7 +77,8 @@ impl Sampler {
         clippy::too_many_lines,
         clippy::cast_sign_loss,
         clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap
+        clippy::cast_possible_wrap,
+        clippy::cast_lossless
     )]
     pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
