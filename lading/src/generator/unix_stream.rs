@@ -203,7 +203,12 @@ impl UnixStream {
                             // if the readiness event is a false positive.
                             match stream.try_write(&blk.bytes[blk_offset..]) {
                                 Ok(bytes) => {
-                                    counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                                    // This metric must be written with a single
+                                    // context or it will crash analysis. The
+                                    // simple way to accomplish that is to
+                                    // attach no labels to it.
+                                    counter!("bytes_written").increment(bytes as u64);
+
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                     blk_offset += bytes;
                                 }
