@@ -4,8 +4,6 @@ use nix::unistd::{Pid, close};
 use std::mem::MaybeUninit;
 use std::os::unix::io::RawFd;
 
-#[allow(dead_code)] // TODO remove before merging
-#[inline]
 fn siginfo() -> libc::siginfo_t {
     unsafe {
         // Create zero-initialized siginfo_t. The libc crate exposes siginfo_t
@@ -21,7 +19,7 @@ fn siginfo() -> libc::siginfo_t {
     }
 }
 
-#[allow(dead_code)] // TODO remove before merging
+#[derive(Debug)]
 pub(crate) struct PidFd {
     fd: RawFd,
 }
@@ -32,7 +30,6 @@ impl PidFd {
     /// # Errors
     /// Returns an error if the PID doesn't exist or if the kernel doesn't
     /// support pidfd.
-    #[allow(dead_code)] // TODO remove before merging
     pub(crate) fn open(pid: Pid) -> Result<Self, Error> {
         // Perform the syscall directly using libc, but convert errors using nix::errno::Errno.
         let res = Errno::result(unsafe {
@@ -52,7 +49,6 @@ impl PidFd {
     /// This function calls `waitid(P_PIDFD, fd, WEXITED|WNOHANG)`, so a wait
     /// without waiting. Returns true immediately if the process has exited,
     /// else false.
-    #[allow(dead_code)] // TODO remove before merging
     #[allow(clippy::cast_sign_loss)]
     pub(crate) fn is_active(&self) -> Result<bool, Error> {
         let mut info = siginfo();

@@ -3,12 +3,13 @@ mod memory;
 mod stat;
 mod uptime;
 
-use std::{collections::VecDeque, io};
+use crate::observer::linux::pidfd::PidFd;
 
 use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::{collections::VecDeque, io};
 use tracing::{error, info, warn};
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
@@ -50,6 +51,7 @@ struct ProcessInfo {
     comm: String,
     pid_s: String,
     stat_sampler: stat::Sampler,
+    pidfd: PidFd,
 }
 
 #[derive(Debug)]
@@ -221,6 +223,22 @@ impl Sampler {
     ) -> Result<bool, Error> {
         let pid = process.pid();
 
+        // SAFETY: We've inserted process info into this map when polling for
+        // child processes.
+        let pinfo = self
+            .process_info
+            .get_mut(&pid)
+            .expect("catastrophic programming error");
+
+        // Check if process is still active before polling. There's a
+        // non-trivial chance that the process has died -- no big deal -- or
+        // that it has died and been replaced and the PID reused. This second
+        // case is a real problem.
+        if !pinfo.pidfd.is_active()? {
+            info!("Process {pid} is no longer active");
+            return Ok(false);
+        }
+
         // `/proc/{pid}/status`
         let status = match process.status() {
             Ok(status) => status,
@@ -235,13 +253,6 @@ impl Sampler {
             // This is a thread, not a process and we do not wish to scan it.
             return Ok(false);
         }
-
-        // SAFETY: We've inserted process info into this map when polling for
-        // child processes.
-        let pinfo = self
-            .process_info
-            .get_mut(&pid)
-            .expect("catastrophic programming error");
 
         let labels: [(&'static str, String); 4] = [
             ("pid", pinfo.pid_s.clone()),
@@ -356,6 +367,21 @@ impl Sampler {
 
 /// Initialize [`ProcessInfo`] for a process. Returns `None` if the process should be skipped.
 async fn initialize_process_info(pid: i32) -> Result<Option<ProcessInfo>, Error> {
+    // First verify the process is still alive using PidFd
+    let pidfd = match PidFd::open(nix::unistd::Pid::from_raw(pid)) {
+        Ok(fd) => fd,
+        Err(e) => {
+            warn!("Could not open pidfd for pid {pid}: {e:?}");
+            return Ok(None);
+        }
+    };
+
+    // Check if process is still active
+    if !pidfd.is_active()? {
+        warn!("Process {pid} is no longer active");
+        return Ok(None);
+    }
+
     let exe = match proc_exe(pid).await {
         Ok(exe) => exe,
         Err(e) => {
@@ -386,6 +412,7 @@ async fn initialize_process_info(pid: i32) -> Result<Option<ProcessInfo>, Error>
         comm,
         pid_s,
         stat_sampler,
+        pidfd,
     };
 
     Ok(Some(info))
