@@ -96,7 +96,7 @@ impl Sampler {
         let parent_info = match initialize_process_info(parent_pid).await {
             Ok(Some(info)) => info,
             Ok(None) => {
-                warn!("Could not initialize parent process info");
+                warn!("Could not initialize parent process info, will retry.");
                 return Ok(());
             }
             Err(e) => {
