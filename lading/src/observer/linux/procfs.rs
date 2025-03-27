@@ -139,9 +139,9 @@ impl Sampler {
                                 // This is a new process. We initialize its
                                 // process info and then determine by
                                 // examination of the exe/cmdline if the process
-                                // is not exec'd -- meaning we will not poll it
-                                // -- or if it's a process in good standing and
-                                // we'll attempt to poll it.
+                                // is fork'd but not exec'd -- meaning we will
+                                // not poll it -- or if it's a process in good
+                                // standing and we'll attempt to poll it.
                                 let child_info = match initialize_process_info(pid).await {
                                     Ok(Some(info)) => info,
                                     Ok(None) => continue,
@@ -209,7 +209,7 @@ impl Sampler {
     }
 
     /// Handle a process. Returns true if the process was handled successfully,
-    /// false if it was skipped for any reason.    
+    /// false if it was skipped for any reason.
     #[allow(
         clippy::similar_names,
         clippy::too_many_lines,
