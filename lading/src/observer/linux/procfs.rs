@@ -84,7 +84,8 @@ impl Sampler {
         let mut processes_found: i32 = 0;
         let mut pids_skipped: FxHashSet<i32> = FxHashSet::default();
 
-        // Clear process_info at the start of each poll to ensure fresh data
+        // Clear process_info at the start of each poll. A process is capable of
+        // changing its details in key ways between polls.
         self.process_info.clear();
 
         // Every sample run we collect all the child processes rooted at the
@@ -153,20 +154,18 @@ impl Sampler {
                                     }
                                 };
 
-                                // Check if this is a forked but not execed process
+                                // Check if this is a forked but not execed
+                                // process.
                                 let parent_info = self
                                     .process_info
                                     .get(&process.pid())
                                     .expect("parent process info should exist");
-
                                 if child_info.exe == parent_info.exe
                                     && child_info.cmdline == parent_info.cmdline
                                 {
-                                    // This is a forked but not execed process.
                                     continue;
                                 }
 
-                                // Store the initialized info before adding to processes queue
                                 self.process_info.insert(pid, child_info);
                                 processes.push_back(child);
                                 pids.insert(pid);
