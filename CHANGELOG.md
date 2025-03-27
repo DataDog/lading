@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 - Lading will now ignore child processes when polling /proc if the children are
   forked but not exec'd.
+- Lading observer will now reject processes that appear to be children of the
+  target because of PID reuse.
 
 ## [0.25.7]
 ## Changed
