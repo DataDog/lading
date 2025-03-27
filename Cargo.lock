@@ -1588,6 +1588,7 @@ dependencies = [
  "lading-payload",
  "lading-signal",
  "lading-throttle",
+ "libc",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
