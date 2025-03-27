@@ -5,11 +5,11 @@ mod uptime;
 
 use std::{collections::VecDeque, io};
 
-use metrics::gauge;
+use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
@@ -163,6 +163,8 @@ impl Sampler {
                                 if child_info.exe == parent_info.exe
                                     && child_info.cmdline == parent_info.cmdline
                                 {
+                                    counter!("process_skipped").increment(1);
+                                    info!("Skipping process {pid}: {child_info:?}");
                                     continue;
                                 }
 
