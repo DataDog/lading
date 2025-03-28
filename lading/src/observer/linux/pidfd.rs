@@ -5,6 +5,10 @@ use std::mem::MaybeUninit;
 use std::os::unix::io::RawFd;
 
 fn siginfo() -> libc::siginfo_t {
+    // SAFETY: This function creates a zero-initialized siginfo_t struct which
+    // is safe because all bit patterns are valid for the struct. The struct is
+    // only used as an output parameter for waitid() which will properly
+    // initialize all fields.
     unsafe {
         // Create zero-initialized siginfo_t. The libc crate exposes siginfo_t
         // with its union fields etc as private fields, so we need to create a
