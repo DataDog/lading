@@ -10,7 +10,7 @@ env:
 jobs:
   tagging:
     name: Determine Tags
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
@@ -69,7 +69,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-20.04
+            runner: ubuntu-24.04
           - arch: arm64
             runner: arm-4core-linux-ubuntu24.04
     permissions:
@@ -112,10 +112,10 @@ jobs:
 
   manifest:
     name: Create Multi-Arch Manifest
-    needs: 
+    needs:
       - tagging
       - build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
