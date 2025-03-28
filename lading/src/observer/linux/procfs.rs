@@ -228,7 +228,7 @@ impl Sampler {
         let pinfo = self
             .process_info
             .get_mut(&pid)
-            .expect("catastrophic programming error");
+            .expect("[pinfo] catastrophic programming error");
 
         // Check if process is still active before polling. There's a
         // non-trivial chance that the process has died -- no big deal -- or
