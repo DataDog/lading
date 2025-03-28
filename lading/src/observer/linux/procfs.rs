@@ -234,7 +234,7 @@ impl Sampler {
         // non-trivial chance that the process has died -- no big deal -- or
         // that it has died and been replaced and the PID reused. This second
         // case is a real problem.
-        if !pinfo.pidfd.is_active()? {
+        if pinfo.pidfd.is_exited()? {
             info!("Process {pid} is no longer active");
             return Ok(false);
         }
@@ -377,7 +377,7 @@ async fn initialize_process_info(pid: i32) -> Result<Option<ProcessInfo>, Error>
     };
 
     // Check if process is still active
-    if !pidfd.is_active()? {
+    if pidfd.is_exited()? {
         warn!("Process {pid} is no longer active");
         return Ok(None);
     }
