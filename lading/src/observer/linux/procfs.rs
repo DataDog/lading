@@ -81,8 +81,8 @@ impl Sampler {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = memory::smaps_rollup::Aggregator::default();
-        let mut processes_found: i32 = 0;
-        let mut pids_skipped: FxHashSet<i32> = FxHashSet::default();
+        let mut processes_found: u32 = 0;
+        let mut processes_skipped: u32 = 0;
 
         // Clear process_info at the start of each poll. A process is capable of
         // changing its details in key ways between polls.
@@ -184,7 +184,7 @@ impl Sampler {
                     // handled successfully
                 }
                 Ok(false) => {
-                    pids_skipped.insert(pid);
+                    processes_skipped += 1;
                 }
                 Err(e) => {
                     warn!("Encountered uncaught error when handling `/proc/{pid}/`: {e}");
@@ -197,12 +197,8 @@ impl Sampler {
         gauge!("processes_found").set(processes_found as f64);
 
         // If we skipped any processes, log a warning.
-        if !pids_skipped.is_empty() {
-            warn!(
-                "Skipped {} processes: {:?}",
-                pids_skipped.len(),
-                pids_skipped
-            );
+        if processes_skipped > 0 {
+            warn!("Skipped {} processes", processes_skipped);
         }
 
         Ok(())
