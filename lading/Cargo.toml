@@ -92,7 +92,7 @@ procfs = { version = "0.17", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.17"
+tempfile = "3.19"
 warp = "0.3"
 proptest = "1.6"
 
