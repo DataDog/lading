@@ -1,4 +1,5 @@
 mod cgroup;
+mod pidfd;
 mod procfs;
 
 use tracing::error;
