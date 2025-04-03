@@ -67,9 +67,11 @@ impl Region {
             let mut offset: Option<u64> = None;
             let mut dev: Option<String> = None;
             let mut inode: Option<u64> = None;
-            let mut pathname: Option<String> = None;
+            let pathname: Option<String> = None;
+            let mut pathname_tokens = vec![];
 
             let mut chars = metadata_line.char_indices().peekable();
+            let mut entered_pathname = false;
 
             loop {
                 let token = next_token(metadata_line, &mut chars);
@@ -93,14 +95,15 @@ impl Region {
                     dev = Some(token.to_string());
                 } else if inode.is_none() {
                     inode = Some(token.parse::<u64>()?);
-                } else if pathname.is_none() {
-                    pathname = Some(token.to_string());
+                } else if pathname.is_none() || entered_pathname {
+                    entered_pathname = true;
+                    pathname_tokens.push(token);
                 } else {
                     break;
                 }
             }
 
-            pathname
+            pathname_tokens.join(" ")
         };
 
         let mut size: Option<u64> = None;
@@ -216,7 +219,7 @@ impl Region {
         };
 
         Ok(Region {
-            pathname: pathname.unwrap_or_default(),
+            pathname,
             size,
             pss,
             swap,
@@ -430,7 +433,7 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.file_pmd_mapped, Some(0));
         assert_eq!(region_one.shared_hugetlb, Some(0));
         assert_eq!(region_one.private_hugetlb, Some(0));
-        assert_eq!(region_one.swap_pss, Some(1 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.swap_pss, Some(BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.locked, Some(0));
 
         let region_two = &regions.0[1];
@@ -489,9 +492,9 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "");
-        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.size, 80_000_000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100_000_000_000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, Some(2 * BYTES_PER_KIBIBYTE));
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
@@ -507,13 +510,13 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.shared_hugetlb, Some(130 * BYTES_PER_KIBIBYTE));
         assert_eq!(
             region_one.private_hugetlb,
-            Some(140140140140 * BYTES_PER_KIBIBYTE)
+            Some(140_140_140_140 * BYTES_PER_KIBIBYTE)
         );
         assert_eq!(
             region_one.swap_pss,
-            Some(10000000000000000 * BYTES_PER_KIBIBYTE)
+            Some(10_000_000_000_000_000 * BYTES_PER_KIBIBYTE)
         );
-        assert_eq!(region_one.locked, Some(1000000000 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.locked, Some(1_000_000_000 * BYTES_PER_KIBIBYTE));
     }
 
     #[test]
@@ -550,9 +553,9 @@ VmFlags:               rd ex mr mw me de sd";
         let region_one = &regions.0[0];
 
         assert_eq!(region_one.pathname, "[stack]");
-        assert_eq!(region_one.size, 80000000 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.pss, 1 * BYTES_PER_KIBIBYTE);
-        assert_eq!(region_one.swap, 100000000000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.size, 80_000_000 * BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.pss, BYTES_PER_KIBIBYTE);
+        assert_eq!(region_one.swap, 100_000_000_000 * BYTES_PER_KIBIBYTE);
         assert_eq!(region_one.rss, 0);
         assert_eq!(region_one.pss_dirty, None); // Still optional and missing
         assert_eq!(region_one.shared_clean, Some(3 * BYTES_PER_KIBIBYTE));
@@ -568,13 +571,13 @@ VmFlags:               rd ex mr mw me de sd";
         assert_eq!(region_one.shared_hugetlb, Some(130 * BYTES_PER_KIBIBYTE));
         assert_eq!(
             region_one.private_hugetlb,
-            Some(140140140140 * BYTES_PER_KIBIBYTE)
+            Some(140_140_140_140 * BYTES_PER_KIBIBYTE)
         );
         assert_eq!(
             region_one.swap_pss,
-            Some(10000000000000000 * BYTES_PER_KIBIBYTE)
+            Some(10_000_000_000_000_000 * BYTES_PER_KIBIBYTE)
         );
-        assert_eq!(region_one.locked, Some(1000000000 * BYTES_PER_KIBIBYTE));
+        assert_eq!(region_one.locked, Some(1_000_000_000 * BYTES_PER_KIBIBYTE));
     }
 
     #[test]
@@ -638,9 +641,9 @@ VmFlags:               rd wr mr mw me ac";
 
         let region = Region::from_str(region).expect("Parsing failed");
         assert_eq!(
-        region.pathname,
-        "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
-    );
+            region.pathname,
+            "/opt/datadog-agent/embedded/lib/python3.9/site-packages/pydantic_core/_pydantic_core.cpython-39-aarch64-linux-gnu.so"
+        );
         assert_eq!(region.size, 20 * BYTES_PER_KIBIBYTE);
         assert_eq!(region.private_dirty.unwrap(), 20 * BYTES_PER_KIBIBYTE);
     }
@@ -730,5 +733,39 @@ ProtectionKey:         0
 VmFlags:               rd ex mr mw me de sd";
 
         let _region = Region::from_str(region).expect("Parsing failed");
+    }
+
+    #[test]
+    fn test_pathnames_with_whitespace() {
+        let region =
+            "7514356d1000-7514356d3000 rw-p 00000000 00:00 0                          [anon: glibc: loader malloc]
+Size:                  8 kB
+KernelPageSize:        4 kB
+MMUPageSize:           4 kB
+Rss:                   8 kB
+Pss:                   8 kB
+Pss_Dirty:             8 kB
+Shared_Clean:          0 kB
+Shared_Dirty:          0 kB
+Private_Clean:         0 kB
+Private_Dirty:         8 kB
+Referenced:            8 kB
+Anonymous:             8 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+THPeligible:           0
+ProtectionKey:         0
+VmFlags: rd wr mr mw me ac sd";
+        let parsed_region = Region::from_str(region).expect("Parsing failed");
+
+        assert_eq!(parsed_region.pathname, ("[anon: glibc: loader malloc]"));
     }
 }

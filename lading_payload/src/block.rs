@@ -8,14 +8,14 @@
 use std::num::NonZeroU32;
 
 use byte_unit::{Byte, ByteUnit};
-use bytes::{buf::Writer, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::mpsc::{error::SendError, Sender},
+    sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{error, info, span, warn, Level};
+use tracing::{Level, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -296,7 +296,7 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
-            crate::Config::Static { ref static_path } => {
+            crate::Config::Static { static_path } => {
                 let span = span!(Level::INFO, "fixed", payload = "static");
                 let _guard = span.enter();
                 construct_block_cache_inner(
@@ -378,11 +378,7 @@ impl Cache {
     /// soon as one is ready, blocking the caller until one is available.
     pub fn next_block(&mut self) -> &Block {
         match self {
-            Self::Fixed {
-                ref mut idx,
-                blocks,
-                ..
-            } => {
+            Self::Fixed { idx, blocks, .. } => {
                 let block = &blocks[*idx];
                 *idx = (*idx + 1) % blocks.len();
                 block
@@ -501,7 +497,7 @@ where
     while bytes_remaining > 0 {
         // A block_size is always in the range [min_block_size,
         // max_block_size).
-        let block_size = rng.gen_range(min_block_size..max_block_size);
+        let block_size = rng.random_range(min_block_size..max_block_size);
 
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
@@ -559,7 +555,9 @@ where
         let min_block_str = byte_unit::Byte::from_bytes(min_block_size.into())
             .get_appropriate_unit(false)
             .to_string();
-        info!("Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}");
+        info!(
+            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}"
+        );
 
         Ok(block_cache)
     }

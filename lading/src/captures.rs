@@ -11,15 +11,15 @@ use std::{
     ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use lading_capture::json;
 use metrics::Key;
 use metrics_util::{
-    registry::{AtomicStorage, GenerationalAtomicStorage, GenerationalStorage, Recency, Registry},
     MetricKindMask,
+    registry::{AtomicStorage, GenerationalAtomicStorage, GenerationalStorage, Recency, Registry},
 };
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
@@ -139,11 +139,11 @@ impl CaptureManager {
 
         let counter_handles = self.inner.registry.get_counter_handles();
         for (key, counter) in counter_handles {
-            let gen = counter.get_generation();
+            let g = counter.get_generation();
             if !self
                 .inner
                 .recency
-                .should_store_counter(&key, gen, &self.inner.registry)
+                .should_store_counter(&key, g, &self.inner.registry)
             {
                 continue;
             }
@@ -168,11 +168,11 @@ impl CaptureManager {
 
         let gauge_handles = self.inner.registry.get_gauge_handles();
         for (key, gauge) in gauge_handles {
-            let gen = gauge.get_generation();
+            let g = gauge.get_generation();
             if !self
                 .inner
                 .recency
-                .should_store_gauge(&key, gen, &self.inner.registry)
+                .should_store_gauge(&key, g, &self.inner.registry)
             {
                 continue;
             }

@@ -4,7 +4,7 @@ use std::io::Write;
 
 use rand::Rng;
 
-use crate::{common::strings, Error};
+use crate::{Error, common::strings};
 
 const MAX_LENGTH: u16 = 6_144; // 6 KiB
 
@@ -36,7 +36,7 @@ impl crate::Serialize for Ascii {
     {
         let mut bytes_remaining = max_bytes;
         loop {
-            let bytes = rng.gen_range(1..MAX_LENGTH);
+            let bytes = rng.random_range(1..MAX_LENGTH);
             // SAFETY: the maximum request is always less than the size of the
             // pool, per our constructor.
             let encoding: &str = self
@@ -59,7 +59,7 @@ impl crate::Serialize for Ascii {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{Ascii, Serialize};
 

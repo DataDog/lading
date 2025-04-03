@@ -16,7 +16,7 @@ use std::{
 
 use nix::{
     errno::Errno,
-    sys::signal::{kill, SIGTERM},
+    sys::signal::{SIGTERM, kill},
     unistd::Pid,
 };
 use rustc_hash::FxHashMap;
@@ -25,7 +25,7 @@ use tokio::process::Command;
 use tracing::{error, info};
 
 use crate::{
-    common::{stdio, Output},
+    common::{Output, stdio},
     target::TargetPidReceiver,
 };
 

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduce a `container` generator able to generate an arbitrary number
   of docker containers
 
+## [0.25.8]
+## Fixed
+- Lading will now ignore child processes when polling /proc if the children are
+  forked but not exec'd.
+- Lading uses virtual CPUs when calculating both procfs and cgroup CPU data.
+
+## [0.25.7]
+## Changed
+- Lading now built with edition 2024
+- Removed use of compromised `tj-actions/changed-files` action from project's GitHub CI configuration
+- Fixed devcontainer configuration to ensure the `rust-analyzer` can run successfully within IDEs
+- Added a new gauge `processes_found` and a new warning log for processes we skipped
+
+## [0.25.6]
+## Fixed
+- `smaps` parsing logic correctly collects memory region pathnames that contain whitespace
+- Fixes issue when parsing `NaN` values from a prometheus endpoint
+- Linux cgroup v2 observer now correctly sets known-counter values as counters in telemetry.
+## Changed
+- smaps data is scraped every tenth sample to reduce capture size.
+- Bumped `opentelemetry-proto` to `0.28.0`.
+- Bumped `prost` to `0.13.0`.
+
 ## [0.25.5]
 ## Added
 - Introduced the ability for users to configure lading's sample rate,

@@ -7,9 +7,9 @@
 //!
 
 use bytes::Bytes;
-use http::{header::InvalidHeaderValue, status::InvalidStatusCode, HeaderMap};
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{header, Request, Response, StatusCode};
+use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
+use http_body_util::{BodyExt, combinators::BoxBody};
+use hyper::{Request, Response, StatusCode, header};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};

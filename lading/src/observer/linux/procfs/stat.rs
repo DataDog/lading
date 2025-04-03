@@ -63,9 +63,9 @@ impl Sampler {
         let parts: Vec<&str> = cpu_max.split_whitespace().collect();
         let (max_str, period_str) = (parts[0], parts[1]);
         let allowed_cores = if max_str == "max" {
-            // If the target cgroup has no CPU limit we assume it has access to all
-            // physical cores.
-            num_cpus::get_physical() as f64
+            // If the target cgroup has no CPU limit we assume it has access to
+            // all cores.
+            num_cpus::get() as f64
         } else {
             let max_val = max_str.parse::<f64>()?;
             let period_val = period_str.parse::<f64>()?;
@@ -128,10 +128,10 @@ fn parse(contents: &str) -> Result<(i32, u64, u64), Error> {
     // time.
     let start_paren = contents
         .find('(')
-        .ok_or_else(|| Error::StatMalformed("Failed to find '(' in stat contents"))?;
+        .ok_or(Error::StatMalformed("Failed to find '(' in stat contents"))?;
     let end_paren = contents
         .rfind(')')
-        .ok_or_else(|| Error::StatMalformed("Failed to find ')' in stat contents"))?;
+        .ok_or(Error::StatMalformed("Failed to find ')' in stat contents"))?;
 
     let before = &contents[..start_paren];
     let after = &contents[end_paren + 2..]; // skip ") "
@@ -213,7 +213,7 @@ fn compute_cpu_usage(prev: Stats, cur: Stats, allowed_cores: f64) -> Option<CpuU
 
 #[cfg(test)]
 mod test {
-    use super::{compute_cpu_usage, parse, Stats};
+    use super::{Stats, compute_cpu_usage, parse};
 
     #[test]
     fn parse_basic() {

@@ -6,10 +6,10 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
-use crate::{common::strings, Error};
+use crate::{Error, common::strings};
 use opentelemetry_proto::tonic::trace::v1;
 use prost::Message;
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use std::io::Write;
 
 use super::Generator;
@@ -24,8 +24,8 @@ impl ExportTraceServiceRequest {
         opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest {
             resource_spans: [v1::ResourceSpans {
                 resource: None,
-                instrumentation_library_spans: [v1::InstrumentationLibrarySpans {
-                    instrumentation_library: None,
+                scope_spans: [v1::ScopeSpans {
+                    scope: None,
                     spans: self.0.into_iter().map(|span| span.0).collect(),
                     schema_url: String::new(),
                 }]
@@ -67,14 +67,14 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
     where
         R: rand::Rng + ?Sized,
     {
-        let trace_id = Standard.sample_iter(&mut rng).take(16).collect();
-        let span_id = Standard.sample_iter(&mut rng).take(8).collect();
+        let trace_id = StandardUniform.sample_iter(&mut rng).take(16).collect();
+        let span_id = StandardUniform.sample_iter(&mut rng).take(8).collect();
 
         // Some collectors may immediately drop old/future spans. Consider
         // constraining these to recent timestamps.
-        let start_time_unix_nano: u64 = rng.gen();
+        let start_time_unix_nano: u64 = rng.random();
         // end time is expected to be greater than or equal to start time
-        let end_time_unix_nano: u64 = rng.gen_range(start_time_unix_nano..=u64::MAX);
+        let end_time_unix_nano: u64 = rng.random_range(start_time_unix_nano..=u64::MAX);
 
         let name = self
             .str_pool
@@ -89,7 +89,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
             // zeros: root span
             parent_span_id: vec![0; 8],
             name: String::from(name),
-            kind: rng.gen_range(0..=5),
+            kind: rng.random_range(0..=5),
             start_time_unix_nano,
             end_time_unix_nano,
             attributes: Vec::new(),
@@ -99,6 +99,7 @@ impl<'a> Generator<'a> for OpentelemetryTraces {
             links: Vec::new(),
             dropped_links_count: 0,
             status: None,
+            flags: 0,
         }))
     }
 }
@@ -142,7 +143,7 @@ mod test {
     use crate::Serialize;
     use proptest::prelude::*;
     use prost::Message;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

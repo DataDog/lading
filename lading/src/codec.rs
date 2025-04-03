@@ -65,7 +65,7 @@ pub(crate) fn decode(
                         .body(crate::full(format!(
                             "Unsupported encoding type: {encoding}"
                         )))
-                        .expect("failed to build response"))
+                        .expect("failed to build response"));
                 }
             }
         }

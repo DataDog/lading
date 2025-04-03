@@ -52,8 +52,8 @@ impl Sampler {
         let (max_str, period_str) = (parts[0], parts[1]);
         let allowed_cores = if max_str == "max" {
             // If the target cgroup has no CPU limit we assume it has access to all
-            // physical cores.
-            num_cpus::get_physical() as f64
+            // logical cores, inclusive of hyperthreaded cores.
+            num_cpus::get() as f64
         } else {
             let max_val = max_str.parse::<f64>()?;
             let period_val = period_str.parse::<f64>()?;

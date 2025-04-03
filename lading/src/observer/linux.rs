@@ -16,8 +16,9 @@ pub enum Error {
 
 #[derive(Debug)]
 pub(crate) struct Sampler {
-    procfs_sampler: procfs::Sampler,
-    cgroup_sampler: cgroup::Sampler,
+    procfs: procfs::Sampler,
+    cgroup: cgroup::Sampler,
+    smaps_interval: u8,
 }
 
 impl Sampler {
@@ -26,14 +27,23 @@ impl Sampler {
         let cgroup_sampler = cgroup::Sampler::new(parent_pid, labels)?;
 
         Ok(Self {
-            procfs_sampler,
-            cgroup_sampler,
+            procfs: procfs_sampler,
+            cgroup: cgroup_sampler,
+            smaps_interval: 10,
         })
     }
 
     pub(crate) async fn sample(&mut self) -> Result<(), Error> {
-        self.procfs_sampler.poll().await?;
-        self.cgroup_sampler.poll().await?;
+        self.smaps_interval -= 1;
+        let sample_smaps = if self.smaps_interval == 0 {
+            self.smaps_interval = 10;
+            true
+        } else {
+            false
+        };
+
+        self.procfs.poll(sample_smaps).await?;
+        self.cgroup.poll().await?;
 
         Ok(())
     }

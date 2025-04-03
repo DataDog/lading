@@ -43,7 +43,6 @@ where
             Error = hyper::Error,
         > + Send
         + 'static,
-
     S::Future: Send + 'static,
 {
     let listener = TcpListener::bind(addr).await.map_err(Error::Io)?;

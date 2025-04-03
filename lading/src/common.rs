@@ -36,7 +36,7 @@ impl fmt::Display for Behavior {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Behavior::Quiet => write!(f, "/dev/null")?,
-            Behavior::Log(ref path) => write!(f, "{}", path.display())?,
+            Behavior::Log(path) => write!(f, "{}", path.display())?,
         }
         Ok(())
     }

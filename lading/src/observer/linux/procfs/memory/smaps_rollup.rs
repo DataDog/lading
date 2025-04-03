@@ -2,7 +2,7 @@ use heck::ToSnakeCase;
 use metrics::gauge;
 use tokio::fs;
 
-use super::{next_token, BYTES_PER_KIBIBYTE};
+use super::{BYTES_PER_KIBIBYTE, next_token};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -35,8 +35,8 @@ pub(crate) async fn poll(
     let mut lines = contents.lines();
 
     lines.next(); // skip header, doesn't have any useful information
-                  // looks like this:
-                  // 00400000-7fff03d61000 ---p 00000000 00:00 0                              [rollup]
+    // looks like this:
+    // 00400000-7fff03d61000 ---p 00000000 00:00 0                              [rollup]
 
     for line in lines {
         let mut chars = line.char_indices().peekable();

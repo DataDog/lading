@@ -1,7 +1,7 @@
 [package]
 name = "sheepdog"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "The integration test harness for lading"
 authors = ["Single Machine Performance Team"]
 license = "MIT"
@@ -11,8 +11,8 @@ publish = false
 anyhow = "1.0"
 escargot = "0.5.13"
 shared = { path = "../shared" }
-tempfile = "3.15"
-tokio = { version = "1.43", features = [
+tempfile = "3.19"
+tokio = { version = "1.44", features = [
   "rt",
   "macros",
   "fs",

@@ -17,7 +17,7 @@ use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{

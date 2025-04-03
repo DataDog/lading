@@ -1,13 +1,13 @@
 [package]
 name = "lading"
-version = "0.25.5"
+version = "0.25.8"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
   "George Hahn <george.hahn@datadoghq.com>",
   "Scott Opell <scott.opell@datadoghq.com>",
   "Caleb Metz <caleb.metz@datadoghq.com>",
 ]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/datadog/lading/"
 keywords = ["random_test", "generator"]
@@ -20,8 +20,8 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
-async-compression = { version = "0.4.17", features = ["tokio", "zstd"] }
-average = { version = "0.15", default-features = false, features = [] }
+async-compression = { version = "0.4.21", features = ["tokio", "zstd"] }
+average = { version = "0.16", default-features = false, features = [] }
 bollard = { version = "0.18", default-features = false, features = ["pipe", "http"] }
 byte-unit = { workspace = true }
 bytes = { workspace = true, features = ["std"] }
@@ -31,7 +31,7 @@ clap = { version = "4.5", default-features = false, features = [
   "derive",
   "help",
 ] }
-flate2 = { version = "1.0.34", default-features = false, features = [
+flate2 = { version = "1.1.0", default-features = false, features = [
   "rust_backend",
 ] }
 futures = "0.3.31"
@@ -51,18 +51,20 @@ nix = { version = "0.29", default-features = false, features = [
   "signal",
 ] }
 num_cpus = { version = "1.16" }
+num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
   "std",
   "std_rng",
+  "thread_rng",
 ] }
 regex = { version = "1.11" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls"] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_qs = { version = "0.13", default-features = false }
+serde_qs = { version = "0.14", default-features = false }
 serde_yaml = { version = "0.9" }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
@@ -83,14 +85,14 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }
 quanta = { version = "0.12", default-features = false, features = [] }
-zstd = "0.13.1"
+zstd = "0.13.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.17", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.15"
+tempfile = "3.19"
 warp = "0.3"
 proptest = "1.6"
 

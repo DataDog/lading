@@ -19,6 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/audit@96e0e19d7510f3de04a5b56213388ac8fcede6d0 # v1.2.3
+      - uses: actions-rust-lang/audit@579aeab71c3eeeeae955a8e3c6136bfc93915987 # v1.2.4
         with:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}

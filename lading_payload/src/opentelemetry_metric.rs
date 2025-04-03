@@ -9,10 +9,10 @@
 
 use std::io::Write;
 
-use crate::{common::strings, Error};
+use crate::{Error, common::strings};
 use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use super::Generator;
 
@@ -26,8 +26,8 @@ impl ExportMetricsServiceRequest {
         opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
             resource_metrics: vec![v1::ResourceMetrics {
                 resource: None,
-                instrumentation_library_metrics: vec![v1::InstrumentationLibraryMetrics {
-                    instrumentation_library: None,
+                scope_metrics: vec![v1::ScopeMetrics {
+                    scope: None,
                     metrics: self.0.into_iter().map(|metric| metric.0).collect(),
                     schema_url: String::new(),
                 }],
@@ -45,21 +45,21 @@ struct NumberDataPoint(v1::NumberDataPoint);
 struct Gauge(v1::Gauge);
 struct Sum(v1::Sum);
 
-impl Distribution<NumberDataPoint> for Standard {
+impl Distribution<NumberDataPoint> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> NumberDataPoint
     where
         R: Rng + ?Sized,
     {
-        let value = match rng.gen_range(0..=1) {
-            0 => v1::number_data_point::Value::AsDouble(rng.gen()),
-            1 => v1::number_data_point::Value::AsInt(rng.gen()),
+        let value = match rng.random_range(0..=1) {
+            0 => v1::number_data_point::Value::AsDouble(rng.random()),
+            1 => v1::number_data_point::Value::AsInt(rng.random()),
             _ => unreachable!(),
         };
 
         NumberDataPoint(v1::NumberDataPoint {
             attributes: Vec::new(),
-            start_time_unix_nano: rng.gen(),
-            time_unix_nano: rng.gen(),
+            start_time_unix_nano: rng.random(),
+            time_unix_nano: rng.random(),
             exemplars: Vec::new(),
             flags: 0,
             value: Some(value),
@@ -67,13 +67,13 @@ impl Distribution<NumberDataPoint> for Standard {
     }
 }
 
-impl Distribution<Gauge> for Standard {
+impl Distribution<Gauge> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Gauge
     where
         R: Rng + ?Sized,
     {
-        let total = rng.gen_range(0..64);
-        let data_points = Standard
+        let total = rng.random_range(0..64);
+        let data_points = StandardUniform
             .sample_iter(rng)
             .map(|ndp: NumberDataPoint| ndp.0)
             .take(total)
@@ -82,7 +82,7 @@ impl Distribution<Gauge> for Standard {
     }
 }
 
-impl Distribution<Sum> for Standard {
+impl Distribution<Sum> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Sum
     where
         R: Rng + ?Sized,
@@ -93,9 +93,9 @@ impl Distribution<Sum> for Standard {
         let aggregation_temporality = *[1, 2]
             .choose(rng)
             .expect("failed to choose aggregation temporality");
-        let is_monotonic = rng.gen();
-        let total = rng.gen_range(0..64);
-        let data_points = Standard
+        let is_monotonic = rng.random();
+        let total = rng.random_range(0..64);
+        let data_points = StandardUniform
             .sample_iter(rng)
             .map(|ndp: NumberDataPoint| ndp.0)
             .take(total)
@@ -135,9 +135,9 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
-        let data = match rng.gen_range(0..=1) {
-            0 => v1::metric::Data::Gauge(rng.gen::<Gauge>().0),
-            1 => v1::metric::Data::Sum(rng.gen::<Sum>().0),
+        let data = match rng.random_range(0..=1) {
+            0 => v1::metric::Data::Gauge(rng.random::<Gauge>().0),
+            1 => v1::metric::Data::Sum(rng.random::<Sum>().0),
             // Currently unsupported: Histogram, ExponentialHistogram, Summary
             _ => unreachable!(),
         };
@@ -161,6 +161,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
             description: String::from(description),
             unit: String::from(unit),
             data,
+            metadata: Vec::new(),
         }))
     }
 }
@@ -203,7 +204,7 @@ mod test {
     use crate::Serialize;
     use proptest::prelude::*;
     use prost::Message;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.

@@ -13,23 +13,23 @@
 use is_executable::IsExecutable;
 use lading_throttle::Throttle;
 use nix::{
-    sys::wait::{waitpid, WaitPidFlag, WaitStatus},
-    unistd::{fork, ForkResult, Pid},
+    sys::wait::{WaitPidFlag, WaitStatus, waitpid},
+    unistd::{ForkResult, Pid, fork},
 };
 use rand::{
-    distributions::{Alphanumeric, DistString},
+    distr::{Alphanumeric, SampleString},
     rngs::StdRng,
-    seq::SliceRandom,
+    seq::IndexedRandom,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{vec_deque, VecDeque},
+    collections::{VecDeque, vec_deque},
     env, error, fmt,
     iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
-    process::{exit, Stdio},
+    process::{Stdio, exit},
     str, thread,
     time::Duration,
 };
@@ -483,12 +483,10 @@ fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
     let mut exited: Option<Pid> = None;
 
     for pid in pids.iter() {
-        match waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {
-            Ok(WaitStatus::StillAlive) => {}
-            Ok(_) | Err(_) => {
-                exited = Some(*pid);
-                break;
-            }
+        if let Ok(WaitStatus::StillAlive) = waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {
+        } else {
+            exited = Some(*pid);
+            break;
         }
     }
     if let Some(pid) = exited {

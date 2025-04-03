@@ -2,8 +2,8 @@
 
 use std::{io::Write, time::SystemTime};
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::Error;
 
@@ -31,18 +31,18 @@ struct Message {
     true_anomaly: u8,
 }
 
-impl Distribution<Message> for Standard {
+impl Distribution<Message> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Message
     where
         R: Rng + ?Sized,
     {
         Message {
-            eccentricity: rng.gen(),
-            semimajor_axis: rng.gen(),
-            inclination: rng.gen(),
-            longitude_of_ascending_node: rng.gen(),
-            periapsis: rng.gen(),
-            true_anomaly: rng.gen(),
+            eccentricity: rng.random(),
+            semimajor_axis: rng.random(),
+            inclination: rng.random(),
+            longitude_of_ascending_node: rng.random(),
+            periapsis: rng.random(),
+            true_anomaly: rng.random(),
         }
     }
 }
@@ -58,20 +58,20 @@ struct Member {
     message: String,    // shortish structured string
 }
 
-impl Distribution<Member> for Standard {
+impl Distribution<Member> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Member
     where
         R: Rng + ?Sized,
     {
         Member {
-            priority: rng.gen_range(0..=191),
-            syslog_version: rng.gen_range(1..=3),
+            priority: rng.random_range(0..=191),
+            syslog_version: rng.random_range(1..=3),
             timestamp: to_rfc3339(SystemTime::now()),
             hostname: (*HOSTNAMES.choose(rng).expect("failed to choose hostnanme")).to_string(),
             app_name: (*APP_NAMES.choose(rng).expect("failed to choose app name")).to_string(),
-            procid: rng.gen_range(100..=9999),
-            msgid: rng.gen_range(1..=999),
-            message: serde_json::to_string(&rng.gen::<Message>()).expect("failed to serialize"),
+            procid: rng.random_range(100..=9999),
+            msgid: rng.random_range(1..=999),
+            message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
         }
     }
 }
@@ -111,7 +111,7 @@ impl crate::Serialize for Syslog5424 {
         }
 
         let mut written_bytes = 0;
-        for member in rng.sample_iter::<Member, Standard>(Standard) {
+        for member in rng.sample_iter::<Member, StandardUniform>(StandardUniform) {
             let encoded = member.into_string();
 
             if encoded.len() + 1 + written_bytes > max_bytes {
@@ -131,7 +131,7 @@ impl crate::Serialize for Syslog5424 {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{Serialize, Syslog5424};
 

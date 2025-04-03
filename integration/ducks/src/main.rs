@@ -17,19 +17,18 @@ use anyhow::Context;
 use bytes::Bytes;
 use bytes::BytesMut;
 use http_body_util::Full;
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{service::service_fn, Method, Request, StatusCode};
+use http_body_util::{BodyExt, combinators::BoxBody};
+use hyper::{Method, Request, StatusCode, service::service_fn};
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto;
 use once_cell::sync::OnceCell;
 use shared::{
-    integration_api::{
-        self,
-        integration_target_server::{IntegrationTarget, IntegrationTargetServer},
-        Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
-    },
     DucksConfig,
+    integration_api::{
+        self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
+        integration_target_server::{IntegrationTarget, IntegrationTargetServer},
+    },
 };
 use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
@@ -37,9 +36,9 @@ use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket, UnixListener},
-    sync::{mpsc, Mutex},
+    sync::{Mutex, mpsc},
 };
-use tokio_stream::{wrappers::UnixListenerStream, Stream};
+use tokio_stream::{Stream, wrappers::UnixListenerStream};
 use tonic::Status;
 use tracing::error;
 use tracing::{debug, trace, warn};

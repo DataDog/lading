@@ -1,7 +1,7 @@
 //! Procfs payload.
 
-use crate::{common::strings, Error, Generator};
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use crate::{Error, Generator, common::strings};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use std::fmt;
 
 mod proc;
@@ -105,7 +105,7 @@ pub struct Statm {
     dt: u64,
 }
 
-impl Distribution<Statm> for Standard {
+impl Distribution<Statm> for StandardUniform {
     /// Generates "uniformly random" instance of [`Statm`].
     ///
     /// Exists because our model of `/proc/{pid}/statm` currently ignores
@@ -115,12 +115,12 @@ impl Distribution<Statm> for Standard {
         R: Rng + ?Sized,
     {
         Statm {
-            size: rng.gen(),
-            resident: rng.gen(),
-            shared: rng.gen(),
-            trs: rng.gen(),
+            size: rng.random(),
+            resident: rng.random(),
+            shared: rng.random(),
+            trs: rng.random(),
             lrs: 0,
-            drs: rng.gen(),
+            drs: rng.random(),
             dt: 0,
         }
     }
@@ -147,12 +147,12 @@ impl fmt::Display for Statm {
 #[derive(Debug)]
 struct Umask(u32);
 
-impl Distribution<Umask> for Standard {
+impl Distribution<Umask> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Umask
     where
         R: Rng + ?Sized,
     {
-        Umask(rng.gen_range(0..UMASK_MAX))
+        Umask(rng.random_range(0..UMASK_MAX))
     }
 }
 
@@ -176,7 +176,7 @@ impl fmt::Display for Umask {
 #[derive(Debug)]
 struct DeviceMask(i32);
 
-impl Distribution<DeviceMask> for Standard {
+impl Distribution<DeviceMask> for StandardUniform {
     /// Generates a valid [`DeviceMask`] bit field with uniform probability.
     fn sample<R>(&self, rng: &mut R) -> DeviceMask
     where
@@ -189,11 +189,11 @@ impl Distribution<DeviceMask> for Standard {
         // simple implementation before later performance optimizations.
         let mut mask: i32 = 0;
         for index in 0..16 {
-            let bit: i32 = rng.gen_range(0..=1);
+            let bit: i32 = rng.random_range(0..=1);
             mask |= bit << index;
         }
         for index in 20..32 {
-            let bit: i32 = rng.gen_range(0..=1);
+            let bit: i32 = rng.random_range(0..=1);
             mask |= bit << index;
         }
         DeviceMask(mask)
@@ -212,12 +212,12 @@ impl fmt::Display for DeviceMask {
 #[derive(Debug, Clone, Copy)]
 pub struct Pid(i32);
 
-impl Distribution<Pid> for Standard {
+impl Distribution<Pid> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Pid
     where
         R: Rng + ?Sized,
     {
-        Pid(rng.gen_range(1..PID_MAX_LIMIT))
+        Pid(rng.random_range(1..PID_MAX_LIMIT))
     }
 }
 
@@ -233,12 +233,12 @@ impl fmt::Display for Pid {
 #[derive(Debug, Clone, Copy)]
 struct Uid(u32);
 
-impl Distribution<Uid> for Standard {
+impl Distribution<Uid> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Uid
     where
         R: Rng + ?Sized,
     {
-        Uid(rng.gen())
+        Uid(rng.random())
     }
 }
 
@@ -254,12 +254,12 @@ impl fmt::Display for Uid {
 #[derive(Debug, Clone, Copy)]
 struct Gid(u32);
 
-impl Distribution<Gid> for Standard {
+impl Distribution<Gid> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Gid
     where
         R: Rng + ?Sized,
     {
-        Gid(rng.gen())
+        Gid(rng.random())
     }
 }
 
@@ -313,12 +313,12 @@ impl fmt::Display for NamespaceIdHierarchy {
 #[derive(Debug, Clone, Copy)]
 struct MemSize(u64);
 
-impl Distribution<MemSize> for Standard {
+impl Distribution<MemSize> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> MemSize
     where
         R: Rng + ?Sized,
     {
-        MemSize(rng.gen())
+        MemSize(rng.random())
     }
 }
 
@@ -342,9 +342,9 @@ impl fmt::Display for MemSize {
 #[derive(Debug, Clone, Copy)]
 struct BooleanField(bool);
 
-impl Distribution<BooleanField> for Standard {
+impl Distribution<BooleanField> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BooleanField {
-        BooleanField(rng.gen())
+        BooleanField(rng.random())
     }
 }
 
@@ -364,7 +364,7 @@ struct SigQ {
     max_number_for_queue: u64,
 }
 
-impl Distribution<SigQ> for Standard {
+impl Distribution<SigQ> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> SigQ
     where
         R: Rng + ?Sized,
@@ -376,8 +376,8 @@ impl Distribution<SigQ> for Standard {
         //
         // In practice, we ignore these constraints for simplicity.
         SigQ {
-            signals_queued: rng.gen(),
-            max_number_for_queue: rng.gen(),
+            signals_queued: rng.random(),
+            max_number_for_queue: rng.random(),
         }
     }
 }
@@ -408,12 +408,12 @@ impl fmt::Display for SigQ {
 #[derive(Debug)]
 struct SignalMask(u64);
 
-impl Distribution<SignalMask> for Standard {
+impl Distribution<SignalMask> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> SignalMask
     where
         R: Rng + ?Sized,
     {
-        SignalMask(rng.gen())
+        SignalMask(rng.random())
     }
 }
 
@@ -436,12 +436,12 @@ impl fmt::Display for SignalMask {
 #[derive(Debug)]
 struct CapabilityMask(u64);
 
-impl Distribution<CapabilityMask> for Standard {
+impl Distribution<CapabilityMask> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> CapabilityMask
     where
         R: Rng + ?Sized,
     {
-        CapabilityMask(rng.gen())
+        CapabilityMask(rng.random())
     }
 }
 
@@ -471,12 +471,12 @@ enum SeccompMode {
     Filter = 2,
 }
 
-impl Distribution<SeccompMode> for Standard {
+impl Distribution<SeccompMode> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> SeccompMode
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..3) {
+        match rng.random_range(0..3) {
             0 => SeccompMode::Disabled,
             1 => SeccompMode::Strict,
             2 => SeccompMode::Filter,
@@ -503,12 +503,12 @@ impl fmt::Display for SeccompMode {
 #[derive(Debug)]
 struct MaskEntry(u32);
 
-impl Distribution<MaskEntry> for Standard {
+impl Distribution<MaskEntry> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> MaskEntry
     where
         R: Rng + ?Sized,
     {
-        MaskEntry(rng.gen())
+        MaskEntry(rng.random())
     }
 }
 
@@ -591,12 +591,12 @@ enum SpeculationStoreBypass {
     Vulnerable,
 }
 
-impl Distribution<SpeculationStoreBypass> for Standard {
+impl Distribution<SpeculationStoreBypass> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> SpeculationStoreBypass
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..7) {
+        match rng.random_range(0..7) {
             0 => SpeculationStoreBypass::Unknown,
             1 => SpeculationStoreBypass::NotVulnerable,
             2 => SpeculationStoreBypass::ThreadForceMitigated,
@@ -637,12 +637,12 @@ enum SpeculationIndirectBranch {
     Unknown,
 }
 
-impl Distribution<SpeculationIndirectBranch> for Standard {
+impl Distribution<SpeculationIndirectBranch> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> SpeculationIndirectBranch
     where
         R: Rng + ?Sized,
     {
-        match rng.gen_range(0..8) {
+        match rng.random_range(0..8) {
             0 => SpeculationIndirectBranch::Unsupported,
             1 => SpeculationIndirectBranch::NotAffected,
             2 => SpeculationIndirectBranch::ConditionalForceDisabled,
@@ -1053,15 +1053,15 @@ impl<'a> Generator<'a> for StatusGenerator {
         #![allow(clippy::similar_names)]
         #![allow(clippy::assertions_on_constants)]
         let pid = self.pid;
-        let uid: Uid = rng.gen();
+        let uid: Uid = rng.random();
         let gid = Gid(uid.0);
-        let seccomp: SeccompMode = rng.gen();
+        let seccomp: SeccompMode = rng.random();
 
         // Seccomp_filters is 0 unless the Seccomp mode is SECCOMP_MODE_FILTER.
         let seccomp_filters = match &seccomp {
             // If Seccomp mode is SECCOMP_MODE_FILTER, then Seccomp_filter is at
             // least 1.
-            SeccompMode::Filter => rng.gen_range(1..SECCOMP_FILTER_MAX),
+            SeccompMode::Filter => rng.random_range(1..SECCOMP_FILTER_MAX),
             SeccompMode::Disabled | SeccompMode::Strict => 0,
         };
 
@@ -1081,21 +1081,21 @@ impl<'a> Generator<'a> for StatusGenerator {
         assert!(ASSUMED_NGROUPS_MAX <= NGROUPS_MAX);
 
         // The `Groups` field of `/proc/{pid}/status` is allowed to be *empty*.
-        let ngroups = rng.gen_range(0..=ASSUMED_NGROUPS_MAX);
+        let ngroups = rng.random_range(0..=ASSUMED_NGROUPS_MAX);
         let mut groups = Vec::with_capacity(ngroups);
         for _ in 0..ngroups {
-            groups.push(Gid(rng.gen()));
+            groups.push(Gid(rng.random()));
         }
         let groups = Groups(groups);
 
         Ok(Status {
             name: self.name.clone(),
-            umask: rng.gen(),
-            state: rng.gen(),
+            umask: rng.random(),
+            state: rng.random(),
             tgid: pid,
             ngid: pid,
             pid,
-            ppid: rng.gen(),
+            ppid: rng.random(),
             // For simplicity, we assume arbitrarily that our generated
             // processes are not being traced, which corresponds to setting
             // tracer_pid to 0.
@@ -1108,50 +1108,50 @@ impl<'a> Generator<'a> for StatusGenerator {
             egid: gid,
             sgid: gid,
             fgid: gid,
-            fd_size: rng.gen(),
+            fd_size: rng.random(),
             groups,
             ns_tgid: NamespaceIdHierarchy(vec![pid]),
             ns_pid: NamespaceIdHierarchy(vec![pid]),
             ns_pgid: NamespaceIdHierarchy(vec![pid]),
             ns_sid: NamespaceIdHierarchy(vec![pid]),
-            vm_peak: rng.gen(),
-            vm_size: rng.gen(),
-            vm_lck: rng.gen(),
-            vm_pin: rng.gen(),
-            vm_hwm: rng.gen(),
-            vm_rss: rng.gen(),
-            rss_anon: rng.gen(),
-            rss_file: rng.gen(),
-            rss_shmem: rng.gen(),
-            vm_data: rng.gen(),
-            vm_stk: rng.gen(),
-            vm_exe: rng.gen(),
-            vm_lib: rng.gen(),
-            vm_pte: rng.gen(),
-            vm_swap: rng.gen(),
-            huge_tlb_pages: rng.gen(),
-            core_dumping: rng.gen(),
-            thp_enabled: rng.gen(),
-            threads: rng.gen_range(1..=ASSUMED_THREAD_MAX),
+            vm_peak: rng.random(),
+            vm_size: rng.random(),
+            vm_lck: rng.random(),
+            vm_pin: rng.random(),
+            vm_hwm: rng.random(),
+            vm_rss: rng.random(),
+            rss_anon: rng.random(),
+            rss_file: rng.random(),
+            rss_shmem: rng.random(),
+            vm_data: rng.random(),
+            vm_stk: rng.random(),
+            vm_exe: rng.random(),
+            vm_lib: rng.random(),
+            vm_pte: rng.random(),
+            vm_swap: rng.random(),
+            huge_tlb_pages: rng.random(),
+            core_dumping: rng.random(),
+            thp_enabled: rng.random(),
+            threads: rng.random_range(1..=ASSUMED_THREAD_MAX),
             sigq: SigQ {
-                signals_queued: rng.gen(),
-                max_number_for_queue: rng.gen(),
+                signals_queued: rng.random(),
+                max_number_for_queue: rng.random(),
             },
-            sig_pnd: rng.gen(),
-            shd_pnd: rng.gen(),
-            sig_blk: rng.gen(),
-            sig_ign: rng.gen(),
-            sig_cgt: rng.gen(),
-            cap_inh: rng.gen(),
-            cap_prm: rng.gen(),
-            cap_eff: rng.gen(),
-            cap_bnd: rng.gen(),
-            cap_amb: rng.gen(),
-            no_new_privs: rng.gen(),
+            sig_pnd: rng.random(),
+            shd_pnd: rng.random(),
+            sig_blk: rng.random(),
+            sig_ign: rng.random(),
+            sig_cgt: rng.random(),
+            cap_inh: rng.random(),
+            cap_prm: rng.random(),
+            cap_eff: rng.random(),
+            cap_bnd: rng.random(),
+            cap_amb: rng.random(),
+            no_new_privs: rng.random(),
             seccomp,
             seccomp_filters,
-            speculation_store_bypass: rng.gen(),
-            speculation_indirect_branch: rng.gen(),
+            speculation_store_bypass: rng.random(),
+            speculation_indirect_branch: rng.random(),
             // Mask entries are displayed in hexadecimal, hence the use of
             // hexadecimal literals. For simplicity, assume each process uses
             // all available CPUs.
@@ -1162,8 +1162,8 @@ impl<'a> Generator<'a> for StatusGenerator {
             // memory on a NUMA node other than node 0
             mems_allowed: MaskCollection(vec![MaskEntry(0x0)]),
             mems_allowed_list: ListCollection(vec![ListEntry::Single(0)]),
-            voluntary_ctxt_switches: rng.gen(),
-            nonvoluntary_ctxt_switches: rng.gen(),
+            voluntary_ctxt_switches: rng.random(),
+            nonvoluntary_ctxt_switches: rng.random(),
         })
     }
 }
@@ -1513,7 +1513,7 @@ impl<'a> Generator<'a> for StatGenerator {
         // scheduling policy). The range of task priorities in the kernel in this
         // scenario is 0 (high) to 39 (low), inclusive. (See `man 5 proc`.)
         let policy = SchedulingPolicy::Normal;
-        let priority = rng.gen_range(0..40);
+        let priority = rng.random_range(0..40);
         let nice = priority - 20;
 
         // Due to asumptions above, this value must be 0; the process is
@@ -1524,74 +1524,74 @@ impl<'a> Generator<'a> for StatGenerator {
         Ok(Stat {
             pid,
             comm: self.comm.clone(),
-            state: rng.gen(),
-            ppid: rng.gen(),
+            state: rng.random(),
+            ppid: rng.random(),
             // Assume process group ID group and session ID are eqaul to PID
             // because this situation seems to be common.
             pgrp: pid,
             session: pid,
-            tty_nr: rng.gen(),
-            tpgid: rng.gen(),
-            flags: rng.gen(),
-            minflt: rng.gen(),
-            cminflt: rng.gen(),
-            majflt: rng.gen(),
-            cmajflt: rng.gen(),
-            utime: rng.gen(),
-            stime: rng.gen(),
-            cutime: rng.gen(),
-            cstime: rng.gen(),
+            tty_nr: rng.random(),
+            tpgid: rng.random(),
+            flags: rng.random(),
+            minflt: rng.random(),
+            cminflt: rng.random(),
+            majflt: rng.random(),
+            cmajflt: rng.random(),
+            utime: rng.random(),
+            stime: rng.random(),
+            cutime: rng.random(),
+            cstime: rng.random(),
             priority,
             nice,
             // Assume up to 32 threads per process, arbitrarily.
-            num_threads: rng.gen_range(1..=i64::from(ASSUMED_THREAD_MAX)),
+            num_threads: rng.random_range(1..=i64::from(ASSUMED_THREAD_MAX)),
             itrealvalue: 0,
-            starttime: rng.gen(),
-            vsize: rng.gen(),
-            rss: rng.gen_range(1..i64::MAX),
+            starttime: rng.random(),
+            vsize: rng.random(),
+            rss: rng.random_range(1..i64::MAX),
             // For now, ignore that rss <= rsslim should hold.
-            rsslim: rng.gen(),
-            startcode: rng.gen(),
+            rsslim: rng.random(),
+            startcode: rng.random(),
             // For now, ignore that startcode <= endcode should hold.
-            endcode: rng.gen(),
-            startstack: rng.gen(),
+            endcode: rng.random(),
+            startstack: rng.random(),
             // Assume `kstkesp` & `kstkeip` are both 0 because this property
             // seems to hold across a variety of processes
             kstkesp: 0,
             kstkeip: 0,
-            signal: rng.gen(),
-            blocked: rng.gen(),
-            sigignore: rng.gen(),
-            sigcatch: rng.gen(),
-            wchan: rng.gen(),
+            signal: rng.random(),
+            blocked: rng.random(),
+            sigignore: rng.random(),
+            sigcatch: rng.random(),
+            wchan: rng.random(),
             nswap: 0,
             cnswap: 0,
-            exit_signal: rng.gen(),
+            exit_signal: rng.random(),
             // Assume machine has 8 cores for now
-            processor: rng.gen_range(0..ASSUMED_NPROC),
+            processor: rng.random_range(0..ASSUMED_NPROC),
             rt_priority,
             policy,
-            delayacct_blkio_ticks: rng.gen(),
-            guest_time: rng.gen(),
-            cguest_time: rng.gen(),
-            start_data: rng.gen(),
+            delayacct_blkio_ticks: rng.random(),
+            guest_time: rng.random(),
+            cguest_time: rng.random(),
+            start_data: rng.random(),
             // Although end_data should probably satisfy the property
             // end_data >= start_data, this implementation ignores that
             // property for simplicity.
-            end_data: rng.gen(),
-            start_brk: rng.gen(),
-            arg_start: rng.gen(),
+            end_data: rng.random(),
+            start_brk: rng.random(),
+            arg_start: rng.random(),
             // Although arg_end should probably satisfy the property
             // arg_end >= arg_start, this implementation ignores that property
             // for simplicity.
-            arg_end: rng.gen(),
-            env_start: rng.gen(),
+            arg_end: rng.random(),
+            env_start: rng.random(),
             // Although env_end should probably satisfy the property
             // env_end >= env_start, this implementation ignores that property
             // for simplicity.
-            env_end: rng.gen(),
+            env_end: rng.random(),
             // Exit code is assigned arbitrarily, for simplicity.
-            exit_code: rng.gen(),
+            exit_code: rng.random(),
         })
     }
 }
@@ -1683,7 +1683,7 @@ impl<'a> Generator<'a> for ProcessGenerator {
     {
         // For simplicity, assume the command line is a single string consisting
         // of a single path component and no arguments.
-        let cmdline_size: usize = rng.gen_range(1..=NAME_MAX);
+        let cmdline_size: usize = rng.random_range(1..=NAME_MAX);
 
         // SAFETY: If this call fails, then execution should panic because an
         // inability to generate process command lines is a serious bug.
@@ -1704,10 +1704,10 @@ impl<'a> Generator<'a> for ProcessGenerator {
         let name_size = std::cmp::min(TASK_NAME_LEN, cmdline.len());
         let name = String::from(&cmdline[..name_size]);
 
-        let io: proc::Io = rng.gen();
-        let statm: Statm = rng.gen();
+        let io: proc::Io = rng.random();
+        let statm: Statm = rng.random();
 
-        let pid: Pid = Pid(rng.gen_range(1..PID_MAX_LIMIT));
+        let pid: Pid = Pid(rng.random_range(1..PID_MAX_LIMIT));
 
         let stat_gen = StatGenerator::new(pid, comm.clone());
         let stat = stat_gen.generate(rng);
@@ -1737,9 +1737,9 @@ where
     R: rand::Rng + ?Sized,
 {
     let mut processes = Vec::with_capacity(total);
-    let gen = ProcessGenerator::new(rng);
+    let g = ProcessGenerator::new(rng);
     for _ in 0..total {
-        processes.push(gen.generate(rng));
+        processes.push(g.generate(rng));
     }
     processes.into_iter().collect()
 }

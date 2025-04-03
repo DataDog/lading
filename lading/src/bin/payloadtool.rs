@@ -5,7 +5,7 @@ use std::{io, num::NonZeroU32};
 use clap::Parser;
 use lading::generator::http::Method;
 use lading_payload::block;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -64,7 +64,9 @@ fn generate_and_check(
         let total_generated_bytes_str = total_generated_bytes
             .get_appropriate_unit(false)
             .to_string();
-        warn!("Generator failed to generate {total_requested_bytes_str}, instead only found {total_generated_bytes_str} of data")
+        warn!(
+            "Generator failed to generate {total_requested_bytes_str}, instead only found {total_generated_bytes_str} of data"
+        )
     }
 
     Ok(())

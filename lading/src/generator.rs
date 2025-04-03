@@ -188,7 +188,9 @@ impl Server {
             Inner::UnixStream(conf) => {
                 if let lading_payload::Config::DogStatsD(variant) = conf.variant {
                     if !variant.length_prefix_framed {
-                        warn!("Dogstatsd stream requires length prefix framing. You likely want to add `length_prefix_framed: true` to your payload config.");
+                        warn!(
+                            "Dogstatsd stream requires length prefix framing. You likely want to add `length_prefix_framed: true` to your payload config."
+                        );
                     }
                 }
 

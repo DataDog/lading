@@ -3,15 +3,15 @@
 use std::{cmp, fmt, io::Write, ops::Range, rc::Rc};
 
 use rand::{
-    distributions::{uniform::SampleUniform, WeightedIndex},
-    prelude::Distribution,
-    seq::SliceRandom,
     Rng,
+    distr::{uniform::SampleUniform, weighted::WeightedIndex},
+    prelude::Distribution,
+    seq::IndexedRandom,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use tracing::{debug, warn};
 
-use crate::{common::strings, Serialize};
+use crate::{Serialize, common::strings};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -203,7 +203,7 @@ where
     {
         match self {
             ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { min, max } => rng.gen_range(*min..=*max),
+            ConfRange::Inclusive { min, max } => rng.random_range(*min..=*max),
         }
     }
 }
@@ -363,7 +363,7 @@ fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
 where
     R: rand::Rng + ?Sized,
 {
-    if rng.gen() {
+    if rng.random() {
         pool.choose(&mut rng)
     } else {
         None
@@ -376,11 +376,7 @@ where
     R: rand::Rng + ?Sized,
     F: FnOnce(&mut R) -> Option<T>,
 {
-    if rng.gen() {
-        func(rng)
-    } else {
-        None
-    }
+    if rng.random() { func(rng) } else { None }
 }
 
 #[inline]
@@ -395,7 +391,7 @@ fn random_strings_with_length<R>(
 where
     R: Rng + ?Sized,
 {
-    let total = rng.gen_range(min_max);
+    let total = rng.random_range(min_max);
     let length_range = ConfRange::Inclusive {
         min: 1,
         max: max_length,
@@ -464,7 +460,7 @@ impl MemberGenerator {
         let num_contexts = contexts.sample(rng);
 
         let mut tags_generator = match tags::Generator::new(
-            rng.gen(),
+            rng.random(),
             tags_per_msg,
             tag_length,
             num_contexts as usize,
@@ -580,12 +576,12 @@ pub enum Member<'a> {
     ServiceCheck(service_check::ServiceCheck<'a>),
 }
 
-impl<'a> fmt::Display for Member<'a> {
+impl fmt::Display for Member<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Metric(ref m) => write!(f, "{m}"),
-            Self::Event(ref e) => write!(f, "{e}"),
-            Self::ServiceCheck(ref sc) => write!(f, "{sc}"),
+            Self::Metric(m) => write!(f, "{m}"),
+            Self::Event(e) => write!(f, "{e}"),
+            Self::ServiceCheck(sc) => write!(f, "{sc}"),
         }
     }
 }
@@ -777,7 +773,7 @@ impl DogStatsD {
 mod test {
     use super::Config;
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::DogStatsD;
 

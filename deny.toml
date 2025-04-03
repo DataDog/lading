@@ -23,7 +23,8 @@ version = 2
 ignore = [
   "RUSTSEC-2024-0370", # proc-macro-error is unmaintained
   "RUSTSEC-2024-0384", # instant crate is unmaintained
-  "RUSTSEC-2024-0387"  # opentelemetry_api is unmaintained
+  "RUSTSEC-2024-0387", # opentelemetry_api is unmaintained
+  "RUSTSEC-2024-0436", # paste is unmaintained
 ]
 
 [bans]

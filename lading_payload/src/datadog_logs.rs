@@ -2,9 +2,9 @@
 
 use std::io::Write;
 
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
-use crate::{common::strings, Error, Generator};
+use crate::{Error, Generator, common::strings};
 
 const STATUSES: [&str; 3] = ["notice", "info", "warning"];
 const HOSTNAMES: [&str; 4] = ["alpha", "beta", "gamma", "localhost"];
@@ -28,16 +28,16 @@ struct Structured {
     vegetable: i16,
 }
 
-impl Distribution<Structured> for Standard {
+impl Distribution<Structured> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Structured
     where
         R: Rng + ?Sized,
     {
         Structured {
-            proportional: rng.gen(),
-            integral: rng.gen(),
-            derivative: rng.gen(),
-            vegetable: rng.gen(),
+            proportional: rng.random(),
+            integral: rng.random(),
+            derivative: rng.random(),
+            vegetable: rng.random(),
         }
     }
 }
@@ -53,14 +53,14 @@ fn message<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> Message<'a>
 where
     R: rand::Rng + ?Sized,
 {
-    match rng.gen_range(0..2) {
+    match rng.random_range(0..2) {
         0 => Message::Unstructured(
             str_pool
                 .of_size_range(rng, 1_u8..16)
                 .expect("failed to generate string"),
         ),
         1 => Message::Structured(
-            serde_json::to_string(&rng.gen::<Structured>()).expect("failed to generate string"),
+            serde_json::to_string(&rng.random::<Structured>()).expect("failed to generate string"),
         ),
         _ => unreachable!(),
     }
@@ -114,7 +114,7 @@ impl<'a> Generator<'a> for DatadogLog {
         Ok(Member {
             message: message(&mut rng, &self.str_pool),
             status: STATUSES.choose(rng).expect("failed to generate status"),
-            timestamp: rng.gen(),
+            timestamp: rng.random(),
             hostname: HOSTNAMES.choose(rng).expect("failed to generate hostnames"),
             service: SERVICES.choose(rng).expect("failed to generate services"),
             ddsource: SOURCES.choose(rng).expect("failed to generate sources"),
@@ -166,7 +166,7 @@ impl crate::Serialize for DatadogLog {
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::Member;
     use crate::{DatadogLog, Serialize};

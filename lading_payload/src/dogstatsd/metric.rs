@@ -2,18 +2,18 @@
 use std::fmt;
 
 use rand::{
-    distributions::{OpenClosed01, WeightedIndex},
-    prelude::{Distribution, SliceRandom},
     Rng,
+    distr::{OpenClosed01, weighted::WeightedIndex},
+    prelude::Distribution,
+    seq::IndexedRandom,
 };
 
-use crate::{common::strings, dogstatsd::metric::template::Template, Error, Generator};
+use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
 use tracing::debug;
 
 use super::{
-    choose_or_not_ref,
+    ConfRange, ValueConf, choose_or_not_ref,
     common::{self, NumValueGenerator},
-    ConfRange, ValueConf,
 };
 
 mod template;
@@ -130,41 +130,41 @@ impl<'a> Generator<'a> for MetricGenerator {
         }
 
         match template {
-            Template::Count(ref count) => Ok(Metric::Count(Count {
+            Template::Count(count) => Ok(Metric::Count(Count {
                 name: &count.name,
                 values,
                 sample_rate,
                 tags: &count.tags,
                 container_id,
             })),
-            Template::Gauge(ref gauge) => Ok(Metric::Gauge(Gauge {
+            Template::Gauge(gauge) => Ok(Metric::Gauge(Gauge {
                 name: &gauge.name,
                 values,
                 tags: &gauge.tags,
                 container_id,
             })),
-            Template::Distribution(ref dist) => Ok(Metric::Distribution(Dist {
+            Template::Distribution(dist) => Ok(Metric::Distribution(Dist {
                 name: &dist.name,
                 values,
                 sample_rate,
                 tags: &dist.tags,
                 container_id,
             })),
-            Template::Histogram(ref hist) => Ok(Metric::Histogram(Histogram {
+            Template::Histogram(hist) => Ok(Metric::Histogram(Histogram {
                 name: &hist.name,
                 values,
                 sample_rate,
                 tags: &hist.tags,
                 container_id,
             })),
-            Template::Timer(ref timer) => Ok(Metric::Timer(Timer {
+            Template::Timer(timer) => Ok(Metric::Timer(Timer {
                 name: &timer.name,
                 values,
                 sample_rate,
                 tags: &timer.tags,
                 container_id,
             })),
-            Template::Set(ref set) => Ok(Metric::Set(Set {
+            Template::Set(set) => Ok(Metric::Set(Set {
                 name: &set.name,
                 value: values.pop().expect("failed to pop value from Vec"),
                 tags: &set.tags,
@@ -191,28 +191,28 @@ pub enum Metric<'a> {
     Distribution(Dist<'a>),
 }
 
-impl<'a> fmt::Display for Metric<'a> {
+impl fmt::Display for Metric<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Count(ref count) => write!(f, "{count}"),
-            Self::Gauge(ref gauge) => write!(f, "{gauge}"),
-            Self::Timer(ref timer) => write!(f, "{timer}"),
-            Self::Histogram(ref histogram) => write!(f, "{histogram}"),
-            Self::Set(ref set) => write!(f, "{set}"),
-            Self::Distribution(ref distribution) => write!(f, "{distribution}"),
+            Self::Count(count) => write!(f, "{count}"),
+            Self::Gauge(gauge) => write!(f, "{gauge}"),
+            Self::Timer(timer) => write!(f, "{timer}"),
+            Self::Histogram(histogram) => write!(f, "{histogram}"),
+            Self::Set(set) => write!(f, "{set}"),
+            Self::Distribution(distribution) => write!(f, "{distribution}"),
         }
     }
 }
 
-impl<'a> std::fmt::Debug for Metric<'a> {
+impl std::fmt::Debug for Metric<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Count(ref count) => write!(f, "{count}"),
-            Self::Gauge(ref gauge) => write!(f, "{gauge}"),
-            Self::Timer(ref timer) => write!(f, "{timer}"),
-            Self::Histogram(ref histogram) => write!(f, "{histogram}"),
-            Self::Set(ref set) => write!(f, "{set}"),
-            Self::Distribution(ref distribution) => write!(f, "{distribution}"),
+            Self::Count(count) => write!(f, "{count}"),
+            Self::Gauge(gauge) => write!(f, "{gauge}"),
+            Self::Timer(timer) => write!(f, "{timer}"),
+            Self::Histogram(histogram) => write!(f, "{histogram}"),
+            Self::Set(set) => write!(f, "{set}"),
+            Self::Distribution(distribution) => write!(f, "{distribution}"),
         }
     }
 }
@@ -232,7 +232,7 @@ pub struct Count<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Count<'a> {
+impl fmt::Display for Count<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAGVALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -276,7 +276,7 @@ pub struct Gauge<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Gauge<'a> {
+impl fmt::Display for Gauge<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -319,7 +319,7 @@ pub struct Timer<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Timer<'a> {
+impl fmt::Display for Timer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -365,7 +365,7 @@ pub struct Dist<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Dist<'a> {
+impl fmt::Display for Dist<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -409,7 +409,7 @@ pub struct Set<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Set<'a> {
+impl fmt::Display for Set<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|s|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         let name = &self.name;
@@ -448,7 +448,7 @@ pub struct Histogram<'a> {
     pub container_id: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for Histogram<'a> {
+impl fmt::Display for Histogram<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|h|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|h|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>

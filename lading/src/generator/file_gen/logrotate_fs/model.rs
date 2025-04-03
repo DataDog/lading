@@ -404,7 +404,7 @@ impl State {
         for group_id in 0..concurrent_logs {
             // First, generate the group name.
             let base: String = (0..8)
-                .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
                 .collect();
             let base_name = format!("{base}_{group_id}.log");
             let mut names = Vec::new();
@@ -419,13 +419,13 @@ impl State {
             let depth = if max_depth == 0 {
                 0
             } else {
-                rng.gen_range(1..=max_depth as usize)
+                rng.random_range(1..=max_depth as usize)
             };
 
             // Build the directory path
             for _ in 0..depth {
                 let dir_name: String = (0..8)
-                    .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                    .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
                     .collect();
 
                 // Create the directory. If the name already exists under the current_inode we reuse it.
@@ -737,11 +737,13 @@ impl State {
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
                 let lost_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
-                info!("Log file deleted. Total bytes lost: {lost_bytes}. Total bytes written: {bytes_written}. Total bytes read: {bytes_read}. Group ID: {group_id}. Created: {created_tick}.",
-                      group_id = file.group_id,
-                      created_tick = file.created_tick,
-                      bytes_written = file.bytes_written,
-                      bytes_read = file.bytes_read);
+                info!(
+                    "Log file deleted. Total bytes lost: {lost_bytes}. Total bytes written: {bytes_written}. Total bytes read: {bytes_read}. Group ID: {group_id}. Created: {created_tick}.",
+                    group_id = file.group_id,
+                    created_tick = file.created_tick,
+                    bytes_written = file.bytes_written,
+                    bytes_read = file.bytes_read
+                );
                 counter!("log_file_deleted").increment(1);
                 counter!("lost_bytes", "group_id" => format!("{}", file.group_id))
                     .increment(lost_bytes);
@@ -833,7 +835,7 @@ impl State {
 
         let inode = file_handle.inode;
         match self.nodes.get_mut(&inode) {
-            Some(Node::File { ref mut file }) => {
+            Some(Node::File { file }) => {
                 let bytes_written = usize::try_from(file.bytes_written)
                     .expect("more bytes written than machine word");
 
@@ -850,7 +852,11 @@ impl State {
 
                 // Get data from block_cache without worrying about blocks
                 let data = self.block_cache.read_at(offset as u64, to_read);
-                assert!(data.len() == to_read, "Data returned from block_cache is distinct from the read size: {l} != {to_read}", l = data.len());
+                assert!(
+                    data.len() == to_read,
+                    "Data returned from block_cache is distinct from the read size: {l} != {to_read}",
+                    l = data.len()
+                );
 
                 file.read(to_read as u64, now);
 
@@ -948,7 +954,7 @@ mod test {
     use lading_payload::block;
     use proptest::collection::vec;
     use proptest::prelude::*;
-    use rand::{rngs::StdRng, seq::IteratorRandom, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng, seq::IteratorRandom};
 
     /// Our testing strategy is to drive the State as if in a filesystem. The
     /// crux is the Operation enum that defines which parts of the State are
@@ -1051,7 +1057,7 @@ mod test {
 
     fn random_inode<R>(rng: &mut R, state: &State) -> Inode
     where
-        R: Rng,
+        R: rand::Rng,
     {
         if state.nodes.is_empty() {
             state.root_inode
@@ -1062,7 +1068,7 @@ mod test {
 
     fn random_name<R>(rng: &mut R, state: &State) -> String
     where
-        R: Rng,
+        R: rand::Rng,
     {
         let names: Vec<String> = state
             .nodes
@@ -1224,8 +1230,7 @@ mod test {
                     end_tick,
                 );
                 assert_eq!(
-                    file.bytes_written,
-                    expected_bytes,
+                    file.bytes_written, expected_bytes,
                     "bytes_written ({}) does not match expected_bytes_written ({expected_bytes}) for file with inode {inode}",
                     file.bytes_written,
                 );
@@ -1268,8 +1273,10 @@ mod test {
                 if file.unlinked && file.read_only {
                     if file.open_handles > 0 {
                         // Should remain in state.nodes
-                        assert!(state.nodes.contains_key(&inode),
-                                "Unlinked, read-only file with open handles should remain in state.nodes");
+                        assert!(
+                            state.nodes.contains_key(&inode),
+                            "Unlinked, read-only file with open handles should remain in state.nodes"
+                        );
 
                         // There should be valid file handles pointing to this inode
                         let valid_handles: Vec<_> = state
@@ -1284,12 +1291,16 @@ mod test {
                             })
                             .collect();
 
-                        assert!(!valid_handles.is_empty(),
-                                "Unlinked, read-only file with open handles should have valid file handles");
+                        assert!(
+                            !valid_handles.is_empty(),
+                            "Unlinked, read-only file with open handles should have valid file handles"
+                        );
                     } else {
                         // Should be removed from state.nodes after GC
-                        assert!(!state.nodes.contains_key(&inode),
-                                "Unlinked, read-only file with zero open handles should be removed from state.nodes");
+                        assert!(
+                            !state.nodes.contains_key(&inode),
+                            "Unlinked, read-only file with zero open handles should be removed from state.nodes"
+                        );
                     }
                 }
             }
@@ -1385,7 +1396,10 @@ mod test {
                         if state.nodes.contains_key(&handle.inode) {
                             let _ = state.read(*handle, offset, size, now);
                         } else {
-                            panic!("Attempted to read from an invalid or already removed inode: {inode}", inode = handle.inode);
+                            panic!(
+                                "Attempted to read from an invalid or already removed inode: {inode}",
+                                inode = handle.inode
+                            );
                         }
                     }
                 }
@@ -1395,7 +1409,9 @@ mod test {
                         let name = op_name.unwrap_or_else(|| random_name(&mut rng, &state));
                         let _ = state.lookup(now, parent_inode, &name);
                     } else {
-                        panic!("Attempted to look up a name in an invalid or already removed parent inode: {parent_inode}");
+                        panic!(
+                            "Attempted to look up a name in an invalid or already removed parent inode: {parent_inode}"
+                        );
                     }
                 }
                 Operation::GetAttr => {
@@ -1403,7 +1419,9 @@ mod test {
                     if state.nodes.contains_key(&inode) {
                         let _ = state.getattr(now, inode);
                     } else {
-                        panic!("Attempted to get attributes of an invalid or already removed inode: {inode}");
+                        panic!(
+                            "Attempted to get attributes of an invalid or already removed inode: {inode}"
+                        );
                     }
                 }
                 Operation::Wait { ticks } => {
