@@ -24,7 +24,7 @@ use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{net::UdpSocket, sync::mpsc};
-use tracing::{debug, info, trace};
+use tracing::{debug, error, info, trace};
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
@@ -184,22 +184,29 @@ impl Udp {
                         }
                     }
                 }
-                _ = self.throttle.wait_for(total_bytes), if connection.is_some() => {
-                    let sock = connection.expect("connection failed");
-                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
-                    match sock.send_to(&blk.bytes, self.addr).await {
-                        Ok(bytes) => {
-                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
-                            counter!("packets_sent", &self.metric_labels).increment(1);
-                            connection = Some(sock);
+                result = self.throttle.wait_for(total_bytes), if connection.is_some() => {
+                    match result {
+                        Ok(()) => {
+                            let sock = connection.expect("connection failed");
+                            let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
+                            match sock.send_to(&blk.bytes, self.addr).await {
+                                Ok(bytes) => {
+                                    counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                                    counter!("packets_sent", &self.metric_labels).increment(1);
+                                    connection = Some(sock);
+                                }
+                                Err(err) => {
+                                    debug!("write failed: {}", err);
+
+                                    let mut error_labels = self.metric_labels.clone();
+                                    error_labels.push(("error".to_string(), err.to_string()));
+                                    counter!("write_failure", &error_labels).increment(1);
+                                    connection = None;
+                                }
+                            }
                         }
                         Err(err) => {
-                            debug!("write failed: {}", err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("request_failure", &error_labels).increment(1);
-                            connection = None;
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
                 }

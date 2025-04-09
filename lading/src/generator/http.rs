@@ -22,7 +22,7 @@ use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, mpsc};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
@@ -227,30 +227,38 @@ impl Http {
             }
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let client = client.clone();
-                    let labels = labels.clone();
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let client = client.clone();
+                            let labels = labels.clone();
 
-                    let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
-                    tokio::spawn(async move {
-                        counter!("requests_sent", &labels).increment(1);
-                        match client.request(request).await {
-                            Ok(response) => {
-                                counter!("bytes_written", &labels).increment(block_length as u64);
-                                let status = response.status();
-                                let mut status_labels = labels.clone();
-                                status_labels
-                                    .push(("status_code".to_string(), status.as_u16().to_string()));
-                                counter!("request_ok", &status_labels).increment(1);
-                            }
-                            Err(err) => {
-                                let mut error_labels = labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", &error_labels).increment(1);
-                            }
+                            let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
+                            tokio::spawn(async move {
+                                counter!("requests_sent", &labels).increment(1);
+                                match client.request(request).await {
+                                    Ok(response) => {
+                                        counter!("bytes_written", &labels).increment(block_length as u64);
+                                        let status = response.status();
+                                        let mut status_labels = labels.clone();
+                                        status_labels
+                                            .push(("status_code".to_string(), status.as_u16().to_string()));
+                                        counter!("request_ok", &status_labels).increment(1);
+                                    }
+                                    Err(err) => {
+                                        let mut error_labels = labels.clone();
+                                        error_labels.push(("error".to_string(), err.to_string()));
+                                        counter!("request_failure", &error_labels).increment(1);
+                                    }
+                                }
+                                drop(permit);
+                            });
+
                         }
-                        drop(permit);
-                    });
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                        }
+                    }
                 },
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
