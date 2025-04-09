@@ -155,7 +155,7 @@ impl Container {
                 warn!("Container warning: {}", warning);
             }
 
-            containers.push(container)
+            containers.push(container);
         }
 
         for container in &containers {
@@ -173,7 +173,7 @@ impl Container {
             () = &mut shutdown_wait => {
                 info!("shutdown signal received");
                 for container in &containers {
-                    Self::stop_and_remove_container(&docker, &container).await?;
+                    Self::stop_and_remove_container(&docker, container).await?;
                 }
 
                 Ok(())
