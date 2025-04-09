@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+## Fixed
+- Fixed throttle capacity validation to prevent requests larger than maximum
+  capacity from being emitted.
+
 ## [0.25.8]
 ## Fixed
 - Lading will now ignore child processes when polling /proc if the children are
