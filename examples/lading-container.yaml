@@ -3,8 +3,20 @@ generator:
       repository: busybox
       tag: latest
       args:
-        - sleep
-        - infinity
+        - /bin/sh
+        - -c
+        - |
+          while true; do
+            nc -l -s 0.0.0.0 -p 5000
+          done
+      env:
+        - FOO=env_foo
+        - BAR=env_bar
+      labels:
+        com.datadoghq.ad.checks: '{"tcp_check": {"instances": [{"name": "foo", "host": "%%host%%", "port": "%%port%%"}]}}'
+        foo: label_foo
+        bar: label_bar
+      network_disabled: false
+      exposed_ports:
+        - 5000/tcp
       nb_containers: 10
-
-blackhole: []

@@ -16,6 +16,7 @@ use bollard::container::{
 use bollard::image::CreateImageOptions;
 use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -34,6 +35,14 @@ pub struct Config {
     pub tag: String,
     /// Arguments to provide to the container (docker calls this args, but that's a dumb name)
     pub args: Option<Vec<String>>,
+    /// Environment variables to set in the container
+    pub env: Option<Vec<String>>,
+    /// Labels to apply to the container
+    pub labels: Option<HashMap<String, String>>,
+    /// Network mode to use for the container
+    pub network_disabled: Option<bool>,
+    /// Ports to expose from the container
+    pub exposed_ports: Option<Vec<String>>,
     /// Number of containers to spin up (defaults to 1)
     pub nb_containers: Option<u32>,
 }
@@ -55,6 +64,10 @@ pub struct Container {
     image: String,
     tag: String,
     args: Option<Vec<String>>,
+    env: Option<Vec<String>>,
+    labels: Option<HashMap<String, String>>,
+    network_disabled: Option<bool>,
+    exposed_ports: Option<Vec<String>>,
     nb: usize,
     shutdown: lading_signal::Watcher,
 }
@@ -76,6 +89,10 @@ impl Container {
             image: config.repository.clone(),
             tag: config.tag.clone(),
             args: config.args.clone(),
+            env: config.env.clone(),
+            labels: config.labels.clone(),
+            network_disabled: config.network_disabled,
+            exposed_ports: config.exposed_ports.clone(),
             nb: config.nb_containers.unwrap_or(1) as usize,
             shutdown,
         })
@@ -145,6 +162,24 @@ impl Container {
                             .args
                             .as_ref()
                             .map(|args| args.iter().map(String::as_str).collect()),
+                        env: self
+                            .env
+                            .as_ref()
+                            .map(|env| env.iter().map(String::as_str).collect()),
+                        labels: self.labels.as_ref().map(|labels| {
+                            labels
+                                .iter()
+                                .map(|(key, value)| (key.as_str(), value.as_str()))
+                                .collect()
+                        }),
+                        network_disabled: self.network_disabled,
+                        #[allow(clippy::zero_sized_map_values)]
+                        exposed_ports: self.exposed_ports.as_ref().map(|ports| {
+                            ports
+                                .iter()
+                                .map(|port| (port.as_str(), HashMap::new()))
+                                .collect()
+                        }),
                         ..Default::default()
                     },
                 )
