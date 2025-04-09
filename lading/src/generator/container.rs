@@ -8,13 +8,13 @@
 //! - Pull and run a specified container image
 //! - Possibly support metrics about container lifecycle
 
+use bollard::Docker;
 use bollard::container::{
     Config as ContainerConfig, CreateContainerOptions, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions,
 };
 use bollard::image::CreateImageOptions;
 use bollard::secret::ContainerCreateResponse;
-use bollard::Docker;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
@@ -34,6 +34,8 @@ pub struct Config {
     pub tag: String,
     /// Arguments to provide to the container (docker calls this args, but that's a dumb name)
     pub args: Option<Vec<String>>,
+    /// Number of containers to spin up (defaults to 1)
+    pub nb_containers: Option<u32>,
 }
 
 /// Errors produced by the `Container` generator.
@@ -53,6 +55,7 @@ pub struct Container {
     image: String,
     tag: String,
     args: Option<Vec<String>>,
+    nb: usize,
     shutdown: lading_signal::Watcher,
 }
 
@@ -73,6 +76,7 @@ impl Container {
             image: config.repository.clone(),
             tag: config.tag.clone(),
             args: config.args.clone(),
+            nb: config.nb_containers.unwrap_or(1) as usize,
             shutdown,
         })
     }
@@ -122,37 +126,45 @@ impl Container {
             }
         }
 
-        let container_name = format!("lading_container_{}", Uuid::new_v4());
-        info!("Creating container: {}", container_name);
+        let mut containers = Vec::with_capacity(self.nb);
 
-        let container = docker
-            .create_container(
-                Some(CreateContainerOptions {
-                    name: &container_name,
-                    platform: None,
-                }),
-                ContainerConfig {
-                    image: Some(full_image.as_str()),
-                    tty: Some(true),
-                    cmd: self
-                        .args
-                        .as_ref()
-                        .map(|args| args.iter().map(String::as_str).collect()),
-                    ..Default::default()
-                },
-            )
-            .await?;
+        for _ in 0..self.nb {
+            let container_name = format!("lading_container_{}", Uuid::new_v4());
+            info!("Creating container: {}", container_name);
 
-        info!("Created container with id: {}", container.id);
-        for warning in &container.warnings {
-            warn!("Container warning: {}", warning);
+            let container = docker
+                .create_container(
+                    Some(CreateContainerOptions {
+                        name: &container_name,
+                        platform: None,
+                    }),
+                    ContainerConfig {
+                        image: Some(full_image.as_str()),
+                        tty: Some(true),
+                        cmd: self
+                            .args
+                            .as_ref()
+                            .map(|args| args.iter().map(String::as_str).collect()),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+
+            info!("Created container with id: {}", container.id);
+            for warning in &container.warnings {
+                warn!("Container warning: {}", warning);
+            }
+
+            containers.push(container)
         }
 
-        docker
-            .start_container(&container.id, None::<StartContainerOptions<String>>)
-            .await?;
+        for container in &containers {
+            docker
+                .start_container(&container.id, None::<StartContainerOptions<String>>)
+                .await?;
 
-        info!("Started container: {}", container.id);
+            info!("Started container: {}", container.id);
+        }
 
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
@@ -160,7 +172,9 @@ impl Container {
         tokio::select! {
             () = &mut shutdown_wait => {
                 info!("shutdown signal received");
-                Self::stop_and_remove_container(&docker, &container).await?;
+                for container in &containers {
+                    Self::stop_and_remove_container(&docker, &container).await?;
+                }
 
                 Ok(())
             }
