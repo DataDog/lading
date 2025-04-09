@@ -20,7 +20,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
-async-compression = { version = "0.4.21", features = ["tokio", "zstd"] }
+async-compression = { version = "0.4.22", features = ["tokio", "zstd"] }
 average = { version = "0.16", default-features = false, features = [] }
 bollard = { version = "0.18", default-features = false, features = ["pipe", "http"] }
 byte-unit = { workspace = true }
@@ -31,7 +31,7 @@ clap = { version = "4.5", default-features = false, features = [
   "derive",
   "help",
 ] }
-flate2 = { version = "1.1.0", default-features = false, features = [
+flate2 = { version = "1.1.1", default-features = false, features = [
   "rust_backend",
 ] }
 futures = "0.3.31"
