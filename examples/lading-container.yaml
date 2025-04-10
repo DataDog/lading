@@ -19,4 +19,4 @@ generator:
       network_disabled: false
       exposed_ports:
         - 5000/tcp
-      nb_containers: 10
+      number_of_containers: 10

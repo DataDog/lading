@@ -3,10 +3,6 @@
 //! This generator is meant to spin up a container from a configured image. For now,
 //! it does not actually do anything beyond logging that it's running and then waiting
 //! for a shutdown signal.
-//!
-//! ## Future Work
-//! - Pull and run a specified container image
-//! - Possibly support metrics about container lifecycle
 
 use bollard::Docker;
 use bollard::container::{
@@ -18,7 +14,7 @@ use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::General;
@@ -27,13 +23,11 @@ use super::General;
 #[serde(deny_unknown_fields)]
 /// Configuration of the container generator.
 pub struct Config {
-    /// The seed for random operations (not currently used, but included for parity)
-    //pub seed: [u8; 32],
     /// The container repository (e.g. "library/nginx")
     pub repository: String,
     /// The container image tag (e.g. "latest")
     pub tag: String,
-    /// Arguments to provide to the container (docker calls this args, but that's a dumb name)
+    /// Arguments to provide to the container
     pub args: Option<Vec<String>>,
     /// Environment variables to set in the container
     pub env: Option<Vec<String>>,
@@ -44,7 +38,7 @@ pub struct Config {
     /// Ports to expose from the container
     pub exposed_ports: Option<Vec<String>>,
     /// Number of containers to spin up (defaults to 1)
-    pub nb_containers: Option<u32>,
+    pub number_of_containers: Option<u32>,
 }
 
 /// Errors produced by the `Container` generator.
@@ -68,7 +62,7 @@ pub struct Container {
     labels: Option<HashMap<String, String>>,
     network_disabled: Option<bool>,
     exposed_ports: Option<Vec<String>>,
-    nb: usize,
+    number_of_containers: usize,
     shutdown: lading_signal::Watcher,
 }
 
@@ -93,7 +87,7 @@ impl Container {
             labels: config.labels.clone(),
             network_disabled: config.network_disabled,
             exposed_ports: config.exposed_ports.clone(),
-            nb: config.nb_containers.unwrap_or(1) as usize,
+            number_of_containers: config.number_of_containers.unwrap_or(1) as usize,
             shutdown,
         })
     }
@@ -117,7 +111,7 @@ impl Container {
         let docker = Docker::connect_with_local_defaults()?;
 
         let full_image = format!("{}:{}", self.image, self.tag);
-        info!("Ensuring image is available: {}", full_image);
+        debug!("Ensuring image is available: {full_image}");
 
         // Pull the image
         let mut pull_stream = docker.create_image(
@@ -133,21 +127,21 @@ impl Container {
             match item {
                 Ok(status) => {
                     if let Some(progress) = status.progress {
-                        info!("Pull progress: {}", progress);
+                        info!("Pull progress: {progress}");
                     }
                 }
                 Err(e) => {
-                    warn!("Pull error: {}", e);
+                    warn!("Pull error: {e}");
                     return Err(e.into());
                 }
             }
         }
 
-        let mut containers = Vec::with_capacity(self.nb);
+        let mut containers = Vec::with_capacity(self.number_of_containers);
 
-        for _ in 0..self.nb {
+        for _ in 0..self.number_of_containers {
             let container_name = format!("lading_container_{}", Uuid::new_v4());
-            info!("Creating container: {}", container_name);
+            debug!("Creating container: {container_name}");
 
             let container = docker
                 .create_container(
@@ -185,9 +179,9 @@ impl Container {
                 )
                 .await?;
 
-            info!("Created container with id: {}", container.id);
+            debug!("Created container with id: {id}", id = container.id);
             for warning in &container.warnings {
-                warn!("Container warning: {}", warning);
+                warn!("Container warning: {warning}");
             }
 
             containers.push(container);
@@ -198,20 +192,32 @@ impl Container {
                 .start_container(&container.id, None::<StartContainerOptions<String>>)
                 .await?;
 
-            info!("Started container: {}", container.id);
+            debug!("Started container: {id}", id = container.id);
         }
 
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
-        tokio::select! {
-            () = &mut shutdown_wait => {
-                info!("shutdown signal received");
-                for container in &containers {
-                    Self::stop_and_remove_container(&docker, container).await?;
+        loop {
+            tokio::select! {
+                // Check that containers are still running every 10 seconds
+                () = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {
+                    for container in &containers {
+                        if let Some(state) = docker.inspect_container(&container.id, None).await?.state {
+                            if !state.running.unwrap_or(false) {
+                                warn!("Container {id} is not running anymore", id = container.id);
+                            }
+                        }
+                    }
                 }
+                () = &mut shutdown_wait => {
+                    debug!("shutdown signal received");
+                    for container in &containers {
+                        Self::stop_and_remove_container(&docker, container).await?;
+                    }
 
-                Ok(())
+                    return Ok(())
+                }
             }
         }
     }
@@ -220,15 +226,15 @@ impl Container {
         docker: &Docker,
         container: &ContainerCreateResponse,
     ) -> Result<(), Error> {
-        info!("Stopping container: {}", container.id);
+        info!("Stopping container: {id}", id = container.id);
         if let Err(e) = docker
             .stop_container(&container.id, Some(StopContainerOptions { t: 5 }))
             .await
         {
-            warn!("Error stopping container {}: {}", container.id, e);
+            warn!("Error stopping container {id}: {e}", id = container.id);
         }
 
-        info!("Removing container: {}", container.id);
+        debug!("Removing container: {id}", id = container.id);
         docker
             .remove_container(
                 &container.id,
@@ -239,7 +245,7 @@ impl Container {
             )
             .await?;
 
-        info!("Removed container: {}", container.id);
+        debug!("Removed container: {id}", id = container.id);
         Ok(())
     }
 }

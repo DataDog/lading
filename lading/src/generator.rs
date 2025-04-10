@@ -250,7 +250,6 @@ impl Server {
             Server::PassthruFile(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,
             Server::ProcFs(inner) => inner.spin().await?,
-            // Run the container generator
             Server::Container(inner) => inner.spin().await?,
         };
 
