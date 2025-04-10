@@ -4,12 +4,12 @@ generator:
         seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
                59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
         concurrent_logs: 8
-        maximum_bytes_per_log: 100MB
+        maximum_bytes_per_log: 100MiB
         total_rotations: 4
         max_depth: 0
         variant: "ascii"
-        bytes_per_second: 1.3MB
-        maximum_prebuild_cache_size_bytes: 1GB
+        bytes_per_second: 1.3MiB
+        maximum_prebuild_cache_size_bytes: 1GiB
         mount_point: /tmp/logrotate
 
 blackhole:
