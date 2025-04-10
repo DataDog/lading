@@ -368,17 +368,24 @@ impl Child {
             let blk = rcv.peek().await.expect("block cache should never be empty");
 
             tokio::select! {
-                _ = self.throttle.wait_for(blk.total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through the blocks");
-                    write_bytes(&blk,
-                                &mut fp,
-                                &mut total_bytes_written,
-                                bytes_per_second,
-                                total_names,
-                                maximum_bytes_per_log,
-                                &self.names,
-                                last_name,
-                                &self.labels).await?;
+                result = self.throttle.wait_for(blk.total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let blk = rcv.next().await.expect("failed to advance through the blocks");
+                            write_bytes(&blk,
+                                    &mut fp,
+                                    &mut total_bytes_written,
+                                    bytes_per_second,
+                                    total_names,
+                                    maximum_bytes_per_log,
+                                    &self.names,
+                                    last_name,
+                                    &self.labels).await?;
+                        }
+                        Err(err) => {
+                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", blk.total_bytes, err);
+                        }
+                    }
                 }
                 () = &mut shutdown_wait => {
                     fp.flush().await.map_err(|err| Error::IoFlush { err })?;
@@ -387,7 +394,6 @@ impl Child {
                     info!("shutdown signal received");
                     return Ok(());
                 },
-
             }
         }
     }

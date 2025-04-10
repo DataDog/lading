@@ -39,7 +39,7 @@ use tokio::{
     sync::{Semaphore, SemaphorePermit, mpsc},
     time::timeout,
 };
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel};
 use lading_payload::block::{self, Block};
@@ -282,30 +282,37 @@ impl SplunkHec {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let client = client.clone();
-                    let labels = labels.clone();
-                    let uri = uri.clone();
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let client = client.clone();
+                            let labels = labels.clone();
+                            let uri = uri.clone();
 
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let body = crate::full(blk.bytes.clone());
-                    let block_length = blk.bytes.len();
+                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            let body = crate::full(blk.bytes.clone());
+                            let block_length = blk.bytes.len();
 
-                    let request = Request::builder()
-                        .method(Method::POST)
-                        .uri(uri)
-                        .header(AUTHORIZATION, format!("Splunk {}", self.token))
-                        .header(CONTENT_LENGTH, block_length)
-                        .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
-                        .body(body)?;
+                            let request = Request::builder()
+                                .method(Method::POST)
+                                .uri(uri)
+                                .header(AUTHORIZATION, format!("Splunk {}", self.token))
+                                .header(CONTENT_LENGTH, block_length)
+                                .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
+                                .body(body)?;
 
-                    // NOTE once JoinSet is in tokio stable we can make this
-                    // much, much tidier by spawning requests in the JoinSet. I
-                    // think we could also possibly have the send request return
-                    // the AckID, meaning we could just keep the channel logic
-                    // in this main loop here and avoid the AckService entirely.
-                    let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
-                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
+                            // NOTE once JoinSet is in tokio stable we can make this
+                            // much, much tidier by spawning requests in the JoinSet. I
+                            // think we could also possibly have the send request return
+                            // the AckID, meaning we could just keep the channel logic
+                            // in this main loop here and avoid the AckService entirely.
+                            let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
+                            tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
+                        }
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                        }
+                    }
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

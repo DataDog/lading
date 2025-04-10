@@ -183,50 +183,57 @@ impl UnixStream {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    // NOTE When we write into a unix stream it may be that only
-                    // some of the written bytes make it through in which case we
-                    // must cycle back around and try to write the remainder of the
-                    // buffer.
-                    let blk_max: usize = total_bytes.get() as usize;
-                    let mut blk_offset = 0;
-                    let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
-                    while blk_offset < blk_max {
-                        let stream = &socket;
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            // NOTE When we write into a unix stream it may be that only
+                            // some of the written bytes make it through in which case we
+                            // must cycle back around and try to write the remainder of the
+                            // buffer.
+                            let blk_max: usize = total_bytes.get() as usize;
+                            let mut blk_offset = 0;
+                            let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
+                            while blk_offset < blk_max {
+                                let stream = &socket;
 
-                        let ready = stream
-                            .ready(tokio::io::Interest::WRITABLE)
-                            .await
-                            .map_err(Error::Io)?;
-                        if ready.is_writable() {
-                            // Try to write data, this may still fail with `WouldBlock`
-                            // if the readiness event is a false positive.
-                            match stream.try_write(&blk.bytes[blk_offset..]) {
-                                Ok(bytes) => {
-                                    counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
-                                    counter!("packets_sent", &self.metric_labels).increment(1);
-                                    blk_offset += bytes;
-                                }
-                                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
-                                    // If the read side has hung up we will never
-                                    // know and will keep attempting to write into
-                                    // the stream. This yield means we won't hog the
-                                    // whole CPU.
-                                    tokio::task::yield_now().await;
-                                }
-                                Err(err ) => {
-                                    warn!("write failed: {}", err);
-                                    if err.kind() == tokio::io::ErrorKind::BrokenPipe {
-                                        warn!("Broken pipe, reconnecting");
-                                        current_connection = None;
-                                        break;
+                                let ready = stream
+                                    .ready(tokio::io::Interest::WRITABLE)
+                                    .await
+                                    .map_err(Error::Io)?;
+                                if ready.is_writable() {
+                                    // Try to write data, this may still fail with `WouldBlock`
+                                    // if the readiness event is a false positive.
+                                    match stream.try_write(&blk.bytes[blk_offset..]) {
+                                        Ok(bytes) => {
+                                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                                            counter!("packets_sent", &self.metric_labels).increment(1);
+                                            blk_offset += bytes;
+                                        }
+                                        Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                                            // If the read side has hung up we will never
+                                            // know and will keep attempting to write into
+                                            // the stream. This yield means we won't hog the
+                                            // whole CPU.
+                                            tokio::task::yield_now().await;
+                                        }
+                                        Err(err ) => {
+                                            warn!("write failed: {}", err);
+                                            if err.kind() == tokio::io::ErrorKind::BrokenPipe {
+                                                warn!("Broken pipe, reconnecting");
+                                                current_connection = None;
+                                                break;
+                                            }
+
+                                            let mut error_labels = self.metric_labels.clone();
+                                            error_labels.push(("error".to_string(), err.to_string()));
+                                            counter!("request_failure", &error_labels).increment(1);
+                                        }
                                     }
-
-                                    let mut error_labels = self.metric_labels.clone();
-                                    error_labels.push(("error".to_string(), err.to_string()));
-                                    counter!("request_failure", &error_labels).increment(1);
                                 }
                             }
+                        }
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
                 }
