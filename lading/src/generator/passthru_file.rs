@@ -13,7 +13,7 @@
 use std::{num::NonZeroU32, path::PathBuf, thread, time::Duration};
 use tokio::io::AsyncWriteExt;
 
-use byte_unit::ByteError;
+use byte_unit::Byte;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
@@ -37,12 +37,12 @@ pub struct Config {
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
-    pub bytes_per_second: byte_unit::Byte,
+    pub bytes_per_second: Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
     #[serde(default = "lading_payload::block::default_maximum_block_size")]
-    pub maximum_block_size: byte_unit::Byte,
+    pub maximum_block_size: Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
-    pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    pub maximum_prebuild_cache_size_bytes: Byte,
     /// The load throttle configuration
     #[serde(default)]
     pub throttle: lading_throttle::Config,
@@ -59,7 +59,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
@@ -104,14 +104,19 @@ impl PassthruFile {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+
+        let maximum_prebuild_cache_size_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+
+        let maximum_block_size = config.maximum_block_size.as_u128();
 
         let block_cache = block::Cache::fixed(
             &mut rng,
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                .ok_or(Error::Zero)?,
-            config.maximum_block_size.get_bytes(),
+            maximum_prebuild_cache_size_bytes,
+            maximum_block_size,
             &config.variant,
         )?;
 

@@ -23,7 +23,7 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteError};
+use byte_unit::Byte;
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
@@ -59,7 +59,7 @@ pub enum Error {
     Child(#[from] JoinError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -152,11 +152,17 @@ impl Server {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.maximum_bytes_per_file.as_u128() as u32).ok_or(Error::Zero)?;
+
+        let maximum_prebuild_cache_size_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+
+        let maximum_block_size = config.maximum_block_size.as_u128();
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
@@ -164,14 +170,11 @@ impl Server {
         for _ in 0..config.duplicates {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
                     &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.get_bytes(),
+                    maximum_prebuild_cache_size_bytes,
+                    maximum_block_size,
                     &config.variant,
                 )?,
             };

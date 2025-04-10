@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{Byte, Unit};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
@@ -33,7 +33,7 @@ use super::General;
 
 // https://stackoverflow.com/a/42610200
 fn maximum_block_size() -> Byte {
-    Byte::from_unit(65_507f64, ByteUnit::B).expect("catastrophic programming bug")
+    Byte::from_u64_with_unit(65_507, Unit::B).expect("catastrophic programming bug")
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -69,7 +69,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
@@ -114,14 +114,14 @@ impl Udp {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let block_cache = block::Cache::fixed(
             &mut rng,
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?,
-            config.maximum_block_size.get_bytes(),
+            config.maximum_block_size.as_u128(),
             &config.variant,
         )?;
 

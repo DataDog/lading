@@ -14,9 +14,6 @@ pub enum Error {
     /// Error for a serde [`serde_yaml`].
     #[error("Failed to deserialize yaml: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
-    /// Error for a byte unit [`byte_unit`].
-    #[error("Value provided is negative: {0}")]
-    ByteUnit(#[from] byte_unit::ByteError),
     /// Error for a socket address [`std::net::SocketAddr`].
     #[error("Failed to convert to valid SocketAddr: {0}")]
     SocketAddr(#[from] std::net::AddrParseError),

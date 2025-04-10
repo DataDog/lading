@@ -17,7 +17,6 @@ use std::{
     thread,
 };
 
-use byte_unit::ByteError;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
@@ -63,7 +62,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
@@ -108,14 +107,14 @@ impl Tcp {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let block_cache = block::Cache::fixed(
             &mut rng,
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?,
-            config.maximum_block_size.get_bytes(),
+            config.maximum_block_size.as_u128(),
             &config.variant,
         )?;
 
