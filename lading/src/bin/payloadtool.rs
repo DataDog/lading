@@ -10,7 +10,8 @@ use rand::{SeedableRng, rngs::StdRng};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
-const UDP_PACKET_LIMIT_BYTES: u64 = 65_507;
+const UDP_PACKET_LIMIT_BYTES: byte_unit::Byte =
+    byte_unit::Byte::from_u64_with_unit(65_507, Unit::B).expect("valid bytes");
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -79,9 +80,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
     match &config.inner {
         lading::generator::Inner::FileGen(_) => unimplemented!("FileGen not supported"),
         lading::generator::Inner::UnixDatagram(g) => {
-            let max_block_size =
-                byte_unit::Byte::from_u64_with_unit(UDP_PACKET_LIMIT_BYTES, Unit::B)
-                    .expect("valid bytes");
+            let max_block_size = UDP_PACKET_LIMIT_BYTES;
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(&g.variant, g.seed, total_bytes, max_block_size)?;
@@ -94,9 +93,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
         lading::generator::Inner::Udp(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            let max_block_size =
-                byte_unit::Byte::from_u64_with_unit(UDP_PACKET_LIMIT_BYTES, Unit::B)
-                    .expect("valid bytes");
+            let max_block_size = UDP_PACKET_LIMIT_BYTES;
             generate_and_check(&g.variant, g.seed, total_bytes, max_block_size)?;
         }
         lading::generator::Inner::Http(g) => {
