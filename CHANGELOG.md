@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## Changed
+- Lading's byte-unit crate is now updated to 5.x. This version of the crate is
+  very strict about the difference between MiB, Mb etc.
 ## Fixed
 - Fixed throttle capacity validation to prevent requests larger than maximum
   capacity from being emitted.
