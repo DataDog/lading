@@ -126,11 +126,11 @@ generator:
       seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       headers: {}
       target_uri: "http://localhost:1000/"
-      bytes_per_second: "100 Mb"
+      bytes_per_second: "100 MiB"
       parallel_connections: 5
       method:
         post:
-          maximum_prebuild_cache_size_bytes: "8 Mb"
+          maximum_prebuild_cache_size_bytes: "8 MiB"
           variant: "fluent"
 blackhole:
   - id: "Data in"
@@ -156,7 +156,7 @@ blackhole:
                             variant: lading_payload::Config::Fluent,
                             maximum_prebuild_cache_size_bytes: byte_unit::Byte::from_u64_with_unit(
                                 8,
-                                byte_unit::Unit::MB
+                                byte_unit::Unit::MiB
                             )
                             .expect("valid bytes"),
                             block_cache_method: block::CacheMethod::Fixed,
@@ -164,7 +164,7 @@ blackhole:
                         headers: HeaderMap::default(),
                         bytes_per_second: byte_unit::Byte::from_u64_with_unit(
                             100,
-                            byte_unit::Unit::MB
+                            byte_unit::Unit::MiB
                         )
                         .expect("valid bytes"),
                         maximum_block_size: lading_payload::block::default_maximum_block_size(),
