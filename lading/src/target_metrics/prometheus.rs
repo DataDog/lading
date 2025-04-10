@@ -160,12 +160,12 @@ pub(crate) async fn scrape_metrics(
     metrics: Option<&Vec<String>>,
 ) {
     let Ok(resp) = client.get(uri).timeout(Duration::from_secs(1)).send().await else {
-        info!("failed to get Prometheus uri");
+        info!("failed to get Prometheus {uri}");
         return;
     };
 
     let Ok(text) = resp.text().await else {
-        info!("failed to read Prometheus response");
+        info!("failed to read Prometheus response from {uri}");
         return;
     };
 
