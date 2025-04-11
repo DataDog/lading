@@ -127,6 +127,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
         }
         lading::generator::Inner::ProcessTree(_) => unimplemented!("ProcessTree not supported"),
         lading::generator::Inner::ProcFs(_) => unimplemented!("ProcFs not supported"),
+        lading::generator::Inner::Container(_) => unimplemented!("Container not supported"),
     };
 
     Ok(())
