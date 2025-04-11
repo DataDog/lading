@@ -94,7 +94,7 @@ impl Container {
 
     /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
     #[must_use]
-    pub fn to_container_config<'a>(&'a self, full_image: &'a str) -> ContainerConfig<&'a str> {
+    fn to_container_config<'a>(&'a self, full_image: &'a str) -> ContainerConfig<&'a str> {
         ContainerConfig {
             image: Some(full_image),
             tty: Some(true),
