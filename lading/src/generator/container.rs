@@ -92,6 +92,38 @@ impl Container {
         })
     }
 
+    /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
+    #[must_use]
+    pub fn to_container_config<'a>(&'a self, full_image: &'a str) -> ContainerConfig<&'a str> {
+        ContainerConfig {
+            image: Some(full_image),
+            tty: Some(true),
+            cmd: self
+                .args
+                .as_ref()
+                .map(|args| args.iter().map(String::as_str).collect()),
+            env: self
+                .env
+                .as_ref()
+                .map(|env| env.iter().map(String::as_str).collect()),
+            labels: self.labels.as_ref().map(|labels| {
+                labels
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str()))
+                    .collect()
+            }),
+            network_disabled: self.network_disabled,
+            #[allow(clippy::zero_sized_map_values)]
+            exposed_ports: self.exposed_ports.as_ref().map(|ports| {
+                ports
+                    .iter()
+                    .map(|port| (port.as_str(), HashMap::new()))
+                    .collect()
+            }),
+            ..Default::default()
+        }
+    }
+
     /// Run the `Container` generator.
     ///
     /// # Errors
@@ -149,33 +181,7 @@ impl Container {
                         name: &container_name,
                         platform: None,
                     }),
-                    ContainerConfig {
-                        image: Some(full_image.as_str()),
-                        tty: Some(true),
-                        cmd: self
-                            .args
-                            .as_ref()
-                            .map(|args| args.iter().map(String::as_str).collect()),
-                        env: self
-                            .env
-                            .as_ref()
-                            .map(|env| env.iter().map(String::as_str).collect()),
-                        labels: self.labels.as_ref().map(|labels| {
-                            labels
-                                .iter()
-                                .map(|(key, value)| (key.as_str(), value.as_str()))
-                                .collect()
-                        }),
-                        network_disabled: self.network_disabled,
-                        #[allow(clippy::zero_sized_map_values)]
-                        exposed_ports: self.exposed_ports.as_ref().map(|ports| {
-                            ports
-                                .iter()
-                                .map(|port| (port.as_str(), HashMap::new()))
-                                .collect()
-                        }),
-                        ..Default::default()
-                    },
+                    self.to_container_config(&full_image),
                 )
                 .await?;
 
@@ -198,14 +204,18 @@ impl Container {
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
         loop {
             tokio::select! {
                 // Check that containers are still running every 10 seconds
-                () = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {
+                _ = interval.tick() => {
                     for container in &containers {
                         if let Some(state) = docker.inspect_container(&container.id, None).await?.state {
                             if !state.running.unwrap_or(false) {
-                                warn!("Container {id} is not running anymore", id = container.id);
+                                return Err(Error::Generic(format!(
+                                    "Container {id} is not running anymore",
+                                    id = container.id
+                                )));
                             }
                         }
                     }
