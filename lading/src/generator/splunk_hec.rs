@@ -19,7 +19,6 @@ mod acknowledgements;
 use std::{future::ready, num::NonZeroU32, thread, time::Duration};
 
 use acknowledgements::Channels;
-use byte_unit::ByteError;
 use http::{
     Method, Request, Uri,
     header::{AUTHORIZATION, CONTENT_LENGTH},
@@ -39,7 +38,7 @@ use tokio::{
     sync::{Semaphore, SemaphorePermit, mpsc},
     time::timeout,
 };
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel};
 use lading_payload::block::{self, Block};
@@ -118,7 +117,7 @@ pub enum Error {
     EmptyAuthorityURI,
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -195,7 +194,7 @@ impl SplunkHec {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
@@ -204,13 +203,13 @@ impl SplunkHec {
             encoding: config.format,
         };
         let total_bytes =
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
         let block_cache = match config.block_cache_method {
             block::CacheMethod::Fixed => block::Cache::fixed(
                 &mut rng,
                 total_bytes,
-                config.maximum_block_size.get_bytes(),
+                config.maximum_block_size.as_u128(),
                 &payload_config,
             )?,
         };
@@ -282,30 +281,37 @@ impl SplunkHec {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let client = client.clone();
-                    let labels = labels.clone();
-                    let uri = uri.clone();
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let client = client.clone();
+                            let labels = labels.clone();
+                            let uri = uri.clone();
 
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let body = crate::full(blk.bytes.clone());
-                    let block_length = blk.bytes.len();
+                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            let body = crate::full(blk.bytes.clone());
+                            let block_length = blk.bytes.len();
 
-                    let request = Request::builder()
-                        .method(Method::POST)
-                        .uri(uri)
-                        .header(AUTHORIZATION, format!("Splunk {}", self.token))
-                        .header(CONTENT_LENGTH, block_length)
-                        .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
-                        .body(body)?;
+                            let request = Request::builder()
+                                .method(Method::POST)
+                                .uri(uri)
+                                .header(AUTHORIZATION, format!("Splunk {}", self.token))
+                                .header(CONTENT_LENGTH, block_length)
+                                .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
+                                .body(body)?;
 
-                    // NOTE once JoinSet is in tokio stable we can make this
-                    // much, much tidier by spawning requests in the JoinSet. I
-                    // think we could also possibly have the send request return
-                    // the AckID, meaning we could just keep the channel logic
-                    // in this main loop here and avoid the AckService entirely.
-                    let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
-                    tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
+                            // NOTE once JoinSet is in tokio stable we can make this
+                            // much, much tidier by spawning requests in the JoinSet. I
+                            // think we could also possibly have the send request return
+                            // the AckID, meaning we could just keep the channel logic
+                            // in this main loop here and avoid the AckService entirely.
+                            let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
+                            tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
+                        }
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                        }
+                    }
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

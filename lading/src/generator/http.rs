@@ -13,7 +13,6 @@
 
 use std::{num::NonZeroU32, thread};
 
-use byte_unit::ByteError;
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use lading_throttle::Throttle;
@@ -22,7 +21,7 @@ use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, mpsc};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
@@ -91,7 +90,7 @@ pub enum Error {
     Http(#[from] hyper::http::Error),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -139,8 +138,8 @@ impl Http {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("config bytes per second must be non-zero");
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.as_u128() as u32)
+            .expect("bytes_per_second must be non-zero");
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         match config.method {
@@ -149,14 +148,15 @@ impl Http {
                 maximum_prebuild_cache_size_bytes,
                 block_cache_method,
             } => {
-                let total_bytes =
-                    NonZeroU32::new(maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+                let maximum_prebuild_cache_size_bytes =
+                    NonZeroU32::new(maximum_prebuild_cache_size_bytes.as_u128() as u32)
                         .ok_or(Error::Zero)?;
+                let maximum_block_size = config.maximum_block_size.as_u128();
                 let block_cache = match block_cache_method {
                     block::CacheMethod::Fixed => block::Cache::fixed(
                         &mut rng,
-                        total_bytes,
-                        config.maximum_block_size.get_bytes(),
+                        maximum_prebuild_cache_size_bytes,
+                        maximum_block_size,
                         &variant,
                     )?,
                 };
@@ -227,30 +227,38 @@ impl Http {
             }
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let client = client.clone();
-                    let labels = labels.clone();
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let client = client.clone();
+                            let labels = labels.clone();
 
-                    let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
-                    tokio::spawn(async move {
-                        counter!("requests_sent", &labels).increment(1);
-                        match client.request(request).await {
-                            Ok(response) => {
-                                counter!("bytes_written", &labels).increment(block_length as u64);
-                                let status = response.status();
-                                let mut status_labels = labels.clone();
-                                status_labels
-                                    .push(("status_code".to_string(), status.as_u16().to_string()));
-                                counter!("request_ok", &status_labels).increment(1);
-                            }
-                            Err(err) => {
-                                let mut error_labels = labels.clone();
-                                error_labels.push(("error".to_string(), err.to_string()));
-                                counter!("request_failure", &error_labels).increment(1);
-                            }
+                            let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
+                            tokio::spawn(async move {
+                                counter!("requests_sent", &labels).increment(1);
+                                match client.request(request).await {
+                                    Ok(response) => {
+                                        counter!("bytes_written", &labels).increment(block_length as u64);
+                                        let status = response.status();
+                                        let mut status_labels = labels.clone();
+                                        status_labels
+                                            .push(("status_code".to_string(), status.as_u16().to_string()));
+                                        counter!("request_ok", &status_labels).increment(1);
+                                    }
+                                    Err(err) => {
+                                        let mut error_labels = labels.clone();
+                                        error_labels.push(("error".to_string(), err.to_string()));
+                                        counter!("request_failure", &error_labels).increment(1);
+                                    }
+                                }
+                                drop(permit);
+                            });
+
                         }
-                        drop(permit);
-                    });
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                        }
+                    }
                 },
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

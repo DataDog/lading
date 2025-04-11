@@ -47,12 +47,12 @@ generator:
   - http:
       seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
       target_uri: "http://localhost:8282/"
-      bytes_per_second: "100 Mb"
+      bytes_per_second: "100 MiB"
       parallel_connections: 10
       method:
         post:
           variant: "fluent"
-          maximum_prebuild_cache_size_bytes: "256 Mb"
+          maximum_prebuild_cache_size_bytes: "256 MiB"
       headers: {}
 
 blackhole:
@@ -63,10 +63,10 @@ blackhole:
 In this setup `lading` is configured to run one generator and one blackhole. In
 general, at least one generator is required and zero or more blackholes are. The
 generator here, named "http", uses a fixed seed to repeatably produce [fluent's
-forward protocol][fluent] instances at 100 Mb per second into the target, with a
-pre-built size of 256 Mb. That is, `lading` will _attempt_ to push at a fixed
+forward protocol][fluent] instances at 100 MiB per second into the target, with a
+pre-built size of 256 MiB. That is, `lading` will _attempt_ to push at a fixed
 throughput, although the target might not be able to cope with that load and
-`lading` will consume 256 Mb of RAM to accommodate pre-build payloads. The
+`lading` will consume 256 MiB of RAM to accommodate pre-build payloads. The
 blackhole in this configuration responds with an empty body 200 OK.
 
 `lading` supports three types of targets, binary launch mode, PID watch mode,

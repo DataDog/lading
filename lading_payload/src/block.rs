@@ -7,7 +7,7 @@
 //! -- are created.
 use std::num::NonZeroU32;
 
-use byte_unit::{Byte, ByteUnit};
+use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -130,10 +130,11 @@ pub fn default_cache_method() -> CacheMethod {
 ///
 /// # Panics
 ///
-/// Function will only panic if there is a serious programming mistake.
+/// This function will panic if the byte unit conversion fails, which should never happen
+/// with the hardcoded value of 1 MiB.
 #[must_use]
 pub fn default_maximum_block_size() -> Byte {
-    Byte::from_unit(1f64, ByteUnit::MiB).expect("should not fail")
+    Byte::from_u64_with_unit(1, Unit::MiB).expect("catastrophic programming bug")
 }
 
 #[derive(Debug)]
@@ -181,8 +182,8 @@ impl Cache {
     where
         R: Rng + ?Sized,
     {
-        let maximum_block_bytes = if (maximum_block_bytes > u32::MAX.into())
-            || (maximum_block_bytes > total_bytes.get().into())
+        let maximum_block_bytes = if (maximum_block_bytes > u128::from(u32::MAX))
+            || (maximum_block_bytes > u128::from(total_bytes.get()))
         {
             return Err(Error::MaximumBlock);
         } else {
@@ -546,14 +547,14 @@ where
     } else {
         let filled_sum = block_cache.iter().map(|b| b.total_bytes.get()).sum::<u32>();
 
-        let filled_sum_str = byte_unit::Byte::from_bytes(filled_sum.into())
-            .get_appropriate_unit(false)
+        let filled_sum_str = Byte::from_u64(filled_sum.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
-        let capacity_sum_str = byte_unit::Byte::from_bytes(total_bytes.into())
-            .get_appropriate_unit(false)
+        let capacity_sum_str = Byte::from_u64(total_bytes.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
-        let min_block_str = byte_unit::Byte::from_bytes(min_block_size.into())
-            .get_appropriate_unit(false)
+        let min_block_str = Byte::from_u64(min_block_size.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
         info!(
             "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}"

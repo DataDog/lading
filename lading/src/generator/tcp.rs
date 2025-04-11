@@ -17,13 +17,12 @@ use std::{
     thread,
 };
 
-use byte_unit::ByteError;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
-use tracing::{info, trace};
+use tracing::{error, info, trace};
 
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
@@ -63,7 +62,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
@@ -108,14 +107,14 @@ impl Tcp {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let block_cache = block::Cache::fixed(
             &mut rng,
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?,
-            config.maximum_block_size.get_bytes(),
+            config.maximum_block_size.as_u128(),
             &config.variant,
         )?;
 
@@ -177,20 +176,27 @@ impl Tcp {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
-                    match connection.write_all(&blk.bytes).await {
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
                         Ok(()) => {
-                            counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
-                            counter!("packets_sent", &self.metric_labels).increment(1);
+                            let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
+                            match connection.write_all(&blk.bytes).await {
+                                Ok(()) => {
+                                    counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
+                                    counter!("packets_sent", &self.metric_labels).increment(1);
+                                }
+                                Err(err) => {
+                                    trace!("write failed: {}", err);
+
+                                    let mut error_labels = self.metric_labels.clone();
+                                    error_labels.push(("error".to_string(), err.to_string()));
+                                    counter!("request_failure", &error_labels).increment(1);
+                                    current_connection = None;
+                                }
+                            }
                         }
                         Err(err) => {
-                            trace!("write failed: {}", err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("request_failure", &error_labels).increment(1);
-                            current_connection = None;
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
                 }

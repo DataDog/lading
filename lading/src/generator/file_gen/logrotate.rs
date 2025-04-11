@@ -20,7 +20,7 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteError};
+use byte_unit::Byte;
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
@@ -102,7 +102,7 @@ pub enum Error {
     Child(#[from] JoinError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -183,26 +183,30 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.get_bytes() as u32)
-            .expect("Expect: config bytes per second must be non-zero");
+        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.as_u128() as u32)
+            .expect("bytes_per_second must be non-zero");
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
-        let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_log.get_bytes() as u32).ok_or(Error::Zero)?;
+        let maximum_bytes_per_log =
+            NonZeroU32::new(config.maximum_bytes_per_log.as_u128() as u32).ok_or(Error::Zero)?;
+
+        let maximum_prebuild_cache_size_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+
+        let maximum_block_size =
+            NonZeroU32::new(config.maximum_block_size.as_u128() as u32).ok_or(Error::Zero)?;
 
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
                     &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.get_bytes(),
+                    maximum_prebuild_cache_size_bytes,
+                    u128::from(maximum_block_size.get()),
                     &config.variant,
                 )?,
             };
@@ -224,7 +228,7 @@ impl Server {
                 &basename,
                 config.total_rotations,
                 bytes_per_second,
-                maximum_bytes_per_file,
+                maximum_bytes_per_log,
                 block_cache,
                 throttle,
                 shutdown.clone(),
@@ -368,17 +372,24 @@ impl Child {
             let blk = rcv.peek().await.expect("block cache should never be empty");
 
             tokio::select! {
-                _ = self.throttle.wait_for(blk.total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through the blocks");
-                    write_bytes(&blk,
-                                &mut fp,
-                                &mut total_bytes_written,
-                                bytes_per_second,
-                                total_names,
-                                maximum_bytes_per_log,
-                                &self.names,
-                                last_name,
-                                &self.labels).await?;
+                result = self.throttle.wait_for(blk.total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let blk = rcv.next().await.expect("failed to advance through the blocks");
+                            write_bytes(&blk,
+                                    &mut fp,
+                                    &mut total_bytes_written,
+                                    bytes_per_second,
+                                    total_names,
+                                    maximum_bytes_per_log,
+                                    &self.names,
+                                    last_name,
+                                    &self.labels).await?;
+                        }
+                        Err(err) => {
+                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", blk.total_bytes, err);
+                        }
+                    }
                 }
                 () = &mut shutdown_wait => {
                     fp.flush().await.map_err(|err| Error::IoFlush { err })?;
@@ -387,7 +398,6 @@ impl Child {
                     info!("shutdown signal received");
                     return Ok(());
                 },
-
             }
         }
     }

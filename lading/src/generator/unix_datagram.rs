@@ -12,7 +12,7 @@
 //!
 
 use crate::common::PeekableReceiver;
-use byte_unit::{Byte, ByteError, ByteUnit};
+use byte_unit::{Byte, Unit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
@@ -36,7 +36,7 @@ fn default_parallel_connections() -> u16 {
 // Mimic the belief of Datadog Agent, although correctly we should be reading
 // sysctl values on Linux.
 fn maximum_block_size() -> Byte {
-    Byte::from_unit(8_192f64, ByteUnit::B).expect("catastrophic programming bug")
+    Byte::from_u64_with_unit(8_192, Unit::B).expect("catastrophic programming bug")
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -95,7 +95,7 @@ pub enum Error {
     Zero,
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
 }
 
 #[derive(Debug)]
@@ -136,7 +136,7 @@ impl UnixDatagram {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
@@ -144,13 +144,13 @@ impl UnixDatagram {
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
             let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                     .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
                     &mut rng,
                     total_bytes,
-                    config.maximum_block_size.get_bytes(),
+                    config.maximum_block_size.as_u128(),
                     &config.variant,
                 )?,
             };
@@ -245,26 +245,33 @@ impl Child {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    // NOTE When we write into a unix socket it may be that only
-                    // some of the written bytes make it through in which case
-                    // we DO NOT cycle back around and try to write the
-                    // remainder of the buffer. To do so would be to shear the
-                    // block across multiple datagrams which we cannot do
-                    // without cooperation of the client, which we are not
-                    // guaranteed.
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    match socket.send(&blk.bytes).await {
-                        Ok(bytes) => {
-                            counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
-                            counter!("packets_sent", &self.metric_labels).increment(1);
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            // NOTE When we write into a unix socket it may be that only
+                            // some of the written bytes make it through in which case
+                            // we DO NOT cycle back around and try to write the
+                            // remainder of the buffer. To do so would be to shear the
+                            // block across multiple datagrams which we cannot do
+                            // without cooperation of the client, which we are not
+                            // guaranteed.
+                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            match socket.send(&blk.bytes).await {
+                                Ok(bytes) => {
+                                    counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
+                                    counter!("packets_sent", &self.metric_labels).increment(1);
+                                }
+                                Err(err) => {
+                                    debug!("write failed: {}", err);
+
+                                    let mut error_labels = self.metric_labels.clone();
+                                    error_labels.push(("error".to_string(), err.to_string()));
+                                    counter!("request_failure", &error_labels).increment(1);
+                                }
+                            }
                         }
                         Err(err) => {
-                            debug!("write failed: {}", err);
-
-                            let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
-                            counter!("request_failure", &error_labels).increment(1);
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
                 }

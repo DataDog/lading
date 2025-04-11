@@ -23,7 +23,7 @@ use std::{
     thread,
 };
 
-use byte_unit::{Byte, ByteError};
+use byte_unit::Byte;
 use futures::future::join_all;
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
@@ -35,7 +35,7 @@ use tokio::{
     sync::mpsc,
     task::{JoinError, JoinHandle},
 };
-use tracing::info;
+use tracing::{error, info};
 
 use crate::common::PeekableReceiver;
 use lading_payload::{
@@ -59,7 +59,7 @@ pub enum Error {
     Child(#[from] JoinError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
-    Byte(#[from] ByteError),
+    Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -152,11 +152,17 @@ impl Server {
         }
 
         let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let maximum_bytes_per_file =
-            NonZeroU32::new(config.maximum_bytes_per_file.get_bytes() as u32).ok_or(Error::Zero)?;
+            NonZeroU32::new(config.maximum_bytes_per_file.as_u128() as u32).ok_or(Error::Zero)?;
+
+        let maximum_prebuild_cache_size_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+
+        let maximum_block_size = config.maximum_block_size.as_u128();
 
         let mut handles = Vec::new();
         let file_index = Arc::new(AtomicU32::new(0));
@@ -164,14 +170,11 @@ impl Server {
         for _ in 0..config.duplicates {
             let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
 
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
-                    .ok_or(Error::Zero)?;
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
                     &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.get_bytes(),
+                    maximum_prebuild_cache_size_bytes,
+                    maximum_block_size,
                     &config.variant,
                 )?,
             };
@@ -263,38 +266,45 @@ impl Child {
             let total_bytes = blk.total_bytes;
 
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                    let total_bytes = u64::from(total_bytes.get());
+                result = self.throttle.wait_for(total_bytes) => {
+                    match result {
+                        Ok(()) => {
+                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            let total_bytes = u64::from(total_bytes.get());
 
-                    {
-                        fp.write_all(&blk.bytes).await?;
-                        counter!("bytes_written").increment(total_bytes);
-                        total_bytes_written += total_bytes;
-                    }
+                            {
+                                fp.write_all(&blk.bytes).await?;
+                                counter!("bytes_written").increment(total_bytes);
+                                total_bytes_written += total_bytes;
+                            }
 
-                    if total_bytes_written > maximum_bytes_per_file {
-                        fp.flush().await?;
-                        if self.rotate {
-                            // Delete file, leaving any open file handlers intact. This
-                            // includes our own `fp` for the time being.
-                            fs::remove_file(&path).await?;
+                            if total_bytes_written > maximum_bytes_per_file {
+                                fp.flush().await?;
+                                if self.rotate {
+                                    // Delete file, leaving any open file handlers intact. This
+                                    // includes our own `fp` for the time being.
+                                    fs::remove_file(&path).await?;
+                                }
+                                // Update `path` to point to the next indexed file.
+                                file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
+                                path = path_from_template(&self.path_template, file_index);
+                                // Open a new fp to `path`, replacing `fp`. Any holders of the
+                                // file pointer still have it but the file no longer has a name.
+                                fp = BufWriter::with_capacity(
+                                    bytes_per_second,
+                                    fs::OpenOptions::new()
+                                        .create(true)
+                                        .truncate(false)
+                                        .write(true)
+                                        .open(&path)
+                                        .await?,
+                                );
+                                total_bytes_written = 0;
+                            }
                         }
-                        // Update `path` to point to the next indexed file.
-                        file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
-                        path = path_from_template(&self.path_template, file_index);
-                        // Open a new fp to `path`, replacing `fp`. Any holders of the
-                        // file pointer still have it but the file no longer has a name.
-                        fp = BufWriter::with_capacity(
-                            bytes_per_second,
-                            fs::OpenOptions::new()
-                                .create(true)
-                                .truncate(false)
-                                .write(true)
-                                .open(&path)
-                                .await?,
-                        );
-                        total_bytes_written = 0;
+                        Err(err) => {
+                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                        }
                     }
                 }
                 () = &mut shutdown_wait => {

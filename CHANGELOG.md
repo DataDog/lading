@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Introduce a `container` generator able to generate an arbitrary number
   of docker containers
+## Changed
+- Lading's byte-unit crate is now updated to 5.x. This version of the crate is
+  very strict about the difference between MiB, Mb etc.
+## Fixed
+- Fixed throttle capacity validation to prevent requests larger than maximum
+  capacity from being emitted.
 
 ## [0.25.8]
 ## Fixed

@@ -78,13 +78,13 @@ impl LoadProfile {
     fn to_model(self) -> model::LoadProfile {
         // For now, one tick is one second.
         match self {
-            LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.get_bytes() as u64),
+            LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.as_u128() as u64),
             LoadProfile::Linear {
                 initial_bytes_per_second,
                 rate,
             } => model::LoadProfile::Linear {
-                start: initial_bytes_per_second.get_bytes() as u64,
-                rate: rate.get_bytes() as u64,
+                start: initial_bytes_per_second.as_u128() as u64,
+                rate: rate.as_u128() as u64,
             },
         }
     }
@@ -137,12 +137,12 @@ impl Server {
         let mut rng = SmallRng::from_seed(config.seed);
 
         let total_bytes =
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.get_bytes() as u32)
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
         let block_cache = block::Cache::fixed(
             &mut rng,
             total_bytes,
-            config.maximum_block_size.get_bytes(),
+            config.maximum_block_size.as_u128(),
             &config.variant,
         )?;
 
@@ -153,7 +153,7 @@ impl Server {
             &mut rng,
             start_time.elapsed().as_secs(),
             config.total_rotations,
-            config.maximum_bytes_per_log.get_bytes() as u64,
+            config.maximum_bytes_per_log.as_u128() as u64,
             block_cache,
             config.max_depth,
             config.concurrent_logs,
