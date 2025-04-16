@@ -8,7 +8,8 @@ impl ProcessDescendentsIterator {
     pub(super) fn new(parent_pid: i32) -> Self {
         Self {
             stack: vec![
-                Process::new(parent_pid).expect(format!("process {parent_pid} not found").as_str()),
+                Process::new(parent_pid)
+                    .unwrap_or_else(|e| panic!("process {parent_pid} not found: {e}")),
             ],
         }
     }
@@ -18,21 +19,20 @@ impl Iterator for ProcessDescendentsIterator {
     type Item = Process;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(process) = self.stack.pop() {
-            if let Ok(tasks) = process.tasks() {
-                for task in tasks.flatten() {
-                    if let Ok(children) = task.children() {
-                        for child in children {
-                            if let Ok(c) = Process::new(child as i32) {
-                                self.stack.push(c);
-                            }
+        let process = self.stack.pop()?;
+        if let Ok(tasks) = process.tasks() {
+            for task in tasks.flatten() {
+                if let Ok(children) = task.children() {
+                    for child in children {
+                        #[allow(clippy::cast_possible_wrap)]
+                        if let Ok(c) = Process::new(child as i32) {
+                            self.stack.push(c);
                         }
                     }
                 }
             }
-            return Some(process);
         }
-        None
+        Some(process)
     }
 }
 

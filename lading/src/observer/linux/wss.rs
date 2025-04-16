@@ -9,6 +9,7 @@ use process_descendents::ProcessDescendentsIterator;
 mod pfnset;
 use pfnset::PfnSet;
 
+// From https://github.com/torvalds/linux/blob/c62f4b82d57155f35befb5c8bbae176614b87623/arch/x86/include/asm/page_64_types.h#L42
 const PAGE_OFFSET: u64 = 0xffff_8800_0000_0000;
 
 #[derive(thiserror::Error, Debug)]
@@ -24,13 +25,22 @@ pub enum Error {
 #[derive(Debug)]
 pub(crate) struct Sampler {
     parent_pid: i32,
+    page_idle_bitmap: std::fs::File,
 }
 
 impl Sampler {
     pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
-        Ok(Self { parent_pid })
+        Ok(Self {
+            parent_pid,
+            // See https://www.kernel.org/doc/html/latest/admin-guide/mm/idle_page_tracking.html
+            page_idle_bitmap: std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/sys/kernel/mm/page_idle/bitmap")?,
+        })
     }
 
+    #[allow(clippy::unused_async)]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
         let page_size = page_size::get();
         let mut pfn_set = PfnSet::new();
@@ -47,7 +57,9 @@ impl Sampler {
                     continue; // page idle tracking is user mem only
                 }
                 debug!("Memory region: {:#x} — {:#x}", begin, end);
+                #[allow(clippy::cast_possible_truncation)]
                 let begin = begin as usize / page_size;
+                #[allow(clippy::cast_possible_truncation)]
                 let end = end as usize / page_size;
                 for page in pagemap.get_range_info(begin..end)? {
                     if let PageInfo::MemoryPage(memory_page_flags) = page {
@@ -61,23 +73,17 @@ impl Sampler {
 
         let mut nb_pages = 0;
 
-        // See https://www.kernel.org/doc/html/latest/admin-guide/mm/idle_page_tracking.html
-        let mut page_idle_bitmap = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/sys/kernel/mm/page_idle/bitmap")?;
-
         for (pfn_block, pfn_bitset) in pfn_set {
-            page_idle_bitmap.seek(SeekFrom::Start(pfn_block * 8))?;
+            self.page_idle_bitmap.seek(SeekFrom::Start(pfn_block * 8))?;
 
             let mut buffer = [0; 8];
-            page_idle_bitmap.read_exact(&mut buffer)?;
+            self.page_idle_bitmap.read_exact(&mut buffer)?;
             let bitset = u64::from_ne_bytes(buffer);
 
             nb_pages += (!bitset & pfn_bitset).count_ones() as usize;
 
-            page_idle_bitmap.seek(SeekFrom::Start(pfn_block * 8))?;
-            page_idle_bitmap.write_all(&pfn_bitset.to_ne_bytes())?;
+            self.page_idle_bitmap.seek(SeekFrom::Start(pfn_block * 8))?;
+            self.page_idle_bitmap.write_all(&pfn_bitset.to_ne_bytes())?;
         }
 
         gauge!("total_wss_bytes").set((nb_pages * page_size) as f64);
