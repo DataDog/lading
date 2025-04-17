@@ -1,4 +1,5 @@
 use metrics::gauge;
+use nix::unistd::AccessFlags;
 use procfs::process::{MemoryMap, MemoryPageFlags, PageInfo};
 use std::io::{Read, Seek, SeekFrom, Write};
 use tracing::debug;
@@ -9,6 +10,7 @@ use process_descendents::ProcessDescendentsIterator;
 mod pfnset;
 use pfnset::PfnSet;
 
+pub(super) const PAGE_IDLE_BITMAP: &str = "/sys/kernel/mm/page_idle/bitmap";
 // From https://github.com/torvalds/linux/blob/c62f4b82d57155f35befb5c8bbae176614b87623/arch/x86/include/asm/page_64_types.h#L42
 const PAGE_OFFSET: u64 = 0xffff_8800_0000_0000;
 
@@ -29,6 +31,10 @@ pub(crate) struct Sampler {
 }
 
 impl Sampler {
+    pub(crate) fn is_available() -> bool {
+        nix::unistd::access(PAGE_IDLE_BITMAP, AccessFlags::R_OK | AccessFlags::W_OK).is_ok()
+    }
+
     pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
         Ok(Self {
             parent_pid,
@@ -36,7 +42,7 @@ impl Sampler {
             page_idle_bitmap: std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open("/sys/kernel/mm/page_idle/bitmap")?,
+                .open(PAGE_IDLE_BITMAP)?,
         })
     }
 
