@@ -5,7 +5,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use tracing::debug;
 
 mod process_descendents;
-use process_descendents::ProcessDescendentsIterator;
+use process_descendents::ProcessDescendantsIterator;
 
 mod pfnset;
 use pfnset::PfnSet;
@@ -51,7 +51,7 @@ impl Sampler {
         let page_size = page_size::get();
         let mut pfn_set = PfnSet::new();
 
-        for process in ProcessDescendentsIterator::new(self.parent_pid) {
+        for process in ProcessDescendantsIterator::new(self.parent_pid) {
             debug!("Process PID: {}", process.pid());
             let mut pagemap = process.pagemap()?;
             for MemoryMap {

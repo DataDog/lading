@@ -1,10 +1,11 @@
 use procfs::process::Process;
 
-pub(super) struct ProcessDescendentsIterator {
+// Iterator which, given a process ID, returns the process and all its descendants
+pub(super) struct ProcessDescendantsIterator {
     stack: Vec<Process>,
 }
 
-impl ProcessDescendentsIterator {
+impl ProcessDescendantsIterator {
     pub(super) fn new(parent_pid: i32) -> Self {
         Self {
             stack: vec![
@@ -15,7 +16,7 @@ impl ProcessDescendentsIterator {
     }
 }
 
-impl Iterator for ProcessDescendentsIterator {
+impl Iterator for ProcessDescendantsIterator {
     type Item = Process;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -44,6 +45,9 @@ mod tests {
     use std::io::BufReader;
     use std::process::{Command, Stdio};
 
+    /// Test the ProcessDescendentsIterator by creating a process tree.
+    /// Each process will print its PID to stdout.
+    /// The test will read the PIDs from stdout and check that the iterator returns all of them.
     #[test]
     fn process_descendants_iterator() {
         const NB_PROCESSES_PER_LEVEL: usize = 3;
@@ -71,7 +75,7 @@ mod tests {
             assert!(children_pids.insert(pid));
         }
 
-        for process in ProcessDescendentsIterator::new(child.id() as i32) {
+        for process in ProcessDescendantsIterator::new(child.id() as i32) {
             assert!(
                 children_pids.remove(&process.pid()),
                 "ProcessDescendentsIterator returned unexpected PID {pid}",
