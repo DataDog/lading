@@ -5,11 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## Added
+- Add a `max_lifetime` parameter to the `container` generator to make it generate
+  a continuous stream of docker containers deletion and re-creation.
 
 ## [0.25.9]
 ## Added
 - Introduce a `container` generator able to generate an arbitrary number
-  of docker containers
+  of docker containers.
 ## Changed
 - Lading's byte-unit crate is now updated to 5.x. This version of the crate is
   very strict about the difference between MiB, Mb etc.
