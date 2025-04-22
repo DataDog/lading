@@ -13,6 +13,7 @@ use bollard::image::CreateImageOptions;
 use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -52,6 +53,9 @@ pub enum Error {
     /// Error produced by the Bollard Docker client.
     #[error("Bollard/Docker error: {0}")]
     Bollard(#[from] bollard::errors::Error),
+    /// Error produced by tokio
+    #[error("Tokio error: {0}")]
+    Tokio(#[from] mpsc::error::SendError<ContainerCreateResponse>),
 }
 
 #[derive(Debug)]
@@ -140,6 +144,7 @@ impl Container {
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let (new_container_tx, mut new_container_rx) = mpsc::channel(32);
         let mut recreate_interval = self.config.max_lifetime.map(|max_lifetime| {
             tokio::time::interval(tokio::time::Duration::from_millis(
                 1_000 * max_lifetime / number_of_containers as u64,
@@ -150,9 +155,26 @@ impl Container {
             tokio::select! {
                 // Destroy and replace containers
                 _ = if let Some(ref mut interval) = recreate_interval { interval.tick() } else { std::future::pending().await } => {
-                    stop_and_remove_container(&docker, &containers.pop_front().ok_or(Error::Generic(String::from("No container left")))?).await?;
-                    containers.push_back(self.config.create_and_start_container(&docker, &full_image).await?);
+                    if let Some(container) = containers.pop_front() {
+                        let docker = docker.clone();
+                        let config = self.config.clone();
+                        let full_image = full_image.clone();
+                        let new_container_tx = new_container_tx.clone();
+                        tokio::spawn(async move {
+                            stop_and_remove_container(&docker, &container).await?;
+                            new_container_tx.send(config.create_and_start_container(&docker, &full_image).await?).await?;
+                            Ok::<(), Error>(())
+                        });
+                    }
                 }
+
+                // Handle new containers from recycling tasks
+                new_container = new_container_rx.recv() => {
+                    if let Some(container) = new_container {
+                        containers.push_back(container);
+                    }
+                }
+
                 // Check that containers are still running every 10 seconds
                 _ = liveness_interval.tick() => {
                     for container in &containers {
@@ -166,11 +188,15 @@ impl Container {
                         }
                     }
                 }
+
+                // Shutdown
                 () = &mut shutdown_wait => {
                     debug!("shutdown signal received");
-                    for container in &containers {
-                        stop_and_remove_container(&docker, container).await?;
-                    }
+                    drop(new_container_tx);
+
+                    futures::future::join_all(
+                        containers.iter().map(|container| stop_and_remove_container(&docker, container))
+                    ).await;
 
                     return Ok(())
                 }
@@ -251,7 +277,7 @@ async fn stop_and_remove_container(
 ) -> Result<(), Error> {
     info!("Stopping container: {id}", id = container.id);
     if let Err(e) = docker
-        .stop_container(&container.id, Some(StopContainerOptions { t: 0 }))
+        .stop_container(&container.id, Some(StopContainerOptions { t: 5 }))
         .await
     {
         warn!("Error stopping container {id}: {e}", id = container.id);
