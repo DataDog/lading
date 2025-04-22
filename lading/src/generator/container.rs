@@ -129,15 +129,13 @@ impl Container {
         }
 
         let number_of_containers = self.config.number_of_containers.unwrap_or(1);
-        let mut containers = VecDeque::with_capacity(number_of_containers);
-
-        for _ in 0..number_of_containers {
-            containers.push_back(
-                self.config
-                    .create_and_start_container(&docker, &full_image)
-                    .await?,
-            );
-        }
+        let mut containers = futures::future::join_all(
+            (0..number_of_containers)
+                .map(|_| self.config.create_and_start_container(&docker, &full_image)),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<VecDeque<_>, Error>>()?;
 
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
