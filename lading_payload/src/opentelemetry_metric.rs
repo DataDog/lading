@@ -7,14 +7,89 @@
 //! experimental JSON OTLP/HTTP format can also be supported but is not
 //! currently implemented.
 
+// Alright, to summarize this payload generator's understanding of the
+// data-model described above:
+//
+// The central concern is a `Metric`. A `Metric` is:
+//
+// * name: String -- unique metric identifier
+// * description: String -- optional human friendly description
+// * unit: String -- unit of measurement, described by http://unitsofmeasure.org/ucum.html
+// * data: enum { Gauge, Sum, Histogram, ExponentialHistogram, Summary }
+//
+// Each `Metric` is associated with a `Resource` -- called `ResourceMetrics` in
+// the proto -- which defines the origination point of the `Metric`. Interior to
+// the `Resource` is the `Scope` -- called `ScopeMetrics` in the proto -- which
+// defines the library/smaller-than-resource scope that generated the `Metric`.
+//
+// The data types are as follows:
+//
+// * Gauge -- a collection of `NumberDataPoint`, values sampled at specific times
+// * Sum -- `Gauge` with the addition of monotonic flag, aggregation metadata
+//
+// We omit Histogram / ExponentialHistogram / Summary in this current version
+// but will introduce them in the near-term. The `NumberDataPoint` is a
+//
+// * attributes: Vec<KeyValue> -- tags
+// * start_time_unix_nano: u64 -- represents the first possible moment a measurement could be recorded, optional
+// * time_unix_nano: u64 -- a timestamp when the value was sampled
+// * value: enum { u64, f64 } -- the value
+// * flags: uu32 -- I'm not sure what to make of this yet
+
 use std::io::Write;
 
+use crate::Generator;
 use crate::{Error, common::strings};
 use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
-use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use rand::{
+    Rng,
+    distr::{StandardUniform, weighted::WeightedIndex},
+    prelude::Distribution,
+    seq::IndexedRandom,
+};
+use serde::{Deserialize, Serialize as SerdeSerialize};
 
-use super::Generator;
+/// Configure the OpenTelemetry metric payload.
+#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// Defines the relative probability of each kind of OpenTelemetry metric.
+    pub metric_weights: MetricWeights,
+}
+
+/// Defines the relative probability of each kind of OpenTelemetry metric.
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct MetricWeights {
+    gauge: u8,
+    sum: u8,
+}
+
+impl Default for MetricWeights {
+    fn default() -> Self {
+        Self {
+            gauge: 50, // 50%
+            sum: 50,   // 50%
+        }
+    }
+}
+
+impl Config {
+    /// Determine whether the passed configuration obeys validation criteria.
+    ///
+    /// # Errors
+    /// Function will error if the configuration is invalid
+    pub fn valid(&self) -> Result<(), String> {
+        // None of the metric weights are 0.
+        if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
+            return Err("Metric weights cannot be 0".to_string());
+        }
+        Ok(())
+    }
+}
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportMetricsServiceRequests`](opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest)
 struct ExportMetricsServiceRequest(Vec<Metric>);
@@ -37,7 +112,7 @@ impl ExportMetricsServiceRequest {
     }
 }
 
-/// A OTLP metric
+/// A OTLP metric.
 #[derive(Debug)]
 pub struct Metric(v1::Metric);
 
@@ -110,24 +185,28 @@ impl Distribution<Sum> for StandardUniform {
 }
 
 #[derive(Debug, Clone)]
-/// OTLP metric payload
-pub struct OpentelemetryMetrics {
+pub(crate) struct MemberGenerator {
     str_pool: strings::Pool,
+    metric_weights: WeightedIndex<u16>,
 }
 
-impl OpentelemetryMetrics {
-    /// Construct a new instance of `OpentelemetryMetrics`
-    pub fn new<R>(rng: &mut R) -> Self
+impl MemberGenerator {
+    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
-        R: rand::Rng + ?Sized,
+        R: Rng + ?Sized,
     {
-        Self {
+        let member_choices = [
+            u16::from(config.metric_weights.gauge),
+            u16::from(config.metric_weights.sum),
+        ];
+        Ok(Self {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
-        }
+            metric_weights: WeightedIndex::new(member_choices)?,
+        })
     }
 }
 
-impl<'a> Generator<'a> for OpentelemetryMetrics {
+impl<'a> Generator<'a> for MemberGenerator {
     type Output = Metric;
     type Error = Error;
 
@@ -135,7 +214,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
-        let data = match rng.random_range(0..=1) {
+        let data = match self.metric_weights.sample(rng) {
             0 => v1::metric::Data::Gauge(rng.random::<Gauge>().0),
             1 => v1::metric::Data::Sum(rng.random::<Sum>().0),
             // Currently unsupported: Histogram, ExponentialHistogram, Summary
@@ -166,6 +245,39 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
     }
 }
 
+#[derive(Debug, Clone)]
+/// OTLP metric payload
+pub struct OpentelemetryMetrics {
+    member_generator: MemberGenerator,
+}
+
+impl OpentelemetryMetrics {
+    /// Construct a new instance of `OpentelemetryMetrics`
+    ///
+    /// # Errors
+    /// Function will error if the configuration is invalid
+    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        Ok(Self {
+            member_generator: MemberGenerator::new(config, rng)?,
+        })
+    }
+}
+
+impl<'a> Generator<'a> for OpentelemetryMetrics {
+    type Output = Metric;
+    type Error = Error;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        self.member_generator.generate(rng)
+    }
+}
+
 impl crate::Serialize for OpentelemetryMetrics {
     fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
@@ -174,8 +286,8 @@ impl crate::Serialize for OpentelemetryMetrics {
     {
         // An Export*ServiceRequest message has 5 bytes of fixed values plus
         // a varint-encoded message length field. The worst case for the message
-        // length field is the max message size divided by 0x7F.
-        let bytes_remaining = max_bytes.checked_sub(5 + max_bytes.div_ceil(0x7F));
+        // length field is the max message size divided by 0b0111_1111.
+        let bytes_remaining = max_bytes.checked_sub(5 + max_bytes.div_ceil(0b0111_1111));
         let Some(mut bytes_remaining) = bytes_remaining else {
             return Ok(());
         };
@@ -200,7 +312,7 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::OpentelemetryMetrics;
+    use super::{Config, OpentelemetryMetrics};
     use crate::Serialize;
     use proptest::prelude::*;
     use prost::Message;
@@ -213,10 +325,10 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut logs = OpentelemetryMetrics::new(&mut rng);
+            let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
@@ -227,10 +339,10 @@ mod test {
         fn payload_is_at_least_half_of_max_bytes(seed: u64, max_bytes in 16u16..u16::MAX) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut logs = OpentelemetryMetrics::new(&mut rng);
+            let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
             assert!(!bytes.is_empty());
         }
@@ -243,10 +355,10 @@ mod test {
         fn payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut logs = OpentelemetryMetrics::new(&mut rng);
+            let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
             opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
