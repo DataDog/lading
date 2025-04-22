@@ -144,7 +144,7 @@ pub enum Config {
     /// Generates OpenTelemetry logs
     OpentelemetryLogs,
     /// Generates OpenTelemetry metrics
-    OpentelemetryMetrics,
+    OpentelemetryMetrics(crate::opentelemetry_metric::Config),
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
