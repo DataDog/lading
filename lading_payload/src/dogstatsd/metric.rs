@@ -11,8 +11,10 @@ use rand::{
 use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
 use tracing::debug;
 
+use self::strings::choose_or_not_ref;
+
 use super::{
-    ConfRange, ValueConf, choose_or_not_ref,
+    ConfRange, ValueConf,
     common::{self, NumValueGenerator},
 };
 
