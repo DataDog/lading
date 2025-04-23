@@ -5,7 +5,9 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 
-use super::{ConfRange, choose_or_not_fn, common};
+use self::strings::choose_or_not_fn;
+
+use super::{ConfRange, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {

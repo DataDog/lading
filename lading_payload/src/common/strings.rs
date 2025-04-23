@@ -1,8 +1,8 @@
 //! Code for the quick creation of randomize strings
 
+use crate::common::config::ConfRange;
+use rand::{Rng, distr::uniform::SampleUniform, seq::IndexedRandom};
 use std::ops::Range;
-
-use rand::distr::uniform::SampleUniform;
 
 const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -129,6 +129,70 @@ impl Pool {
             None
         }
     }
+}
+
+pub(crate) fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
+where
+    R: rand::Rng + ?Sized,
+{
+    if rng.random() {
+        pool.choose(&mut rng)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn choose_or_not_fn<R, T, F>(rng: &mut R, func: F) -> Option<T>
+where
+    T: Clone,
+    R: rand::Rng + ?Sized,
+    F: FnOnce(&mut R) -> Option<T>,
+{
+    if rng.random() { func(rng) } else { None }
+}
+
+#[inline]
+/// Generate a total number of strings randomly chosen from the range `min_max` with a maximum length
+/// per string of `max_length`.
+pub(crate) fn random_strings_with_length<R>(
+    pool: &Pool,
+    min_max: Range<usize>,
+    max_length: u16,
+    rng: &mut R,
+) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    let total = rng.random_range(min_max);
+    let length_range = ConfRange::Inclusive {
+        min: 1,
+        max: max_length,
+    };
+
+    random_strings_with_length_range(pool, total, length_range, rng)
+}
+
+#[inline]
+/// Generate a `total` number of strings with a maximum length per string of
+/// `max_length`.
+pub(crate) fn random_strings_with_length_range<R>(
+    pool: &Pool,
+    total: usize,
+    length_range: ConfRange<u16>,
+    mut rng: &mut R,
+) -> Vec<String>
+where
+    R: Rng + ?Sized,
+{
+    let mut buf = Vec::with_capacity(total);
+    for _ in 0..total {
+        let sz = length_range.sample(&mut rng) as usize;
+        buf.push(String::from(
+            pool.of_size(&mut rng, sz)
+                .expect("failed to generate string"),
+        ));
+    }
+    buf
 }
 
 #[cfg(test)]
