@@ -1,17 +1,19 @@
 //! `DogStatsD` payload.
 
-use std::{cmp, fmt, io::Write, ops::Range, rc::Rc};
+use std::{fmt, io::Write, rc::Rc};
 
-use rand::{
-    Rng,
-    distr::{uniform::SampleUniform, weighted::WeightedIndex},
-    prelude::Distribution,
-    seq::IndexedRandom,
-};
+use rand::{Rng, distr::weighted::WeightedIndex, prelude::Distribution};
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use tracing::{debug, warn};
 
-use crate::{Serialize, common::strings};
+use crate::{
+    Serialize,
+    common::{
+        config::ConfRange,
+        strings,
+        strings::{random_strings_with_length, random_strings_with_length_range},
+    },
+};
 
 use self::{
     common::tags, event::EventGenerator, metric::MetricGenerator,
@@ -141,69 +143,6 @@ impl Default for ValueConf {
                 min: i64::MIN,
                 max: i64::MAX,
             },
-        }
-    }
-}
-/// Range expression for configuration
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
-#[serde(deny_unknown_fields)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
-pub enum ConfRange<T>
-where
-    T: PartialEq + cmp::PartialOrd + Clone + Copy,
-{
-    /// A constant T
-    Constant(T),
-    /// In which a T is chosen between `min` and `max`, inclusive of `max`.
-    Inclusive {
-        /// The minimum of the range.
-        min: T,
-        /// The maximum of the range.
-        max: T,
-    },
-}
-
-impl<T> ConfRange<T>
-where
-    T: PartialEq + cmp::PartialOrd + Clone + Copy,
-{
-    /// Returns true if the range provided by the user is valid, false
-    /// otherwise.
-    fn valid(&self) -> (bool, &'static str) {
-        match self {
-            Self::Constant(_) => (true, ""),
-            Self::Inclusive { min, max } => (min < max, "min must be less than max"),
-        }
-    }
-
-    fn start(&self) -> T {
-        match self {
-            ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { min, .. } => *min,
-        }
-    }
-
-    fn end(&self) -> T {
-        match self {
-            ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { max, .. } => *max,
-        }
-    }
-}
-
-impl<T> ConfRange<T>
-where
-    T: PartialEq + cmp::PartialOrd + Clone + Copy + SampleUniform,
-{
-    fn sample<R>(&self, rng: &mut R) -> T
-    where
-        R: rand::Rng + ?Sized,
-    {
-        match self {
-            ConfRange::Constant(c) => *c,
-            ConfRange::Inclusive { min, max } => rng.random_range(*min..=*max),
         }
     }
 }
@@ -357,70 +296,6 @@ impl Config {
         }
         Ok(())
     }
-}
-
-fn choose_or_not_ref<'a, R, T>(mut rng: &mut R, pool: &'a [T]) -> Option<&'a T>
-where
-    R: rand::Rng + ?Sized,
-{
-    if rng.random() {
-        pool.choose(&mut rng)
-    } else {
-        None
-    }
-}
-
-fn choose_or_not_fn<R, T, F>(rng: &mut R, func: F) -> Option<T>
-where
-    T: Clone,
-    R: rand::Rng + ?Sized,
-    F: FnOnce(&mut R) -> Option<T>,
-{
-    if rng.random() { func(rng) } else { None }
-}
-
-#[inline]
-/// Generate a total number of strings randomly chosen from the range `min_max` with a maximum length
-/// per string of `max_length`.
-fn random_strings_with_length<R>(
-    pool: &strings::Pool,
-    min_max: Range<usize>,
-    max_length: u16,
-    rng: &mut R,
-) -> Vec<String>
-where
-    R: Rng + ?Sized,
-{
-    let total = rng.random_range(min_max);
-    let length_range = ConfRange::Inclusive {
-        min: 1,
-        max: max_length,
-    };
-
-    random_strings_with_length_range(pool, total, length_range, rng)
-}
-
-#[inline]
-/// Generate a `total` number of strings with a maximum length per string of
-/// `max_length`.
-fn random_strings_with_length_range<R>(
-    pool: &strings::Pool,
-    total: usize,
-    length_range: ConfRange<u16>,
-    mut rng: &mut R,
-) -> Vec<String>
-where
-    R: Rng + ?Sized,
-{
-    let mut buf = Vec::with_capacity(total);
-    for _ in 0..total {
-        let sz = length_range.sample(&mut rng) as usize;
-        buf.push(String::from(
-            pool.of_size(&mut rng, sz)
-                .expect("failed to generate string"),
-        ));
-    }
-    buf
 }
 
 #[derive(Debug, Clone)]
