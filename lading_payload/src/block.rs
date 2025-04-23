@@ -328,8 +328,8 @@ impl Cache {
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
-            crate::Config::OpentelemetryMetrics => {
-                let mut pyld = crate::OpentelemetryMetrics::new(&mut rng);
+            crate::Config::OpentelemetryMetrics(config) => {
+                let mut pyld = crate::OpentelemetryMetrics::new(*config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-metrics");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?

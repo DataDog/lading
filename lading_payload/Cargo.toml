@@ -53,3 +53,7 @@ doctest = false
 [[bench]]
 name = "default"
 harness = false
+
+[[bench]]
+name = "opentelemetry_metric"
+harness = false
