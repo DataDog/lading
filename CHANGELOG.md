@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a continuous stream of docker containers deletion and re-creation.
 - Block cache generation now logs its number of rejected, success blocks once
   the cache is created.
+- Added configurable metric kind weights in OpenTelemetry metrics payload generator.
 
 ## [0.25.9]
 ## Added
