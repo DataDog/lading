@@ -493,7 +493,11 @@ generator:
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
-            variant: "opentelemetry_metrics"
+            variant:
+              opentelemetry_metrics:
+                metric_weights:
+                  gauge: 50
+                  sum: 50
         headers:
             Content-Type: "application/x-protobuf"
         "#,
