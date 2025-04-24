@@ -1,15 +1,15 @@
 use procfs::process::Pfn;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Structure used to represent a set of page frame numbers (PFNs)
 /// in a format suitable for use with the Idle Page Tracking API.
 /// <https://www.kernel.org/doc/html/latest/admin-guide/mm/idle_page_tracking.html>
 #[derive(Debug)]
-pub(super) struct PfnSet(HashMap<u64, u64>);
+pub(super) struct PfnSet(FxHashMap<u64, u64>);
 
 impl PfnSet {
     pub(super) fn new() -> Self {
-        Self(HashMap::with_capacity(1024))
+        Self(FxHashMap::default())
     }
 
     pub(super) fn insert(&mut self, pfn: Pfn) {

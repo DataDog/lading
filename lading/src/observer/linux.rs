@@ -1,5 +1,6 @@
 mod cgroup;
 mod procfs;
+mod utils;
 mod wss;
 
 use tracing::{error, warn};
@@ -23,8 +24,7 @@ pub(crate) struct Sampler {
     procfs: procfs::Sampler,
     cgroup: cgroup::Sampler,
     wss: Option<wss::Sampler>,
-    smaps_interval: u8,
-    last_wss_sample: tokio::time::Instant,
+    tick_counter: u8,
 }
 
 impl Sampler {
@@ -35,7 +35,22 @@ impl Sampler {
             Some(wss::Sampler::new(parent_pid)?)
         } else {
             warn!(
-                "{} isn’t accessible. Either the kernel hasn’t been compiled with CONFIG_IDLE_PAGE_TRACKING or the process doesn’t have access to it. WSS sampling is not available",
+                r"{} isn’t accessible.
+Either the kernel hasn’t been compiled with CONFIG_IDLE_PAGE_TRACKING
+or the process doesn’t have access to it.
+WSS sampling is not available.
+
+Kernel support can be checked with
+```
+grep CONFIG_IDLE_PAGE_TRACKING /boot/config-$(uname -r)
+```
+
+Permissions can be checked with
+```
+id
+ls -l /sys/kernel/mm/page_idle/bitmap
+```
+",
                 wss::PAGE_IDLE_BITMAP
             );
             None
@@ -45,19 +60,17 @@ impl Sampler {
             procfs: procfs_sampler,
             cgroup: cgroup_sampler,
             wss: wss_sampler,
-            smaps_interval: 10,
-            last_wss_sample: tokio::time::Instant::now() - tokio::time::Duration::from_secs(61),
+            tick_counter: 0,
         })
     }
 
     pub(crate) async fn sample(&mut self) -> Result<(), Error> {
-        self.smaps_interval -= 1;
-        let sample_smaps = if self.smaps_interval == 0 {
-            self.smaps_interval = 10;
-            true
-        } else {
-            false
-        };
+        let sample_smaps = self.tick_counter % 10 == 0;
+        let sample_wss = self.tick_counter % 60 == 0;
+        self.tick_counter += 1;
+        if self.tick_counter == 60 {
+            self.tick_counter = 0;
+        }
 
         self.procfs.poll(sample_smaps).await?;
         self.cgroup.poll().await?;
@@ -66,9 +79,8 @@ impl Sampler {
             // WSS measures the amount of memory that has been accessed since the last poll.
             // As a consequence, the poll interval impacts the measure.
             // That’s why we need to be sure we don’t poll more often than once per minute.
-            if self.last_wss_sample.elapsed() > tokio::time::Duration::from_secs(60) {
+            if sample_wss {
                 wss.poll().await?;
-                self.last_wss_sample = tokio::time::Instant::now();
             }
         }
 

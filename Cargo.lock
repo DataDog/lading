@@ -1680,7 +1680,6 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "once_cell",
- "page_size",
  "procfs",
  "proptest",
  "quanta",

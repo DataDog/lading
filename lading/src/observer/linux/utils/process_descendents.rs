@@ -1,12 +1,12 @@
 use procfs::process::Process;
 
-// Iterator which, given a process ID, returns the process and all its descendants
-pub(super) struct ProcessDescendantsIterator {
+/// Iterator which, given a process ID, returns the process and all its descendants
+pub(in crate::observer::linux) struct ProcessDescendantsIterator {
     stack: Vec<Process>,
 }
 
 impl ProcessDescendantsIterator {
-    pub(super) fn new(parent_pid: i32) -> Self {
+    pub(in crate::observer::linux) fn new(parent_pid: i32) -> Self {
         Self {
             stack: vec![
                 Process::new(parent_pid)
@@ -57,7 +57,7 @@ mod tests {
         const NB_PROCESSES: usize =
             (NB_PROCESSES_PER_LEVEL.pow(NB_LEVELS + 1) - 1) / (NB_PROCESSES_PER_LEVEL - 1);
 
-        let mut child = Command::new("src/observer/linux/wss/tests/create_process_tree.py")
+        let mut child = Command::new("src/observer/linux/utils/tests/create_process_tree.py")
             .arg(NB_PROCESSES_PER_LEVEL.to_string())
             .arg(NB_LEVELS.to_string())
             .stdout(Stdio::piped())

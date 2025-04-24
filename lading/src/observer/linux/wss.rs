@@ -4,21 +4,32 @@ use procfs::process::{MemoryMap, MemoryPageFlags, PageInfo};
 use std::io::{Read, Seek, SeekFrom, Write};
 use tracing::debug;
 
-mod process_descendents;
-use process_descendents::ProcessDescendantsIterator;
+use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 
 mod pfnset;
 use pfnset::PfnSet;
 
 pub(super) const PAGE_IDLE_BITMAP: &str = "/sys/kernel/mm/page_idle/bitmap";
+
+#[cfg(target_arch = "x86_64")]
 // From https://github.com/torvalds/linux/blob/c62f4b82d57155f35befb5c8bbae176614b87623/arch/x86/include/asm/page_64_types.h#L42
 const PAGE_OFFSET: u64 = 0xffff_8800_0000_0000;
+#[cfg(target_arch = "aarch64")]
+// On arm64, the virtual address at which user space ends is more configurable
+// See https://github.com/torvalds/linux/blob/c62f4b82d57155f35befb5c8bbae176614b87623/arch/arm64/include/asm/memory.h#L43-L45
+// So, I checked one of our staging machine:
+//        # grep VA_BITS /host/proc/1/root/boot/config-6.8.0-1027-aws
+//        # CONFIG_ARM64_VA_BITS_39 is not set
+//        CONFIG_ARM64_VA_BITS_48=y
+//        CONFIG_ARM64_VA_BITS=48
+const PAGE_OFFSET: u64 = -1 << 48;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[cfg(target_os = "linux")]
     /// Wrapper for [`procfs::ProcError`]
     #[error("Unable to read procfs: {0}")]
     Proc(#[from] procfs::ProcError),
@@ -48,7 +59,8 @@ impl Sampler {
 
     #[allow(clippy::unused_async)]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
-        let page_size = page_size::get();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let page_size = unsafe { nix::libc::sysconf(nix::libc::_SC_PAGESIZE) as usize };
         let mut pfn_set = PfnSet::new();
 
         for process in ProcessDescendantsIterator::new(self.parent_pid) {
