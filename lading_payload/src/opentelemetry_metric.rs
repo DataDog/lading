@@ -39,6 +39,7 @@
 // * flags: uu32 -- I'm not sure what to make of this yet
 
 use std::io::Write;
+use std::rc::Rc;
 
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
 use opentelemetry_proto::tonic::{
@@ -125,22 +126,19 @@ impl Config {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResourceGenerator {
-    str_pool: strings::Pool,
     attributes_per_resource: ConfRange<u32>,
     scopes_per_resource: ConfRange<u32>,
     scope_generator: ScopeGenerator,
+    str_pool: Rc<strings::Pool>,
 }
 
 impl ResourceGenerator {
-    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
+    pub(crate) fn new(config: Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         Ok(Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: Rc::clone(str_pool),
             attributes_per_resource: config.contexts.attributes_per_resource,
             scopes_per_resource: config.contexts.scopes_per_resource,
-            scope_generator: ScopeGenerator::new(config, rng)?,
+            scope_generator: ScopeGenerator::new(config, str_pool)?,
         })
     }
 }
@@ -189,22 +187,19 @@ impl<'a> Generator<'a> for ResourceGenerator {
 // want to start generating scopes.
 #[derive(Debug, Clone)]
 pub(crate) struct ScopeGenerator {
-    str_pool: strings::Pool,
     metrics_per_scope: ConfRange<u32>,
     attributes_per_scope: ConfRange<u32>,
     metric_generator: MetricGenerator,
+    str_pool: Rc<strings::Pool>,
 }
 
 impl ScopeGenerator {
-    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
+    pub(crate) fn new(config: Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         Ok(Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: Rc::clone(str_pool),
             attributes_per_scope: config.contexts.attributes_per_scope,
             metrics_per_scope: config.contexts.metrics_per_scope,
-            metric_generator: MetricGenerator::new(config, rng)?,
+            metric_generator: MetricGenerator::new(config, str_pool)?,
         })
     }
 }
@@ -213,7 +208,7 @@ impl<'a> Generator<'a> for ScopeGenerator {
     type Output = v1::ScopeMetrics;
     type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -226,7 +221,7 @@ impl<'a> Generator<'a> for ScopeGenerator {
         let instrumentation_scope: InstrumentationScope = {
             let name = self
                 .str_pool
-                .of_size_range(&mut rng, 1_u8..16)
+                .of_size_range(rng, 1_u8..16)
                 .ok_or(Error::StringGenerate)?;
 
             let count = self.attributes_per_scope.sample(rng);
@@ -250,22 +245,19 @@ impl<'a> Generator<'a> for ScopeGenerator {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MetricGenerator {
-    str_pool: strings::Pool,
     metric_weights: WeightedIndex<u16>,
     attributes_per_metric: ConfRange<u32>,
+    str_pool: Rc<strings::Pool>,
 }
 
 impl MetricGenerator {
-    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
+    pub(crate) fn new(config: Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         let member_choices = [
             u16::from(config.metric_weights.gauge),
             u16::from(config.metric_weights.sum),
         ];
         Ok(Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: Rc::clone(str_pool),
             metric_weights: WeightedIndex::new(member_choices)?,
             attributes_per_metric: config.contexts.attributes_per_metric,
         })
@@ -276,7 +268,7 @@ impl<'a> Generator<'a> for MetricGenerator {
     type Output = v1::Metric;
     type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -290,17 +282,17 @@ impl<'a> Generator<'a> for MetricGenerator {
 
         let name = self
             .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
+            .of_size_range(rng, 1_u8..16)
             .ok_or(Error::StringGenerate)?;
         let description = self
             .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
+            .of_size_range(rng, 1_u8..16)
             .ok_or(Error::StringGenerate)?;
 
         // TODO this is not correct and must be fixed to accord with http://unitsofmeasure.org/ucum.html.
         let unit = self
             .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
+            .of_size_range(rng, 1_u8..16)
             .ok_or(Error::StringGenerate)?;
 
         let count = self.attributes_per_metric.sample(rng);
@@ -467,8 +459,9 @@ impl OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
+        let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
         Ok(Self {
-            member_generator: MemberGenerator::new(config, rng)?,
+            member_generator: ResourceGenerator::new(config, &str_pool)?,
         })
     }
 }
