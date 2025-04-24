@@ -149,7 +149,7 @@ impl<'a> Generator<'a> for ResourceGenerator {
     type Output = v1::ResourceMetrics;
     type Error = Error;
 
-    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -159,28 +159,10 @@ impl<'a> Generator<'a> for ResourceGenerator {
         // the message.
         let resource: Option<resource::v1::Resource> = if !unknown_resource && rng.random_bool(0.5)
         {
-            // We do not make a k/v pair where the v is unset.
-            let total_kv_pairs = self.attributes_per_resource.sample(rng);
-            let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
-            for _ in 0..total_kv_pairs {
-                let key = self
-                    .str_pool
-                    .of_size_range(&mut rng, 1_u8..16)
-                    .ok_or(Error::StringGenerate)?;
-                let val = self
-                    .str_pool
-                    .of_size_range(&mut rng, 1_u8..16)
-                    .ok_or(Error::StringGenerate)?;
-
-                kvs.push(KeyValue {
-                    key: String::from(key),
-                    value: Some(AnyValue {
-                        value: Some(any_value::Value::StringValue(String::from(val))),
-                    }),
-                });
-            }
+            let count = self.attributes_per_resource.sample(rng);
+            let attributes = generate_attributes(&self.str_pool, rng, count)?;
             let res = resource::v1::Resource {
-                attributes: kvs,
+                attributes,
                 dropped_attributes_count: 0,
             };
             Some(res)
@@ -242,36 +224,18 @@ impl<'a> Generator<'a> for ScopeGenerator {
         }
 
         let instrumentation_scope: InstrumentationScope = {
-            // We do not make a k/v pair where the v is unset.
-            let total_kv_pairs = self.attributes_per_scope.sample(rng);
-            let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
-            for _ in 0..total_kv_pairs {
-                let key = self
-                    .str_pool
-                    .of_size_range(&mut rng, 1_u8..16)
-                    .ok_or(Error::StringGenerate)?;
-                let val = self
-                    .str_pool
-                    .of_size_range(&mut rng, 1_u8..16)
-                    .ok_or(Error::StringGenerate)?;
-
-                kvs.push(KeyValue {
-                    key: String::from(key),
-                    value: Some(AnyValue {
-                        value: Some(any_value::Value::StringValue(String::from(val))),
-                    }),
-                });
-            }
-
             let name = self
                 .str_pool
                 .of_size_range(&mut rng, 1_u8..16)
                 .ok_or(Error::StringGenerate)?;
 
+            let count = self.attributes_per_scope.sample(rng);
+            let attributes = generate_attributes(&self.str_pool, rng, count)?;
+
             InstrumentationScope {
                 name: String::from(name),
                 version: String::new(),
-                attributes: kvs,
+                attributes,
                 dropped_attributes_count: 0,
             }
         };
@@ -339,33 +303,15 @@ impl<'a> Generator<'a> for MetricGenerator {
             .of_size_range(&mut rng, 1_u8..16)
             .ok_or(Error::StringGenerate)?;
 
-        // We do not make a k/v pair where the v is unset.
-        let total_kv_pairs = self.attributes_per_metric.sample(rng);
-        let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
-        for _ in 0..total_kv_pairs {
-            let key = self
-                .str_pool
-                .of_size_range(&mut rng, 1_u8..16)
-                .ok_or(Error::StringGenerate)?;
-            let val = self
-                .str_pool
-                .of_size_range(&mut rng, 1_u8..16)
-                .ok_or(Error::StringGenerate)?;
-
-            kvs.push(KeyValue {
-                key: String::from(key),
-                value: Some(AnyValue {
-                    value: Some(any_value::Value::StringValue(String::from(val))),
-                }),
-            });
-        }
+        let count = self.attributes_per_metric.sample(rng);
+        let metadata = generate_attributes(&self.str_pool, rng, count)?;
 
         Ok(v1::Metric {
             name: String::from(name),
             description: String::from(description),
             unit: String::from(unit),
             data,
-            metadata: kvs,
+            metadata,
         })
     }
 }
@@ -575,6 +521,33 @@ impl crate::Serialize for OpentelemetryMetrics {
         writer.write_all(&buf)?;
         Ok(())
     }
+}
+
+fn generate_attributes<R>(
+    str_pool: &strings::Pool,
+    rng: &mut R,
+    count: u32,
+) -> Result<Vec<KeyValue>, Error>
+where
+    R: Rng + ?Sized,
+{
+    let mut kvs = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let key = str_pool
+            .of_size_range(rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?;
+        let val = str_pool
+            .of_size_range(rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?;
+
+        kvs.push(KeyValue {
+            key: String::from(key),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(String::from(val))),
+            }),
+        });
+    }
+    Ok(kvs)
 }
 
 #[cfg(test)]
