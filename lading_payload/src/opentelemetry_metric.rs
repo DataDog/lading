@@ -20,7 +20,9 @@
 // Each `Metric` is associated with a `Resource` -- called `ResourceMetrics` in
 // the proto -- which defines the origination point of the `Metric`. Interior to
 // the `Resource` is the `Scope` -- called `ScopeMetrics` in the proto -- which
-// defines the library/smaller-than-resource scope that generated the `Metric`.
+// defines the library/smaller-than-resource scope that generated the
+// `Metric`. We will not set `Scope` until we find out that it's important to do
+// so for modeling purposes.
 //
 // The data types are as follows:
 //
@@ -38,9 +40,12 @@
 
 use std::io::Write;
 
-use crate::Generator;
-use crate::{Error, common::strings};
-use opentelemetry_proto::tonic::metrics::v1;
+use crate::{Error, Generator, common::config::ConfRange, common::strings};
+use opentelemetry_proto::tonic::{
+    common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
+    metrics::v1,
+    resource,
+};
 use prost::Message;
 use rand::{
     Rng,
@@ -54,9 +59,30 @@ use serde::{Deserialize, Serialize as SerdeSerialize};
 #[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
-pub struct Config {
-    /// Defines the relative probability of each kind of OpenTelemetry metric.
-    pub metric_weights: MetricWeights,
+/// OpenTelemetry metric contexts
+pub struct Contexts {
+    /// The range of attributes for resources.
+    pub attributes_per_resource: ConfRange<u32>,
+    /// TODO
+    pub scopes_per_resource: ConfRange<u32>,
+    /// TODO
+    pub attributes_per_scope: ConfRange<u32>,
+    /// The range of attributes for scopes per resource.
+    pub metrics_per_scope: ConfRange<u32>,
+    /// The range of attributes for scopes per resource.
+    pub attributes_per_metric: ConfRange<u32>,
+}
+
+impl Default for Contexts {
+    fn default() -> Self {
+        Self {
+            attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
+            scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
+            attributes_per_scope: ConfRange::Constant(0),
+            metrics_per_scope: ConfRange::Inclusive { min: 0, max: 20 },
+            attributes_per_metric: ConfRange::Inclusive { min: 0, max: 10 },
+        }
+    }
 }
 
 /// Defines the relative probability of each kind of OpenTelemetry metric.
@@ -91,31 +117,260 @@ impl Config {
     }
 }
 
-/// Wrapper to generate arbitrary OpenTelemetry [`ExportMetricsServiceRequests`](opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest)
-struct ExportMetricsServiceRequest(Vec<Metric>);
+// Okay if you think about it OTel Metrics are in a tree. That tree is rooted at
+// the Resource, below the resources are Scope which contain Metrics. If we want
+// to have a bounded amount of contexts we need some way of counting how many
+// we've made where a context is the Resources X Scopes X Metric Names and so
+// the Resource is the top generator etc.
 
-impl ExportMetricsServiceRequest {
-    fn into_prost_type(
-        self,
-    ) -> opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
-        opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
-            resource_metrics: vec![v1::ResourceMetrics {
-                resource: None,
-                scope_metrics: vec![v1::ScopeMetrics {
-                    scope: None,
-                    metrics: self.0.into_iter().map(|metric| metric.0).collect(),
-                    schema_url: String::new(),
-                }],
-                schema_url: String::new(),
-            }],
-        }
+#[derive(Debug, Clone)]
+pub(crate) struct ResourceGenerator {
+    str_pool: strings::Pool,
+    attributes_per_resource: ConfRange<u32>,
+    scopes_per_resource: ConfRange<u32>,
+    scope_generator: ScopeGenerator,
+}
+
+impl ResourceGenerator {
+    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        Ok(Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            attributes_per_resource: config.contexts.attributes_per_resource,
+            scopes_per_resource: config.contexts.scopes_per_resource,
+            scope_generator: ScopeGenerator::new(config, rng)?,
+        })
     }
 }
 
-/// A OTLP metric.
-#[derive(Debug)]
-pub struct Metric(v1::Metric);
+impl<'a> Generator<'a> for ResourceGenerator {
+    type Output = v1::ResourceMetrics;
+    type Error = Error;
 
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let unknown_resource = self.attributes_per_resource.start() == 0;
+        // If the range of resources admits 0 the field `unknown_resources` will
+        // be set and we give half-odds on there be no `resource` field set in
+        // the message.
+        let resource: Option<resource::v1::Resource> = if !unknown_resource && rng.random_bool(0.5)
+        {
+            // We do not make a k/v pair where the v is unset.
+            let total_kv_pairs = self.attributes_per_resource.sample(rng);
+            let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
+            for _ in 0..total_kv_pairs {
+                let key = self
+                    .str_pool
+                    .of_size_range(&mut rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?;
+                let val = self
+                    .str_pool
+                    .of_size_range(&mut rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?;
+
+                kvs.push(KeyValue {
+                    key: String::from(key),
+                    value: Some(AnyValue {
+                        value: Some(any_value::Value::StringValue(String::from(val))),
+                    }),
+                });
+            }
+            let res = resource::v1::Resource {
+                attributes: kvs,
+                dropped_attributes_count: 0,
+            };
+            Some(res)
+        } else {
+            None
+        };
+
+        let total_scopes = self.scopes_per_resource.sample(rng);
+        let mut scope_metrics = Vec::with_capacity(total_scopes as usize);
+        for _ in 0..total_scopes {
+            scope_metrics.push(self.scope_generator.generate(rng)?);
+        }
+
+        Ok(v1::ResourceMetrics {
+            resource,
+            scope_metrics,
+            schema_url: String::new(),
+        })
+    }
+}
+
+// NOTE the scope generator today is a pass-through, existing really only to
+// contain the metric generator. Left to leave the machinery in place for if we
+// want to start generating scopes.
+#[derive(Debug, Clone)]
+pub(crate) struct ScopeGenerator {
+    str_pool: strings::Pool,
+    metrics_per_scope: ConfRange<u32>,
+    attributes_per_scope: ConfRange<u32>,
+    metric_generator: MetricGenerator,
+}
+
+impl ScopeGenerator {
+    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        Ok(Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            attributes_per_scope: config.contexts.attributes_per_scope,
+            metrics_per_scope: config.contexts.metrics_per_scope,
+            metric_generator: MetricGenerator::new(config, rng)?,
+        })
+    }
+}
+
+impl<'a> Generator<'a> for ScopeGenerator {
+    type Output = v1::ScopeMetrics;
+    type Error = Error;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let total_metrics = self.metrics_per_scope.sample(rng);
+        let mut metrics = Vec::with_capacity(total_metrics as usize);
+        for _ in 0..total_metrics {
+            metrics.push(self.metric_generator.generate(rng)?);
+        }
+
+        let instrumentation_scope: InstrumentationScope = {
+            // We do not make a k/v pair where the v is unset.
+            let total_kv_pairs = self.attributes_per_scope.sample(rng);
+            let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
+            for _ in 0..total_kv_pairs {
+                let key = self
+                    .str_pool
+                    .of_size_range(&mut rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?;
+                let val = self
+                    .str_pool
+                    .of_size_range(&mut rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?;
+
+                kvs.push(KeyValue {
+                    key: String::from(key),
+                    value: Some(AnyValue {
+                        value: Some(any_value::Value::StringValue(String::from(val))),
+                    }),
+                });
+            }
+
+            let name = self
+                .str_pool
+                .of_size_range(&mut rng, 1_u8..16)
+                .ok_or(Error::StringGenerate)?;
+
+            InstrumentationScope {
+                name: String::from(name),
+                version: String::new(),
+                attributes: kvs,
+                dropped_attributes_count: 0,
+            }
+        };
+
+        Ok(v1::ScopeMetrics {
+            scope: Some(instrumentation_scope),
+            metrics,
+            schema_url: String::new(), // 0-sized alloc
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MetricGenerator {
+    str_pool: strings::Pool,
+    metric_weights: WeightedIndex<u16>,
+    attributes_per_metric: ConfRange<u32>,
+}
+
+impl MetricGenerator {
+    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let member_choices = [
+            u16::from(config.metric_weights.gauge),
+            u16::from(config.metric_weights.sum),
+        ];
+        Ok(Self {
+            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            metric_weights: WeightedIndex::new(member_choices)?,
+            attributes_per_metric: config.contexts.attributes_per_metric,
+        })
+    }
+}
+
+impl<'a> Generator<'a> for MetricGenerator {
+    type Output = v1::Metric;
+    type Error = Error;
+
+    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let data = match self.metric_weights.sample(rng) {
+            0 => v1::metric::Data::Gauge(rng.random::<Gauge>().0),
+            1 => v1::metric::Data::Sum(rng.random::<Sum>().0),
+            // Currently unsupported: Histogram, ExponentialHistogram, Summary
+            _ => unreachable!(),
+        };
+        let data = Some(data);
+
+        let name = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?;
+        let description = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?;
+
+        // TODO this is not correct and must be fixed to accord with http://unitsofmeasure.org/ucum.html.
+        let unit = self
+            .str_pool
+            .of_size_range(&mut rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?;
+
+        // We do not make a k/v pair where the v is unset.
+        let total_kv_pairs = self.attributes_per_metric.sample(rng);
+        let mut kvs = Vec::with_capacity(total_kv_pairs as usize);
+        for _ in 0..total_kv_pairs {
+            let key = self
+                .str_pool
+                .of_size_range(&mut rng, 1_u8..16)
+                .ok_or(Error::StringGenerate)?;
+            let val = self
+                .str_pool
+                .of_size_range(&mut rng, 1_u8..16)
+                .ok_or(Error::StringGenerate)?;
+
+            kvs.push(KeyValue {
+                key: String::from(key),
+                value: Some(AnyValue {
+                    value: Some(any_value::Value::StringValue(String::from(val))),
+                }),
+            });
+        }
+
+        Ok(v1::Metric {
+            name: String::from(name),
+            description: String::from(description),
+            unit: String::from(unit),
+            data,
+            metadata: kvs,
+        })
+    }
+}
+
+// Wrappers allowing us to implement Distribution
 struct NumberDataPoint(v1::NumberDataPoint);
 struct Gauge(v1::Gauge);
 struct Sum(v1::Sum);
@@ -132,10 +387,16 @@ impl Distribution<NumberDataPoint> for StandardUniform {
         };
 
         NumberDataPoint(v1::NumberDataPoint {
+            // NOTE absent a reason to set attributes to not-empty, it's unclear
+            // that we should.
             attributes: Vec::new(),
-            start_time_unix_nano: rng.random(),
+            start_time_unix_nano: 0, // epoch instant
             time_unix_nano: rng.random(),
+            // Unclear that this needs to be set.
             exemplars: Vec::new(),
+            // Equivalent to DoNotUse, the flag is ignored. If we ever set
+            // `value` to None this must be set to
+            // DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK
             flags: 0,
             value: Some(value),
         })
@@ -284,15 +545,21 @@ impl crate::Serialize for OpentelemetryMetrics {
         R: Rng + Sized,
         W: Write,
     {
-        // An Export*ServiceRequest message has 5 bytes of fixed values plus
-        // a varint-encoded message length field. The worst case for the message
-        // length field is the max message size divided by 0b0111_1111.
+        // Alright, what we're making here is the ExportMetricServiceRequest. It
+        // has 5 bytes of fixed values plus a varint-encoded message length
+        // field to it. The worst case for the message length field is the max
+        // message size divided by 0b0111_1111.
+        //
+        // The user _does not_ set the number of Resoures per request -- we pack
+        // those in until max_bytes -- but they do set the scopes per request
+        // etc. All of that is transparent here, handled by the generators
+        // above.
         let bytes_remaining = max_bytes.checked_sub(5 + max_bytes.div_ceil(0b0111_1111));
         let Some(mut bytes_remaining) = bytes_remaining else {
             return Ok(());
         };
 
-        let mut acc = ExportMetricsServiceRequest(Vec::new());
+        let mut acc = Vec::with_capacity(128); // arbitrary constant
         loop {
             let member: Metric = self.generate(&mut rng)?;
             let len = member.0.encoded_len() + 2;
