@@ -22,7 +22,7 @@ const PAGE_OFFSET: u64 = 0xffff_8800_0000_0000;
 //        # CONFIG_ARM64_VA_BITS_39 is not set
 //        CONFIG_ARM64_VA_BITS_48=y
 //        CONFIG_ARM64_VA_BITS=48
-const PAGE_OFFSET: u64 = -1 << 48;
+const PAGE_OFFSET: u64 = u64::MAX << 48;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
