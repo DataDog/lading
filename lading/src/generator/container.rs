@@ -14,6 +14,7 @@ use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -39,9 +40,9 @@ pub struct Config {
     /// Ports to expose from the container
     pub exposed_ports: Option<Vec<String>>,
     /// Maximum lifetime of containers before being replaced
-    pub max_lifetime: Option<u64>,
+    pub max_lifetime_seconds: Option<std::num::NonZeroU64>,
     /// Number of containers to spin up (defaults to 1)
-    pub number_of_containers: Option<usize>,
+    pub number_of_containers: Option<std::num::NonZeroU32>,
 }
 
 /// Errors produced by the `Container` generator.
@@ -91,6 +92,8 @@ impl Container {
     /// Will return an error if Docker connection fails, image pulling fails,
     /// container creation fails, container start fails, or container removal fails.
     ///
+    /// # Panics
+    ///
     /// Steps:
     /// 1. Connect to Docker.
     /// 2. Pull the specified image (if not available).
@@ -132,24 +135,43 @@ impl Container {
             }
         }
 
-        let number_of_containers = self.config.number_of_containers.unwrap_or(1);
-        let mut containers = futures::future::join_all(
-            (0..number_of_containers)
-                .map(|_| self.config.create_and_start_container(&docker, &full_image)),
-        )
-        .await
-        .into_iter()
-        .collect::<Result<VecDeque<_>, Error>>()?;
+        #[allow(clippy::unwrap_used)]
+        let number_of_containers = self
+            .config
+            .number_of_containers
+            .unwrap_or(std::num::NonZero::new(1).unwrap());
+
+        let mut set = JoinSet::new();
+        for _ in 0..number_of_containers.into() {
+            let docker = docker.clone();
+            let config = self.config.clone();
+            let full_image = full_image.clone();
+            set.spawn(async move {
+                config
+                    .create_and_start_container(&docker, &full_image)
+                    .await
+            });
+        }
+
+        let mut containers = set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<Result<VecDeque<ContainerCreateResponse>, Error>>()?;
 
         // Wait for shutdown signal
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         let (new_container_tx, mut new_container_rx) = mpsc::channel(32);
-        let mut recreate_interval = self.config.max_lifetime.map(|max_lifetime| {
-            tokio::time::interval(tokio::time::Duration::from_millis(
-                1_000 * max_lifetime / number_of_containers as u64,
-            ))
-        });
+        let mut recreate_interval = self
+            .config
+            .max_lifetime_seconds
+            .map(|max_lifetime_seconds| {
+                tokio::time::interval(
+                    tokio::time::Duration::from_secs(max_lifetime_seconds.into())
+                        / <std::num::NonZero<u32> as Into<u32>>::into(number_of_containers),
+                )
+            });
         let mut liveness_interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
         loop {
             tokio::select! {
@@ -194,9 +216,15 @@ impl Container {
                     debug!("shutdown signal received");
                     drop(new_container_tx);
 
-                    futures::future::join_all(
-                        containers.iter().map(|container| stop_and_remove_container(&docker, container))
-                    ).await;
+                    let mut set = JoinSet::new();
+                    for container in containers {
+                        let docker = docker.clone();
+                        set.spawn(async move {
+                            stop_and_remove_container(&docker, &container).await
+                        });
+                    }
+
+                    set.join_all().await;
 
                     return Ok(())
                 }
@@ -295,5 +323,6 @@ async fn stop_and_remove_container(
         .await?;
 
     debug!("Removed container: {id}", id = container.id);
+
     Ok(())
 }
