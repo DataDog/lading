@@ -38,6 +38,8 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
+pub(crate) mod unit;
+
 use std::io::Write;
 use std::rc::Rc;
 
@@ -55,6 +57,7 @@ use rand::{
     seq::IndexedRandom,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
+use unit::UnitGenerator;
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -258,6 +261,7 @@ impl<'a> Generator<'a> for ScopeGenerator {
 pub(crate) struct MetricGenerator {
     metric_weights: WeightedIndex<u16>,
     attributes_per_metric: ConfRange<u32>,
+    unit_generator: UnitGenerator,
     str_pool: Rc<strings::Pool>,
 }
 
@@ -270,6 +274,7 @@ impl MetricGenerator {
         Ok(Self {
             str_pool: Rc::clone(str_pool),
             metric_weights: WeightedIndex::new(member_choices)?,
+            unit_generator: UnitGenerator::new(),
             attributes_per_metric: config.contexts.attributes_per_metric,
         })
     }
@@ -300,12 +305,12 @@ impl<'a> Generator<'a> for MetricGenerator {
             .of_size_range(rng, 1_u8..16)
             .ok_or(Error::StringGenerate)?;
 
-        // TODO this is not correct and must be fixed to accord with http://unitsofmeasure.org/ucum.html.
-        let unit = self
-            .str_pool
-            .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-
+        // Units are optional, "" is the None unit.
+        let unit = if rng.random_bool(0.1) {
+            self.unit_generator.generate(rng)?
+        } else {
+            ""
+        };
         let count = self.attributes_per_metric.sample(rng);
         let metadata = generate_attributes(&self.str_pool, rng, count)?;
 
