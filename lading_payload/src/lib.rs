@@ -81,6 +81,9 @@ pub enum Error {
     /// See [`weighted::Error`]
     #[error(transparent)]
     Weights(#[from] weighted::Error),
+    /// See [`unit::Error`]
+    #[error(transparent)]
+    Unit(#[from] opentelemetry_metric::unit::Error),
 }
 
 /// To serialize into bytes
