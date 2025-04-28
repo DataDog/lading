@@ -170,7 +170,7 @@ jobs:
       - name: Check out branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Check all GitHub Actions in ".github/workflows" are pinned to SHAs
-        uses: stacklok/frizbee-action@a0f3391cbe93a54e2a68cfaca2283f8cf3fd72ea # v0.0.2
+        uses: stacklok/frizbee-action@dc454ed70a43219e1ccec26e2c291d8fe9ae30d4 # v0.0.3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -179,7 +179,7 @@ jobs:
           fail_on_unpinned: true
           open_pr: false
       - name: Check all GitHub Actions in ".github/actions" are pinned to SHAs
-        uses: stacklok/frizbee-action@a0f3391cbe93a54e2a68cfaca2283f8cf3fd72ea # v0.0.2
+        uses: stacklok/frizbee-action@dc454ed70a43219e1ccec26e2c291d8fe9ae30d4 # v0.0.3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
