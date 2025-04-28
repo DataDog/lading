@@ -111,29 +111,7 @@ impl Container {
         let full_image = format!("{}:{}", self.config.repository, self.config.tag);
         debug!("Ensuring image is available: {full_image}");
 
-        // Pull the image
-        let mut pull_stream = docker.create_image(
-            Some(CreateImageOptions::<String> {
-                from_image: full_image.clone(),
-                ..Default::default()
-            }),
-            None,
-            None,
-        );
-
-        while let Some(item) = pull_stream.next().await {
-            match item {
-                Ok(status) => {
-                    if let Some(progress) = status.progress {
-                        info!("Pull progress: {progress}");
-                    }
-                }
-                Err(e) => {
-                    warn!("Pull error: {e}");
-                    return Err(e.into());
-                }
-            }
-        }
+        pull_image(&docker, &full_image).await?;
 
         #[allow(clippy::unwrap_used)]
         let number_of_containers = self
@@ -231,6 +209,33 @@ impl Container {
             }
         }
     }
+}
+
+async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
+    let mut pull_stream = docker.create_image(
+        Some(CreateImageOptions::<&str> {
+            from_image: full_image,
+            ..Default::default()
+        }),
+        None,
+        None,
+    );
+
+    while let Some(item) = pull_stream.next().await {
+        match item {
+            Ok(status) => {
+                if let Some(progress) = status.progress {
+                    info!("Pull progress: {progress}");
+                }
+            }
+            Err(e) => {
+                warn!("Pull error: {e}");
+                return Err(e.into());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 impl Config {
