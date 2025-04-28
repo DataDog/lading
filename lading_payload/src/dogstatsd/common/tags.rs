@@ -1,63 +1,12 @@
 //! Tag generation for dogstatsd payloads
-use std::cell::{Cell, RefCell};
+use crate::{common::strings::Pool, dogstatsd::ConfRange};
 use std::rc::Rc;
 
-use rand::Rng;
-use rand::distr::Distribution;
-use rand::seq::IndexedRandom;
-use rand::{SeedableRng, rngs::SmallRng};
-use tracing::warn;
-
-use crate::dogstatsd::common::OpenClosed01;
-use crate::{
-    common::strings::{Handle, Pool},
-    dogstatsd::ConfRange,
-};
-
-const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
-const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
-const WARN_UNIQUE_TAG_RATIO: f32 = 0.10;
-const MIN_TAG_LENGTH: u16 = 3;
-
-/// List of tags that will be present on a dogstatsd message
 pub(crate) type Tagset = Vec<String>;
 
-/// Generator for tags
-///
-/// This is an unusual generator. Unlike our others this maintains its own RNG
-/// and will reseed it when counter reaches `num_tagsets`. The goal is to
-/// produce only a limited, deterministic set of tags while avoiding needing to
-/// allocate them all in one shot.
-///
-/// The `unique_tag_ratio` is a value between 0.10 and 1.0. It represents the
-/// ratio of new tags to existing tags. If the value is 1.0, then all tags will
-/// be new. If the value 0.0 were allowed,
-/// it would conceptually mean "always use an existing tag", however this is a
-/// degenerate case as there would never be a new tag generated.
-/// therefore a minimum value is enforced.
-/// Despite this minimum, if the configuration is overly restrictive, it may
-/// result in non-unique tagsets.
-/// As an example:
-/// `unique_tag_probability`: 0.10
-/// `tags_per_msg`: 3
-/// `num_tagsets`: 1000
-///
-/// With 3 tags per message, and a 10% chance of generating a new tag, 1000 calls
-/// to generate will result in 3000 "get new tag" decisions.
-/// 300 of these will result in new tags and 2700 of these will re-use an existing tag.
-/// With only 300 chances for new entropy, each individual tagset will likely over-sample
-/// the existing tags and therefore UNDER-generate the desired number of unique tagsets.
 #[derive(Debug, Clone)]
 pub(crate) struct Generator {
-    seed: Cell<u64>,
-    internal_rng: RefCell<SmallRng>,
-    tagsets_produced: Cell<usize>,
-    num_tagsets: usize,
-    tags_per_msg: ConfRange<u8>,
-    tag_length: ConfRange<u16>,
-    str_pool: Rc<Pool>,
-    unique_tag_probability: f32,
-    unique_tags: RefCell<Vec<(Handle, Handle)>>,
+    inner: crate::common::tags::Generator,
 }
 
 /// Error type for `TagGenerator`
@@ -65,7 +14,7 @@ pub(crate) struct Generator {
 pub(crate) enum Error {
     /// Invalid construction
     #[error("Invalid construction: {0}")]
-    InvalidConstruction(String),
+    InvalidConstruction(#[from] crate::common::tags::Error),
 }
 
 impl Generator {
@@ -83,63 +32,21 @@ impl Generator {
         str_pool: Rc<Pool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
-        if !tag_length_valid {
-            return Err(Error::InvalidConstruction(format!(
-                "Invalid tag length: {tag_length_valid_msg}"
-            )));
-        }
-        if tag_length.start() < MIN_TAG_LENGTH {
-            return Err(Error::InvalidConstruction(format!(
-                "Tag length must be at least {MIN_TAG_LENGTH}, found {start}",
-                start = tag_length.start()
-            )));
-        }
+        // Adjust tag_length range to account for the colon separator
+        let adjusted_tag_length = ConfRange::Inclusive {
+            min: tag_length.start(),
+            max: tag_length.end().saturating_sub(1),
+        };
 
-        if !(MIN_UNIQUE_TAG_RATIO..=MAX_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            return Err(Error::InvalidConstruction(format!(
-                "Unique tag ratio must be between {MIN_UNIQUE_TAG_RATIO} and {MAX_UNIQUE_TAG_RATIO}"
-            )));
-        }
-
-        if (MIN_UNIQUE_TAG_RATIO..=WARN_UNIQUE_TAG_RATIO).contains(&unique_tag_probability) {
-            warn!(
-                "unique_tag_probability is less than {WARN_UNIQUE_TAG_RATIO}. This may result in non-unique tagsets"
-            );
-        }
-
-        let rng = SmallRng::seed_from_u64(seed);
-
-        Ok(Generator {
-            seed: Cell::new(seed),
-            internal_rng: RefCell::new(rng),
+        let inner = crate::common::tags::Generator::new(
+            seed,
             tags_per_msg,
-            tag_length,
-            str_pool,
-            tagsets_produced: Cell::new(0),
+            adjusted_tag_length,
             num_tagsets,
+            str_pool,
             unique_tag_probability,
-            unique_tags: RefCell::new(Vec::new()),
-        })
-    }
-
-    fn get_existing_tag<R>(&self, unique_tags: &[(Handle, Handle)], rng: &mut R) -> Option<String>
-    where
-        R: rand::Rng + ?Sized,
-    {
-        let handles = unique_tags.choose(rng);
-        match handles {
-            Some((key_handle, value_handle)) => {
-                match (
-                    self.str_pool.using_handle(*key_handle),
-                    self.str_pool.using_handle(*value_handle),
-                ) {
-                    (Some(key), Some(value)) => Some(format!("{key}:{value}")),
-                    _ => None,
-                }
-            }
-            None => None,
-        }
+        )?;
+        Ok(Generator { inner })
     }
 }
 
@@ -153,59 +60,23 @@ impl<'a> crate::Generator<'a> for Generator {
     /// identical tagsets.
     /// Each tagset is randomly chosen. There is a very high probability that each tagset
     /// will be unique, however see the note in the component documentation.
-    fn generate<R>(&'a self, _rng: &mut R) -> Result<Self::Output, Self::Error>
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
     {
-        // if we have produced the number of tagsets we are supposed to produce, then reseed the internal RNG
-        // this ensures that we generate the same tags in a loop
-        if self.tagsets_produced.get() >= self.num_tagsets {
-            // Reseed internal RNG with initial seed
-            self.internal_rng
-                .replace(SmallRng::seed_from_u64(self.seed.get()));
-            self.tagsets_produced.set(0);
+        let mut tag_handles = self.inner.generate(rng)?;
+        let mut tagset = Vec::with_capacity(tag_handles.len());
+        for crate::common::tags::Tag { key, value } in tag_handles.drain(..) {
+            let key_s = self
+                .inner
+                .using_handle(key)
+                .expect("invalid handle, catastrophic bug");
+            let val_s = self
+                .inner
+                .using_handle(value)
+                .expect("invalid handle, catastrophic bug");
+            tagset.push(format!("{key_s}:{val_s}"));
         }
-
-        // a tagset is a list of tags that will be put on a single dogstatsd message.
-        // this is the return value from this function
-        let mut tagset: Tagset = Vec::new();
-
-        let mut rng = self.internal_rng.borrow_mut();
-        let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
-        for _ in 0..tags_count {
-            let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
-
-            let mut unique_tags = self.unique_tags.borrow_mut();
-            let attempted_tag = if choose_existing_prob > self.unique_tag_probability {
-                self.get_existing_tag(&unique_tags, &mut *rng)
-            } else {
-                None
-            };
-
-            // if a tag was chosen from the existing set, no need to grab a new tag.
-            if let Some(tag) = attempted_tag {
-                tagset.push(tag.to_string());
-            } else {
-                // subtract 1 to account for delimiter
-                let desired_size = self.tag_length.sample(&mut *rng) as usize - 1;
-                // randomly split this between two strings
-                let key_size = rng.random_range(1..desired_size);
-                let value_size = desired_size - key_size;
-
-                let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
-                let value_handle = self.str_pool.of_size_with_handle(&mut *rng, value_size);
-
-                match (key_handle, value_handle) {
-                    (Some((key, key_handle)), Some((value, value_handle))) => {
-                        unique_tags.push((key_handle, value_handle));
-                        tagset.push(format!("{key}:{value}"));
-                    }
-                    _ => panic!("failed to generate tag"),
-                }
-            };
-        }
-
-        self.tagsets_produced.set(self.tagsets_produced.get() + 1);
         Ok(tagset)
     }
 }
@@ -222,7 +93,7 @@ mod test {
 
     use crate::Generator;
     use crate::common::strings::Pool;
-    use crate::dogstatsd::common::tags::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
+    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
 
     /// given a list of tagsets, this returns the number of unique timeseries that they represent
@@ -326,8 +197,10 @@ mod test {
             for _ in 0..num_tagsets {
                 let tagset = generator.generate(&mut rng)?;
                 for tag in &tagset {
-                    assert!(tag.len() <= tag_size_range.end().into());
-                    assert!(tag.len() >= tag_size_range.start().into());
+                    let start = tag_size_range.start().into();
+                    let end = tag_size_range.end().into();
+                    debug_assert!(tag.len() <= end, "tag len: {}, tag_size_range end: {end}", tag.len());
+                    debug_assert!(tag.len() >= start, "tag len: {}, tag_size_range start: {start}", tag.len());
                     let num_delimiters = tag.chars().filter(|c| *c == ':').count();
                     assert_eq!(num_delimiters, 1);
                 }

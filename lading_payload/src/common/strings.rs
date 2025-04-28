@@ -120,6 +120,7 @@ impl Pool {
 
     /// Given an opaque handle returned from `*_with_handle`, return the &str it represents
     #[must_use]
+    #[inline]
     pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
         let (offset, length) = handle;
         if offset + length < self.inner.len() {
