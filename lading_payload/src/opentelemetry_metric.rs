@@ -57,7 +57,7 @@ use rand::{
 use serde::{Deserialize, Serialize as SerdeSerialize};
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
@@ -102,6 +102,17 @@ impl Default for MetricWeights {
             sum: 50,   // 50%
         }
     }
+}
+
+/// Configure the OpenTelemetry metric payload.
+#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// Defines the relative probability of each kind of OpenTelemetry metric.
+    pub metric_weights: MetricWeights,
+    /// Define the contexts available when generating metrics
+    contexts: Contexts,
 }
 
 impl Config {
@@ -384,70 +395,9 @@ impl Distribution<Sum> for StandardUniform {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MemberGenerator {
-    str_pool: strings::Pool,
-    metric_weights: WeightedIndex<u16>,
-}
-
-impl MemberGenerator {
-    pub(crate) fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
-        let member_choices = [
-            u16::from(config.metric_weights.gauge),
-            u16::from(config.metric_weights.sum),
-        ];
-        Ok(Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
-            metric_weights: WeightedIndex::new(member_choices)?,
-        })
-    }
-}
-
-impl<'a> Generator<'a> for MemberGenerator {
-    type Output = Metric;
-    type Error = Error;
-
-    fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
-    where
-        R: rand::Rng + ?Sized,
-    {
-        let data = match self.metric_weights.sample(rng) {
-            0 => v1::metric::Data::Gauge(rng.random::<Gauge>().0),
-            1 => v1::metric::Data::Sum(rng.random::<Sum>().0),
-            // Currently unsupported: Histogram, ExponentialHistogram, Summary
-            _ => unreachable!(),
-        };
-        let data = Some(data);
-
-        let name = self
-            .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-        let description = self
-            .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-        let unit = self
-            .str_pool
-            .of_size_range(&mut rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-
-        Ok(Metric(v1::Metric {
-            name: String::from(name),
-            description: String::from(description),
-            unit: String::from(unit),
-            data,
-            metadata: Vec::new(),
-        }))
-    }
-}
-
-#[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    member_generator: MemberGenerator,
+    member_generator: ResourceGenerator,
 }
 
 impl OpentelemetryMetrics {
@@ -467,7 +417,7 @@ impl OpentelemetryMetrics {
 }
 
 impl<'a> Generator<'a> for OpentelemetryMetrics {
-    type Output = Metric;
+    type Output = v1::ResourceMetrics;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
@@ -500,17 +450,22 @@ impl crate::Serialize for OpentelemetryMetrics {
 
         let mut acc = Vec::with_capacity(128); // arbitrary constant
         loop {
-            let member: Metric = self.generate(&mut rng)?;
-            let len = member.0.encoded_len() + 2;
+            let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
+            let len = resource.encoded_len() + 2;
             match bytes_remaining.checked_sub(len) {
                 Some(remainder) => {
-                    acc.0.push(member);
+                    acc.push(resource);
                     bytes_remaining = remainder;
                 }
                 None => break,
             }
         }
-        let buf = acc.into_prost_type().encode_to_vec();
+
+        let proto =
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
+                resource_metrics: acc,
+            };
+        let buf = proto.encode_to_vec();
         writer.write_all(&buf)?;
         Ok(())
     }
