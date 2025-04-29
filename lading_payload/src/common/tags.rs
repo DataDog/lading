@@ -59,6 +59,11 @@ impl TagStore {
             Some(&self.vec[idx])
         }
     }
+
+    fn clear(&mut self) {
+        self.set.clear();
+        self.vec.clear();
+    }
 }
 
 /// Generator for individual tags
@@ -243,7 +248,7 @@ impl<'a> crate::Generator<'a> for Generator {
             // Reseed internal RNG with initial seed
             self.internal_rng
                 .replace(SmallRng::seed_from_u64(self.seed.get()));
-            self.tag_store.replace(TagStore::new());
+            self.tag_store.borrow_mut().clear();
             self.tagsets_produced.set(0);
         }
 
