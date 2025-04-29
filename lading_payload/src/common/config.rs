@@ -31,7 +31,7 @@ where
     pub(crate) fn valid(&self) -> (bool, &'static str) {
         match self {
             Self::Constant(_) => (true, ""),
-            Self::Inclusive { min, max } => (min < max, "min must be less than max"),
+            Self::Inclusive { min, max } => (min <= max, "min must be less than or equal to max"),
         }
     }
 

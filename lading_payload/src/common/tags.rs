@@ -21,7 +21,7 @@ pub(crate) const WARN_UNIQUE_TAG_RATIO: f32 = 0.10;
 pub(crate) const MIN_TAG_LENGTH: u16 = 3;
 
 /// List of tags that will be present on a dogstatsd message
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Tag {
     pub(crate) key: Handle,
     pub(crate) value: Handle,
@@ -59,12 +59,12 @@ pub(crate) struct Generator {
     seed: Cell<u64>,
     internal_rng: RefCell<SmallRng>,
     tagsets_produced: Cell<usize>,
-    num_tagsets: usize,
-    tags_per_msg: ConfRange<u8>,
-    tag_length: ConfRange<u16>,
+    num_tagsets: usize, // Maximum number of unique tagsets that will ever be generated
+    tags_per_msg: ConfRange<u8>, // Maximum number of tags per individually generated tagset
+    tag_length: ConfRange<u16>, // Maximum length of a tag key or value in a tagset
     str_pool: Rc<Pool>,
     unique_tag_probability: f32,
-    unique_tags: RefCell<Vec<Tag>>,
+    unique_tags: RefCell<Vec<Tag>>, // The unique tags that have been generated, length is at most num_tagsets
 }
 
 /// Error type for `TagGenerator`
@@ -143,11 +143,20 @@ impl<'a> crate::Generator<'a> for Generator {
     type Output = Tagset;
     type Error = crate::Error;
 
-    /// Return a tagset -- a list of tags, each tag having the format `key:value`
-    /// Note that after `num_tagsets` have been produced, the tagsets will loop and produce
-    /// identical tagsets.
-    /// Each tagset is randomly chosen. There is a very high probability that each tagset
-    /// will be unique, however see the note in the component documentation.
+    /// Return a tagset -- a list of tags
+    ///
+    /// This function concerns itself with two general concepts: tags and
+    /// tagsets. A "tag" is a key-value pair that obeys some length parameters
+    /// taken as a whole. A tagset is a collection of tags. We generate a
+    /// globally unique number of tagsets -- corresponding to `num_tagsets` in
+    /// the constructor -- and each tagset is guaranteed to have a bounded
+    /// number of tags -- corresponding to `tags_per_msg` in the constructor.
+    /// `unique_tag_probability` in the constructor controls how often a unique
+    /// tag will be a part of any individual tagset.
+    ///
+    /// Note that after `num_tagsets` have been produced, the tagsets will loop
+    /// and produce identical tagsets. Each tagset is randomly chosen. No more
+    /// than `num_tagsets` unique tagsets will ever be generated.
     fn generate<R>(&'a self, _rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
@@ -165,23 +174,59 @@ impl<'a> crate::Generator<'a> for Generator {
         let mut tagset: Tagset = Vec::new();
         let mut rng = self.internal_rng.borrow_mut();
         let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
-        for _ in 0..tags_count {
-            let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
+        let mut unique_tags = self.unique_tags.borrow_mut();
 
-            let mut unique_tags = self.unique_tags.borrow_mut();
-            let attempted_tag = if choose_existing_prob > self.unique_tag_probability {
-                unique_tags.choose(&mut rng).copied()
+        // If we have no unique tags yet, we must generate at least one
+        if unique_tags.is_empty() {
+            let desired_size = self.tag_length.sample(&mut *rng) as usize;
+            // Ensure we have at least 1 character for both key and value
+            let max_key_size = desired_size - 1;
+            let min_key_size = 1;
+            let key_size = if max_key_size <= min_key_size {
+                min_key_size
             } else {
-                None
+                rng.random_range(min_key_size..=max_key_size)
             };
+            let value_size = desired_size - key_size;
 
-            // If a tag was chosen from the existing set, no need to grab a new tag.
-            if let Some(tag) = attempted_tag {
-                tagset.push(tag);
+            let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
+            let value_handle = self.str_pool.of_size_with_handle(&mut *rng, value_size);
+
+            match (key_handle, value_handle) {
+                (Some((_, key_handle)), Some((_, value_handle))) => {
+                    let tag: Tag = Tag {
+                        key: key_handle,
+                        value: value_handle,
+                    };
+                    unique_tags.push(tag);
+                    tagset.push(tag);
+                }
+                _ => panic!("failed to generate tag"),
+            }
+        }
+
+        // For remaining tags, decide whether to reuse existing tags or generate new ones
+        while tagset.len() < tags_count {
+            let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
+            let should_reuse = choose_existing_prob > self.unique_tag_probability
+                || unique_tags.len() >= self.num_tagsets;
+
+            if should_reuse && !unique_tags.is_empty() {
+                // Reuse an existing tag
+                if let Some(tag) = unique_tags.choose(&mut *rng).copied() {
+                    tagset.push(tag);
+                }
             } else {
+                // Generate a new unique tag
                 let desired_size = self.tag_length.sample(&mut *rng) as usize;
-                // randomly split this between two strings
-                let key_size = rng.random_range(1..desired_size);
+                // Ensure we have at least 1 character for both key and value
+                let max_key_size = desired_size - 1;
+                let min_key_size = 1;
+                let key_size = if max_key_size <= min_key_size {
+                    min_key_size
+                } else {
+                    rng.random_range(min_key_size..=max_key_size)
+                };
                 let value_size = desired_size - key_size;
 
                 let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
@@ -198,10 +243,169 @@ impl<'a> crate::Generator<'a> for Generator {
                     }
                     _ => panic!("failed to generate tag"),
                 }
-            };
+            }
         }
 
         self.tagsets_produced.set(self.tagsets_produced.get() + 1);
         Ok(tagset)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
+
+    use super::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
+    use crate::Generator;
+    use crate::common::config::ConfRange;
+    use crate::common::strings::Pool;
+
+    proptest! {
+        #[test]
+        fn generator_yields_valid_tags(
+            seed: u64,
+            num_tagsets in 1..100_usize,
+            tags_per_msg_max in 1..u8::MAX,
+            tag_size_min in 3..64_u16,
+            tag_size_max in 64..128_u16,
+            pool_size in 1_024..10_000_usize
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
+            let tag_size_range = ConfRange::Inclusive{min: tag_size_min, max: tag_size_max};
+            let generator = super::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                num_tagsets,
+                str_pool,
+                1.0
+            ).expect("Tag generator to be valid");
+
+            for _ in 0..num_tagsets {
+                let tagset = generator.generate(&mut rng)?;
+                for tag in &tagset {
+                    let key = generator.using_handle(tag.key).expect("invalid handle");
+                    let value = generator.using_handle(tag.value).expect("invalid handle");
+                    let total_size = key.len() + value.len();
+                    debug_assert!(total_size <= tag_size_range.end() as usize, "tag len: {}, tag_size_range end: {end}", total_size, end = tag_size_range.end());
+                    debug_assert!(total_size >= tag_size_range.start() as usize, "tag len: {}, tag_size_range start: {start}", total_size, start = tag_size_range.start());
+                }
+                debug_assert!(tagset.len() <= tags_per_msg_range.end() as usize, "tagset len: {}, tags_per_msg_range end: {end}", tagset.len(), end = tags_per_msg_range.end());
+                debug_assert!(tagset.len() >= tags_per_msg_range.start() as usize, "tagset len: {}, tags_per_msg_range start: {start}", tagset.len(), start = tags_per_msg_range.start());
+            }
+        }
+
+        #[test]
+        fn tagsets_repeat_after_reaching_tagset_max(
+            seed: u64,
+            num_tagsets in 1..100_usize,
+            tags_per_msg_max in 1..u8::MAX,
+            tag_size_min in 3..64_u16,
+            tag_size_max in 64..128_u16,
+            pool_size in 1_024..10_000_usize
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: tags_per_msg_max };
+            let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
+            let generator = super::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                num_tagsets,
+                str_pool,
+                1.0
+            ).expect("Tag generator to be valid");
+
+            let first_batch = (0..num_tagsets)
+                .map(|_| generator.generate(&mut rng).expect("failed to generate tagset"))
+                .collect::<Vec<_>>();
+
+            let second_batch = (0..num_tagsets)
+                .map(|_| generator.generate(&mut rng).expect("failed to generate tagset"))
+                .collect::<Vec<_>>();
+
+            debug_assert_eq!(first_batch.len(), second_batch.len(), "batch lengths differ: first={}, second={}", first_batch.len(), second_batch.len());
+            for i in 0..first_batch.len() {
+                let first = &first_batch[i];
+                let second = &second_batch[i];
+                debug_assert_eq!(first, second, "tagsets at index {i} differ");
+            }
+        }
+
+        #[test]
+        fn unique_tagsets_respected_always_unique_tags(
+            seed: u64,
+            desired_num_tagsets in 1..100_usize,
+            tags_per_msg_max in 1..u8::MAX,
+            tag_size_min in 3..64_u16,
+            tag_size_max in 64..128_u16,
+            pool_size in 1_024..10_000_usize
+        ) {
+            let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: tags_per_msg_max };
+            let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let generator = super::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                desired_num_tagsets,
+                str_pool,
+                1.0
+            ).expect("Tag generator to be valid");
+
+            let mut unique_tags = HashSet::new();
+            for _ in 0..desired_num_tagsets {
+                let tagset = generator.generate(&mut rng).expect("failed to generate tagset");
+                for tag in tagset {
+                    unique_tags.insert((tag.key, tag.value));
+                }
+            }
+            assert!(unique_tags.len() >= desired_num_tagsets);
+        }
+
+        #[test]
+        fn unique_tagsets_respected_with_varying_ratio(
+            seed: u64,
+            desired_num_tagsets in 5..100_usize,
+            unique_tag_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO,
+            tags_per_msg_max in 1..u8::MAX,
+            tag_size_min in 3..64_u16,
+            tag_size_max in 64..128_u16,
+            pool_size in 1_024..10_000_usize
+        ) {
+            let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: tags_per_msg_max };
+            let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let generator = super::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                desired_num_tagsets,
+                str_pool,
+                unique_tag_ratio
+            ).expect("Tag generator to be valid");
+
+            let mut unique_tags = HashSet::new();
+            for _ in 0..desired_num_tagsets {
+                let tagset = generator.generate(&mut rng).expect("failed to generate tagset");
+                for tag in tagset {
+                    unique_tags.insert((tag.key, tag.value));
+                }
+            }
+            debug_assert_eq!(unique_tags.len(), desired_num_tagsets, "Expected exactly {desired_num_tagsets} unique tags, got {}", unique_tags.len());
+        }
     }
 }
