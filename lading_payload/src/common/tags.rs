@@ -1,5 +1,6 @@
 //! Tag generation for dogstatsd payloads
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use rand::Rng;
@@ -21,12 +22,55 @@ pub(crate) const WARN_UNIQUE_TAG_RATIO: f32 = 0.10;
 pub(crate) const MIN_TAG_LENGTH: u16 = 3;
 
 /// List of tags that will be present on a dogstatsd message
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Tag {
     pub(crate) key: Handle,
     pub(crate) value: Handle,
 }
 pub(crate) type Tagset = Vec<Tag>;
+
+/// Generator for individual tags
+#[derive(Debug, Clone)]
+pub(crate) struct TagGenerator {
+    str_pool: Rc<Pool>,
+    tag_length: ConfRange<u16>,
+}
+
+impl TagGenerator {
+    pub(crate) fn new(str_pool: Rc<Pool>, tag_length: ConfRange<u16>) -> Self {
+        Self {
+            str_pool,
+            tag_length,
+        }
+    }
+
+    pub(crate) fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let desired_size = self.tag_length.sample(rng) as usize;
+        // Ensure we have at least 1 character for both key and value
+        let max_key_size = desired_size - 1;
+        let min_key_size = 1;
+        let key_size = if max_key_size <= min_key_size {
+            min_key_size
+        } else {
+            rng.random_range(min_key_size..=max_key_size)
+        };
+        let value_size = desired_size - key_size;
+
+        let key_handle = self.str_pool.of_size_with_handle(rng, key_size);
+        let value_handle = self.str_pool.of_size_with_handle(rng, value_size);
+
+        match (key_handle, value_handle) {
+            (Some((_, key_handle)), Some((_, value_handle))) => Ok(Tag {
+                key: key_handle,
+                value: value_handle,
+            }),
+            _ => Err(crate::Error::StringGenerate),
+        }
+    }
+}
 
 /// Generator for tags
 ///
@@ -61,10 +105,9 @@ pub(crate) struct Generator {
     tagsets_produced: Cell<usize>,
     num_tagsets: usize, // Maximum number of unique tagsets that will ever be generated
     tags_per_msg: ConfRange<u8>, // Maximum number of tags per individually generated tagset
-    tag_length: ConfRange<u16>, // Maximum length of a tag key or value in a tagset
-    str_pool: Rc<Pool>,
+    tags: TagGenerator,
     unique_tag_probability: f32,
-    unique_tags: RefCell<Vec<Tag>>, // The unique tags that have been generated, length is at most num_tagsets
+    unique_tags: RefCell<HashSet<Tag>>, // The unique tags that have been generated
 }
 
 /// Error type for `TagGenerator`
@@ -116,17 +159,17 @@ impl Generator {
         }
 
         let rng = SmallRng::seed_from_u64(seed);
+        let tags = TagGenerator::new(str_pool, tag_length);
 
         Ok(Generator {
             seed: Cell::new(seed),
             internal_rng: RefCell::new(rng),
             tags_per_msg,
-            tag_length,
-            str_pool,
+            tags,
             tagsets_produced: Cell::new(0),
             num_tagsets,
             unique_tag_probability,
-            unique_tags: RefCell::new(Vec::new()),
+            unique_tags: RefCell::new(HashSet::new()),
         })
     }
 
@@ -135,7 +178,7 @@ impl Generator {
     #[must_use]
     #[inline]
     pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
-        self.str_pool.using_handle(handle)
+        self.tags.str_pool.using_handle(handle)
     }
 }
 
@@ -178,71 +221,26 @@ impl<'a> crate::Generator<'a> for Generator {
 
         // If we have no unique tags yet, we must generate at least one
         if unique_tags.is_empty() {
-            let desired_size = self.tag_length.sample(&mut *rng) as usize;
-            // Ensure we have at least 1 character for both key and value
-            let max_key_size = desired_size - 1;
-            let min_key_size = 1;
-            let key_size = if max_key_size <= min_key_size {
-                min_key_size
-            } else {
-                rng.random_range(min_key_size..=max_key_size)
-            };
-            let value_size = desired_size - key_size;
-
-            let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
-            let value_handle = self.str_pool.of_size_with_handle(&mut *rng, value_size);
-
-            match (key_handle, value_handle) {
-                (Some((_, key_handle)), Some((_, value_handle))) => {
-                    let tag: Tag = Tag {
-                        key: key_handle,
-                        value: value_handle,
-                    };
-                    unique_tags.push(tag);
-                    tagset.push(tag);
-                }
-                _ => panic!("failed to generate tag"),
-            }
+            let tag = self.tags.generate(&mut *rng)?;
+            unique_tags.insert(tag);
+            tagset.push(tag);
         }
 
         // For remaining tags, decide whether to reuse existing tags or generate new ones
         while tagset.len() < tags_count {
             let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
-            let should_reuse = choose_existing_prob > self.unique_tag_probability
-                || unique_tags.len() >= self.num_tagsets;
+            let should_reuse = choose_existing_prob > self.unique_tag_probability;
 
             if should_reuse && !unique_tags.is_empty() {
                 // Reuse an existing tag
-                if let Some(tag) = unique_tags.choose(&mut *rng).copied() {
+                if let Some(tag) = unique_tags.choose(&mut *rng) {
                     tagset.push(tag);
                 }
             } else {
                 // Generate a new unique tag
-                let desired_size = self.tag_length.sample(&mut *rng) as usize;
-                // Ensure we have at least 1 character for both key and value
-                let max_key_size = desired_size - 1;
-                let min_key_size = 1;
-                let key_size = if max_key_size <= min_key_size {
-                    min_key_size
-                } else {
-                    rng.random_range(min_key_size..=max_key_size)
-                };
-                let value_size = desired_size - key_size;
-
-                let key_handle = self.str_pool.of_size_with_handle(&mut *rng, key_size);
-                let value_handle = self.str_pool.of_size_with_handle(&mut *rng, value_size);
-
-                match (key_handle, value_handle) {
-                    (Some((_, key_handle)), Some((_, value_handle))) => {
-                        let tag: Tag = Tag {
-                            key: key_handle,
-                            value: value_handle,
-                        };
-                        unique_tags.push(tag);
-                        tagset.push(tag);
-                    }
-                    _ => panic!("failed to generate tag"),
-                }
+                let tag = self.tags.generate(&mut *rng)?;
+                unique_tags.insert(tag);
+                tagset.push(tag);
             }
         }
 
