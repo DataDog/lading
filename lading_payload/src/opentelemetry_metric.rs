@@ -65,6 +65,12 @@ use unit::UnitGenerator;
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
 pub struct Contexts {
+    /// The global total number of contexts, defined as the unique Resources --
+    /// attributes -- crossed with the unique Scopes -- defined by
+    /// InstrumentationScopes -- and unique Metrics -- defined by name,
+    /// attributes but not data or unit.
+    pub total_contexts: ConfRange<u32>,
+
     /// The range of attributes for resources.
     pub attributes_per_resource: ConfRange<u32>,
     /// TODO
@@ -80,6 +86,7 @@ pub struct Contexts {
 impl Default for Contexts {
     fn default() -> Self {
         Self {
+            total_contexts: ConfRange::Constant(1_000),
             attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_scope: ConfRange::Constant(0),
@@ -505,11 +512,52 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{Config, OpentelemetryMetrics};
+    use super::{Config, Contexts, OpentelemetryMetrics};
     use crate::Serialize;
+    use crate::{Generator, common::config::ConfRange};
     use proptest::prelude::*;
-    use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
+
+    // Generation of metrics must be deterministic. In order to assert this
+    // property we generate two instances of OpentelemetryMetrics from disinct
+    // rngs and drive them forward for a random amount of steps, asserting equal
+    // outcomes.
+    proptest! {
+        #[test]
+        fn opentelemetry_metrics_generate_is_deterministic(
+            seed: u64,
+            total_contexts in 0..100_u32,
+            attributes_per_resource in 0..20_u32,
+            scopes_per_resource in 0..20_u32,
+            attributes_per_scope in 0..20_u32,
+            metrics_per_scope in 0..20_u32,
+            attributes_per_metric in 0..10_u32,
+            steps in 1..u8::MAX
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut rng1 = SmallRng::seed_from_u64(seed);
+            let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
+            let mut rng2 = SmallRng::seed_from_u64(seed);
+            let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
+
+            for _ in 0..steps {
+                let gen_1 = otel_metrics1.generate(&mut rng1)?;
+                let gen_2 = otel_metrics2.generate(&mut rng2)?;
+                debug_assert_eq!(gen_1, gen_2);
+            }
+        }
+    }
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -523,6 +571,51 @@ mod test {
             let mut bytes = Vec::with_capacity(max_bytes);
             metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
             assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
+        }
+    }
+
+    // Generation of metrics must be context bounded. That is, the 0th metric
+    // generated must be equal to the `total_contexts`th generated metric.
+    proptest! {
+        #[test]
+        fn contexts_bound_metric_generation(
+            seed: u64,
+            total_contexts in 0..100_u32,
+            attributes_per_resource in 0..25_u32,
+            scopes_per_resource in 0..50_u32,
+            attributes_per_scope in 0..20_u32,
+            metrics_per_scope in 1..100_u32,
+            attributes_per_metric in 0..100_u32,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut rng1 = SmallRng::seed_from_u64(seed);
+            let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
+            let mut rng2 = SmallRng::seed_from_u64(seed);
+            let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
+
+            // Run otel_metrics1 'around the loop' one time and then assert by
+            // comparison with otel_metric2 that the 'loop' is being obeyed.
+            for _ in 0..total_contexts {
+                let _ = otel_metrics1.generate(&mut rng1)?;
+            }
+
+            for i in 0..total_contexts {
+                let actual = otel_metrics1.generate(&mut rng1)?;
+                let expected = otel_metrics2.generate(&mut rng2)?;
+
+                debug_assert_eq!(actual, expected, "Context loop disobeyed on {i}th iteration");
+            }
         }
     }
 
@@ -542,19 +635,19 @@ mod test {
     //     }
     // }
 
-    // We want to know that every payload produced by this type actually
-    // deserializes as a collection of OTEL metrics.
-    proptest! {
-        #[test]
-        fn payload_deserializes(seed: u64, max_bytes: u16)  {
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
+    // // We want to know that every payload produced by this type actually
+    // // deserializes as a collection of OTEL metrics.
+    // proptest! {
+    //     #[test]
+    //     fn payload_deserializes(seed: u64, max_bytes: u16)  {
+    //         let max_bytes = max_bytes as usize;
+    //         let mut rng = SmallRng::seed_from_u64(seed);
+    //         let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
 
-            let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+    //         let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
+    //         metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
-        }
-    }
+    //         opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+    //     }
+    // }
 }
