@@ -29,22 +29,57 @@ pub(crate) struct Tag {
 }
 pub(crate) type Tagset = Vec<Tag>;
 
+/// A store for managing unique tags with O(1) insertion and random selection
+#[derive(Debug, Default, Clone)]
+struct TagStore {
+    set: HashSet<Tag>, // O(1) uniqueness checks
+    vec: Vec<Tag>,     // O(1) random selection
+}
+
+impl TagStore {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn insert(&mut self, tag: Tag) -> bool {
+        if self.set.insert(tag) {
+            self.vec.push(tag);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
+    fn random_tag<R: Rng>(&self, rng: &mut R) -> Option<&Tag> {
+        if self.vec.is_empty() {
+            None
+        } else {
+            let idx = rng.random_range(0..self.vec.len());
+            Some(&self.vec[idx])
+        }
+    }
+}
+
 /// Generator for individual tags
 #[derive(Debug, Clone)]
-pub(crate) struct TagGenerator {
+struct TagGenerator {
     str_pool: Rc<Pool>,
     tag_length: ConfRange<u16>,
 }
 
 impl TagGenerator {
-    pub(crate) fn new(str_pool: Rc<Pool>, tag_length: ConfRange<u16>) -> Self {
+    fn new(str_pool: Rc<Pool>, tag_length: ConfRange<u16>) -> Self {
         Self {
             str_pool,
             tag_length,
         }
     }
 
-    pub(crate) fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
+    fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -72,7 +107,7 @@ impl TagGenerator {
     }
 }
 
-/// Generator for tags
+/// Generator for tagsets
 ///
 /// This is an unusual generator. Unlike our others this maintains its own RNG
 /// and will reseed it when counter reaches `num_tagsets`. The goal is to
@@ -107,7 +142,7 @@ pub(crate) struct Generator {
     tags_per_msg: ConfRange<u8>, // Maximum number of tags per individually generated tagset
     tags: TagGenerator,
     unique_tag_probability: f32,
-    unique_tags: RefCell<HashSet<Tag>>, // The unique tags that have been generated
+    tag_store: RefCell<TagStore>,
 }
 
 /// Error type for `TagGenerator`
@@ -119,7 +154,7 @@ pub(crate) enum Error {
 }
 
 impl Generator {
-    /// Creates a new tag generator
+    /// Creates a new tagset generator
     ///
     /// # Errors
     /// - If `tags_per_msg` is invalid or exceeds the maximum
@@ -169,7 +204,7 @@ impl Generator {
             tagsets_produced: Cell::new(0),
             num_tagsets,
             unique_tag_probability,
-            unique_tags: RefCell::new(HashSet::new()),
+            tag_store: RefCell::new(TagStore::new()),
         })
     }
 
@@ -217,12 +252,12 @@ impl<'a> crate::Generator<'a> for Generator {
         let mut tagset: Tagset = Vec::new();
         let mut rng = self.internal_rng.borrow_mut();
         let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
-        let mut unique_tags = self.unique_tags.borrow_mut();
+        let mut tag_store = self.tag_store.borrow_mut();
 
         // If we have no unique tags yet, we must generate at least one
-        if unique_tags.is_empty() {
+        if tag_store.is_empty() {
             let tag = self.tags.generate(&mut *rng)?;
-            unique_tags.insert(tag);
+            tag_store.insert(tag);
             tagset.push(tag);
         }
 
@@ -231,15 +266,15 @@ impl<'a> crate::Generator<'a> for Generator {
             let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
             let should_reuse = choose_existing_prob > self.unique_tag_probability;
 
-            if should_reuse && !unique_tags.is_empty() {
+            if should_reuse && !tag_store.is_empty() {
                 // Reuse an existing tag
-                if let Some(tag) = unique_tags.choose(&mut *rng) {
-                    tagset.push(tag);
+                if let Some(tag) = tag_store.random_tag(&mut *rng) {
+                    tagset.push(*tag);
                 }
             } else {
                 // Generate a new unique tag
                 let tag = self.tags.generate(&mut *rng)?;
-                unique_tags.insert(tag);
+                tag_store.insert(tag);
                 tagset.push(tag);
             }
         }
