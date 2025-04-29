@@ -19,4 +19,5 @@ generator:
       network_disabled: false
       exposed_ports:
         - 5000/tcp
+      max_lifetime_seconds: 20
       number_of_containers: 10
