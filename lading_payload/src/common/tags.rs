@@ -391,7 +391,7 @@ mod test {
             tag_size_max in 64..128_u16,
             pool_size in 1_024..10_000_usize
         ) {
-            let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: tags_per_msg_max };
+            let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: tags_per_msg_max };
             let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
             let mut rng = SmallRng::seed_from_u64(seed);
 
