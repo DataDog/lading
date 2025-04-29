@@ -3,13 +3,15 @@ mod memory;
 mod stat;
 mod uptime;
 
-use std::{collections::VecDeque, io};
+use std::io;
 
-use metrics::{counter, gauge};
+use metrics::gauge;
 use nix::errno::Errno;
 use procfs::process::Process;
-use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::{error, info, warn};
+use rustc_hash::FxHashMap;
+use tracing::{error, warn};
+
+use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
@@ -88,94 +90,19 @@ impl Sampler {
         // changing its details in key ways between polls.
         self.process_info.clear();
 
-        // Every sample run we collect all the child processes rooted at the
-        // parent. As noted by the procfs documentation is this done by
-        // dereferencing the `/proc/<pid>/root` symlink.
-        // We must be sure to initialize the parent process info.
-        let parent_pid = self.parent.pid();
-        let parent_info = match initialize_process_info(parent_pid).await {
-            Ok(Some(info)) => info,
-            Ok(None) => {
-                warn!("Could not initialize parent process info, will retry.");
-                return Ok(());
-            }
-            Err(e) => {
-                warn!("Error initializing parent process info: {:?}", e);
-                return Ok(());
-            }
-        };
-        self.process_info.insert(parent_pid, parent_info);
-
-        let mut processes: VecDeque<Process> = VecDeque::with_capacity(16); // an arbitrary smallish number
-        processes.push_back(Process::new(parent_pid)?);
-
-        // We need to track the pids of processes we've already seen to avoid
-        // duplicate reads of process info. A child pid may be listed multiple
-        // times, see below loop for details.
-        let mut pids: FxHashSet<i32> = FxHashSet::default();
-        pids.insert(parent_pid);
-
-        while let Some(process) = processes.pop_back() {
-            // Search for child processes. This is done by querying for every
-            // thread of `process` and inspecting each child of the thread. Note
-            // that processes on linux are those threads that have their group
-            // id equal to their pid. It's also possible for a pid to list
-            // itself as a child so we reference the pid hashset above to avoid
-            // infinite loops.
-            //
-            // We take special care to avoid processes that are forked but not
-            // exec'd. We do this because unexeced processes register the heap
-            // memory of the parent process in their smaps, leading to a double
-            // counting.
-            if let Ok(tasks) = process.tasks() {
-                for task in tasks.flatten() {
-                    if let Ok(mut children) = task.children() {
-                        for child in children
-                            .drain(..)
-                            .filter_map(|c| Process::new(c as i32).ok())
-                        {
-                            let pid = child.pid();
-                            if !pids.contains(&pid) {
-                                // This is a new process. We initialize its
-                                // process info and then determine by
-                                // examination of the exe/cmdline if the process
-                                // is fork'd but not exec'd -- meaning we will
-                                // not poll it -- or if it's a process in good
-                                // standing and we'll attempt to poll it.
-                                let child_info = match initialize_process_info(pid).await {
-                                    Ok(Some(info)) => info,
-                                    Ok(None) => continue,
-                                    Err(e) => {
-                                        warn!(
-                                            "Couldn't initialize process info for pid {}: {:?}",
-                                            pid, e
-                                        );
-                                        continue;
-                                    }
-                                };
-
-                                // Check if this is a forked but not execed
-                                // process.
-                                let parent_info = self
-                                    .process_info
-                                    .get(&process.pid())
-                                    .expect("parent process info should exist");
-                                if child_info.exe == parent_info.exe
-                                    && child_info.cmdline == parent_info.cmdline
-                                {
-                                    counter!("process_skipped").increment(1);
-                                    info!("Skipping process {pid}: {child_info:?}");
-                                    continue;
-                                }
-
-                                self.process_info.insert(pid, child_info);
-                                processes.push_back(child);
-                                pids.insert(pid);
-                            }
-                        }
-                    }
+        for process in ProcessDescendantsIterator::new(self.parent.pid) {
+            let process_info = match initialize_process_info(process.pid()).await {
+                Ok(Some(info)) => info,
+                Ok(None) => {
+                    warn!("Could not initialize process info, will retry.");
+                    return Ok(());
                 }
-            }
+                Err(e) => {
+                    warn!("Error initializing process info: {:?}", e);
+                    return Ok(());
+                }
+            };
+            self.process_info.insert(process.pid(), process_info);
 
             processes_found += 1;
             let pid = process.pid();

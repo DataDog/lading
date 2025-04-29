@@ -47,6 +47,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
 nix = { version = "0.29", default-features = false, features = [
+  "fs",
   "process",
   "signal",
 ] }
