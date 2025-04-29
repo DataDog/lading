@@ -294,6 +294,7 @@ mod test {
     use crate::Generator;
     use crate::common::config::ConfRange;
     use crate::common::strings::Pool;
+    use crate::common::tags::Handle;
 
     proptest! {
         #[test]
@@ -404,14 +405,20 @@ mod test {
                 unique_tag_ratio
             ).expect("Tag generator to be valid");
 
-            let mut unique_tags = HashSet::new();
+            let mut unique_tagsets: HashSet<Vec<(Handle, Handle)>> = HashSet::new();
             for _ in 0..desired_num_tagsets {
-                let tagset = generator.generate(&mut rng).expect("failed to generate tagset");
-                for tag in tagset {
-                    unique_tags.insert((tag.key, tag.value));
-                }
+                let ts = generator.generate(&mut rng)?;
+                // Hash the tag-set as an ordered list of (key,value) pairs
+                unique_tagsets.insert(
+                    ts.iter().map(|t| (t.key, t.value)).collect()
+                );
             }
-            debug_assert!(unique_tags.len() <= desired_num_tagsets, "Expected at most {desired_num_tagsets} unique tags, got {}", unique_tags.len());
+
+            debug_assert!(
+                unique_tagsets.len() <= desired_num_tagsets,
+                "Expected at most {desired_num_tagsets} unique tag-sets, got {}",
+                unique_tagsets.len()
+            );
         }
     }
 }
