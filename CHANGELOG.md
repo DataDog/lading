@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ## Added
+- Compute the Working Set Size of the target thanks to the Linux Idle Page Tracking API.
+  And expose it in the new `total_wss_bytes` metric.
 - Add a `max_lifetime` parameter to the `container` generator to make it generate
   a continuous stream of docker containers deletion and re-creation.
 
@@ -13,8 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Introduce a `container` generator able to generate an arbitrary number
   of docker containers.
-- Compute the Working Set Size of the target thanks to the Linux Idle Page Tracking API.
-  And expose it in the new `total_wss_bytes` metric.
 ## Changed
 - Lading's byte-unit crate is now updated to 5.x. This version of the crate is
   very strict about the difference between MiB, Mb etc.
