@@ -58,7 +58,7 @@ use rand::{
     seq::IndexedRandom,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::{Kind, MetricTemplate, ResourceTemplate, ScopeTemplate};
+use templates::ResourceTemplateGenerator;
 use unit::UnitGenerator;
 
 /// Configure the OpenTelemetry metric payload.
@@ -428,7 +428,7 @@ impl OpentelemetryMetrics {
     {
         let context_cap = config.contexts.total_contexts.sample(rng);
         let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
-        let resource_template_generator = ResourceTemplateGenerator::new(&cfg, &str_pool)?;
+        let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool)?;
 
         let mut pool = Vec::with_capacity(context_cap as usize);
         for _ in 0..context_cap {
