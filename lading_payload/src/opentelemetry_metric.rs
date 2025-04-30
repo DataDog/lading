@@ -561,7 +561,7 @@ mod test {
             for _ in 0..steps {
                 let gen_1 = otel_metrics1.generate(&mut rng1)?;
                 let gen_2 = otel_metrics2.generate(&mut rng2)?;
-                debug_assert_eq!(gen_1, gen_2);
+                prop_assert_eq!(gen_1, gen_2);
             }
         }
     }
@@ -577,7 +577,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
+            prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
 
@@ -622,7 +622,9 @@ mod test {
             let actual_contexts = ids.len();
             let below = total_contexts_min as usize <= actual_contexts;
             let above = actual_contexts <= total_contexts_max as usize;
-            debug_assert!(below && above, "Inequality failed: {below} <= {actual_contexts} <= {above}");
+            prop_assert!(below && above,
+                         "expected {} ≤ {} ≤ {}",
+                         total_contexts_min, actual_contexts, total_contexts_max);
         }
     }
 
@@ -693,14 +695,14 @@ mod test {
                 let metric = otel_metrics.generate(&mut rng)?;
 
                 if let Some(resource) = &metric.resource {
-                    assert!(
+                    prop_assert!(
                         resource.attributes.len() <= attributes_per_resource as usize,
                         "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
                         len = resource.attributes.len(),
                     );
                 }
 
-                assert!(
+                prop_assert!(
                     metric.scope_metrics.len() <= scopes_per_resource as usize,
                     "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
                     len = metric.scope_metrics.len(),
@@ -708,21 +710,21 @@ mod test {
 
                 for scope in &metric.scope_metrics {
                     if let Some(scope) = &scope.scope {
-                        assert!(
+                        prop_assert!(
                             scope.attributes.len() <= attributes_per_scope as usize,
                             "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
                             len = scope.attributes.len(),
                         );
                     }
 
-                    assert!(
+                    prop_assert!(
                         scope.metrics.len() <= metrics_per_scope as usize,
                         "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
                         len = scope.metrics.len(),
                     );
 
                     for metric in &scope.metrics {
-                        assert!(
+                        prop_assert!(
                             metric.metadata.len() <= attributes_per_metric as usize,
                             "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
                             len = metric.metadata.len(),
