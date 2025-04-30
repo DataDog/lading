@@ -65,12 +65,6 @@ use unit::UnitGenerator;
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
 pub struct Contexts {
-    /// The global total number of contexts, defined as the unique Resources --
-    /// attributes -- crossed with the unique Scopes -- defined by
-    /// InstrumentationScopes -- and unique Metrics -- defined by name,
-    /// attributes but not data or unit.
-    pub total_contexts: ConfRange<u32>,
-
     /// The range of attributes for resources.
     pub attributes_per_resource: ConfRange<u32>,
     /// TODO
@@ -86,7 +80,6 @@ pub struct Contexts {
 impl Default for Contexts {
     fn default() -> Self {
         Self {
-            total_contexts: ConfRange::Constant(1_000),
             attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_scope: ConfRange::Constant(0),
@@ -409,7 +402,8 @@ impl Distribution<Sum> for StandardUniform {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    member_generator: ResourceGenerator,
+    // TODO insert a 'templates' field that will be a Vec of a yet-to-be defined
+    generator: ResourceGenerator,
 }
 
 impl OpentelemetryMetrics {
@@ -423,7 +417,7 @@ impl OpentelemetryMetrics {
     {
         let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
         Ok(Self {
-            member_generator: ResourceGenerator::new(config, &str_pool)?,
+            generator: ResourceGenerator::new(config, &str_pool)?,
         })
     }
 }
@@ -436,7 +430,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
-        self.member_generator.generate(rng)
+        self.generator.generate(rng)
     }
 }
 
@@ -446,10 +440,10 @@ impl crate::Serialize for OpentelemetryMetrics {
         R: Rng + Sized,
         W: Write,
     {
-        // Alright, what we're making here is the ExportMetricServiceRequest. It
-        // has 5 bytes of fixed values plus a varint-encoded message length
-        // field to it. The worst case for the message length field is the max
-        // message size divided by 0b0111_1111.
+        // What we're making here is the ExportMetricServiceRequest. It has 5
+        // bytes of fixed values plus a varint-encoded message length field to
+        // it. The worst case for the message length field is the max message
+        // size divided by 0b0111_1111.
         //
         // The user _does not_ set the number of Resoures per request -- we pack
         // those in until max_bytes -- but they do set the scopes per request
@@ -526,7 +520,6 @@ mod test {
         #[test]
         fn opentelemetry_metrics_generate_is_deterministic(
             seed: u64,
-            total_contexts in 0..100_u32,
             attributes_per_resource in 0..20_u32,
             scopes_per_resource in 0..20_u32,
             attributes_per_scope in 0..20_u32,
@@ -536,7 +529,6 @@ mod test {
         ) {
             let config = Config {
                 contexts: Contexts {
-                    total_contexts: ConfRange::Constant(total_contexts),
                     attributes_per_resource: ConfRange::Constant(attributes_per_resource),
                     scopes_per_resource: ConfRange::Constant(scopes_per_resource),
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
@@ -574,50 +566,52 @@ mod test {
         }
     }
 
-    // Generation of metrics must be context bounded. That is, the 0th metric
-    // generated must be equal to the `total_contexts`th generated metric.
-    proptest! {
-        #[test]
-        fn contexts_bound_metric_generation(
-            seed: u64,
-            total_contexts in 0..100_u32,
-            attributes_per_resource in 0..25_u32,
-            scopes_per_resource in 0..50_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 1..100_u32,
-            attributes_per_metric in 0..100_u32,
-        ) {
-            let config = Config {
-                contexts: Contexts {
-                    total_contexts: ConfRange::Constant(total_contexts),
-                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
-                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
-                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
-                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
-                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
-                },
-                ..Default::default()
-            };
+    // // Generation of metrics must be context bounded. That is, the 0th metric
+    // // generated must be equal to the `total_contexts`th generated metric.
+    // proptest! {
+    //     #[test]
+    //     fn contexts_bound_metric_generation(
+    //         seed: u64,
+    //         total_contexts in 0..100_u32,
+    //         attributes_per_resource in 0..25_u32,
+    //         scopes_per_resource in 0..50_u32,
+    //         attributes_per_scope in 0..20_u32,
+    //         metrics_per_scope in 1..100_u32,
+    //         attributes_per_metric in 0..100_u32,
+    //     ) {
+    //         let config = Config {
+    //             contexts: Contexts {
+    //                 total_contexts: ConfRange::Constant(total_contexts),
+    //                 attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+    //                 scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+    //                 attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+    //                 metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+    //                 attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+    //             },
+    //             ..Default::default()
+    //         };
 
-            let mut rng1 = SmallRng::seed_from_u64(seed);
-            let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
-            let mut rng2 = SmallRng::seed_from_u64(seed);
-            let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
+    //         let mut rng1 = SmallRng::seed_from_u64(seed);
+    //         let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
+    //         let mut rng2 = SmallRng::seed_from_u64(seed);
+    //         let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
 
-            // Run otel_metrics1 'around the loop' one time and then assert by
-            // comparison with otel_metric2 that the 'loop' is being obeyed.
-            for _ in 0..total_contexts {
-                let _ = otel_metrics1.generate(&mut rng1)?;
-            }
+    //         // Run otel_metrics1 'around the loop' one time and then assert by
+    //         // comparison with otel_metric2 that the 'loop' is being obeyed.
+    //         //
+    //         // The idea is this: both otel_metrics1 and otel_metrics2 are deterministic as demonstrated by opentelemetry_metrics_generate_is_deterministic and so if we advance otel_metrics1 then the
+    //         for _ in 0..total_contexts {
+    //             let _ = otel_metrics1.generate(&mut rng1)?;
+    //         }
 
-            for i in 0..total_contexts {
-                let actual = otel_metrics1.generate(&mut rng1)?;
-                let expected = otel_metrics2.generate(&mut rng2)?;
+    //         for i in 0..total_contexts {
+    //             let actual = otel_metrics1.generate(&mut rng1)?;
+    //             let expected = otel_metrics2.generate(&mut rng2)?;
 
-                debug_assert_eq!(actual, expected, "Context loop disobeyed on {i}th iteration");
-            }
-        }
-    }
+    //             debug_assert_eq!(actual, expected, "Context loop disobeyed on {i}th iteration");
+    //         }
+    //     }
+    // }
 
     // NOTE disabled temporarily, will re-enable in up-stack commit
     // // We want to be sure that the payloads are not being left empty.
@@ -650,4 +644,77 @@ mod test {
     //         opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
     //     }
     // }
+
+    // Confirm that configuration bounds are naively obeyed. For instance, this
+    // test will pass if every resource generated has identical attributes, etc
+    // etc. Confirmation of context bounds being obeyed -- implying examination
+    // of attributes et al -- is appropriate for another property test.
+    proptest! {
+        #[test]
+        fn counts_within_bounds(
+            seed: u64,
+            attributes_per_resource in 0..20_u32,
+            scopes_per_resource in 0..20_u32,
+            attributes_per_scope in 0..20_u32,
+            metrics_per_scope in 0..20_u32,
+            attributes_per_metric in 0..10_u32,
+            steps in 1..u8::MAX
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+
+            for _ in 0..steps {
+                let metric = otel_metrics.generate(&mut rng)?;
+
+                if let Some(resource) = &metric.resource {
+                    assert!(
+                        resource.attributes.len() <= attributes_per_resource as usize,
+                        "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
+                        len = resource.attributes.len(),
+                    );
+                }
+
+                assert!(
+                    metric.scope_metrics.len() <= scopes_per_resource as usize,
+                    "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
+                    len = metric.scope_metrics.len(),
+                );
+
+                for scope in &metric.scope_metrics {
+                    if let Some(scope) = &scope.scope {
+                        assert!(
+                            scope.attributes.len() <= attributes_per_scope as usize,
+                            "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
+                            len = scope.attributes.len(),
+                        );
+                    }
+
+                    assert!(
+                        scope.metrics.len() <= metrics_per_scope as usize,
+                        "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
+                        len = scope.metrics.len(),
+                    );
+
+                    for metric in &scope.metrics {
+                        assert!(
+                            metric.metadata.len() <= attributes_per_metric as usize,
+                            "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
+                            len = metric.metadata.len(),
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
