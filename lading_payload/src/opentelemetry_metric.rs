@@ -45,10 +45,7 @@ use std::io::Write;
 use std::rc::Rc;
 
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
-use opentelemetry_proto::tonic::{
-    common::v1::{AnyValue, KeyValue, any_value},
-    metrics::v1,
-};
+use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
 use rand::{Rng, seq::IndexedRandom};
 use serde::{Deserialize, Serialize as SerdeSerialize};
@@ -221,8 +218,6 @@ impl Config {
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
     pool: Vec<templates::ResourceTemplate>,
-    // // TODO insert a 'templates' field that will be a Vec of a yet-to-be defined
-    // generator: ResourceGenerator,
 }
 
 impl OpentelemetryMetrics {
@@ -327,33 +322,6 @@ impl crate::Serialize for OpentelemetryMetrics {
         writer.write_all(&buf)?;
         Ok(())
     }
-}
-
-fn generate_attributes<R>(
-    str_pool: &strings::Pool,
-    rng: &mut R,
-    count: u32,
-) -> Result<Vec<KeyValue>, Error>
-where
-    R: Rng + ?Sized,
-{
-    let mut kvs = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let key = str_pool
-            .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-        let val = str_pool
-            .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-
-        kvs.push(KeyValue {
-            key: String::from(key),
-            value: Some(AnyValue {
-                value: Some(any_value::Value::StringValue(String::from(val))),
-            }),
-        });
-    }
-    Ok(kvs)
 }
 
 #[cfg(test)]
