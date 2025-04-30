@@ -129,6 +129,84 @@ impl Config {
         if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
             return Err("Metric weights cannot be 0".to_string());
         }
+
+        // total_contexts cannot be zero
+        match self.contexts.total_contexts {
+            ConfRange::Constant(0) => return Err("total_contexts cannot be zero".to_string()),
+            ConfRange::Constant(_) => (), // valid case
+            ConfRange::Inclusive { min, max } => {
+                if min == 0 {
+                    return Err("total_contexts minimum cannot be zero".to_string());
+                }
+                if min > max {
+                    return Err("total_contexts minimum cannot be greater than maximum".to_string());
+                }
+            }
+        }
+
+        let min_contexts = match self.contexts.total_contexts {
+            ConfRange::Constant(n) => n,
+            ConfRange::Inclusive { min, .. } => min,
+        };
+        let max_contexts = match self.contexts.total_contexts {
+            ConfRange::Constant(n) => n,
+            ConfRange::Inclusive { max, .. } => max,
+        };
+
+        // Calculate minimum and maximum possible contexts based on composition
+        let min_configured = match self.contexts.scopes_per_resource {
+            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(n) => {
+                let metrics = match self.contexts.metrics_per_scope {
+                    ConfRange::Constant(0) => 0,
+                    ConfRange::Constant(m) => m,
+                    ConfRange::Inclusive { min, .. } => min,
+                };
+                n * metrics
+            }
+            ConfRange::Inclusive { min, .. } => {
+                let metrics = match self.contexts.metrics_per_scope {
+                    ConfRange::Constant(0) => 0,
+                    ConfRange::Constant(m) => m,
+                    ConfRange::Inclusive { min, .. } => min,
+                };
+                min * metrics
+            }
+        };
+
+        let max_configured = match self.contexts.scopes_per_resource {
+            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(n) => {
+                let metrics = match self.contexts.metrics_per_scope {
+                    ConfRange::Constant(0) => 0,
+                    ConfRange::Constant(m) => m,
+                    ConfRange::Inclusive { max, .. } => max,
+                };
+                n * metrics
+            }
+            ConfRange::Inclusive { max, .. } => {
+                let metrics = match self.contexts.metrics_per_scope {
+                    ConfRange::Constant(0) => 0,
+                    ConfRange::Constant(m) => m,
+                    ConfRange::Inclusive { max, .. } => max,
+                };
+                max * metrics
+            }
+        };
+
+        // Validate that the requested contexts are achievable
+        if min_contexts > max_configured {
+            return Err(format!(
+                "Minimum requested contexts {min_contexts} cannot be achieved with current configuration (max possible: {max_configured})"
+            ));
+        }
+
+        if max_contexts < min_configured {
+            return Err(format!(
+                "Maximum requested contexts {max_contexts} is less than minimum possible contexts {min_configured}"
+            ));
+        }
+
         Ok(())
     }
 }
@@ -613,5 +691,86 @@ mod test {
             // If the metrics are equal then their contexts must be equal.
             assert_eq!(context_id(&metric1), context_id(&metric2));
         }
+    }
+
+    #[test]
+    fn config_validation() {
+        // Valid cases
+        let valid_config = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Constant(100),
+                attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
+                scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
+                attributes_per_scope: ConfRange::Constant(0),
+                metrics_per_scope: ConfRange::Inclusive { min: 1, max: 20 },
+                attributes_per_metric: ConfRange::Inclusive { min: 0, max: 10 },
+            },
+            ..Default::default()
+        };
+        assert!(valid_config.valid().is_ok());
+
+        // Zero total_contexts
+        let zero_contexts = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Constant(0),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_contexts.valid().is_err());
+
+        // Zero min in range
+        let zero_min_range = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Inclusive { min: 0, max: 100 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_min_range.valid().is_err());
+
+        // Min greater than max
+        let min_gt_max = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Inclusive { min: 100, max: 50 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(min_gt_max.valid().is_err());
+
+        // Impossible to achieve minimum contexts
+        let impossible_min = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Inclusive {
+                    min: 1000,
+                    max: 2000,
+                },
+                scopes_per_resource: ConfRange::Constant(1),
+                metrics_per_scope: ConfRange::Constant(1),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(impossible_min.valid().is_err());
+
+        // Impossible to achieve maximum contexts
+        let impossible_max = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Inclusive { min: 1, max: 1 },
+                scopes_per_resource: ConfRange::Constant(2),
+                metrics_per_scope: ConfRange::Constant(2),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(impossible_max.valid().is_err());
+
+        // Zero metric weights
+        let zero_weights = Config {
+            metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
+            ..valid_config
+        };
+        assert!(zero_weights.valid().is_err());
     }
 }
