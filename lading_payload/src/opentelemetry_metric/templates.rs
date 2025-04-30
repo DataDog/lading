@@ -69,10 +69,7 @@ impl MetricTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         let tags = TagGenerator::new(
             rand::random(),
-            ConfRange::Inclusive {
-                min: 0,
-                max: config.contexts.attributes_per_metric.end() as u8,
-            },
+            config.contexts.attributes_per_metric,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
@@ -185,7 +182,7 @@ pub(crate) struct ScopeTemplate {
 
 #[derive(Clone)]
 pub(crate) struct ScopeTemplateGenerator {
-    metrics_per_scope: ConfRange<u32>,
+    metrics_per_scope: ConfRange<u8>,
     metric_generator: MetricTemplateGenerator,
     str_pool: Rc<strings::Pool>,
     tags: TagGenerator,
@@ -195,10 +192,7 @@ impl ScopeTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         let tags = TagGenerator::new(
             rand::random(),
-            ConfRange::Inclusive {
-                min: 0,
-                max: config.contexts.attributes_per_scope.end() as u8,
-            },
+            config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
@@ -255,8 +249,8 @@ pub(crate) struct ResourceTemplate {
 
 #[derive(Clone)]
 pub(crate) struct ResourceTemplateGenerator {
-    scopes_per_resource: ConfRange<u32>,
-    attributes_per_resource: ConfRange<u32>,
+    scopes_per_resource: ConfRange<u8>,
+    attributes_per_resource: ConfRange<u8>,
     scope_generator: ScopeTemplateGenerator,
     tags: TagGenerator,
 }
@@ -265,10 +259,7 @@ impl ResourceTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
         let tags = TagGenerator::new(
             rand::random(),
-            ConfRange::Inclusive {
-                min: 0,
-                max: config.contexts.attributes_per_resource.end() as u8,
-            },
+            config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),

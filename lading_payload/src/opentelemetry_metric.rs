@@ -64,15 +64,15 @@ pub struct Contexts {
     pub total_contexts: ConfRange<u32>,
 
     /// The range of attributes for resources.
-    pub attributes_per_resource: ConfRange<u32>,
+    pub attributes_per_resource: ConfRange<u8>,
     /// TODO
-    pub scopes_per_resource: ConfRange<u32>,
+    pub scopes_per_resource: ConfRange<u8>,
     /// TODO
-    pub attributes_per_scope: ConfRange<u32>,
+    pub attributes_per_scope: ConfRange<u8>,
     /// The range of attributes for scopes per resource.
-    pub metrics_per_scope: ConfRange<u32>,
+    pub metrics_per_scope: ConfRange<u8>,
     /// The range of attributes for scopes per resource.
-    pub attributes_per_metric: ConfRange<u32>,
+    pub attributes_per_metric: ConfRange<u8>,
 }
 
 impl Default for Contexts {
@@ -193,13 +193,13 @@ impl Config {
         };
 
         // Validate that the requested contexts are achievable
-        if min_contexts > max_configured {
+        if min_contexts > u32::from(max_configured) {
             return Err(format!(
                 "Minimum requested contexts {min_contexts} cannot be achieved with current configuration (max possible: {max_configured})"
             ));
         }
 
-        if max_contexts < min_configured {
+        if max_contexts < u32::from(min_configured) {
             return Err(format!(
                 "Maximum requested contexts {max_contexts} is less than minimum possible contexts {min_configured}"
             ));
