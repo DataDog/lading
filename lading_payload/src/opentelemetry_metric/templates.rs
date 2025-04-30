@@ -65,9 +65,16 @@ pub(crate) struct MetricTemplateGenerator {
 }
 
 impl MetricTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
         let tags = TagGenerator::new(
-            rand::random(),
+            rng.random(),
             config.contexts.attributes_per_metric,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
@@ -188,9 +195,16 @@ pub(crate) struct ScopeTemplateGenerator {
 }
 
 impl ScopeTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
         let tags = TagGenerator::new(
-            rand::random(),
+            rng.random(),
             config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
@@ -200,7 +214,7 @@ impl ScopeTemplateGenerator {
 
         Ok(Self {
             metrics_per_scope: config.contexts.metrics_per_scope,
-            metric_generator: MetricTemplateGenerator::new(config, str_pool)?,
+            metric_generator: MetricTemplateGenerator::new(config, str_pool, rng)?,
             str_pool: Rc::clone(str_pool),
             tags,
         })
@@ -255,9 +269,16 @@ pub(crate) struct ResourceTemplateGenerator {
 }
 
 impl ResourceTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
         let tags = TagGenerator::new(
-            rand::random(),
+            rng.random(),
             config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
@@ -268,7 +289,7 @@ impl ResourceTemplateGenerator {
         Ok(Self {
             scopes_per_resource: config.contexts.scopes_per_resource,
             attributes_per_resource: config.contexts.attributes_per_resource,
-            scope_generator: ScopeTemplateGenerator::new(config, str_pool)?,
+            scope_generator: ScopeTemplateGenerator::new(config, str_pool, rng)?,
             tags,
         })
     }
