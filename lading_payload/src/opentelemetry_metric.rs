@@ -419,6 +419,9 @@ impl OpentelemetryMetrics {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+    ///
+    /// # Panics
+    /// TODO
     pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
@@ -504,7 +507,7 @@ impl OpentelemetryMetrics {
                     let kind = match metric_kinds.sample(rng) {
                         0 => Kind::Gauge,
                         1 => Kind::Sum {
-                            aggregation_temporality: *[1, 2].choose(rng).unwrap(),
+                            aggregation_temporality: *[1, 2].choose(rng).expect("cannot fail"),
                             is_monotonic: rng.random_bool(0.5),
                         },
                         _ => unreachable!(),
