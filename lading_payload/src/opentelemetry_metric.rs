@@ -65,6 +65,10 @@ use unit::UnitGenerator;
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
 pub struct Contexts {
+    /// The range of contexts -- see documentation for `context_id` function --
+    /// that will be generated.
+    pub total_contexts: ConfRange<u32>,
+
     /// The range of attributes for resources.
     pub attributes_per_resource: ConfRange<u32>,
     /// TODO
@@ -80,6 +84,7 @@ pub struct Contexts {
 impl Default for Contexts {
     fn default() -> Self {
         Self {
+            total_contexts: ConfRange::Constant(100),
             attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_scope: ConfRange::Constant(0),
@@ -515,7 +520,10 @@ mod test {
     use opentelemetry_proto::tonic::common::v1::any_value;
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
-    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::{
+        collections::HashSet,
+        hash::{DefaultHasher, Hash, Hasher},
+    };
 
     // Generation of metrics must be deterministic. In order to assert this
     // property we generate two instances of OpentelemetryMetrics from disinct
@@ -525,6 +533,7 @@ mod test {
         #[test]
         fn opentelemetry_metrics_generate_is_deterministic(
             seed: u64,
+            total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u32,
             scopes_per_resource in 0..20_u32,
             attributes_per_scope in 0..20_u32,
@@ -534,6 +543,7 @@ mod test {
         ) {
             let config = Config {
                 contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
                     attributes_per_resource: ConfRange::Constant(attributes_per_resource),
                     scopes_per_resource: ConfRange::Constant(scopes_per_resource),
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
@@ -571,52 +581,50 @@ mod test {
         }
     }
 
-    // // Generation of metrics must be context bounded. That is, the 0th metric
-    // // generated must be equal to the `total_contexts`th generated metric.
-    // proptest! {
-    //     #[test]
-    //     fn contexts_bound_metric_generation(
-    //         seed: u64,
-    //         total_contexts in 0..100_u32,
-    //         attributes_per_resource in 0..25_u32,
-    //         scopes_per_resource in 0..50_u32,
-    //         attributes_per_scope in 0..20_u32,
-    //         metrics_per_scope in 1..100_u32,
-    //         attributes_per_metric in 0..100_u32,
-    //     ) {
-    //         let config = Config {
-    //             contexts: Contexts {
-    //                 total_contexts: ConfRange::Constant(total_contexts),
-    //                 attributes_per_resource: ConfRange::Constant(attributes_per_resource),
-    //                 scopes_per_resource: ConfRange::Constant(scopes_per_resource),
-    //                 attributes_per_scope: ConfRange::Constant(attributes_per_scope),
-    //                 metrics_per_scope: ConfRange::Constant(metrics_per_scope),
-    //                 attributes_per_metric: ConfRange::Constant(attributes_per_metric),
-    //             },
-    //             ..Default::default()
-    //         };
+    // Generation of metrics must be context bounded. If `generate` is called
+    // more than total_context times only total_context contexts should be
+    // produced.
+    proptest! {
+        #[test]
+        fn contexts_bound_metric_generation(
+            seed: u64,
+            total_contexts_min in 0..4_u32,
+            total_contexts_max in 5..32_u32,
+            attributes_per_resource in 0..25_u32,
+            scopes_per_resource in 0..50_u32,
+            attributes_per_scope in 0..20_u32,
+            metrics_per_scope in 1..100_u32,
+            attributes_per_metric in 0..100_u32,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Inclusive { min: total_contexts_min, max: total_contexts_max },
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
 
-    //         let mut rng1 = SmallRng::seed_from_u64(seed);
-    //         let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
-    //         let mut rng2 = SmallRng::seed_from_u64(seed);
-    //         let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
+            let mut ids = HashSet::new();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
 
-    //         // Run otel_metrics1 'around the loop' one time and then assert by
-    //         // comparison with otel_metric2 that the 'loop' is being obeyed.
-    //         //
-    //         // The idea is this: both otel_metrics1 and otel_metrics2 are deterministic as demonstrated by opentelemetry_metrics_generate_is_deterministic and so if we advance otel_metrics1 then the
-    //         for _ in 0..total_contexts {
-    //             let _ = otel_metrics1.generate(&mut rng1)?;
-    //         }
+            let total_generations = total_contexts_max + (total_contexts_max / 2);
+            for _ in 0..total_generations {
+                let res = otel_metrics.generate(&mut rng)?;
+                let id = context_id(&res);
+                ids.insert(id);
+            }
 
-    //         for i in 0..total_contexts {
-    //             let actual = otel_metrics1.generate(&mut rng1)?;
-    //             let expected = otel_metrics2.generate(&mut rng2)?;
-
-    //             debug_assert_eq!(actual, expected, "Context loop disobeyed on {i}th iteration");
-    //         }
-    //     }
-    // }
+            let actual_contexts = ids.len();
+            let below = total_contexts_min as usize <= actual_contexts;
+            let above = actual_contexts <= total_contexts_max as usize;
+            debug_assert!(below && above, "Inequality failed: {below} <= {actual_contexts} <= {above}");
+        }
+    }
 
     // NOTE disabled temporarily, will re-enable in up-stack commit
     // // We want to be sure that the payloads are not being left empty.
@@ -658,6 +666,7 @@ mod test {
         #[test]
         fn counts_within_bounds(
             seed: u64,
+            total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u32,
             scopes_per_resource in 0..20_u32,
             attributes_per_scope in 0..20_u32,
@@ -667,6 +676,7 @@ mod test {
         ) {
             let config = Config {
                 contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
                     attributes_per_resource: ConfRange::Constant(attributes_per_resource),
                     scopes_per_resource: ConfRange::Constant(scopes_per_resource),
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
@@ -799,6 +809,7 @@ mod test {
         #[test]
         fn context_is_equality(
             seed: u64,
+            total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u32,
             scopes_per_resource in 0..20_u32,
             attributes_per_scope in 0..20_u32,
@@ -807,6 +818,7 @@ mod test {
         ) {
             let config = Config {
                 contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
                     attributes_per_resource: ConfRange::Constant(attributes_per_resource),
                     scopes_per_resource: ConfRange::Constant(scopes_per_resource),
                     attributes_per_scope: ConfRange::Constant(attributes_per_scope),
