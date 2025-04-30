@@ -304,11 +304,7 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let unknown_resource = self.attributes_per_resource.start() == 0;
-        // If the range of resources admits 0 the field `unknown_resources` will
-        // be set and we give half-odds on there be no `resource` field set in
-        // the message.
-        let resource = if unknown_resource && rng.random_bool(0.5) {
+        let resource = if self.attributes_per_resource.start() == 0 {
             None
         } else {
             let attributes = self.tags.generate(rng)?;
