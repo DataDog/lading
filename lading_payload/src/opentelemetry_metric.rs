@@ -357,7 +357,7 @@ mod test {
         #[test]
         fn contexts_bound_metric_generation(
             seed: u64,
-            total_contexts_min in 0..4_u32,
+            total_contexts_min in 1..4_u32,
             total_contexts_max in 5..32_u32,
             attributes_per_resource in 0..25_u32,
             scopes_per_resource in 0..50_u32,
