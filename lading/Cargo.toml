@@ -46,7 +46,7 @@ is_executable = "1.0.4"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
-nix = { version = "0.29", default-features = false, features = [
+nix = { version = "0.30", default-features = false, features = [
   "fs",
   "process",
   "signal",
