@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use opentelemetry_proto::tonic::{
-    common::v1::{self, AnyValue, InstrumentationScope, KeyValue, any_value},
+    common::v1::{self, InstrumentationScope},
     metrics::{
         self,
         v1::{Metric, NumberDataPoint, metric::Data},
@@ -14,11 +14,8 @@ use rand::{
     seq::IndexedRandom,
 };
 
-use crate::{
-    Error, common::config::ConfRange, common::strings, common::tags::Generator as TagGenerator,
-};
-
-use super::{Config, UnitGenerator};
+use super::{Config, UnitGenerator, tags::TagGenerator};
+use crate::{Error, common::config::ConfRange, common::strings};
 
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
@@ -70,7 +67,6 @@ pub(crate) struct MetricTemplateGenerator {
 
 impl MetricTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
-        let num_tagsets: usize = config.contexts.attributes_per_metric.end() as usize;
         let tags = TagGenerator::new(
             rand::random(),
             ConfRange::Inclusive {
@@ -78,11 +74,10 @@ impl MetricTemplateGenerator {
                 max: config.contexts.attributes_per_metric.end() as u8,
             },
             ConfRange::Inclusive { min: 3, max: 32 },
-            num_tagsets,
+            config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
             0.25,
-        )
-        .map_err(|_| Error::StringGenerate)?;
+        )?;
 
         Ok(Self {
             kind_dist: WeightedIndex::new([
@@ -104,26 +99,7 @@ impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let tagset = self.tags.generate(rng)?;
-        let mut metadata = Vec::with_capacity(tagset.len());
-
-        for tag in tagset {
-            let key = self
-                .tags
-                .using_handle(tag.key)
-                .ok_or(Error::StringGenerate)?;
-            let val = self
-                .tags
-                .using_handle(tag.value)
-                .ok_or(Error::StringGenerate)?;
-
-            metadata.push(KeyValue {
-                key: String::from(key),
-                value: Some(AnyValue {
-                    value: Some(any_value::Value::StringValue(String::from(val))),
-                }),
-            });
-        }
+        let metadata = self.tags.generate(rng)?;
 
         let name = self
             .str_pool
@@ -217,8 +193,6 @@ pub(crate) struct ScopeTemplateGenerator {
 
 impl ScopeTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
-        let num_tagsets: usize = config.contexts.attributes_per_metric.end() as usize;
-
         let tags = TagGenerator::new(
             rand::random(),
             ConfRange::Inclusive {
@@ -226,11 +200,10 @@ impl ScopeTemplateGenerator {
                 max: config.contexts.attributes_per_scope.end() as u8,
             },
             ConfRange::Inclusive { min: 3, max: 32 },
-            num_tagsets,
+            config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
             0.25,
-        )
-        .map_err(|_| Error::StringGenerate)?;
+        )?;
 
         Ok(Self {
             metrics_per_scope: config.contexts.metrics_per_scope,
@@ -249,26 +222,7 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let tagset = self.tags.generate(rng)?;
-        let mut attributes = Vec::with_capacity(tagset.len());
-
-        for tag in tagset {
-            let key = self
-                .tags
-                .using_handle(tag.key)
-                .ok_or(Error::StringGenerate)?;
-            let val = self
-                .tags
-                .using_handle(tag.value)
-                .ok_or(Error::StringGenerate)?;
-
-            attributes.push(KeyValue {
-                key: String::from(key),
-                value: Some(AnyValue {
-                    value: Some(any_value::Value::StringValue(String::from(val))),
-                }),
-            });
-        }
+        let attributes = self.tags.generate(rng)?;
 
         let scope = InstrumentationScope {
             name: self
@@ -281,7 +235,6 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
             dropped_attributes_count: 0,
         };
 
-        // metrics
         let total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<MetricTemplate> = Vec::with_capacity(total_metrics as usize);
         for _ in 0..total_metrics {
@@ -310,7 +263,6 @@ pub(crate) struct ResourceTemplateGenerator {
 
 impl ResourceTemplateGenerator {
     pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
-        let num_tagsets: usize = config.contexts.attributes_per_resource.end() as usize;
         let tags = TagGenerator::new(
             rand::random(),
             ConfRange::Inclusive {
@@ -318,11 +270,10 @@ impl ResourceTemplateGenerator {
                 max: config.contexts.attributes_per_resource.end() as u8,
             },
             ConfRange::Inclusive { min: 3, max: 32 },
-            num_tagsets,
+            config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
             0.25,
-        )
-        .map_err(|_| Error::StringGenerate)?;
+        )?;
 
         Ok(Self {
             scopes_per_resource: config.contexts.scopes_per_resource,
@@ -341,27 +292,6 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let tagset = self.tags.generate(rng)?;
-        let mut attributes = Vec::with_capacity(tagset.len());
-
-        for tag in tagset {
-            let key = self
-                .tags
-                .using_handle(tag.key)
-                .ok_or(Error::StringGenerate)?;
-            let val = self
-                .tags
-                .using_handle(tag.value)
-                .ok_or(Error::StringGenerate)?;
-
-            attributes.push(KeyValue {
-                key: String::from(key),
-                value: Some(AnyValue {
-                    value: Some(any_value::Value::StringValue(String::from(val))),
-                }),
-            });
-        }
-
         let unknown_resource = self.attributes_per_resource.start() == 0;
         // If the range of resources admits 0 the field `unknown_resources` will
         // be set and we give half-odds on there be no `resource` field set in
@@ -369,26 +299,7 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
         let resource = if unknown_resource && rng.random_bool(0.5) {
             None
         } else {
-            let tagset = self.tags.generate(rng)?;
-            let mut attributes = Vec::with_capacity(tagset.len());
-
-            for tag in tagset {
-                let key = self
-                    .tags
-                    .using_handle(tag.key)
-                    .ok_or(Error::StringGenerate)?;
-                let val = self
-                    .tags
-                    .using_handle(tag.value)
-                    .ok_or(Error::StringGenerate)?;
-
-                attributes.push(KeyValue {
-                    key: String::from(key),
-                    value: Some(AnyValue {
-                        value: Some(any_value::Value::StringValue(String::from(val))),
-                    }),
-                });
-            }
+            let attributes = self.tags.generate(rng)?;
             let res = resource::v1::Resource {
                 attributes,
                 dropped_attributes_count: 0,
