@@ -65,13 +65,13 @@ pub struct Contexts {
 
     /// The range of attributes for resources.
     pub attributes_per_resource: ConfRange<u8>,
-    /// TODO
+    /// The range of scopes that will be generated per resource.
     pub scopes_per_resource: ConfRange<u8>,
-    /// TODO
+    /// The range of attributes for each scope.
     pub attributes_per_scope: ConfRange<u8>,
-    /// The range of attributes for scopes per resource.
+    /// The range of metrics that will be generated per scope.
     pub metrics_per_scope: ConfRange<u8>,
-    /// The range of attributes for scopes per resource.
+    /// The range of attributes for each metric.
     pub attributes_per_metric: ConfRange<u8>,
 }
 
@@ -209,12 +209,6 @@ impl Config {
     }
 }
 
-// Okay if you think about it OTel Metrics are in a tree. That tree is rooted at
-// the Resource, below the resources are Scope which contain Metrics. If we want
-// to have a bounded amount of contexts we need some way of counting how many
-// we've made where a context is the Resources X Scopes X Metric Names and so
-// the Resource is the top generator etc.
-
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
@@ -226,9 +220,6 @@ impl OpentelemetryMetrics {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    ///
-    /// # Panics
-    /// TODO
     pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
