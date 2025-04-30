@@ -341,11 +341,11 @@ mod test {
         fn opentelemetry_metrics_generate_is_deterministic(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX
         ) {
             let config = Config {
@@ -397,11 +397,11 @@ mod test {
             seed: u64,
             total_contexts_min in 1..4_u32,
             total_contexts_max in 5..32_u32,
-            attributes_per_resource in 0..25_u32,
-            scopes_per_resource in 0..50_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 1..100_u32,
-            attributes_per_metric in 0..100_u32,
+            attributes_per_resource in 0..25_u8,
+            scopes_per_resource in 0..50_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 1..100_u8,
+            attributes_per_metric in 0..100_u8,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -443,11 +443,11 @@ mod test {
         fn counts_within_bounds(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX
         ) {
             let config = Config {
@@ -586,11 +586,11 @@ mod test {
         fn context_is_equality(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
         ) {
             let config = Config {
                 contexts: Contexts {
