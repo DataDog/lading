@@ -1,5 +1,7 @@
+use std::rc::Rc;
+
 use opentelemetry_proto::tonic::{
-    common::v1,
+    common::v1::{self, InstrumentationScope},
     metrics::{
         self,
         v1::{Metric, NumberDataPoint, metric::Data},
@@ -8,8 +10,13 @@ use opentelemetry_proto::tonic::{
 };
 use rand::{
     Rng,
-    distr::{Distribution, StandardUniform},
+    distr::{Distribution, StandardUniform, weighted::WeightedIndex},
+    seq::IndexedRandom,
 };
+
+use crate::{Error, common::config::ConfRange, common::strings};
+
+use super::{Config, UnitGenerator, generate_attributes};
 
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
@@ -94,6 +101,77 @@ pub(crate) struct MetricTemplate {
     pub kind: Kind,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct MetricTemplateGenerator {
+    attributes_per_metric: ConfRange<u32>,
+    kind_dist: WeightedIndex<u16>,
+    unit_gen: UnitGenerator,
+    str_pool: Rc<strings::Pool>,
+}
+
+impl MetricTemplateGenerator {
+    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+        Ok(Self {
+            attributes_per_metric: config.contexts.attributes_per_metric,
+            kind_dist: WeightedIndex::new([
+                u16::from(config.metric_weights.gauge),
+                u16::from(config.metric_weights.sum),
+            ])?,
+            unit_gen: UnitGenerator::new(),
+            str_pool: Rc::clone(str_pool),
+        })
+    }
+}
+
+impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
+    type Output = MetricTemplate;
+    type Error = Error;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let count = self.attributes_per_metric.sample(rng);
+        let metadata = generate_attributes(&self.str_pool, rng, count)?;
+
+        let name = self
+            .str_pool
+            .of_size_range(rng, 1_u8..16)
+            .ok_or(Error::StringGenerate)?
+            .to_owned();
+        let description = if rng.random_bool(0.1) {
+            self.str_pool
+                .of_size_range(rng, 1_u8..16)
+                .ok_or(Error::StringGenerate)?
+                .to_owned()
+        } else {
+            String::new()
+        };
+        let unit = if rng.random_bool(0.1) {
+            self.unit_gen.generate(rng)?.to_owned()
+        } else {
+            String::new()
+        };
+
+        let kind = match self.kind_dist.sample(rng) {
+            0 => Kind::Gauge,
+            1 => Kind::Sum {
+                aggregation_temporality: *[1, 2].choose(rng).expect("cannot fail"),
+                is_monotonic: rng.random_bool(0.5),
+            },
+            _ => unreachable!(),
+        };
+
+        Ok(MetricTemplate {
+            name,
+            description,
+            unit,
+            metadata,
+            kind,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Kind {
     Gauge,
@@ -138,9 +216,115 @@ pub(crate) struct ScopeTemplate {
     pub metrics: Vec<MetricTemplate>,
 }
 
+#[derive(Clone)]
+pub(crate) struct ScopeTemplateGenerator {
+    metrics_per_scope: ConfRange<u32>,
+    attributes_per_scope: ConfRange<u32>,
+    metric_generator: MetricTemplateGenerator,
+    str_pool: Rc<strings::Pool>,
+}
+
+impl ScopeTemplateGenerator {
+    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+        Ok(Self {
+            metrics_per_scope: config.contexts.metrics_per_scope,
+            attributes_per_scope: config.contexts.attributes_per_scope,
+            metric_generator: MetricTemplateGenerator::new(config, str_pool)?,
+            str_pool: Rc::clone(str_pool),
+        })
+    }
+}
+
+impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
+    type Output = ScopeTemplate;
+    type Error = Error;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let total_attributes = self.attributes_per_scope.sample(rng);
+        let attributes = super::generate_attributes(&self.str_pool, rng, total_attributes)?;
+        let scope = InstrumentationScope {
+            name: self
+                .str_pool
+                .of_size_range(rng, 1_u8..16)
+                .ok_or(Error::StringGenerate)?
+                .to_owned(),
+            version: String::new(),
+            attributes,
+            dropped_attributes_count: 0,
+        };
+
+        // metrics
+        let total_metrics = self.metrics_per_scope.sample(rng);
+        let mut metrics: Vec<MetricTemplate> = Vec::with_capacity(total_metrics as usize);
+        for _ in 0..total_metrics {
+            let m = self.metric_generator.generate(rng)?;
+            metrics.push(m);
+        }
+
+        Ok(ScopeTemplate { scope, metrics })
+    }
+}
+
 /// Static description of an OTLP Resource (context top-level).
 #[derive(Debug, Clone)]
 pub(crate) struct ResourceTemplate {
     pub resource: Option<resource::v1::Resource>,
     pub scopes: Vec<ScopeTemplate>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ResourceTemplateGenerator {
+    scopes_per_resource: ConfRange<u32>,
+    attributes_per_resource: ConfRange<u32>,
+    scope_generator: ScopeTemplateGenerator,
+    str_pool: Rc<strings::Pool>,
+}
+
+impl ResourceTemplateGenerator {
+    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+        Ok(Self {
+            scopes_per_resource: config.contexts.scopes_per_resource,
+            attributes_per_resource: config.contexts.attributes_per_resource,
+            scope_generator: ScopeTemplateGenerator::new(config, str_pool)?,
+            str_pool: Rc::clone(str_pool),
+        })
+    }
+}
+
+impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
+    type Output = ResourceTemplate;
+    type Error = Error;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let unknown_resource = self.attributes_per_resource.start() == 0;
+        // If the range of resources admits 0 the field `unknown_resources` will
+        // be set and we give half-odds on there be no `resource` field set in
+        // the message.
+        let resource = if unknown_resource && rng.random_bool(0.5) {
+            None
+        } else {
+            let count = self.attributes_per_resource.sample(rng);
+            let attributes = generate_attributes(&self.str_pool, rng, count)?;
+            let res = resource::v1::Resource {
+                attributes,
+                dropped_attributes_count: 0,
+            };
+            Some(res)
+        };
+
+        let total_scopes = self.scopes_per_resource.sample(rng);
+        let mut scopes = Vec::with_capacity(total_scopes as usize);
+        for _ in 0..total_scopes {
+            let s = self.scope_generator.generate(rng)?;
+            scopes.push(s);
+        }
+
+        Ok(ResourceTemplate { resource, scopes })
+    }
 }
