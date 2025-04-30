@@ -38,6 +38,7 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
+mod templates;
 pub(crate) mod unit;
 
 use std::io::Write;
@@ -57,6 +58,7 @@ use rand::{
     seq::IndexedRandom,
 };
 use serde::{Deserialize, Serialize as SerdeSerialize};
+use templates::{Kind, MetricTemplate, ResourceTemplate, ScopeTemplate};
 use unit::UnitGenerator;
 
 /// Configure the OpenTelemetry metric payload.
@@ -407,8 +409,9 @@ impl Distribution<Sum> for StandardUniform {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    // TODO insert a 'templates' field that will be a Vec of a yet-to-be defined
-    generator: ResourceGenerator,
+    pool: Vec<templates::ResourceTemplate>,
+    // // TODO insert a 'templates' field that will be a Vec of a yet-to-be defined
+    // generator: ResourceGenerator,
 }
 
 impl OpentelemetryMetrics {
@@ -420,10 +423,110 @@ impl OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
+        // NOTE okay this huge constructor is a mess. What I want to do is move
+        // the bulk of this to generate and generate _if_ we have not reached
+        // the cap else choose from the templates. But I've got seriously turned
+        // around somewhere.
+
+        //
+        // Ok(Self {
+        //     generator: ResourceGenerator::new(config, &str_pool)?,
+        // })
+
+        let context_cap = config.contexts.total_contexts.sample(rng);
+        // NOTE does this need to be Rc? I think not, since we get the strings
+        // we need immediately.
         let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
-        Ok(Self {
-            generator: ResourceGenerator::new(config, &str_pool)?,
-        })
+        let unit_gen = UnitGenerator::new();
+        let metric_kinds = WeightedIndex::new([
+            u16::from(config.metric_weights.gauge),
+            u16::from(config.metric_weights.sum),
+        ])?;
+
+        let mut pool = Vec::with_capacity(context_cap as usize);
+        for _ in 0..context_cap {
+            let unknown_resource = config.contexts.attributes_per_resource.start() == 0;
+            // If the range of resources admits 0 the field `unknown_resources` will
+            // be set and we give half-odds on there be no `resource` field set in
+            // the message.
+            let resource: Option<resource::v1::Resource> =
+                if !unknown_resource && rng.random_bool(0.5) {
+                    let count = config.contexts.attributes_per_resource.sample(rng);
+                    let attributes = generate_attributes(&str_pool, rng, count)?;
+                    let res = resource::v1::Resource {
+                        attributes,
+                        dropped_attributes_count: 0,
+                    };
+                    Some(res)
+                } else {
+                    None
+                };
+            let total_scopes = config.contexts.scopes_per_resource.sample(rng);
+            let mut scopes = Vec::with_capacity(total_scopes as usize);
+            for _ in 0..total_scopes {
+                // InstrumentationScope
+                let total_scope_attrs = config.contexts.attributes_per_scope.sample(rng);
+                let scope_attrs = generate_attributes(&str_pool, rng, total_scope_attrs)?;
+                let scope = InstrumentationScope {
+                    name: str_pool
+                        .of_size_range(rng, 1_u8..16)
+                        .ok_or(Error::StringGenerate)?
+                        .to_owned(),
+                    version: String::new(),
+                    attributes: scope_attrs,
+                    dropped_attributes_count: 0,
+                };
+                // Metrics
+                let total_metrics = config.contexts.metrics_per_scope.sample(rng);
+                let mut metric_tpls = Vec::with_capacity(total_metrics as usize);
+                for _ in 0..total_metrics {
+                    let meta_count = config.contexts.attributes_per_metric.sample(rng);
+                    let metadata = generate_attributes(&str_pool, rng, meta_count)?;
+                    let name = str_pool
+                        .of_size_range(rng, 1_u8..16)
+                        .ok_or(Error::StringGenerate)?
+                        .to_owned();
+
+                    let description = if rng.random_bool(0.1) {
+                        str_pool
+                            .of_size_range(rng, 1_u8..16)
+                            .ok_or(Error::StringGenerate)?
+                            .to_owned()
+                    } else {
+                        String::new()
+                    };
+                    let unit = if rng.random_bool(0.1) {
+                        unit_gen.generate(rng)?.to_owned()
+                    } else {
+                        String::new()
+                    };
+
+                    let kind = match metric_kinds.sample(rng) {
+                        0 => Kind::Gauge,
+                        1 => Kind::Sum {
+                            aggregation_temporality: *[1, 2].choose(rng).unwrap(),
+                            is_monotonic: rng.random_bool(0.5),
+                        },
+                        _ => unreachable!(),
+                    };
+
+                    metric_tpls.push(MetricTemplate {
+                        name,
+                        description,
+                        unit,
+                        metadata,
+                        kind,
+                    });
+                }
+
+                scopes.push(ScopeTemplate {
+                    scope,
+                    metrics: metric_tpls,
+                });
+            }
+            pool.push(ResourceTemplate { resource, scopes });
+        }
+        Ok(Self { pool })
     }
 }
 
@@ -435,7 +538,30 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
-        self.generator.generate(rng)
+        let tpl = self
+            .pool
+            .choose(rng)
+            .expect("template pool cannot be empty")
+            .clone();
+
+        let mut scopes = Vec::with_capacity(tpl.scopes.len());
+        for s_tpl in tpl.scopes {
+            let mut metrics = Vec::with_capacity(s_tpl.metrics.len());
+            for m_tpl in s_tpl.metrics {
+                metrics.push(m_tpl.instantiate(rng));
+            }
+            scopes.push(v1::ScopeMetrics {
+                scope: Some(s_tpl.scope.clone()),
+                metrics,
+                schema_url: String::new(),
+            });
+        }
+
+        Ok(v1::ResourceMetrics {
+            resource: tpl.resource,
+            scope_metrics: scopes,
+            schema_url: String::new(),
+        })
     }
 }
 

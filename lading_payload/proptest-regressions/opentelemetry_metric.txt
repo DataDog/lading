@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc fb4491409643aa9910513cdf45400067e8bc3d8822c5790fc5d93b0454606e52 # shrinks to seed = 8730101364625525163, max_bytes = 16
+cc 297490dc1350251d3ef3efa2d11d9c73aedf5de8b3bc09e8d09ded7278c2999c # shrinks to seed = 9775772407792899571, total_contexts_min = 0, total_contexts_max = 5, attributes_per_resource = 0, scopes_per_resource = 0, attributes_per_scope = 0, metrics_per_scope = 1, attributes_per_metric = 0
