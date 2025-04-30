@@ -507,10 +507,15 @@ where
 #[cfg(test)]
 mod test {
     use super::{Config, Contexts, OpentelemetryMetrics};
-    use crate::Serialize;
-    use crate::{Generator, common::config::ConfRange};
+    use crate::{
+        Generator, Serialize,
+        common::config::ConfRange,
+        opentelemetry_metric::v1::{ResourceMetrics, metric},
+    };
+    use opentelemetry_proto::tonic::common::v1::any_value;
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
+    use std::hash::{DefaultHasher, Hash, Hasher};
 
     // Generation of metrics must be deterministic. In order to assert this
     // property we generate two instances of OpentelemetryMetrics from disinct
@@ -715,6 +720,115 @@ mod test {
                     }
                 }
             }
+        }
+    }
+
+    /// Extracts and hashes the context from a ResourceMetrics.
+    ///
+    /// A context is defined by the unique combination of:
+    /// - Resource attributes
+    /// - Scope attributes
+    /// - Metric name, attributes, data kind, and unit
+    fn context_id(metric: &ResourceMetrics) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        // Hash resource attributes
+        if let Some(resource) = &metric.resource {
+            for attr in &resource.attributes {
+                attr.key.hash(&mut hasher);
+                if let Some(value) = &attr.value {
+                    if let Some(any_value::Value::StringValue(s)) = &value.value {
+                        s.hash(&mut hasher);
+                    }
+                }
+            }
+        }
+
+        // Hash each scope's context
+        for scope_metrics in &metric.scope_metrics {
+            // Hash scope attributes
+            if let Some(scope) = &scope_metrics.scope {
+                for attr in &scope.attributes {
+                    attr.key.hash(&mut hasher);
+                    if let Some(value) = &attr.value {
+                        if let Some(any_value::Value::StringValue(s)) = &value.value {
+                            s.hash(&mut hasher);
+                        }
+                    }
+                }
+            }
+
+            // Hash each metric's context
+            for metric in &scope_metrics.metrics {
+                // Hash metric name
+                metric.name.hash(&mut hasher);
+
+                // Hash metric attributes
+                for attr in &metric.metadata {
+                    attr.key.hash(&mut hasher);
+                    if let Some(value) = &attr.value {
+                        if let Some(any_value::Value::StringValue(s)) = &value.value {
+                            s.hash(&mut hasher);
+                        }
+                    }
+                }
+
+                // Hash metric data kind and unit
+                metric.unit.hash(&mut hasher);
+                if let Some(data) = &metric.data {
+                    match data {
+                        metric::Data::Gauge(_) => "gauge".hash(&mut hasher),
+                        metric::Data::Sum(sum) => {
+                            "sum".hash(&mut hasher);
+                            sum.aggregation_temporality.hash(&mut hasher);
+                            sum.is_monotonic.hash(&mut hasher);
+                        }
+                        // Add other metric types as needed
+                        _ => "unknown".hash(&mut hasher),
+                    }
+                }
+            }
+        }
+
+        hasher.finish()
+    }
+
+    // Ensures that the context_id function serves as an equality test, ignoring
+    // value differences etc.
+    proptest! {
+        #[test]
+        fn context_is_equality(
+            seed: u64,
+            attributes_per_resource in 0..20_u32,
+            scopes_per_resource in 0..20_u32,
+            attributes_per_scope in 0..20_u32,
+            metrics_per_scope in 0..20_u32,
+            attributes_per_metric in 0..10_u32,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+
+            // Generate two identical metrics
+            let metric1 = otel_metrics.generate(&mut rng)?;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let metric2 = otel_metrics.generate(&mut rng)?;
+
+            // Ensure that the metrics are equal.
+            assert_eq!(metric1, metric2);
+            // If the metrics are equal then their contexts must be equal.
+            assert_eq!(context_id(&metric1), context_id(&metric2));
         }
     }
 }
