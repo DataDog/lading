@@ -38,6 +38,7 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
+pub(crate) mod tags;
 mod templates;
 pub(crate) mod unit;
 
