@@ -280,9 +280,8 @@ mod test {
                 })
                 .collect::<Vec<_>>();
 
-            let margin_of_error = 3;
             let num_contexts = count_num_contexts(&tagsets);
-            prop_assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
+            prop_assert_eq!(num_contexts, desired_num_tagsets);
         }
     }
 }

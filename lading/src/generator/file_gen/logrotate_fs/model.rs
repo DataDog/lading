@@ -1092,7 +1092,7 @@ mod test {
         // read past the maximum bytes available.
         for node in state.nodes.values() {
             if let Node::File { file } = node {
-                assert!(
+                prop_assert!(
                     file.bytes_written >= file.max_offset_observed,
                     "bytes_written ({}) < max_offset_observed ({})",
                     file.bytes_written,
@@ -1104,7 +1104,7 @@ mod test {
         // Property 2: status_tick == modified_tick || status_tick == access_tick
         for node in state.nodes.values() {
             if let Node::File { file } = node {
-                assert!(
+                prop_assert!(
                     file.status_tick == file.modified_tick || file.status_tick == file.access_tick,
                     "status_tick ({}) != modified_tick ({}) or access_tick ({})",
                     file.status_tick,
@@ -1134,9 +1134,12 @@ mod test {
                         }
 
                         if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
-                            assert!(!peer_file.unlinked, "File was found in peer chain unlinked");
+                            prop_assert!(
+                                !peer_file.unlinked,
+                                "File was found in peer chain unlinked"
+                            );
                             expected_ordinal += 1;
-                            assert_eq!(
+                            prop_assert_eq!(
                                 peer_file.ordinal,
                                 expected_ordinal,
                                 "Expected ordinal {expected_ordinal}, got {peer_file_ordinal}",
@@ -1159,7 +1162,7 @@ mod test {
                 if file.unlinked {
                     continue;
                 }
-                assert!(
+                prop_assert!(
                     file.ordinal <= state.max_rotations,
                     "Ordinal {ordinal} exceeds max_rotations {max_rotations}: {state:#?}",
                     ordinal = file.ordinal,
@@ -1199,7 +1202,7 @@ mod test {
                 if let Some(names) = state.group_names.get(file.group_id as usize) {
                     if let Some(expected_name) = names.get(file.ordinal as usize) {
                         let actual_name = state.get_name(inode).unwrap_or("");
-                        assert_eq!(
+                        prop_assert_eq!(
                             actual_name,
                             expected_name.as_str(),
                             "Inode {inode} name mismatch: expected {expected_name}, got {actual_name}",
@@ -1229,8 +1232,9 @@ mod test {
                     file.created_tick,
                     end_tick,
                 );
-                assert_eq!(
-                    file.bytes_written, expected_bytes,
+                prop_assert_eq!(
+                    file.bytes_written,
+                    expected_bytes,
                     "bytes_written ({}) does not match expected_bytes_written ({expected_bytes}) for file with inode {inode}",
                     file.bytes_written,
                 );
@@ -1253,7 +1257,7 @@ mod test {
                 let max_size = state
                     .max_bytes_per_file
                     .saturating_add(2 * file.bytes_per_tick);
-                assert!(
+                prop_assert!(
                     file.bytes_written >= min_size && file.bytes_written <= max_size,
                     "Rotated file size {actual} not in expected range [{min_size}, {max_size}]",
                     actual = file.bytes_written
@@ -1273,7 +1277,7 @@ mod test {
                 if file.unlinked && file.read_only {
                     if file.open_handles > 0 {
                         // Should remain in state.nodes
-                        assert!(
+                        prop_assert!(
                             state.nodes.contains_key(&inode),
                             "Unlinked, read-only file with open handles should remain in state.nodes"
                         );
@@ -1291,13 +1295,13 @@ mod test {
                             })
                             .collect();
 
-                        assert!(
+                        prop_assert!(
                             !valid_handles.is_empty(),
                             "Unlinked, read-only file with open handles should have valid file handles"
                         );
                     } else {
                         // Should be removed from state.nodes after GC
-                        assert!(
+                        prop_assert!(
                             !state.nodes.contains_key(&inode),
                             "Unlinked, read-only file with zero open handles should be removed from state.nodes"
                         );

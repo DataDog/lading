@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 9c7455b354ddc3d731190002edf0877dd19bf97e09f4bb0450ec2306334b07ff # shrinks to seed = 0, desired_num_tagsets = 1
+cc b3ca67731c6c3eb6721e97865edaa68be560099593954e61d2e5265102389b8a # shrinks to seed = 3082872044793773844, desired_num_tagsets = 5, unique_tag_ratio = 0.1

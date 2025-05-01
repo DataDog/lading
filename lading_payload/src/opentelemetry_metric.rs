@@ -668,9 +668,9 @@ mod test {
             let metric2 = otel_metrics.generate(&mut rng)?;
 
             // Ensure that the metrics are equal.
-            assert_eq!(metric1, metric2);
+            prop_assert_eq!(metric1, metric2);
             // If the metrics are equal then their contexts must be equal.
-            assert_eq!(context_id(&metric1), context_id(&metric2));
+            prop_assert_eq!(context_id(&metric1), context_id(&metric2));
         }
     }
 
