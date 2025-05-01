@@ -1,9 +1,8 @@
 //! Tag generation for OpenTelemetry metric payloads
 use std::rc::Rc;
 
-use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
-
 use crate::{Error, common::config::ConfRange, common::strings::Pool};
+use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TagGenerator {
@@ -39,7 +38,7 @@ impl TagGenerator {
 }
 
 impl<'a> crate::Generator<'a> for TagGenerator {
-    type Output = Vec<KeyValue>;
+    type Output = Rc<Vec<KeyValue>>;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
@@ -56,7 +55,7 @@ impl<'a> crate::Generator<'a> for TagGenerator {
             .inner
             .generate(rng)
             .map_err(|_| Error::StringGenerate)?;
-        let mut attributes = Vec::with_capacity(tagset.len());
+        let mut attributes = Vec::<KeyValue>::with_capacity(tagset.len());
 
         for tag in tagset {
             let key = self
@@ -76,6 +75,6 @@ impl<'a> crate::Generator<'a> for TagGenerator {
             });
         }
 
-        Ok(attributes)
+        Ok(Rc::new(attributes))
     }
 }

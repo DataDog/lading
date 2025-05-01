@@ -15,7 +15,7 @@ use tokio::{
     sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{Level, error, info, span, warn};
+use tracing::{Level, debug, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -489,8 +489,6 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
-    let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
@@ -500,6 +498,9 @@ where
         ?total_bytes,
         "Constructing requested block cache"
     );
+    let mut block_sizes_skipped = 0;
+    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
+    let mut bytes_remaining = total_bytes;
 
     let start = Instant::now();
     let mut next_minute = 1;

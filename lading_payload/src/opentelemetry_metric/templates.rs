@@ -54,7 +54,7 @@ pub(crate) struct MetricTemplate {
     pub name: String,
     pub description: String,
     pub unit: String,
-    pub metadata: Vec<v1::KeyValue>,
+    pub metadata: Rc<Vec<v1::KeyValue>>,
     pub kind: Kind,
 }
 
@@ -176,7 +176,7 @@ impl MetricTemplate {
             description: self.description.clone(),
             unit: self.unit.clone(),
             data: Some(data),
-            metadata: self.metadata.clone(),
+            metadata: self.metadata.as_slice().to_owned(),
         }
     }
 }
@@ -244,7 +244,7 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
                     .ok_or(Error::StringGenerate)?
                     .to_owned(),
                 version: String::new(),
-                attributes,
+                attributes: attributes.as_slice().to_owned(),
                 dropped_attributes_count: 0,
             })
         };
@@ -315,7 +315,7 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
         } else {
             let attributes = self.tags.generate(rng)?;
             let res = resource::v1::Resource {
-                attributes,
+                attributes: attributes.as_slice().to_owned(),
                 dropped_attributes_count: 0,
             };
             Some(res)
