@@ -18,7 +18,7 @@ use tokio::{
     sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{Level, error, info, span, warn};
+use tracing::{Level, debug, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -478,8 +478,6 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
-    let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
     let mut rejectset = RejectSet::new((max_block_size / 32).min(1));
 
@@ -488,6 +486,9 @@ where
         ?total_bytes,
         "Constructing requested block cache"
     );
+    let mut block_sizes_skipped = 0;
+    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
+    let mut bytes_remaining = total_bytes;
 
     let start = Instant::now();
     let mut next_minute = 1;
@@ -515,6 +516,12 @@ where
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
+                block_sizes_skipped += 1;
+                debug!(
+                    ?block_sizes_skipped,
+                    "EmptyBlock result with block_size: {block_size}"
+                );
+
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
                 // break. We do know that there's some true minimum viable size
