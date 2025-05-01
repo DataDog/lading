@@ -659,18 +659,20 @@ mod test {
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let metric1 = otel_metrics1.generate(&mut rng)?;
 
-            // Generate two identical metrics
-            let metric1 = otel_metrics.generate(&mut rng)?;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
-            let metric2 = otel_metrics.generate(&mut rng)?;
+            let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let metric2 = otel_metrics2.generate(&mut rng)?;
+
+            let context_id1 = context_id(&metric1);
+            let context_id2 = context_id(&metric2);
 
             // Ensure that the metrics are equal.
             prop_assert_eq!(metric1, metric2);
             // If the metrics are equal then their contexts must be equal.
-            prop_assert_eq!(context_id(&metric1), context_id(&metric2));
+            prop_assert_eq!(context_id1, context_id2);
         }
     }
 
