@@ -174,11 +174,11 @@ mod test {
                 })
                 .collect::<Vec<_>>();
 
-            assert_eq!(first_batch.len(), second_batch.len());
+            prop_assert_eq!(first_batch.len(), second_batch.len());
             for i in 0..first_batch.len() {
                 let first = &first_batch[i];
                 let second = &second_batch[i];
-                assert_eq!(first, second);
+                prop_assert_eq!(first, second);
             }
         }
     }
@@ -205,13 +205,13 @@ mod test {
                 for tag in &tagset {
                     let start = tag_size_range.start().into();
                     let end = tag_size_range.end().into();
-                    debug_assert!(tag.len() <= end, "tag len: {}, tag_size_range end: {end}", tag.len());
-                    debug_assert!(tag.len() >= start, "tag len: {}, tag_size_range start: {start}", tag.len());
+                    prop_assert!(tag.len() <= end, "tag len: {}, tag_size_range end: {end}", tag.len());
+                    prop_assert!(tag.len() >= start, "tag len: {}, tag_size_range start: {start}", tag.len());
                     let num_delimiters = tag.chars().filter(|c| *c == ':').count();
-                    assert_eq!(num_delimiters, 1);
+                    prop_assert_eq!(num_delimiters, 1);
                 }
-                assert!(tagset.len() <= tags_per_msg_range.end() as usize);
-                assert!(tagset.len() >= tags_per_msg_range.start() as usize);
+                prop_assert!(tagset.len() <= tags_per_msg_range.end() as usize);
+                prop_assert!(tagset.len() >= tags_per_msg_range.start() as usize);
             }
         }
     }
@@ -246,7 +246,7 @@ mod test {
                 .collect::<Vec<_>>();
 
             let num_contexts = count_num_contexts(&tagsets);
-            assert_eq!(num_contexts, desired_num_tagsets);
+            prop_assert_eq!(num_contexts, desired_num_tagsets);
         }
     }
 
@@ -284,7 +284,7 @@ mod test {
 
             let margin_of_error = 3;
             let num_contexts = count_num_contexts(&tagsets);
-            assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
+            prop_assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
         }
     }
 }

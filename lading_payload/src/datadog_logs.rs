@@ -182,7 +182,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            debug_assert!(
+            prop_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
                 std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")

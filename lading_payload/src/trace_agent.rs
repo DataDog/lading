@@ -283,7 +283,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
-            debug_assert!(
+            prop_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
                 std::str::from_utf8(&bytes)?
@@ -300,7 +300,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
-            debug_assert!(
+            prop_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
                 std::str::from_utf8(&bytes)?

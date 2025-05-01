@@ -1370,7 +1370,7 @@ mod test {
                 Operation::Open => {
                     let inode = random_inode(&mut rng, &state);
                     if let Some(handle) = state.open_file(now, inode) {
-                        assert!(handle.inode == inode);
+                        prop_assert!(handle.inode == inode);
                         open_handles.insert(handle.inode, handle);
                     }
                 }

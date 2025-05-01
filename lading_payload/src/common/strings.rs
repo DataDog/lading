@@ -228,7 +228,7 @@ mod test {
             let pool = Pool::with_size_and_alphabet(&mut rng, max_bytes, ALPHANUM);
             if let Some(s) = pool.of_size(&mut rng, of_size_bytes) {
                 for c in s.bytes() {
-                    assert!(ALPHANUM.contains(&c));
+                    prop_assert!(ALPHANUM.contains(&c));
                 }
             }
         }
@@ -244,7 +244,7 @@ mod test {
 
             let pool = Pool::with_size_and_alphabet(&mut rng, max_bytes, ALPHANUM);
             if let Some(s) = pool.of_size(&mut rng, of_size_bytes) {
-                assert!(s.len() == of_size_bytes);
+                prop_assert!(s.len() == of_size_bytes);
             }
         }
     }
@@ -260,7 +260,7 @@ mod test {
 
             let pool = Pool::with_size_and_alphabet(&mut rng, max_bytes, ALPHANUM);
             if pool.of_size(&mut rng, of_size_bytes).is_none() {
-                assert!(of_size_bytes >= max_bytes);
+                prop_assert!(of_size_bytes >= max_bytes);
             }
         }
     }

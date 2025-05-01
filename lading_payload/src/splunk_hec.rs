@@ -204,7 +204,7 @@ mod test {
 
             let mut bytes = Vec::with_capacity(max_bytes);
             hec.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            assert!(bytes.len() <= max_bytes);
+            prop_assert!(bytes.len() <= max_bytes);
         }
     }
 
