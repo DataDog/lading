@@ -18,7 +18,6 @@ use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, common::config::ConfRange, common::strings};
 
 const UNIQUE_TAG_RATIO: f32 = 0.75;
-
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Ndp
@@ -157,7 +156,7 @@ pub(crate) enum Kind {
 impl MetricTemplate {
     /// Instantiate the template into a concrete `v1::Metric`
     pub(crate) fn instantiate<R: Rng + ?Sized>(&self, rng: &mut R) -> Metric {
-        let total_data_points = rng.random_range(0..60);
+        let total_data_points = rng.random_range(1..60);
         let data_points = (0..total_data_points)
             .map(|_| rng.random::<Ndp>().0)
             .collect();
