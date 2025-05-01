@@ -183,7 +183,7 @@ impl MetricTemplate {
 /// Static description of a Scope and its metrics.
 #[derive(Debug, Clone)]
 pub(crate) struct ScopeTemplate {
-    pub scope: v1::InstrumentationScope,
+    pub scope: Option<InstrumentationScope>,
     pub metrics: Vec<MetricTemplate>,
 }
 
@@ -193,6 +193,7 @@ pub(crate) struct ScopeTemplateGenerator {
     metric_generator: MetricTemplateGenerator,
     str_pool: Rc<strings::Pool>,
     tags: TagGenerator,
+    attributes_per_scope: ConfRange<u8>,
 }
 
 impl ScopeTemplateGenerator {
@@ -210,7 +211,7 @@ impl ScopeTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
-            0.25,
+            0.75,
         )?;
 
         Ok(Self {
@@ -218,6 +219,7 @@ impl ScopeTemplateGenerator {
             metric_generator: MetricTemplateGenerator::new(config, str_pool, rng)?,
             str_pool: Rc::clone(str_pool),
             tags,
+            attributes_per_scope: config.contexts.attributes_per_scope,
         })
     }
 }
@@ -230,17 +232,20 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let attributes = self.tags.generate(rng)?;
-
-        let scope = InstrumentationScope {
-            name: self
-                .str_pool
-                .of_size_range(rng, 1_u8..16)
-                .ok_or(Error::StringGenerate)?
-                .to_owned(),
-            version: String::new(),
-            attributes,
-            dropped_attributes_count: 0,
+        let scope = if self.attributes_per_scope.start() == 0 {
+            None
+        } else {
+            let attributes = self.tags.generate(rng)?;
+            Some(InstrumentationScope {
+                name: self
+                    .str_pool
+                    .of_size_range(rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?
+                    .to_owned(),
+                version: String::new(),
+                attributes,
+                dropped_attributes_count: 0,
+            })
         };
 
         let total_metrics = self.metrics_per_scope.sample(rng);
@@ -284,7 +289,7 @@ impl ResourceTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
-            0.25,
+            0.75,
         )?;
 
         Ok(Self {

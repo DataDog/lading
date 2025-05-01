@@ -259,7 +259,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
                 metrics.push(m_tpl.instantiate(rng));
             }
             scopes.push(v1::ScopeMetrics {
-                scope: Some(s_tpl.scope.clone()),
+                scope: s_tpl.scope.clone(),
                 metrics,
                 schema_url: String::new(),
             });
@@ -326,6 +326,7 @@ mod test {
     };
     use opentelemetry_proto::tonic::common::v1::any_value;
     use proptest::prelude::*;
+    use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
     use std::{
         collections::HashSet,
@@ -431,6 +432,79 @@ mod test {
             prop_assert!(bounded_above,
                          "expected {} ≤ {}",
                          actual_contexts, total_contexts_max);
+        }
+    }
+
+    // We want to be sure that the payloads are not being left empty.
+    proptest! {
+        #[test]
+        fn payload_is_at_least_half_of_max_bytes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            max_bytes in 16u16..u16::MAX
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+
+            assert!(!bytes.is_empty());
+        }
+    }
+
+    // We want to know that every payload produced by this type actually
+    // deserializes as a collection of OTEL metrics.
+    proptest! {
+        #[test]
+        fn payload_deserializes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            max_bytes: u16
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+
+            let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 
