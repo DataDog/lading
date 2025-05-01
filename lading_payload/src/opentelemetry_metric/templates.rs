@@ -17,6 +17,8 @@ use rand::{
 use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, common::config::ConfRange, common::strings};
 
+const UNIQUE_TAG_RATIO: f32 = 0.75;
+
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Ndp
@@ -80,7 +82,7 @@ impl MetricTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
-            0.25,
+            UNIQUE_TAG_RATIO,
         )?;
 
         Ok(Self {
@@ -211,7 +213,7 @@ impl ScopeTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
-            0.75,
+            UNIQUE_TAG_RATIO,
         )?;
 
         Ok(Self {
@@ -289,7 +291,7 @@ impl ResourceTemplateGenerator {
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
             Rc::clone(str_pool),
-            0.75,
+            UNIQUE_TAG_RATIO,
         )?;
 
         Ok(Self {
@@ -320,6 +322,14 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
             Some(res)
         };
 
+        // NOTE we are aware that this may under-generate unique contexts. In
+        // particular, imagine that the user has configured things such that the
+        // natural entropy of the pool is very low, meaning most scopes produced
+        // are "equal". We will produce total_scopes scopes that have less
+        // uniqueness than the amount generated.
+        //
+        // This is a chronic issue with our current approach across multiple
+        // payloads and will require a deep think to repair.
         let total_scopes = self.scopes_per_resource.sample(rng);
         let mut scopes = Vec::with_capacity(total_scopes as usize);
         for _ in 0..total_scopes {
