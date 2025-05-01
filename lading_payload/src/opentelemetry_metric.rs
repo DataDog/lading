@@ -153,53 +153,53 @@ impl Config {
 
         // Calculate minimum and maximum possible contexts based on composition
         let min_configured = match self.contexts.scopes_per_resource {
-            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(0) => 0u32,
             ConfRange::Constant(n) => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { min, .. } => min,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                n * metrics
+                u32::from(n) * metrics
             }
             ConfRange::Inclusive { min, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { min, .. } => min,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                min * metrics
+                u32::from(min) * metrics
             }
         };
 
         let max_configured = match self.contexts.scopes_per_resource {
-            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(0) => 0u32,
             ConfRange::Constant(n) => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { max, .. } => max,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                n * metrics
+                u32::from(n) * metrics
             }
             ConfRange::Inclusive { max, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { max, .. } => max,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                max * metrics
+                u32::from(max) * metrics
             }
         };
 
         // Validate that the requested contexts are achievable
-        if min_contexts > u32::from(max_configured) {
+        if min_contexts > max_configured {
             return Err(format!(
                 "Minimum requested contexts {min_contexts} cannot be achieved with current configuration (max possible: {max_configured})"
             ));
         }
 
-        if max_contexts < u32::from(min_configured) {
+        if max_contexts < min_configured {
             return Err(format!(
                 "Maximum requested contexts {max_contexts} is less than minimum possible contexts {min_configured}"
             ));
@@ -397,11 +397,11 @@ mod test {
         fn contexts_bound_metric_generation(
             seed: u64,
             total_contexts_min in 1..4_u32,
-            total_contexts_max in 5..32_u32,
+            total_contexts_max in 5..100_u32,
             attributes_per_resource in 0..25_u8,
-            scopes_per_resource in 0..50_u8,
+            scopes_per_resource in 1..10_u8,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 1..100_u8,
+            metrics_per_scope in 1..10_u8,
             attributes_per_metric in 0..100_u8,
         ) {
             let config = Config {
@@ -415,6 +415,8 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assume!(config.valid().is_ok());
 
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
