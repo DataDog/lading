@@ -106,3 +106,7 @@ doctest = false
 
 [[bin]]
 name = "lading"
+
+[[bin]]
+name = "blockgen"
+path = "src/bin/blockgen.rs"
