@@ -5,11 +5,14 @@
 //! from that, decoupling the create/send operations. This module is the
 //! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
 //! -- are created.
+mod rejectset;
+
 use std::num::NonZeroU32;
 
 use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
 use rand::Rng;
+use rejectset::RejectSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::mpsc::{Sender, error::SendError},
@@ -478,6 +481,8 @@ where
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
+    let mut rejectset = RejectSet::new((max_block_size / 32).min(1));
+
     info!(
         ?max_block_size,
         ?total_bytes,
@@ -500,6 +505,10 @@ where
         // max_block_size).
         let block_size = rng.random_range(min_block_size..max_block_size);
 
+        // Skip block sizes that are known to fail
+        if rejectset.is_rejected(block_size) {
+            continue;
+        }
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
                 bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
@@ -515,6 +524,7 @@ where
                 // by -75% -- an arbitrary figure -- and set that as the new
                 // minimum block size.
                 min_block_size = (f64::from(block_size) * 0.25) as u32;
+                rejectset.reject(block_size);
             }
             Err(e) => {
                 error!("Unexpected error during block construction: {e}");

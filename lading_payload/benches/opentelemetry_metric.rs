@@ -17,7 +17,7 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
     let mb = 1_000_000; // 1 MiB
 
     let mut group = c.benchmark_group("opentelemetry_metric_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    for size in &[mb / 2, mb] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
