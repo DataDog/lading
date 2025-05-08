@@ -4,11 +4,15 @@ use std::{io, num::NonZeroU32};
 
 use byte_unit::{Unit, UnitType};
 use clap::Parser;
+use jemallocator::Jemalloc;
 use lading::generator::http::Method;
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const UDP_PACKET_LIMIT_BYTES: byte_unit::Byte =
     byte_unit::Byte::from_u64_with_unit(65_507, Unit::B).expect("valid bytes");
