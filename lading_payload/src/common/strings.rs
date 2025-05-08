@@ -22,7 +22,10 @@ pub(crate) struct Pool {
 }
 
 /// Opaque 'str' handle for the pool
-pub(crate) type Handle = (usize, usize);
+///
+// The pool will not index more than 2**32. Using a type smaller than `usize`
+// allows a more compact representation.
+pub(crate) type Handle = (u32, u32);
 
 impl Pool {
     /// Create a new instance of `Pool` with the default alpha-numeric character
@@ -31,6 +34,7 @@ impl Pool {
     where
         R: rand::Rng + ?Sized,
     {
+        assert!(u32::try_from(bytes).is_ok());
         Self::with_size_and_alphabet(rng, bytes, ALPHANUM)
     }
 
@@ -97,10 +101,18 @@ impl Pool {
         }
 
         let max_lower_idx = self.inner.len() - bytes;
-        let lower_idx = rng.random_range(0..max_lower_idx);
-        let upper_idx = lower_idx + bytes;
+        let lower_idx: usize = rng.random_range(0..max_lower_idx);
+        let upper_idx: usize = lower_idx + bytes;
 
-        Some((&self.inner[lower_idx..upper_idx], (lower_idx, bytes)))
+        Some((
+            &self.inner[lower_idx..upper_idx],
+            (
+                lower_idx
+                    .try_into()
+                    .expect("must fit into u32 by construction"),
+                bytes.try_into().expect("must fit in u32 by construction"),
+            ),
+        ))
     }
 
     /// Return a `&str` from the interior storage with size selected from `bytes_range`. Result will
@@ -120,8 +132,11 @@ impl Pool {
 
     /// Given an opaque handle returned from `*_with_handle`, return the &str it represents
     #[must_use]
+    #[inline]
     pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
         let (offset, length) = handle;
+        let offset = offset as usize;
+        let length = length as usize;
         if offset + length < self.inner.len() {
             let str = &self.inner[offset..offset + length];
             Some(str)
