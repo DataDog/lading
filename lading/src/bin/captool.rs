@@ -7,12 +7,16 @@ use async_compression::tokio::bufread::ZstdDecoder;
 use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
+use jemallocator::Jemalloc;
 use lading_capture::json::{Line, MetricKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::LinesStream;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
