@@ -7,7 +7,6 @@ use std::cmp;
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub enum ConfRange<T>
 where
     T: PartialEq + cmp::PartialOrd + Clone + Copy,
