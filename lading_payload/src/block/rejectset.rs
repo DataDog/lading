@@ -82,7 +82,7 @@ impl RejectSet {
     fn insert_interval(&mut self, mut start: u32, mut end: u32) {
         // merge with any low interval that touches
         if let Some((&lstart, &lend)) = self.intervals.range(..=start).next_back() {
-            if lend.wrapping_add(1) >= start {
+            if start.saturating_sub(lend) <= self.epsilon {
                 start = start.min(lstart);
                 end = end.max(lend);
                 self.intervals.remove(&lstart);
@@ -90,7 +90,7 @@ impl RejectSet {
         }
         // merge any high intervals that touch
         while let Some((&hstart, &hend)) = self.intervals.range(start..).next() {
-            if hstart.wrapping_sub(1) <= end {
+            if hstart.saturating_sub(end) <= self.epsilon {
                 start = start.min(hstart);
                 end = end.max(hend);
                 self.intervals.remove(&hstart);
