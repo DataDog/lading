@@ -479,6 +479,7 @@ where
     R: Rng + ?Sized,
 {
     let mut min_block_size = 0;
+    let mut max_valid_block_size = 0;
     let mut rejectset = RejectSet::new((max_block_size * 4).min(1));
 
     info!(
@@ -514,7 +515,11 @@ where
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
                 block_sizes_used += 1;
-                bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
+                let total_bytes = block.total_bytes.get();
+                if total_bytes > max_valid_block_size {
+                    max_valid_block_size = total_bytes;
+                }
+                bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
@@ -579,8 +584,11 @@ where
         let min_block_str = Byte::from_u64(min_block_size.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
+        let max_valid_block_str = Byte::from_u64(max_valid_block_size.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
         info!(
-            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}"
+            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}, maximum valid {max_valid_block_str}"
         );
 
         Ok(block_cache)
