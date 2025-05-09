@@ -493,6 +493,7 @@ where
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
+
     info!(
         ?max_block_size,
         ?total_bytes,
