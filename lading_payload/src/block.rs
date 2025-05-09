@@ -479,7 +479,7 @@ where
     R: Rng + ?Sized,
 {
     let mut min_block_size = 0;
-    let mut rejectset = RejectSet::new((max_block_size / 32).min(1));
+    let mut rejectset = RejectSet::new((max_block_size * 4).min(1));
 
     info!(
         ?max_block_size,
@@ -487,6 +487,7 @@ where
         "Constructing requested block cache"
     );
     let mut block_sizes_skipped = 0;
+    let mut block_sizes_used = 0;
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
 
@@ -512,6 +513,7 @@ where
         }
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
+                block_sizes_used += 1;
                 bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
                 block_cache.push(block);
             }
@@ -519,7 +521,11 @@ where
                 block_sizes_skipped += 1;
                 debug!(
                     ?block_sizes_skipped,
-                    "EmptyBlock result with block_size: {block_size}"
+                    ?block_sizes_used,
+                    ?min_block_size,
+                    ?block_size,
+                    ?max_block_size,
+                    "EmptyBlock result"
                 );
 
                 // It might be that `block_size` could not be constructed
