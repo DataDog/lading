@@ -1,6 +1,10 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
-use lading_payload::{OpentelemetryMetrics, Serialize, opentelemetry_metric::Config};
+use lading_payload::common::config::ConfRange;
+use lading_payload::{
+    OpentelemetryMetrics, Serialize,
+    opentelemetry_metric::{Config, Contexts, MetricWeights},
+};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
@@ -8,7 +12,17 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
     c.bench_function("opentelemetry_metric_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19690716);
-            let config = Config::default();
+            let config = Config {
+                metric_weights: MetricWeights { gauge: 50, sum: 50 },
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(100),
+                    attributes_per_resource: ConfRange::Inclusive { min: 1, max: 64 },
+                    scopes_per_resource: ConfRange::Inclusive { min: 1, max: 32 },
+                    attributes_per_scope: ConfRange::Inclusive { min: 0, max: 4 },
+                    metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
+                    attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
+                },
+            };
             let _ot = OpentelemetryMetrics::new(config, &mut rng)
                 .expect("failed to create metrics generator");
         })
@@ -24,7 +38,17 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let config = Config::default();
+                let config = Config {
+                    metric_weights: MetricWeights { gauge: 50, sum: 50 },
+                    contexts: Contexts {
+                        total_contexts: ConfRange::Constant(100),
+                        attributes_per_resource: ConfRange::Inclusive { min: 1, max: 64 },
+                        scopes_per_resource: ConfRange::Inclusive { min: 1, max: 32 },
+                        attributes_per_scope: ConfRange::Inclusive { min: 0, max: 4 },
+                        metrics_per_scope: ConfRange::Inclusive { min: 1, max: 128 },
+                        attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
+                    },
+                };
                 let ot = OpentelemetryMetrics::new(config, &mut rng)
                     .expect("failed to create metrics generator");
                 let mut writer = Vec::with_capacity(size);

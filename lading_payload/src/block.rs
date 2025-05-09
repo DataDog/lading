@@ -18,7 +18,7 @@ use tokio::{
     sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{Level, error, info, span, warn};
+use tracing::{Level, debug, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -478,16 +478,19 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
-    let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
-    let mut rejectset = RejectSet::new((max_block_size / 32).min(1));
+    let mut max_valid_block_size = 0;
+    let mut rejectset = RejectSet::new((max_block_size * 4).min(1));
 
     info!(
         ?max_block_size,
         ?total_bytes,
         "Constructing requested block cache"
     );
+    let mut block_sizes_skipped = 0;
+    let mut block_sizes_used = 0;
+    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
+    let mut bytes_remaining = total_bytes;
 
     let start = Instant::now();
     let mut next_minute = 1;
@@ -511,10 +514,25 @@ where
         }
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
-                bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
+                block_sizes_used += 1;
+                let total_bytes = block.total_bytes.get();
+                if total_bytes > max_valid_block_size {
+                    max_valid_block_size = total_bytes;
+                }
+                bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
+                block_sizes_skipped += 1;
+                debug!(
+                    ?block_sizes_skipped,
+                    ?block_sizes_used,
+                    ?min_block_size,
+                    ?block_size,
+                    ?max_block_size,
+                    "EmptyBlock result"
+                );
+
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
                 // break. We do know that there's some true minimum viable size
@@ -566,8 +584,11 @@ where
         let min_block_str = Byte::from_u64(min_block_size.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
+        let max_valid_block_str = Byte::from_u64(max_valid_block_size.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
         info!(
-            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}"
+            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}, maximum valid {max_valid_block_str}"
         );
 
         Ok(block_cache)

@@ -43,6 +43,7 @@ http-serde = "2.1"
 hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
 is_executable = "1.0.4"
+jemallocator = { version = "0.5" }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
