@@ -8,6 +8,7 @@ use opentelemetry_proto::tonic::{
     },
     resource,
 };
+use prost::Message;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
@@ -178,6 +179,25 @@ impl MetricTemplate {
             data: Some(data),
             metadata: self.metadata.as_slice().to_owned(),
         }
+    }
+
+    /// Shrink self by removing data-points until `encoded_len() <= limit`.
+    pub(crate) fn fit_into(&self, limit: usize, rng: &mut impl Rng) -> metrics::v1::Metric {
+        let mut data = self.instantiate(rng);
+
+        while data.encoded_len() + 2 > limit {
+            let res = match data.data.as_mut() {
+                Some(Data::Gauge(g)) => g.data_points.pop(),
+                Some(Data::Sum(s)) => s.data_points.pop(),
+                None => None,
+                _ => unreachable!(),
+            };
+
+            if res.is_none() {
+                break; // cannot shrink further
+            }
+        }
+        data
     }
 }
 

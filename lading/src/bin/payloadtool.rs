@@ -8,7 +8,7 @@ use jemallocator::Jemalloc;
 use lading::generator::http::Method;
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
 #[global_allocator]
@@ -55,7 +55,7 @@ fn generate_and_check(
         block::Cache::Fixed { blocks, .. } => blocks,
     };
     info!("Payload generation took {:?}", start.elapsed());
-    debug!("Payload: {:#?}", blocks);
+    trace!("Payload: {:#?}", blocks);
 
     let mut total_generated_bytes: u32 = 0;
     for block in blocks.iter() {
@@ -73,8 +73,10 @@ fn generate_and_check(
             .get_appropriate_unit(UnitType::Binary)
             .to_string();
         warn!(
-            "Generator failed to generate {total_requested_bytes_str}, instead only found {total_generated_bytes_str} of data"
+            "Generator failed to generate {total_requested_bytes_str}, producing {total_generated_bytes_str} of data"
         )
+    } else {
+        info!("Generator succeeded in generating {total_requested_bytes_str} of data")
     }
 
     Ok(())

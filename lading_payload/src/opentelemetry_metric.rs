@@ -49,10 +49,12 @@ use crate::{Error, Generator, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
-use rand::{Rng, seq::IndexedRandom};
+use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use templates::ResourceTemplateGenerator;
 use unit::UnitGenerator;
+
+const SMALLEST_PROTOBUF: usize = 8; // safety buffer, smallest useful protobuf
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -284,62 +286,154 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
 impl crate::Serialize for OpentelemetryMetrics {
     fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
-        R: Rng + Sized,
+        R: rand::Rng + Sized,
         W: Write,
     {
-        // What we're making here is the ExportMetricServiceRequest. It has 5
-        // bytes of fixed values plus a varint-encoded message length field to
-        // it. The worst case for the message length field is the max message
-        // size divided by 0b0111_1111.
-        //
-        // The user _does not_ set the number of Resoures per request -- we pack
-        // those in until max_bytes -- but they do set the scopes per request
-        // etc. All of that is transparent here, handled by the generators
-        // above.
+        // Scott's idea to generate directly into the protobuf
+
+        let header_overhead = 1 /*tag*/ + max_bytes.div_ceil(0x7F);
         let mut bytes_remaining = max_bytes
-            .checked_sub(5 + max_bytes.div_ceil(0b0111_1111))
+            .checked_sub(header_overhead)
             .ok_or(Error::Serialize)?;
-        // Each ResourceMetrics contains:
-        //
-        // - Resource with attributes
-        // - ScopeMetrics array
-        // - Each scope has metrics array
-        //
-        // Give or take, figure maybe 64 bytes a pop?
-        let estimated_resources = bytes_remaining / 64;
-        let mut acc = Vec::with_capacity(estimated_resources.min(128));
 
-        // Generate resources as space allows. We will always generate at least
-        // one, whether it fits or not.
-        loop {
-            let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
-            let len = resource.encoded_len() + 2;
-            match bytes_remaining.checked_sub(len) {
-                Some(remainder) => {
-                    acc.push(resource);
-                    bytes_remaining = remainder;
-                }
-                None => break,
-            }
-        }
+        let mut resources = Vec::new();
 
-        let proto =
-            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
-                resource_metrics: acc,
+        'resource: while bytes_remaining >= SMALLEST_PROTOBUF {
+            let tpl = self
+                .pool
+                .choose(&mut rng)
+                .expect("template pool cannot be empty");
+
+            let mut res = opentelemetry_proto::tonic::metrics::v1::ResourceMetrics {
+                resource: tpl.resource.clone(),
+                scope_metrics: Vec::new(),
+                schema_url: String::new(),
             };
 
-        let mut buf = self.scratch.borrow_mut();
-        let needed = proto.encoded_len();
-        let capacity = buf.capacity();
-        buf.clear(); // keep the allocation, drop the contents
-        if capacity < needed {
-            buf.reserve(needed - capacity); // at most one malloc here
+            // Fill scopes until we exhaust budget
+            for s_tpl in &tpl.scopes {
+                let mut scope = opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
+                    scope: s_tpl.scope.clone(),
+                    metrics: Vec::new(),
+                    schema_url: String::new(),
+                };
+
+                for m_tpl in &s_tpl.metrics {
+                    // Space needed by res + scope so far plus field tag/len
+                    let envelope = res.encoded_len() + scope.encoded_len() + 2;
+                    if envelope + SMALLEST_PROTOBUF > bytes_remaining {
+                        break; // out of room already
+                    }
+
+                    let budget = bytes_remaining - envelope;
+                    let metric = m_tpl.fit_into(budget, &mut rng);
+
+                    let metric_size = metric.encoded_len() + 2;
+                    if metric_size > budget {
+                        break; // trimmed metric is too large
+                    }
+
+                    scope.metrics.push(metric);
+                    bytes_remaining -= metric_size;
+                }
+
+                if !scope.metrics.is_empty() {
+                    res.scope_metrics.push(scope);
+                }
+
+                if bytes_remaining < SMALLEST_PROTOBUF {
+                    break;
+                }
+            }
+
+            if res.scope_metrics.is_empty() {
+                break 'resource;
+            }
+
+            resources.push(res);
         }
-        proto.encode(&mut *buf)?;
-        writer.write_all(&buf)?;
+
+        let request =
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
+                resource_metrics: resources,
+            };
+
+        let needed = request.encoded_len();
+        {
+            let mut buf = self.scratch.borrow_mut();
+            buf.clear(); // keep the allocation, drop the contents
+            let capacity = buf.capacity();
+            let diff = capacity.saturating_sub(needed);
+            if buf.capacity() < needed {
+                buf.reserve(diff); // at most one malloc here
+            }
+            request.encode(&mut *buf)?;
+            writer.write_all(&buf)?;
+        }
+
         Ok(())
     }
 }
+
+// impl crate::Serialize for OpentelemetryMetrics {
+//     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+//     where
+//         R: Rng + Sized,
+//         W: Write,
+//     {
+//         // What we're making here is the ExportMetricServiceRequest. It has 5
+//         // bytes of fixed values plus a varint-encoded message length field to
+//         // it. The worst case for the message length field is the max message
+//         // size divided by 0b0111_1111.
+//         //
+//         // The user _does not_ set the number of Resoures per request -- we pack
+//         // those in until max_bytes -- but they do set the scopes per request
+//         // etc. All of that is transparent here, handled by the generators
+//         // above.
+//         let mut bytes_remaining = max_bytes
+//             .checked_sub(5 + max_bytes.div_ceil(0b0111_1111))
+//             .ok_or(Error::Serialize)?;
+//         // Each ResourceMetrics contains:
+//         //
+//         // - Resource with attributes
+//         // - ScopeMetrics array
+//         // - Each scope has metrics array
+//         //
+//         // Give or take, figure maybe 64 bytes a pop?
+// //        let estimated_resources = bytes_remaining / 64;
+//         let mut acc = Vec::with_capacity(estimated_resources.min(128));
+
+//         // Generate resources as space allows. We will always generate at least
+//         // one, whether it fits or not.
+//         loop {
+//             let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
+//             let len = resource.encoded_len() + 2;
+//             match bytes_remaining.checked_sub(len) {
+//                 Some(remainder) => {
+//                     acc.push(resource);
+//                     bytes_remaining = remainder;
+//                 }
+//                 None => break,
+//             }
+//         }
+
+//         let proto =
+//             opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
+//                 resource_metrics: acc,
+//             };
+
+//         let mut buf = self.scratch.borrow_mut();
+//         let needed = proto.encoded_len();
+//         let capacity = buf.capacity();
+//         buf.clear(); // keep the allocation, drop the contents
+//         if capacity < needed {
+//             buf.reserve(needed - capacity); // at most one malloc here
+//         }
+//         proto.encode(&mut *buf)?;
+//         writer.write_all(&buf)?;
+//         Ok(())
+//     }
+// }
 
 #[cfg(test)]
 mod test {
