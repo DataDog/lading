@@ -57,7 +57,7 @@ use templates::ResourceTemplateGenerator;
 use tracing::debug;
 use unit::UnitGenerator;
 
-const SMALLEST_PROTOBUF: usize = 512; // smallest useful protobuf, arbitrary low-ish cut-off
+const SMALLEST_PROTOBUF: usize = 64; // smallest useful protobuf, arbitrary low-ish cut-off
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -325,18 +325,11 @@ impl crate::Serialize for OpentelemetryMetrics {
         // until we hit max_bytes worth of serialized bytes.
         let mut bytes_remaining = max_bytes;
         let mut request = ExportMetricsServiceRequest {
-            resource_metrics: Vec::with_capacity(128),
+            resource_metrics: Vec::with_capacity(8),
         };
 
         let loop_id: u32 = rng.random();
         while bytes_remaining >= SMALLEST_PROTOBUF {
-            debug!(
-                ?loop_id,
-                ?max_bytes,
-                ?bytes_remaining,
-                ?SMALLEST_PROTOBUF,
-                "to_bytes inner loop"
-            );
             let rm = self
                 .generate(&mut rng)
                 .expect("no errors possible, catastrophic programming issue");
@@ -429,6 +422,46 @@ mod test {
                 let gen_1 = otel_metrics1.generate(&mut rng1)?;
                 let gen_2 = otel_metrics2.generate(&mut rng2)?;
                 prop_assert_eq!(gen_1, gen_2);
+            }
+        }
+    }
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            steps in 1..u8::MAX,
+            max_bytes in 64u16..u16::MAX)
+        {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            for _ in 0..steps {
+                bytes.clear();
+                metrics.to_bytes(&mut rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+                prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
             }
         }
     }
