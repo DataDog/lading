@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo bench:*)",
+      "Bash(cargo kani:*)",
+      "Bash(cargo test:*)",
+      "Bash(rm:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo nextest run:*)",
+      "Bash(grep:*)",
+      "Bash(RUST_BACKTRACE=1 cargo test -p lading-payload -- opentelemetry_metric::test::timestamps_are_monotonic)",
+      "Bash(cargo build:*)",
+      "Bash(hyperfine:*)",
+      "Bash(RUST_LOG=info time ./target/release/payloadtool examples/lading-otel-metrics.yaml)",
+      "Bash(RUST_LOG=info ./target/release/payloadtool examples/lading-otel-metrics.yaml)",
+      "Bash(RUST_LOG=debug ./target/release/payloadtool examples/lading-otel-metrics.yaml)",
+      "Bash(timeout:*)"
+    ],
+    "deny": []
+  }
+}

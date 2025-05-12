@@ -31,7 +31,7 @@ generator:
             set: 0
             histogram: 0
       bytes_per_second: "80 MiB"
-      maximum_prebuild_cache_size_bytes: "500 MiB"
+      maximum_prebuild_cache_size_bytes: "1 GiB"
 
 blackhole:
   - http:

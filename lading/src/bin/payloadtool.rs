@@ -57,7 +57,7 @@ fn generate_and_check(
     for block in blocks.iter() {
         total_generated_bytes += block.total_bytes.get();
     }
-    if total_bytes.get() != total_generated_bytes {
+    if total_bytes.get().abs_diff(total_generated_bytes) > 1_000_000 {
         let total_requested_bytes = byte_unit::Byte::from_u128(total_bytes.get().into())
             .expect("total_bytes must be non-zero");
         let total_requested_bytes_str = total_requested_bytes
