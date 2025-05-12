@@ -335,6 +335,7 @@ impl crate::Serialize for OpentelemetryMetrics {
             request.resource_metrics.push(rm);
             let required_bytes = request.encoded_len();
             if required_bytes > max_bytes {
+                drop(request.resource_metrics.pop());
                 break;
             }
             bytes_remaining -= required_bytes;
