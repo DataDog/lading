@@ -38,7 +38,7 @@ impl TagGenerator {
 }
 
 impl<'a> crate::Generator<'a> for TagGenerator {
-    type Output = Rc<Vec<KeyValue>>;
+    type Output = Vec<KeyValue>;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
@@ -75,6 +75,6 @@ impl<'a> crate::Generator<'a> for TagGenerator {
             });
         }
 
-        Ok(Rc::new(attributes))
+        Ok(attributes)
     }
 }
