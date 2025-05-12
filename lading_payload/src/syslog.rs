@@ -100,7 +100,7 @@ impl Member {
 }
 
 impl crate::Serialize for Syslog5424 {
-    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&mut self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -142,7 +142,7 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
-            let syslog = Syslog5424::default();
+            let mut syslog = Syslog5424::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             syslog.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");

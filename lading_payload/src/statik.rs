@@ -69,7 +69,7 @@ impl Static {
 
 impl crate::Serialize for Static {
     fn to_bytes<W, R>(
-        &self,
+        &mut self,
         mut rng: R,
         max_bytes: usize,
         writer: &mut W,

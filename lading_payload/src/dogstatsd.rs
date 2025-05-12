@@ -663,7 +663,12 @@ impl DogStatsD {
 }
 
 impl Serialize for DogStatsD {
-    fn to_bytes<W, R>(&self, rng: R, max_bytes: usize, writer: &mut W) -> Result<(), crate::Error>
+    fn to_bytes<W, R>(
+        &mut self,
+        rng: R,
+        max_bytes: usize,
+        writer: &mut W,
+    ) -> Result<(), crate::Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -671,7 +676,7 @@ impl Serialize for DogStatsD {
         if self.length_prefix_framed {
             self.to_bytes_length_prefix_framed(rng, max_bytes, writer)
         } else {
-            self.to_bytes(rng, max_bytes, writer)
+            self.to_bytes_unframed(rng, max_bytes, writer)
         }
     }
 }
@@ -686,7 +691,7 @@ impl DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let mut bytes_remaining = max_bytes;
+        let mut bytes_remaining = max_bytes.saturating_sub(std::mem::size_of::<usize>());
         let mut members = Vec::new();
         // generate as many messages as we can fit
         loop {
@@ -733,7 +738,8 @@ impl DogStatsD {
 
         Ok(())
     }
-    fn to_bytes<W, R>(
+
+    fn to_bytes_unframed<W, R>(
         &self,
         mut rng: R,
         max_bytes: usize,
@@ -775,7 +781,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
-    use crate::DogStatsD;
+    use crate::{DogStatsD, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -786,11 +792,11 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config::default();
-            let dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng)?;
+            let mut dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes)?;
-            debug_assert!(
+            prop_assert!(
                 bytes.len() <= max_bytes,
                 "{:?}",
                 std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
@@ -807,14 +813,15 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config { length_prefix_framed: true, ..Default::default() };
-            let dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng).expect("failed to create DogStatsD");
+            let mut dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng).expect("failed to create DogStatsD");
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            debug_assert!(
+            prop_assert!(
                 bytes.len() <= max_bytes,
-                "{:?}",
-                std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
+                "{l} <= {max_bytes}, {pyld:?}",
+                l = bytes.len(),
+                pyld = std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str")
             );
         }
     }
