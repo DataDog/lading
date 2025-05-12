@@ -15,7 +15,7 @@ use tokio::{
     sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{Level, error, info, span, warn};
+use tracing::{Level, debug, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -528,6 +528,7 @@ where
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
+                debug!(?block_size, "rejected block");
                 rejected_block_sizes += 1;
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad

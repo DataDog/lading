@@ -54,9 +54,10 @@ use prost::Message;
 use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use templates::ResourceTemplateGenerator;
+use tracing::debug;
 use unit::UnitGenerator;
 
-const SMALLEST_PROTOBUF: usize = 32; // smallest useful protobuf, arbitrary low-ish cut-off
+const SMALLEST_PROTOBUF: usize = 512; // smallest useful protobuf, arbitrary low-ish cut-off
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -327,18 +328,34 @@ impl crate::Serialize for OpentelemetryMetrics {
             resource_metrics: Vec::with_capacity(128),
         };
 
+        let loop_id: u32 = rng.random();
         while bytes_remaining >= SMALLEST_PROTOBUF {
+            debug!(
+                ?loop_id,
+                ?max_bytes,
+                ?bytes_remaining,
+                ?SMALLEST_PROTOBUF,
+                "to_bytes inner loop"
+            );
             let rm = self
                 .generate(&mut rng)
                 .expect("no errors possible, catastrophic programming issue");
 
             request.resource_metrics.push(rm);
             let required_bytes = request.encoded_len();
+            debug!(
+                ?loop_id,
+                ?max_bytes,
+                ?bytes_remaining,
+                ?required_bytes,
+                ?SMALLEST_PROTOBUF,
+                "to_bytes inner loop"
+            );
             if required_bytes > max_bytes {
                 drop(request.resource_metrics.pop());
                 break;
             }
-            bytes_remaining -= required_bytes;
+            bytes_remaining = max_bytes.saturating_sub(required_bytes);
         }
 
         let needed = request.encoded_len();
