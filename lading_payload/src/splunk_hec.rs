@@ -152,7 +152,7 @@ impl SplunkHec {
 }
 
 impl crate::Serialize for SplunkHec {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -200,7 +200,7 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
-            let hec = SplunkHec::default();
+            let mut hec = SplunkHec::default();
 
             let mut bytes = Vec::with_capacity(max_bytes);
             hec.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -215,7 +215,7 @@ mod test {
         fn every_payload_deserializes(seed: u64, max_bytes in 0..u16::MAX)  {
             let max_bytes = max_bytes as usize;
             let rng = SmallRng::seed_from_u64(seed);
-            let hec = SplunkHec::default();
+            let mut hec = SplunkHec::default();
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             hec.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");

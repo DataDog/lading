@@ -126,7 +126,7 @@ impl<'a> Generator<'a> for DatadogLog {
 }
 
 impl crate::Serialize for DatadogLog {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         W: Write,
         R: Rng + Sized,
@@ -178,7 +178,7 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let ddlogs = DatadogLog::new(&mut rng);
+            let mut ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -197,7 +197,7 @@ mod test {
         fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let ddlogs = DatadogLog::new(&mut rng);
+            let mut ddlogs = DatadogLog::new(&mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");

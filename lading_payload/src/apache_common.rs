@@ -341,7 +341,7 @@ impl<'a> Generator<'a> for ApacheCommon {
 }
 
 impl crate::Serialize for ApacheCommon {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -377,7 +377,7 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let apache = ApacheCommon::new(&mut rng);
+            let mut apache = ApacheCommon::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             apache.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");

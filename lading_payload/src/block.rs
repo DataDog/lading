@@ -192,7 +192,7 @@ impl Cache {
 
         let blocks = match payload {
             crate::Config::TraceAgent(enc) => {
-                let ta = match enc {
+                let mut ta = match enc {
                     crate::Encoding::Json => crate::TraceAgent::json(&mut rng),
                     crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
                 };
@@ -200,15 +200,21 @@ impl Cache {
                 let span = span!(Level::INFO, "fixed", payload = "trace-agent");
                 let _guard = span.enter();
 
-                construct_block_cache_inner(&mut rng, &ta, maximum_block_bytes, total_bytes.get())?
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut ta,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
             }
             crate::Config::Syslog5424 => {
                 let span = span!(Level::INFO, "fixed", payload = "syslog5424");
                 let _guard = span.enter();
 
+                let mut syslog = crate::Syslog5424::default();
                 construct_block_cache_inner(
                     &mut rng,
-                    &crate::Syslog5424::default(),
+                    &mut syslog,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
@@ -221,25 +227,25 @@ impl Cache {
                         return Err(Error::InvalidConfig(e));
                     }
                 }
-                let serializer = crate::DogStatsD::new(*conf, &mut rng)?;
+                let mut serializer = crate::DogStatsD::new(*conf, &mut rng)?;
 
                 let span = span!(Level::INFO, "fixed", payload = "dogstatsd");
                 let _guard = span.enter();
 
                 construct_block_cache_inner(
                     &mut rng,
-                    &serializer,
+                    &mut serializer,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
             }
             crate::Config::Fluent => {
-                let pyld = crate::Fluent::new(&mut rng);
+                let mut pyld = crate::Fluent::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "fluent");
                 let _guard = span.enter();
                 construct_block_cache_inner(
                     &mut rng,
-                    &pyld,
+                    &mut pyld,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
@@ -247,42 +253,43 @@ impl Cache {
             crate::Config::SplunkHec { encoding } => {
                 let span = span!(Level::INFO, "fixed", payload = "splunkHec");
                 let _guard = span.enter();
+                let mut splunk_hec = crate::SplunkHec::new(*encoding);
                 construct_block_cache_inner(
                     &mut rng,
-                    &crate::SplunkHec::new(*encoding),
+                    &mut splunk_hec,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
             }
             crate::Config::ApacheCommon => {
-                let pyld = crate::ApacheCommon::new(&mut rng);
+                let mut pyld = crate::ApacheCommon::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "apache-common");
                 let _guard = span.enter();
                 construct_block_cache_inner(
                     &mut rng,
-                    &pyld,
+                    &mut pyld,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
             }
             crate::Config::Ascii => {
-                let pyld = crate::Ascii::new(&mut rng);
+                let mut pyld = crate::Ascii::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "ascii");
                 let _guard = span.enter();
                 construct_block_cache_inner(
                     &mut rng,
-                    &pyld,
+                    &mut pyld,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
             }
             crate::Config::DatadogLog => {
-                let serializer = crate::DatadogLog::new(&mut rng);
+                let mut serializer = crate::DatadogLog::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "datadog-log");
                 let _guard = span.enter();
                 construct_block_cache_inner(
                     &mut rng,
-                    &serializer,
+                    &mut serializer,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
@@ -290,9 +297,10 @@ impl Cache {
             crate::Config::Json => {
                 let span = span!(Level::INFO, "fixed", payload = "json");
                 let _guard = span.enter();
+                let mut json = crate::Json;
                 construct_block_cache_inner(
                     &mut rng,
-                    &crate::Json,
+                    &mut json,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
@@ -300,30 +308,31 @@ impl Cache {
             crate::Config::Static { static_path } => {
                 let span = span!(Level::INFO, "fixed", payload = "static");
                 let _guard = span.enter();
+                let mut static_serializer = crate::Static::new(static_path)?;
                 construct_block_cache_inner(
                     &mut rng,
-                    &crate::Static::new(static_path)?,
+                    &mut static_serializer,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
             }
             crate::Config::OpentelemetryTraces => {
-                let pyld = crate::OpentelemetryTraces::new(&mut rng);
+                let mut pyld = crate::OpentelemetryTraces::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "otel-traces");
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, maximum_block_bytes, total_bytes.get())?
+                construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
             crate::Config::OpentelemetryLogs => {
-                let pyld = crate::OpentelemetryLogs::new(&mut rng);
+                let mut pyld = crate::OpentelemetryLogs::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "otel-logs");
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, maximum_block_bytes, total_bytes.get())?
+                construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
             crate::Config::OpentelemetryMetrics => {
-                let pyld = crate::OpentelemetryMetrics::new(&mut rng);
+                let mut pyld = crate::OpentelemetryMetrics::new(&mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "otel-metrics");
                 let _guard = span.enter();
-                construct_block_cache_inner(rng, &pyld, maximum_block_bytes, total_bytes.get())?
+                construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
         };
 
@@ -467,7 +476,7 @@ impl Cache {
 #[allow(clippy::cast_sign_loss)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
-    serializer: &S,
+    serializer: &mut S,
     max_block_size: u32,
     total_bytes: u32,
 ) -> Result<Vec<Block>, SpinError>
@@ -573,7 +582,7 @@ where
 #[inline]
 fn construct_block<R, S>(
     mut rng: &mut R,
-    serializer: &S,
+    serializer: &mut S,
     chunk_size: u32,
 ) -> Result<Block, SpinError>
 where

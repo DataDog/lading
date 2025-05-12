@@ -194,7 +194,7 @@ impl<'a> Generator<'a> for TraceAgent {
 }
 
 impl crate::Serialize for TraceAgent {
-    fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
@@ -279,7 +279,7 @@ mod test {
         fn payload_not_exceed_max_bytes_json(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let trace_agent = TraceAgent::json(&mut rng);
+            let mut trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
@@ -296,7 +296,7 @@ mod test {
         fn payload_not_exceed_max_bytes_msg_pack(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let trace_agent = TraceAgent::json(&mut rng);
+            let mut trace_agent = TraceAgent::json(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
