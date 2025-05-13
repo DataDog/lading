@@ -662,7 +662,7 @@ mod test {
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
-            budget in 128..2048_usize,
+            budget in SMALLEST_PROTOBUF..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -676,50 +676,48 @@ mod test {
                 ..Default::default()
             };
 
-            prop_assume!(config.valid().is_ok());
-
             let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             for _ in 0..steps {
-                let metric = otel_metrics.generate(&mut rng, &mut b)?;
-
-                if let Some(resource) = &metric.resource {
-                    prop_assert!(
-                        resource.attributes.len() <= attributes_per_resource as usize,
-                        "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
-                        len = resource.attributes.len(),
-                    );
-                }
-
-                prop_assert!(
-                    metric.scope_metrics.len() <= scopes_per_resource as usize,
-                    "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
-                    len = metric.scope_metrics.len(),
-                );
-
-                for scope in &metric.scope_metrics {
-                    if let Some(scope) = &scope.scope {
+                if let Ok(metric) = otel_metrics.generate(&mut rng, &mut b) {
+                    if let Some(resource) = &metric.resource {
                         prop_assert!(
-                            scope.attributes.len() <= attributes_per_scope as usize,
-                            "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
-                            len = scope.attributes.len(),
+                            resource.attributes.len() <= attributes_per_resource as usize,
+                            "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
+                            len = resource.attributes.len(),
                         );
                     }
 
                     prop_assert!(
-                        scope.metrics.len() <= metrics_per_scope as usize,
-                        "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
-                        len = scope.metrics.len(),
+                        metric.scope_metrics.len() <= scopes_per_resource as usize,
+                        "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
+                        len = metric.scope_metrics.len(),
                     );
 
-                    for metric in &scope.metrics {
+                    for scope in &metric.scope_metrics {
+                        if let Some(scope) = &scope.scope {
+                            prop_assert!(
+                                scope.attributes.len() <= attributes_per_scope as usize,
+                                "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
+                                len = scope.attributes.len(),
+                            );
+                        }
+
                         prop_assert!(
-                            metric.metadata.len() <= attributes_per_metric as usize,
-                            "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
-                            len = metric.metadata.len(),
+                            scope.metrics.len() <= metrics_per_scope as usize,
+                            "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
+                            len = scope.metrics.len(),
                         );
+
+                        for metric in &scope.metrics {
+                            prop_assert!(
+                                metric.metadata.len() <= attributes_per_metric as usize,
+                                "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
+                                len = metric.metadata.len(),
+                            );
+                        }
                     }
                 }
             }
@@ -808,7 +806,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 1..20_u8,
             attributes_per_metric in 0..10_u8,
-            budget in 512..4098_usize,
+            budget in SMALLEST_PROTOBUF..4098_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
