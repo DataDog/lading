@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, rc::Rc};
+// TODO remove
+#![allow(clippy::print_stdout)]
+
+use std::{cmp, collections::BTreeMap, rc::Rc};
 
 use opentelemetry_proto::tonic::{
     common::v1::InstrumentationScope,
@@ -14,7 +17,7 @@ use rand::{
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
     seq::{IndexedRandom, IteratorRandom},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common::strings};
@@ -73,6 +76,13 @@ impl Pool {
 
         let upper = *budget;
         let mut limit = *budget;
+
+        println!(
+            "len: {len}, context_cap: {context_cap}, budget: {budget}",
+            len = self.len,
+            context_cap = self.context_cap,
+            budget = *budget,
+        );
 
         // Generate new instances until either context_cap is hit or the
         // remaining space drops below our lookup interval.
@@ -192,14 +202,14 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     {
         // We record the original budget because if we bail out on generation we
         // are obligated by trait semantics to NOT alter the passed budget.
-        let original_budget = *budget;
-        let mut inner_budget = *budget;
+        let original_budget: usize = *budget;
+        let mut inner_budget: usize = *budget;
 
         let metadata = match self.tags.generate(rng, &mut inner_budget) {
             Ok(md) => md,
             Err(GeneratorError::SizeExhausted) => {
                 error!("Tag generator unable to satify request for {inner_budget} size");
-                Err(GeneratorError::SizeExhausted)?
+                Vec::new()
             }
             Err(e) => Err(e)?,
         };
@@ -247,7 +257,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 is_monotonic,
             }),
         };
-        let metric = Metric {
+        let mut metric = Metric {
             name,
             description,
             unit,
@@ -255,18 +265,81 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             metadata,
         };
 
-        let required_bytes = metric.encoded_len();
-        let diff = original_budget.saturating_sub(required_bytes);
+        while data_points_total(&metric) > 0 {
+            let required_bytes = metric.encoded_len();
 
-        if diff > 0 {
-            *budget = diff;
-            Ok(metric)
-        } else {
-            error!(
-                "MetricTemplateGenerator unable to satisfy request for {original_budget} bytes."
-            );
-            Err(Self::Error::SizeExhausted)
+            assert_eq!(original_budget, *budget);
+            match original_budget.cmp(&required_bytes) {
+                cmp::Ordering::Equal | cmp::Ordering::Greater => {
+                    println!(
+                        "budget: {budget}, original_budget: {original_budget}, required_bytes: {required_bytes}"
+                    );
+                    *budget -= required_bytes;
+                    return Ok(metric);
+                }
+                cmp::Ordering::Less => {
+                    // Too many metric points, go around the loop again and try
+                    // again.
+                    metric = cut_data_points(metric);
+                }
+            }
         }
+        println!(
+            "MetricTemplateGenerator unable to satisfy request for {original_budget} bytes, total data points: {total_data_points}.",
+        );
+        debug!("MetricTemplateGenerator unable to satisfy request for {original_budget} bytes.");
+        Err(Self::Error::SizeExhausted)
+    }
+}
+
+fn data_points_total(metric: &Metric) -> usize {
+    let data = &metric.data;
+    match data {
+        Some(
+            Data::Gauge(metrics::v1::Gauge { data_points })
+            | Data::Sum(metrics::v1::Sum { data_points, .. }),
+        ) => data_points.len(),
+        None => 0,
+        _ => unimplemented!("only gauge/sum metrics supported"),
+    }
+}
+
+fn cut_data_points(metric: Metric) -> Metric {
+    let name = metric.name;
+    let description = metric.description;
+    let unit = metric.unit;
+    let metadata = metric.metadata;
+    let data = metric.data;
+
+    let new_data = match data {
+        Some(Data::Gauge(metrics::v1::Gauge { mut data_points })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Gauge(metrics::v1::Gauge { data_points }))
+        }
+        Some(Data::Sum(metrics::v1::Sum {
+            mut data_points,
+            aggregation_temporality,
+            is_monotonic,
+        })) => {
+            let new_len = data_points.len() / 2;
+            data_points.truncate(new_len);
+            Some(Data::Sum(metrics::v1::Sum {
+                data_points,
+                aggregation_temporality,
+                is_monotonic,
+            }))
+        }
+        None => None,
+        _ => unimplemented!("only gauge/sum metrics supported"),
+    };
+
+    Metric {
+        name,
+        description,
+        unit,
+        metadata,
+        data: new_data,
     }
 }
 
@@ -320,7 +393,6 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
     type Output = ScopeMetrics;
     type Error = GeneratorError;
 
-    #[tracing::instrument(skip(self, rng))]
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
@@ -341,7 +413,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
                 Ok(md) => md,
                 Err(GeneratorError::SizeExhausted) => {
                     error!("Tag generator unable to satify request for {inner_budget} size");
-                    Err(GeneratorError::SizeExhausted)?
+                    Vec::new()
                 }
                 Err(e) => Err(e)?,
             };
@@ -357,29 +429,24 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
             })
         };
 
-        let mut total_metrics = self.metrics_per_scope.sample(rng);
+        let total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<Metric> = Vec::with_capacity(total_metrics as usize);
         // Search for the most metrics we can fit. If the metric_generator
-        // returns SizeExhausted we cut total_metrics by 1/4 and try again until
-        // we hit total_metrics == 0, at which point this generator signals
-        // SizeExhausted.
-        'outer: while total_metrics > 0 {
-            for _ in 0..total_metrics {
-                match self.metric_generator.generate(rng, &mut inner_budget) {
-                    Ok(m) => metrics.push(m),
-                    Err(GeneratorError::SizeExhausted) => {
-                        total_metrics /= 4;
-                        if total_metrics == 0 {
-                            error!(
-                                "ScopeTemplateGenerator unable to satisfy erquest for {original_budget} bytes"
-                            );
-                            return Err(GeneratorError::SizeExhausted);
-                        }
-                        continue 'outer;
-                    }
-                    Err(e) => return Err(e),
-                }
+        // returns SizeExhausted we check to see if metrics was populated at all
+        // and if it was not we signal SizeExhausted.
+        for _ in 0..total_metrics {
+            match self.metric_generator.generate(rng, &mut inner_budget) {
+                Ok(m) => metrics.push(m),
+                Err(GeneratorError::SizeExhausted) => break,
+                Err(e) => return Err(e),
             }
+        }
+        if metrics.is_empty() {
+            println!("Unable to populate metrics with budget {original_budget}");
+            error!(
+                "ScopeTemplateGenerator unable to populate metrics with budget {original_budget}"
+            );
+            return Err(GeneratorError::SizeExhausted);
         }
 
         let scope_metrics = ScopeMetrics {
@@ -389,13 +456,12 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
         };
 
         let required_bytes = scope_metrics.encoded_len();
-        let diff = original_budget.saturating_sub(required_bytes);
-
-        if diff > 0 {
-            *budget = diff;
-            Ok(scope_metrics)
-        } else {
-            Err(Self::Error::SizeExhausted)
+        match original_budget.cmp(&required_bytes) {
+            cmp::Ordering::Equal | cmp::Ordering::Greater => {
+                *budget -= required_bytes;
+                Ok(scope_metrics)
+            }
+            cmp::Ordering::Less => Err(Self::Error::SizeExhausted),
         }
     }
 }
@@ -447,10 +513,17 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let resource = if self.attributes_per_resource.start() == 0 {
+        // We record the original budget because if we bail out on generation we
+        // are obligated by trait semantics to NOT alter the passed budget.
+        let original_budget = *budget;
+        let mut inner_budget = *budget;
+
+        println!("hello from resourcetemplategenerator");
+
+        let resource = if self.attributes_per_resource.end() == 0 {
             None
         } else {
-            match self.tags.generate(rng, budget) {
+            match self.tags.generate(rng, &mut inner_budget) {
                 Ok(attributes) => {
                     let res = resource::v1::Resource {
                         attributes: attributes.as_slice().to_owned(),
@@ -463,22 +536,24 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
             }
         };
 
-        // NOTE we are aware that this may under-generate unique contexts. In
-        // particular, imagine that the user has configured things such that the
-        // natural entropy of the pool is very low, meaning most scopes produced
-        // are "equal". We will produce total_scopes scopes that have less
-        // uniqueness than the amount generated.
-        //
-        // This is a chronic issue with our current approach across multiple
-        // payloads and will require a deep think to repair.
+        // Search for the most scopes we can fit. If the scope_generator
+        // returns SizeExhausted we check to see if metrics was populated at all
+        // and if it was not we signal SizeExhausted.
         let total_scopes = self.scopes_per_resource.sample(rng);
         let mut scopes = Vec::with_capacity(total_scopes as usize);
         for _ in 0..total_scopes {
-            match self.scope_generator.generate(rng, budget) {
+            match self.scope_generator.generate(rng, &mut inner_budget) {
                 Ok(s) => scopes.push(s),
                 Err(GeneratorError::SizeExhausted) => break,
                 Err(e) => return Err(e),
             }
+        }
+        if scopes.is_empty() {
+            println!("Unable to populate scopes with budget {original_budget}");
+            error!(
+                "ResourceTemplateGenerator unable to populate metrics with budget {original_budget}"
+            );
+            return Err(GeneratorError::SizeExhausted);
         }
 
         let resource_metrics = ResourceMetrics {
@@ -488,13 +563,18 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         };
 
         let required_bytes = resource_metrics.encoded_len();
-        let diff = budget.saturating_sub(required_bytes);
+        println!(
+            "attrs per resource: {attributes_per_resource}, scopes per resource: {scopes_per_resource}, required bytes {required_bytes}",
+            attributes_per_resource = self.attributes_per_resource,
+            scopes_per_resource = self.scopes_per_resource
+        );
 
-        if diff > 0 {
-            *budget = diff;
-            Ok(resource_metrics)
-        } else {
-            Err(Self::Error::SizeExhausted)
+        match original_budget.cmp(&required_bytes) {
+            cmp::Ordering::Equal | cmp::Ordering::Greater => {
+                *budget -= required_bytes;
+                Ok(resource_metrics)
+            }
+            cmp::Ordering::Less => Err(Self::Error::SizeExhausted),
         }
     }
 }

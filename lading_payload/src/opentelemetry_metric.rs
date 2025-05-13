@@ -753,9 +753,9 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 1..20_u8,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 1..20_u8,
             attributes_per_metric in 0..10_u8,
             budget in 128..2048_usize,
         ) {

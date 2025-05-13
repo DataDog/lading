@@ -2,7 +2,7 @@
 
 use rand::distr::uniform::SampleUniform;
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use std::cmp;
+use std::{cmp, fmt};
 
 /// Range expression for configuration
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -63,6 +63,24 @@ where
         match self {
             ConfRange::Constant(c) => *c,
             ConfRange::Inclusive { min, max } => rng.random_range(*min..=*max),
+        }
+    }
+}
+
+impl<T> fmt::Display for ConfRange<T>
+where
+    T: PartialEq + cmp::PartialOrd + Clone + Copy + fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfRange::Constant(c) => write!(f, "{c}"),
+            ConfRange::Inclusive { min, max } => {
+                if min == max {
+                    write!(f, "{min}")
+                } else {
+                    write!(f, "{min}..={max}")
+                }
+            }
         }
     }
 }
