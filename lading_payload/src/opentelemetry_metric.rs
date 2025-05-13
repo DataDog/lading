@@ -39,7 +39,7 @@
 // * flags: uu32 -- I'm not sure what to make of this yet
 
 pub(crate) mod tags;
-mod templates;
+pub(crate) mod templates;
 pub(crate) mod unit;
 
 use std::rc::Rc;
@@ -256,11 +256,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     {
         // Retrieve a template from the pool, modify its timestamp and data
         // points to randomize the data we send out.
-        let mut tpl: v1::ResourceMetrics = self
-            .pool
-            .fetch(rng, budget)
-            .map_err(|_| Error::Serialize)?
-            .to_owned();
+        let mut tpl: v1::ResourceMetrics = self.pool.fetch(rng, budget)?.to_owned();
 
         // Randomize the data points in each metric. Metric kinds are preserved
         // but timestamps are completely random as are point values.
@@ -324,25 +320,29 @@ impl crate::Serialize for OpentelemetryMetrics {
 
         let loop_id: u32 = rng.random();
         while bytes_remaining >= SMALLEST_PROTOBUF {
-            let rm = self
-                .generate(&mut rng, &mut bytes_remaining)
-                .expect("no errors possible, catastrophic programming issue");
-
-            request.resource_metrics.push(rm);
-            let required_bytes = request.encoded_len();
-            debug!(
-                ?loop_id,
-                ?max_bytes,
-                ?bytes_remaining,
-                ?required_bytes,
-                ?SMALLEST_PROTOBUF,
-                "to_bytes inner loop"
-            );
-            if required_bytes > max_bytes {
-                drop(request.resource_metrics.pop());
-                break;
+            if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
+                request.resource_metrics.push(rm);
+                let required_bytes = request.encoded_len();
+                debug!(
+                    ?loop_id,
+                    ?max_bytes,
+                    ?bytes_remaining,
+                    ?required_bytes,
+                    ?SMALLEST_PROTOBUF,
+                    "to_bytes inner loop"
+                );
+                if required_bytes > max_bytes {
+                    drop(request.resource_metrics.pop());
+                    break;
+                }
+                bytes_remaining = max_bytes.saturating_sub(required_bytes);
+            } else {
+                debug!(
+                    ?bytes_remaining,
+                    ?SMALLEST_PROTOBUF,
+                    "could not generate ResourceMetrics instance"
+                );
             }
-            bytes_remaining = max_bytes.saturating_sub(required_bytes);
         }
 
         let needed = request.encoded_len();
@@ -378,6 +378,46 @@ mod test {
         collections::HashSet,
         hash::{DefaultHasher, Hash, Hasher},
     };
+
+    // Budget always decreases equivalent to the size of the returned value.
+    proptest! {
+        #[test]
+        fn generate_decrease_budget(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            steps in 1..u8::MAX,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut budget = 10_000_000;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+
+            for _ in 0..steps {
+                let prev = budget;
+                match otel_metrics.generate(&mut rng, &mut budget) {
+                    Ok(rm) => prop_assert_eq!(prev-rm.encoded_len(), budget),
+                    Err(crate::Error::Pool(_)) => break,
+                    Err(e) => return Err(e.into())
+                }
+            }
+        }
+    }
 
     // Generation of metrics must be deterministic. In order to assert this
     // property we generate two instances of OpentelemetryMetrics from disinct

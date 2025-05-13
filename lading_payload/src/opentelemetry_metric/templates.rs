@@ -21,8 +21,8 @@ use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common:
 const UNIQUE_TAG_RATIO: f32 = 0.75;
 
 /// Errors related to template generators
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum PoolError {
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum PoolError {
     #[error("Choice could not be made on empty container.")]
     EmptyChoice,
     #[error("Generation error: {0}")]
@@ -68,44 +68,41 @@ impl Pool {
         // ResourceMetrics::generator with the budget and then store the result
         // for future use in `by_size`.
         //
-        // Size search is in the interval (budget / 2, budget].
+        // Size search is in the interval (0, budget].
 
         let upper = *budget;
-        let lower = *budget / 2 + 1;
+        let mut limit = *budget;
 
         // Generate new instances until either context_cap is hit or the
         // remaining space drops below our lookup interval.
-        while self.len < self.context_cap && *budget > lower {
-            match self.generator.generate(rng, budget) {
+        if self.len < self.context_cap {
+            match self.generator.generate(rng, &mut limit) {
                 Ok(rm) => {
                     let sz = rm.encoded_len();
                     self.by_size.entry(sz).or_default().push(rm);
                     self.len += 1;
                 }
-                // Too big for what’s left – stop the fill-in loop.
-                Err(GeneratorError::SizeExhausted) => break,
-                // Bubble up hard errors.
                 Err(e) => return Err(PoolError::Generator(e)),
             }
         }
 
-        let choice: &ResourceMetrics = self
+        let (choice_sz, choices) = self
             .by_size
-            .range(lower..=upper)
-            .choose(rng)
-            .ok_or(PoolError::EmptyChoice)?
-            .1
+            .range(..=upper)
             .choose(rng)
             .ok_or(PoolError::EmptyChoice)?;
+
+        let choice = choices.choose(rng).ok_or(PoolError::EmptyChoice)?;
+        *budget = budget.saturating_sub(*choice_sz);
 
         Ok(choice)
     }
 }
 
 /// Errors related to template generators
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum GeneratorError {
-    #[error("Generator exhausted bytes budget prematurely.")]
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum GeneratorError {
+    #[error("Generator exhausted bytes budget prematurely")]
     SizeExhausted,
     /// failed to generate string
     #[error("Failed to generate string")]
@@ -334,9 +331,11 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
         let total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<Metric> = Vec::with_capacity(total_metrics as usize);
         for _ in 0..total_metrics {
-            // TODO handle SizeExhausted and bail on this loop
-            let m = self.metric_generator.generate(rng, budget)?;
-            metrics.push(m);
+            match self.metric_generator.generate(rng, budget) {
+                Ok(m) => metrics.push(m),
+                Err(GeneratorError::SizeExhausted) => break,
+                Err(e) => return Err(e),
+            }
         }
 
         let scope_metrics = ScopeMetrics {
@@ -407,12 +406,17 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         let resource = if self.attributes_per_resource.start() == 0 {
             None
         } else {
-            let attributes = self.tags.generate(rng, budget)?;
-            let res = resource::v1::Resource {
-                attributes: attributes.as_slice().to_owned(),
-                dropped_attributes_count: 0,
-            };
-            Some(res)
+            match self.tags.generate(rng, budget) {
+                Ok(attributes) => {
+                    let res = resource::v1::Resource {
+                        attributes: attributes.as_slice().to_owned(),
+                        dropped_attributes_count: 0,
+                    };
+                    Some(res)
+                }
+                Err(GeneratorError::SizeExhausted) => None,
+                Err(e) => return Err(e),
+            }
         };
 
         // NOTE we are aware that this may under-generate unique contexts. In
@@ -426,9 +430,11 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         let total_scopes = self.scopes_per_resource.sample(rng);
         let mut scopes = Vec::with_capacity(total_scopes as usize);
         for _ in 0..total_scopes {
-            // TODO handle SizeExhausted and bail on this loop only
-            let s = self.scope_generator.generate(rng, budget)?;
-            scopes.push(s);
+            match self.scope_generator.generate(rng, budget) {
+                Ok(s) => scopes.push(s),
+                Err(GeneratorError::SizeExhausted) => break,
+                Err(e) => return Err(e),
+            }
         }
 
         let resource_metrics = ResourceMetrics {

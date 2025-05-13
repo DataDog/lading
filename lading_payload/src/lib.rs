@@ -87,6 +87,9 @@ pub enum Error {
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),
+    /// See [`opentelemetry_metric::templates::PoolError`]
+    #[error("Unable to choose from pool: {0}")]
+    Pool(#[from] opentelemetry_metric::templates::PoolError),
 }
 
 /// To serialize into bytes
