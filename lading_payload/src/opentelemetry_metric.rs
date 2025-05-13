@@ -45,15 +45,15 @@ pub(crate) mod unit;
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
-use crate::{Error, Generator, common::config::ConfRange, common::strings};
+use crate::SizedGenerator;
+use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
-use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::ResourceTemplateGenerator;
+use templates::{Pool, ResourceTemplateGenerator};
 use tracing::debug;
 use unit::UnitGenerator;
 
@@ -220,7 +220,7 @@ impl Config {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    pool: Vec<v1::ResourceMetrics>,
+    pool: Pool,
     scratch: RefCell<BytesMut>,
 }
 
@@ -237,26 +237,20 @@ impl OpentelemetryMetrics {
         // Moby Dick is 1.2Mb. 256Kb should be more than enough for metric
         // names, descriptions, etc.
         let str_pool = Rc::new(strings::Pool::with_size(rng, 256_000));
-        let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
-
-        let mut pool = Vec::with_capacity(context_cap as usize);
-        for _ in 0..context_cap {
-            let r = resource_template_generator.generate(rng)?;
-            pool.push(r);
-        }
+        let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {
-            pool,
+            pool: Pool::new(context_cap, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
         })
     }
 }
 
-impl<'a> Generator<'a> for OpentelemetryMetrics {
+impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     type Output = v1::ResourceMetrics;
     type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -264,8 +258,8 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         // points to randomize the data we send out.
         let mut tpl: v1::ResourceMetrics = self
             .pool
-            .choose(rng)
-            .expect("template pool cannot be empty")
+            .fetch(rng, budget)
+            .map_err(|_| Error::Serialize)?
             .to_owned();
 
         // Randomize the data points in each metric. Metric kinds are preserved
@@ -331,7 +325,7 @@ impl crate::Serialize for OpentelemetryMetrics {
         let loop_id: u32 = rng.random();
         while bytes_remaining >= SMALLEST_PROTOBUF {
             let rm = self
-                .generate(&mut rng)
+                .generate(&mut rng, &mut bytes_remaining)
                 .expect("no errors possible, catastrophic programming issue");
 
             request.resource_metrics.push(rm);
@@ -372,7 +366,7 @@ impl crate::Serialize for OpentelemetryMetrics {
 mod test {
     use super::{Config, Contexts, OpentelemetryMetrics};
     use crate::{
-        Generator, Serialize,
+        Serialize, SizedGenerator,
         common::config::ConfRange,
         opentelemetry_metric::v1::{ResourceMetrics, metric},
     };
@@ -399,7 +393,8 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX
+            steps in 1..u8::MAX,
+            budget in 128..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -413,15 +408,18 @@ mod test {
                 ..Default::default()
             };
 
+            let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
-            let otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
+            let mut otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
+            let mut b2 = budget;
             let mut rng2 = SmallRng::seed_from_u64(seed);
-            let otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
+            let mut otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
 
             for _ in 0..steps {
-                let gen_1 = otel_metrics1.generate(&mut rng1)?;
-                let gen_2 = otel_metrics2.generate(&mut rng2)?;
+                let gen_1 = otel_metrics1.generate(&mut rng1, &mut b1)?;
+                let gen_2 = otel_metrics2.generate(&mut rng2, &mut b2)?;
                 prop_assert_eq!(gen_1, gen_2);
+                prop_assert_eq!(b1, b2);
             }
         }
     }
@@ -480,6 +478,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 1..10_u8,
             attributes_per_metric in 0..100_u8,
+            budget in 128..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -497,11 +496,12 @@ mod test {
 
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut b = budget;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
-                let res = otel_metrics.generate(&mut rng)?;
+                let res = otel_metrics.generate(&mut rng, &mut b)?;
                 let id = context_id(&res);
                 ids.insert(id);
             }
@@ -565,7 +565,8 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX
+            steps in 1..u8::MAX,
+            budget in 128..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -579,11 +580,12 @@ mod test {
                 ..Default::default()
             };
 
+            let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             for _ in 0..steps {
-                let metric = otel_metrics.generate(&mut rng)?;
+                let metric = otel_metrics.generate(&mut rng, &mut b)?;
 
                 if let Some(resource) = &metric.resource {
                     prop_assert!(
@@ -708,6 +710,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
+            budget in 128..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -721,14 +724,16 @@ mod test {
                 ..Default::default()
             };
 
+            let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let metric1 = otel_metrics.generate(&mut rng, &mut b1)?;
 
             // Generate two identical metrics
-            let metric1 = otel_metrics.generate(&mut rng)?;
+            let mut b2 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
-            let metric2 = otel_metrics.generate(&mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let metric2 = otel_metrics.generate(&mut rng, &mut b2)?;
 
             // Ensure that the metrics are equal.
             assert_eq!(metric1, metric2);

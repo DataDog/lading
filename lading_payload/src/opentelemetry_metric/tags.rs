@@ -1,8 +1,10 @@
 //! Tag generation for OpenTelemetry metric payloads
 use std::rc::Rc;
 
-use crate::{Error, common::config::ConfRange, common::strings::Pool};
+use super::templates::GeneratorError;
+use crate::{Error, Generator, common::config::ConfRange, common::strings::Pool};
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+use prost::Message;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TagGenerator {
@@ -37,11 +39,15 @@ impl TagGenerator {
     }
 }
 
-impl<'a> crate::Generator<'a> for TagGenerator {
+impl<'a> crate::SizedGenerator<'a> for TagGenerator {
     type Output = Vec<KeyValue>;
-    type Error = Error;
+    type Error = GeneratorError;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -54,25 +60,37 @@ impl<'a> crate::Generator<'a> for TagGenerator {
         let tagset = self
             .inner
             .generate(rng)
-            .map_err(|_| Error::StringGenerate)?;
+            .map_err(|_| Self::Error::StringGenerate)?;
         let mut attributes = Vec::<KeyValue>::with_capacity(tagset.len());
 
         for tag in tagset {
             let key = self
                 .inner
                 .using_handle(tag.key)
-                .ok_or(Error::StringGenerate)?;
+                .ok_or(Self::Error::StringGenerate)?;
             let val = self
                 .inner
                 .using_handle(tag.value)
-                .ok_or(Error::StringGenerate)?;
+                .ok_or(Self::Error::StringGenerate)?;
 
-            attributes.push(KeyValue {
+            let kv = KeyValue {
                 key: String::from(key),
                 value: Some(AnyValue {
                     value: Some(any_value::Value::StringValue(String::from(val))),
                 }),
-            });
+            };
+
+            // NOTE when this is encoded by protobuf the Vec will have a
+            // variable length associated with it which we DO NOT consider here.
+            let required_bytes = kv.encoded_len();
+            let diff = budget.saturating_sub(required_bytes);
+
+            if diff > 0 {
+                attributes.push(kv);
+                *budget = diff;
+            } else if attributes.is_empty() {
+                return Err(Self::Error::SizeExhausted);
+            }
         }
 
         Ok(attributes)

@@ -7,6 +7,8 @@
 // that for our purposes, so for now we rely on a simple table method. I imagine
 // we can just keep stuffing the table for a while as seems desirable.
 
+use super::templates::GeneratorError;
+
 const UNITS: &[&str] = &[
     "bit", "Kbit", "Mbit", "Gbit", // data size, bits, decimal
     "Kibit", "Mibit", "Gibit", // data size, bits, binary
@@ -32,7 +34,7 @@ impl UnitGenerator {
 
 impl crate::Generator<'_> for UnitGenerator {
     type Output = &'static str;
-    type Error = Error;
+    type Error = GeneratorError;
 
     fn generate<R>(&self, rng: &mut R) -> Result<Self::Output, Self::Error>
     where

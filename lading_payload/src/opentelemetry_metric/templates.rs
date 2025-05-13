@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use opentelemetry_proto::tonic::{
     common::v1::InstrumentationScope,
@@ -8,16 +8,109 @@ use opentelemetry_proto::tonic::{
     },
     resource,
 };
+use prost::Message;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
-    seq::IndexedRandom,
+    seq::{IndexedRandom, IteratorRandom},
 };
 
 use super::{Config, UnitGenerator, tags::TagGenerator};
-use crate::{Error, common::config::ConfRange, common::strings};
+use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common::strings};
 
 const UNIQUE_TAG_RATIO: f32 = 0.75;
+
+/// Errors related to template generators
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum PoolError {
+    #[error("Choice could not be made on empty container.")]
+    EmptyChoice,
+    #[error("Generation error: {0}")]
+    Generator(#[from] GeneratorError),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Pool {
+    context_cap: u32,
+    /// key: encoded size; val: templates with that size
+    by_size: BTreeMap<usize, Vec<ResourceMetrics>>,
+    generator: ResourceTemplateGenerator,
+    len: u32,
+}
+
+impl Pool {
+    /// Build an empty pool that can hold at most `context_cap` templates.
+    pub(crate) fn new(context_cap: u32, generator: ResourceTemplateGenerator) -> Self {
+        Self {
+            context_cap,
+            by_size: BTreeMap::new(),
+            generator,
+            len: 0,
+        }
+    }
+
+    /// Return a `ResourceMetrics` from the pool.
+    ///
+    /// Instances of `ResourceMetrics` returned by this function are guaranteed
+    /// to be of an encoded size no greater than budget. No greater than
+    /// `context_cap` instances of `ResourceMetrics` will ever be stored in this
+    /// structure.
+    pub(crate) fn fetch<R>(
+        &mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<&ResourceMetrics, PoolError>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        // If we are at context cap, search by_size for templates <= budget and
+        // return a random choice. If we are not at context cap, call
+        // ResourceMetrics::generator with the budget and then store the result
+        // for future use in `by_size`.
+        //
+        // Size search is in the interval (budget / 2, budget].
+
+        let upper = *budget;
+        let lower = *budget / 2 + 1;
+
+        // Generate new instances until either context_cap is hit or the
+        // remaining space drops below our lookup interval.
+        while self.len < self.context_cap && *budget > lower {
+            match self.generator.generate(rng, budget) {
+                Ok(rm) => {
+                    let sz = rm.encoded_len();
+                    self.by_size.entry(sz).or_default().push(rm);
+                    self.len += 1;
+                }
+                // Too big for what’s left – stop the fill-in loop.
+                Err(GeneratorError::SizeExhausted) => break,
+                // Bubble up hard errors.
+                Err(e) => return Err(PoolError::Generator(e)),
+            }
+        }
+
+        let choice: &ResourceMetrics = self
+            .by_size
+            .range(lower..=upper)
+            .choose(rng)
+            .ok_or(PoolError::EmptyChoice)?
+            .1
+            .choose(rng)
+            .ok_or(PoolError::EmptyChoice)?;
+
+        Ok(choice)
+    }
+}
+
+/// Errors related to template generators
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum GeneratorError {
+    #[error("Generator exhausted bytes budget prematurely.")]
+    SizeExhausted,
+    /// failed to generate string
+    #[error("Failed to generate string")]
+    StringGenerate,
+}
 
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
@@ -87,25 +180,29 @@ impl MetricTemplateGenerator {
     }
 }
 
-impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
+impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     type Output = Metric;
-    type Error = Error;
+    type Error = GeneratorError;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
     where
         R: Rng + ?Sized,
     {
-        let metadata = self.tags.generate(rng)?;
+        let metadata = self.tags.generate(rng, budget)?;
 
         let name = self
             .str_pool
             .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?
+            .ok_or(Self::Error::StringGenerate)?
             .to_owned();
         let description = if rng.random_bool(0.1) {
             self.str_pool
                 .of_size_range(rng, 1_u8..16)
-                .ok_or(Error::StringGenerate)?
+                .ok_or(Self::Error::StringGenerate)?
                 .to_owned()
         } else {
             String::new()
@@ -140,13 +237,23 @@ impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
                 is_monotonic,
             }),
         };
-        Ok(Metric {
+        let metric = Metric {
             name,
             description,
             unit,
             data: Some(data),
             metadata,
-        })
+        };
+
+        let required_bytes = metric.encoded_len();
+        let diff = budget.saturating_sub(required_bytes);
+
+        if diff > 0 {
+            *budget = diff;
+            Ok(metric)
+        } else {
+            Err(Self::Error::SizeExhausted)
+        }
     }
 }
 
@@ -159,7 +266,7 @@ pub(crate) enum Kind {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ScopeTemplateGenerator {
     metrics_per_scope: ConfRange<u8>,
     metric_generator: MetricTemplateGenerator,
@@ -196,23 +303,27 @@ impl ScopeTemplateGenerator {
     }
 }
 
-impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
+impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
     type Output = ScopeMetrics;
-    type Error = Error;
+    type Error = GeneratorError;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
     where
         R: Rng + ?Sized,
     {
         let scope = if self.attributes_per_scope.start() == 0 {
             None
         } else {
-            let attributes = self.tags.generate(rng)?;
+            let attributes = self.tags.generate(rng, budget)?;
             Some(InstrumentationScope {
                 name: self
                     .str_pool
                     .of_size_range(rng, 1_u8..16)
-                    .ok_or(Error::StringGenerate)?
+                    .ok_or(Self::Error::StringGenerate)?
                     .to_owned(),
                 version: String::new(),
                 attributes: attributes.as_slice().to_owned(),
@@ -223,19 +334,30 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
         let total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<Metric> = Vec::with_capacity(total_metrics as usize);
         for _ in 0..total_metrics {
-            let m = self.metric_generator.generate(rng)?;
+            // TODO handle SizeExhausted and bail on this loop
+            let m = self.metric_generator.generate(rng, budget)?;
             metrics.push(m);
         }
 
-        Ok(ScopeMetrics {
+        let scope_metrics = ScopeMetrics {
             scope,
             metrics,
             schema_url: String::new(),
-        })
+        };
+
+        let required_bytes = scope_metrics.encoded_len();
+        let diff = budget.saturating_sub(required_bytes);
+
+        if diff > 0 {
+            *budget = diff;
+            Ok(scope_metrics)
+        } else {
+            Err(Self::Error::SizeExhausted)
+        }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ResourceTemplateGenerator {
     scopes_per_resource: ConfRange<u8>,
     attributes_per_resource: ConfRange<u8>,
@@ -270,18 +392,22 @@ impl ResourceTemplateGenerator {
     }
 }
 
-impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
+impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
     type Output = ResourceMetrics;
-    type Error = Error;
+    type Error = GeneratorError;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
     where
         R: Rng + ?Sized,
     {
         let resource = if self.attributes_per_resource.start() == 0 {
             None
         } else {
-            let attributes = self.tags.generate(rng)?;
+            let attributes = self.tags.generate(rng, budget)?;
             let res = resource::v1::Resource {
                 attributes: attributes.as_slice().to_owned(),
                 dropped_attributes_count: 0,
@@ -300,14 +426,25 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
         let total_scopes = self.scopes_per_resource.sample(rng);
         let mut scopes = Vec::with_capacity(total_scopes as usize);
         for _ in 0..total_scopes {
-            let s = self.scope_generator.generate(rng)?;
+            // TODO handle SizeExhausted and bail on this loop only
+            let s = self.scope_generator.generate(rng, budget)?;
             scopes.push(s);
         }
 
-        Ok(ResourceMetrics {
+        let resource_metrics = ResourceMetrics {
             resource,
             scope_metrics: scopes,
             schema_url: String::new(),
-        })
+        };
+
+        let required_bytes = resource_metrics.encoded_len();
+        let diff = budget.saturating_sub(required_bytes);
+
+        if diff > 0 {
+            *budget = diff;
+            Ok(resource_metrics)
+        } else {
+            Err(Self::Error::SizeExhausted)
+        }
     }
 }

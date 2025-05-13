@@ -209,3 +209,17 @@ pub(crate) trait Generator<'a> {
     where
         R: rand::Rng + ?Sized;
 }
+
+/// A generator that can shape its output to fit within `budget` bytes.
+pub(crate) trait SizedGenerator<'a> {
+    type Output: 'a;
+    type Error: 'a;
+
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        R: rand::Rng + ?Sized;
+}
