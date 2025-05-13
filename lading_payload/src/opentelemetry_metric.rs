@@ -53,8 +53,8 @@ use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::{Pool, ResourceTemplateGenerator};
-use tracing::debug;
+use templates::{Pool, PoolError, ResourceTemplateGenerator};
+use tracing::{debug, error};
 use unit::UnitGenerator;
 
 const SMALLEST_PROTOBUF: usize = 64; // smallest useful protobuf, arbitrary low-ish cut-off
@@ -256,7 +256,14 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     {
         // Retrieve a template from the pool, modify its timestamp and data
         // points to randomize the data we send out.
-        let mut tpl: v1::ResourceMetrics = self.pool.fetch(rng, budget)?.to_owned();
+        let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
+            Ok(t) => t.to_owned(),
+            Err(PoolError::EmptyChoice) => {
+                error!("Pool was unable to satify request for {budget} size");
+                Err(PoolError::EmptyChoice)?
+            }
+            Err(e) => Err(e)?,
+        };
 
         // Randomize the data points in each metric. Metric kinds are preserved
         // but timestamps are completely random as are point values.

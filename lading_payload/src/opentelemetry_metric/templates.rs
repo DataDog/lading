@@ -14,6 +14,7 @@ use rand::{
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
     seq::{IndexedRandom, IteratorRandom},
 };
+use tracing::error;
 
 use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common::strings};
@@ -189,7 +190,19 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let metadata = self.tags.generate(rng, budget)?;
+        // We record the original budget because if we bail out on generation we
+        // are obligated by trait semantics to NOT alter the passed budget.
+        let original_budget = *budget;
+        let mut inner_budget = *budget;
+
+        let metadata = match self.tags.generate(rng, &mut inner_budget) {
+            Ok(md) => md,
+            Err(GeneratorError::SizeExhausted) => {
+                error!("Tag generator unable to satify request for {inner_budget} size");
+                Err(GeneratorError::SizeExhausted)?
+            }
+            Err(e) => Err(e)?,
+        };
 
         let name = self
             .str_pool
@@ -243,12 +256,15 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         };
 
         let required_bytes = metric.encoded_len();
-        let diff = budget.saturating_sub(required_bytes);
+        let diff = original_budget.saturating_sub(required_bytes);
 
         if diff > 0 {
             *budget = diff;
             Ok(metric)
         } else {
+            error!(
+                "MetricTemplateGenerator unable to satisfy request for {original_budget} bytes."
+            );
             Err(Self::Error::SizeExhausted)
         }
     }
@@ -304,6 +320,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
     type Output = ScopeMetrics;
     type Error = GeneratorError;
 
+    #[tracing::instrument(skip(self, rng))]
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
@@ -312,10 +329,22 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
+        // We record the original budget because if we bail out on generation we
+        // are obligated by trait semantics to NOT alter the passed budget.
+        let original_budget = *budget;
+        let mut inner_budget = *budget;
+
         let scope = if self.attributes_per_scope.start() == 0 {
             None
         } else {
-            let attributes = self.tags.generate(rng, budget)?;
+            let attributes = match self.tags.generate(rng, &mut inner_budget) {
+                Ok(md) => md,
+                Err(GeneratorError::SizeExhausted) => {
+                    error!("Tag generator unable to satify request for {inner_budget} size");
+                    Err(GeneratorError::SizeExhausted)?
+                }
+                Err(e) => Err(e)?,
+            };
             Some(InstrumentationScope {
                 name: self
                     .str_pool
@@ -328,13 +357,28 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
             })
         };
 
-        let total_metrics = self.metrics_per_scope.sample(rng);
+        let mut total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<Metric> = Vec::with_capacity(total_metrics as usize);
-        for _ in 0..total_metrics {
-            match self.metric_generator.generate(rng, budget) {
-                Ok(m) => metrics.push(m),
-                Err(GeneratorError::SizeExhausted) => break,
-                Err(e) => return Err(e),
+        // Search for the most metrics we can fit. If the metric_generator
+        // returns SizeExhausted we cut total_metrics by 1/4 and try again until
+        // we hit total_metrics == 0, at which point this generator signals
+        // SizeExhausted.
+        'outer: while total_metrics > 0 {
+            for _ in 0..total_metrics {
+                match self.metric_generator.generate(rng, &mut inner_budget) {
+                    Ok(m) => metrics.push(m),
+                    Err(GeneratorError::SizeExhausted) => {
+                        total_metrics /= 4;
+                        if total_metrics == 0 {
+                            error!(
+                                "ScopeTemplateGenerator unable to satisfy erquest for {original_budget} bytes"
+                            );
+                            return Err(GeneratorError::SizeExhausted);
+                        }
+                        continue 'outer;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
 
@@ -345,7 +389,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
         };
 
         let required_bytes = scope_metrics.encoded_len();
-        let diff = budget.saturating_sub(required_bytes);
+        let diff = original_budget.saturating_sub(required_bytes);
 
         if diff > 0 {
             *budget = diff;

@@ -218,6 +218,7 @@ pub(crate) trait SizedGenerator<'a> {
     type Output: 'a;
     type Error: 'a;
 
+    /// Decrements `budget` if and only if result is Ok.
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
