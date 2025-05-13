@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   And expose it in the new `total_wss_bytes` metric.
 - Add a `max_lifetime` parameter to the `container` generator to make it generate
   a continuous stream of docker containers deletion and re-creation.
+- Block cache generation now logs its number of rejected, success blocks once
+  the cache is created.
 
 ## [0.25.9]
 ## Added

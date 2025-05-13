@@ -466,6 +466,11 @@ impl Cache {
 /// of time. We vary the size of blocks -- via `block_chunks` -- to allow the
 /// user to express a range of block sizes they wish to see.
 ///
+/// This function works by randomly probing the block size search space. This
+/// has the benefit of making the payload generators conceptually simple with
+/// the downside of wasting -- potentially -- `crate::Serializer::to_bytes`
+/// calls when the passed block size cannot be satisfied.
+///
 /// # Panics
 ///
 /// Function will panic if the `serializer` signals an error. In the future we
@@ -487,6 +492,9 @@ where
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
+    let mut max_actual_block_size = 0;
+    let mut rejected_block_sizes = 0;
+    let mut success_block_sizes = 0;
     info!(
         ?max_block_size,
         ?total_bytes,
@@ -511,10 +519,15 @@ where
 
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
-                bytes_remaining = bytes_remaining.saturating_sub(block.total_bytes.get());
+                success_block_sizes += 1;
+
+                let total_bytes = block.total_bytes.get();
+                max_actual_block_size = max_actual_block_size.max(total_bytes);
+                bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
                 block_cache.push(block);
             }
             Err(SpinError::EmptyBlock) => {
+                rejected_block_sizes += 1;
                 // It might be that `block_size` could not be constructed
                 // because the size is too small or we just caught a bad
                 // break. We do know that there's some true minimum viable size
@@ -565,8 +578,11 @@ where
         let min_block_str = Byte::from_u64(min_block_size.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
+        let max_actual_block_str = Byte::from_u64(max_actual_block_size.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
         info!(
-            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}"
+            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}."
         );
 
         Ok(block_cache)
