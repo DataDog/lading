@@ -57,7 +57,9 @@ use templates::{Pool, PoolError, ResourceTemplateGenerator};
 use tracing::{debug, error};
 use unit::UnitGenerator;
 
-const SMALLEST_PROTOBUF: usize = 64; // smallest useful protobuf, arbitrary low-ish cut-off
+// smallest useful protobuf, determined by experimentation and enforced in
+// smallest_protobuf test
+const SMALLEST_PROTOBUF: usize = 31;
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -130,22 +132,58 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+
     pub fn valid(&self) -> Result<(), String> {
-        // None of the metric weights are 0.
+        // Validate metric weights - both types must have non-zero probability to ensure
+        // we can generate a diverse set of metrics
         if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
             return Err("Metric weights cannot be 0".to_string());
         }
 
-        // total_contexts cannot be zero
+        // Validate total_contexts - we need at least one context to generate metrics
         match self.contexts.total_contexts {
             ConfRange::Constant(0) => return Err("total_contexts cannot be zero".to_string()),
-            ConfRange::Constant(_) => (), // valid case
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
             ConfRange::Inclusive { min, max } => {
                 if min == 0 {
                     return Err("total_contexts minimum cannot be zero".to_string());
                 }
                 if min > max {
                     return Err("total_contexts minimum cannot be greater than maximum".to_string());
+                }
+            }
+        }
+
+        // Validate scopes_per_resource - each resource must have at least one scope
+        // to contain metrics
+        match self.contexts.scopes_per_resource {
+            ConfRange::Constant(0) => return Err("scopes_per_resource cannot be zero".to_string()),
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
+            ConfRange::Inclusive { min, max } => {
+                if min == 0 {
+                    return Err("scopes_per_resource minimum cannot be zero".to_string());
+                }
+                if min > max {
+                    return Err(
+                        "scopes_per_resource minimum cannot be greater than maximum".to_string()
+                    );
+                }
+            }
+        }
+
+        // Validate metrics_per_scope - each scope must contain at least one metric
+        // to be meaningful
+        match self.contexts.metrics_per_scope {
+            ConfRange::Constant(0) => return Err("metrics_per_scope cannot be zero".to_string()),
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
+            ConfRange::Inclusive { min, max } => {
+                if min == 0 {
+                    return Err("metrics_per_scope minimum cannot be zero".to_string());
+                }
+                if min > max {
+                    return Err(
+                        "metrics_per_scope minimum cannot be greater than maximum".to_string()
+                    );
                 }
             }
         }
@@ -371,13 +409,19 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics};
+    use super::{Config, Contexts, OpentelemetryMetrics, SMALLEST_PROTOBUF};
     use crate::{
         Serialize, SizedGenerator,
         common::config::ConfRange,
         opentelemetry_metric::v1::{ResourceMetrics, metric},
     };
     use opentelemetry_proto::tonic::common::v1::any_value;
+    use opentelemetry_proto::tonic::metrics::v1::{
+        Metric, NumberDataPoint, ScopeMetrics, number_data_point,
+    };
+    use opentelemetry_proto::tonic::{
+        collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
+    };
     use proptest::prelude::*;
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
@@ -410,6 +454,8 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assume!(config.valid().is_ok());
 
             let mut budget = 10_000_000;
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -454,6 +500,8 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assume!(config.valid().is_ok());
 
             let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
@@ -587,6 +635,8 @@ mod test {
                 ..Default::default()
             };
 
+            prop_assume!(config.valid().is_ok());
+
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
@@ -626,6 +676,8 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assume!(config.valid().is_ok());
 
             let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -757,7 +809,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 1..20_u8,
             attributes_per_metric in 0..10_u8,
-            budget in 128..2048_usize,
+            budget in 512..4098_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -770,6 +822,9 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assert!(budget > SMALLEST_PROTOBUF);
+            prop_assume!(config.valid().is_ok());
 
             let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -790,8 +845,56 @@ mod test {
     }
 
     #[test]
+    fn smallest_protobuf() {
+        let data_point = NumberDataPoint {
+            attributes: Vec::new(),
+            start_time_unix_nano: 0,
+            time_unix_nano: 1, // Minimal non-zero timestamp
+            value: Some(number_data_point::Value::AsInt(1)), // Smallest value
+            exemplars: Vec::new(),
+            flags: 0,
+        };
+
+        let gauge = Gauge {
+            data_points: vec![data_point],
+        };
+
+        let metric = Metric {
+            name: "x".into(), // Minimal valid name
+            description: "".into(),
+            unit: "".into(),
+            data: Some(metric::Data::Gauge(gauge)),
+            metadata: Vec::new(), // No metadata
+        };
+
+        let scope_metrics = ScopeMetrics {
+            scope: None, // No scope info
+            metrics: vec![metric],
+            schema_url: "".into(),
+        };
+
+        let resource_metrics = ResourceMetrics {
+            resource: None, // No resource info
+            scope_metrics: vec![scope_metrics],
+            schema_url: "".into(),
+        };
+
+        // The most minimal request we care to support, just one single data point
+        let minimal_request = ExportMetricsServiceRequest {
+            resource_metrics: vec![resource_metrics],
+        };
+
+        let encoded_size = minimal_request.encoded_len();
+
+        assert!(
+            encoded_size == SMALLEST_PROTOBUF,
+            "Minimal useful request size ({encoded_size}) should be == SMALLEST_PROTOBUF ({SMALLEST_PROTOBUF})"
+        );
+    }
+
+    #[test]
     fn config_validation() {
-        // Valid cases
+        // Valid configuration
         let valid_config = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Constant(100),
@@ -805,7 +908,7 @@ mod test {
         };
         assert!(valid_config.valid().is_ok());
 
-        // Zero total_contexts
+        // Invalid: Zero total_contexts
         let zero_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Constant(0),
@@ -815,27 +918,87 @@ mod test {
         };
         assert!(zero_contexts.valid().is_err());
 
-        // Zero min in range
-        let zero_min_range = Config {
+        // Invalid: Zero minimum total_contexts in range
+        let zero_min_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 0, max: 100 },
                 ..valid_config.contexts
             },
             ..valid_config
         };
-        assert!(zero_min_range.valid().is_err());
+        assert!(zero_min_contexts.valid().is_err());
 
-        // Min greater than max
-        let min_gt_max = Config {
+        // Invalid: Min greater than max in total_contexts
+        let min_gt_max_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 100, max: 50 },
                 ..valid_config.contexts
             },
             ..valid_config
         };
-        assert!(min_gt_max.valid().is_err());
+        assert!(min_gt_max_contexts.valid().is_err());
 
-        // Impossible to achieve minimum contexts
+        // Invalid: Zero scopes_per_resource
+        let zero_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Constant(0),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_scopes.valid().is_err());
+
+        // Invalid: Zero minimum scopes_per_resource in range
+        let zero_min_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Inclusive { min: 0, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_min_scopes.valid().is_err());
+
+        // Invalid: Min greater than max in scopes_per_resource
+        let min_gt_max_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Inclusive { min: 20, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(min_gt_max_scopes.valid().is_err());
+
+        // Invalid: Zero metrics_per_scope
+        let zero_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Constant(0),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_metrics.valid().is_err());
+
+        // Invalid: Zero minimum metrics_per_scope in range
+        let zero_min_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Inclusive { min: 0, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_min_metrics.valid().is_err());
+
+        // Invalid: Min greater than max in metrics_per_scope
+        let min_gt_max_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Inclusive { min: 20, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(min_gt_max_metrics.valid().is_err());
+
+        // Invalid: Impossible to achieve minimum contexts (context requirement exceeds capacity)
         let impossible_min = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive {
@@ -850,7 +1013,7 @@ mod test {
         };
         assert!(impossible_min.valid().is_err());
 
-        // Impossible to achieve maximum contexts
+        // Invalid: Impossible to achieve maximum contexts (max is too small)
         let impossible_max = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 1, max: 1 },
@@ -862,7 +1025,19 @@ mod test {
         };
         assert!(impossible_max.valid().is_err());
 
-        // Zero metric weights
+        // Invalid: Zero metric weights
+        let zero_gauge_weight = Config {
+            metric_weights: super::MetricWeights { gauge: 0, sum: 50 },
+            ..valid_config
+        };
+        assert!(zero_gauge_weight.valid().is_err());
+
+        let zero_sum_weight = Config {
+            metric_weights: super::MetricWeights { gauge: 50, sum: 0 },
+            ..valid_config
+        };
+        assert!(zero_sum_weight.valid().is_err());
+
         let zero_weights = Config {
             metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
             ..valid_config
