@@ -1,6 +1,3 @@
-// TODO remove
-#![allow(clippy::print_stdout)]
-
 use std::{cmp, collections::BTreeMap, rc::Rc};
 
 use opentelemetry_proto::tonic::{
@@ -76,13 +73,6 @@ impl Pool {
 
         let upper = *budget;
         let mut limit = *budget;
-
-        println!(
-            "len: {len}, context_cap: {context_cap}, budget: {budget}",
-            len = self.len,
-            context_cap = self.context_cap,
-            budget = *budget,
-        );
 
         // Generate new instances until either context_cap is hit or the
         // remaining space drops below our lookup interval.
@@ -271,9 +261,6 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             assert_eq!(original_budget, *budget);
             match original_budget.cmp(&required_bytes) {
                 cmp::Ordering::Equal | cmp::Ordering::Greater => {
-                    println!(
-                        "budget: {budget}, original_budget: {original_budget}, required_bytes: {required_bytes}"
-                    );
                     *budget -= required_bytes;
                     return Ok(metric);
                 }
@@ -284,9 +271,6 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 }
             }
         }
-        println!(
-            "MetricTemplateGenerator unable to satisfy request for {original_budget} bytes, total data points: {total_data_points}.",
-        );
         debug!("MetricTemplateGenerator unable to satisfy request for {original_budget} bytes.");
         Err(Self::Error::SizeExhausted)
     }
@@ -442,26 +426,31 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
             }
         }
         if metrics.is_empty() {
-            println!("Unable to populate metrics with budget {original_budget}");
             error!(
                 "ScopeTemplateGenerator unable to populate metrics with budget {original_budget}"
             );
             return Err(GeneratorError::SizeExhausted);
         }
 
-        let scope_metrics = ScopeMetrics {
+        let mut scope_metrics = ScopeMetrics {
             scope,
             metrics,
             schema_url: String::new(),
         };
-
-        let required_bytes = scope_metrics.encoded_len();
-        match original_budget.cmp(&required_bytes) {
-            cmp::Ordering::Equal | cmp::Ordering::Greater => {
-                *budget -= required_bytes;
-                Ok(scope_metrics)
+        loop {
+            let required_bytes = scope_metrics.encoded_len();
+            match original_budget.cmp(&required_bytes) {
+                cmp::Ordering::Equal | cmp::Ordering::Greater => {
+                    *budget -= required_bytes;
+                    return Ok(scope_metrics);
+                }
+                cmp::Ordering::Less => {
+                    if scope_metrics.metrics.pop().is_some() {
+                        continue;
+                    }
+                    return Err(GeneratorError::SizeExhausted);
+                }
             }
-            cmp::Ordering::Less => Err(Self::Error::SizeExhausted),
         }
     }
 }
@@ -518,8 +507,6 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         let original_budget = *budget;
         let mut inner_budget = *budget;
 
-        println!("hello from resourcetemplategenerator");
-
         let resource = if self.attributes_per_resource.end() == 0 {
             None
         } else {
@@ -549,7 +536,6 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
             }
         }
         if scopes.is_empty() {
-            println!("Unable to populate scopes with budget {original_budget}");
             error!(
                 "ResourceTemplateGenerator unable to populate metrics with budget {original_budget}"
             );
@@ -563,11 +549,6 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         };
 
         let required_bytes = resource_metrics.encoded_len();
-        println!(
-            "attrs per resource: {attributes_per_resource}, scopes per resource: {scopes_per_resource}, required bytes {required_bytes}",
-            attributes_per_resource = self.attributes_per_resource,
-            scopes_per_resource = self.scopes_per_resource
-        );
 
         match original_budget.cmp(&required_bytes) {
             cmp::Ordering::Equal | cmp::Ordering::Greater => {

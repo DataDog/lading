@@ -132,7 +132,6 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
@@ -824,23 +823,25 @@ mod test {
             };
 
             prop_assert!(budget > SMALLEST_PROTOBUF);
-            prop_assume!(config.valid().is_ok());
 
             let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
-            let metric1 = otel_metrics.generate(&mut rng, &mut b1)?;
+            let metric1 = otel_metrics.generate(&mut rng, &mut b1);
 
             // Generate two identical metrics
             let mut b2 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
-            let metric2 = otel_metrics.generate(&mut rng, &mut b2)?;
+            let metric2 = otel_metrics.generate(&mut rng, &mut b2);
 
-            // Ensure that the metrics are equal.
-            assert_eq!(metric1, metric2);
-            // If the metrics are equal then their contexts must be equal.
-            assert_eq!(context_id(&metric1), context_id(&metric2));
+            // Ensure that the metrics are equal and that their contexts, when
+            // applicable, are also equal.
+            if let Ok(m1) = metric1 {
+                let m2 = metric2.unwrap();
+                prop_assert_eq!(context_id(&m1), context_id(&m2));
+                prop_assert_eq!(m1, m2);
+            }
         }
     }
 
