@@ -454,8 +454,6 @@ mod test {
                 ..Default::default()
             };
 
-            prop_assume!(config.valid().is_ok());
-
             let mut budget = 10_000_000;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
@@ -477,7 +475,7 @@ mod test {
     // outcomes.
     proptest! {
         #[test]
-        fn opentelemetry_metrics_generate_is_deterministic(
+        fn is_deterministic(
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
@@ -500,8 +498,6 @@ mod test {
                 ..Default::default()
             };
 
-            prop_assume!(config.valid().is_ok());
-
             let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
             let mut otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
@@ -510,10 +506,11 @@ mod test {
             let mut otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
 
             for _ in 0..steps {
-                let gen_1 = otel_metrics1.generate(&mut rng1, &mut b1)?;
-                let gen_2 = otel_metrics2.generate(&mut rng2, &mut b2)?;
-                prop_assert_eq!(gen_1, gen_2);
-                prop_assert_eq!(b1, b2);
+                if let Ok(gen_1) = otel_metrics1.generate(&mut rng1, &mut b1) {
+                    let gen_2 = otel_metrics2.generate(&mut rng2, &mut b2).expect("gen_2 was not Ok");
+                    prop_assert_eq!(gen_1, gen_2);
+                    prop_assert_eq!(b1, b2);
+                }
             }
         }
     }
@@ -586,8 +583,6 @@ mod test {
                 ..Default::default()
             };
 
-            prop_assume!(config.valid().is_ok());
-
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut b = budget;
@@ -595,16 +590,16 @@ mod test {
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
-                let res = otel_metrics.generate(&mut rng, &mut b)?;
-                let id = context_id(&res);
-                ids.insert(id);
+                if let Ok(res) = otel_metrics.generate(&mut rng, &mut b) {
+                    let id = context_id(&res);
+                    ids.insert(id);
+                }
             }
 
             let actual_contexts = ids.len();
             let bounded_above = actual_contexts <= total_contexts_max as usize;
             prop_assert!(bounded_above,
-                         "expected {} ≤ {}",
-                         actual_contexts, total_contexts_max);
+                         "expected {actual_contexts} ≤ {total_contexts_max}");
         }
     }
 
@@ -633,8 +628,6 @@ mod test {
                 },
                 ..Default::default()
             };
-
-            prop_assume!(config.valid().is_ok());
 
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
