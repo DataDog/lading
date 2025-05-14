@@ -3,12 +3,9 @@ use std::fmt;
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
-use crate::{Error, Generator};
+use crate::{Error, Generator, common::strings::choose_or_not_ref};
 
-use super::{
-    choose_or_not_ref,
-    common::{self, tags::Tagset},
-};
+use super::common::{self, tags::Tagset};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
