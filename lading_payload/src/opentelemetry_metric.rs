@@ -478,7 +478,7 @@ mod test {
 
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
