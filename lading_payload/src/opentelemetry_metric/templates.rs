@@ -198,7 +198,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let metadata = match self.tags.generate(rng, &mut inner_budget) {
             Ok(md) => md,
             Err(GeneratorError::SizeExhausted) => {
-                error!("Tag generator unable to satify request for {inner_budget} size");
+                debug!("Tag generator unable to satify request for {inner_budget} size");
                 Vec::new()
             }
             Err(e) => Err(e)?,
@@ -396,7 +396,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
             let attributes = match self.tags.generate(rng, &mut inner_budget) {
                 Ok(md) => md,
                 Err(GeneratorError::SizeExhausted) => {
-                    error!("Tag generator unable to satify request for {inner_budget} size");
+                    debug!("Tag generator unable to satify request for {inner_budget} size");
                     Vec::new()
                 }
                 Err(e) => Err(e)?,
@@ -426,7 +426,7 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
             }
         }
         if metrics.is_empty() {
-            error!(
+            debug!(
                 "ScopeTemplateGenerator unable to populate metrics with budget {original_budget}"
             );
             return Err(GeneratorError::SizeExhausted);
@@ -536,26 +536,33 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
             }
         }
         if scopes.is_empty() {
-            error!(
+            debug!(
                 "ResourceTemplateGenerator unable to populate metrics with budget {original_budget}"
             );
             return Err(GeneratorError::SizeExhausted);
         }
 
-        let resource_metrics = ResourceMetrics {
+        let mut resource_metrics = ResourceMetrics {
             resource,
             scope_metrics: scopes,
             schema_url: String::new(),
         };
 
-        let required_bytes = resource_metrics.encoded_len();
+        loop {
+            let required_bytes = resource_metrics.encoded_len();
 
-        match original_budget.cmp(&required_bytes) {
-            cmp::Ordering::Equal | cmp::Ordering::Greater => {
-                *budget -= required_bytes;
-                Ok(resource_metrics)
+            match original_budget.cmp(&required_bytes) {
+                cmp::Ordering::Equal | cmp::Ordering::Greater => {
+                    *budget -= required_bytes;
+                    return Ok(resource_metrics);
+                }
+                cmp::Ordering::Less => {
+                    if resource_metrics.scope_metrics.pop().is_some() {
+                        continue;
+                    }
+                    return Err(Self::Error::SizeExhausted);
+                }
             }
-            cmp::Ordering::Less => Err(Self::Error::SizeExhausted),
         }
     }
 }
