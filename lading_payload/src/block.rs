@@ -5,7 +5,7 @@
 //! from that, decoupling the create/send operations. This module is the
 //! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
 //! -- are created.
-use std::{num::NonZeroU32, usize};
+use std::num::NonZeroU32;
 
 use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};

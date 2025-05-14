@@ -203,7 +203,7 @@ impl Serialize for Payload {
     }
 }
 
-/// Generate instance of `I` from source of randomness `S`.
+/// Generate instances of `Self::Output` from source of randomness.
 pub(crate) trait Generator<'a> {
     type Output: 'a;
     type Error: 'a;
@@ -213,12 +213,18 @@ pub(crate) trait Generator<'a> {
         R: rand::Rng + ?Sized;
 }
 
-/// A generator that can shape its output to fit within `budget` bytes.
+/// Generate instances of `Self::Output` from source of randomness, constrained
+/// to byte budgets.
 pub(crate) trait SizedGenerator<'a> {
     type Output: 'a;
     type Error: 'a;
 
-    /// Decrements `budget` if and only if result is Ok.
+    /// Generate a new instance of `Self::Output`. Implementations MUST uphold
+    /// the following properties:
+    ///
+    /// * `budget` is decremented if and only if return is Ok
+    /// * `budget` must be decremented only by the amount required to store
+    ///   returned instance of `Self::Output`.
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
