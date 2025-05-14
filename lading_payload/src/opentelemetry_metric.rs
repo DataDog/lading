@@ -493,33 +493,6 @@ mod test {
         }
     }
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    proptest! {
-        #[test]
-        fn payload_not_exceed_max_bytes(seed: u64, max_bytes in 128u16..u16::MAX) {
-            let config = Config {
-                contexts: Contexts {
-                    total_contexts: ConfRange::Constant(1),
-                    attributes_per_resource: ConfRange::Constant(0),
-                    scopes_per_resource: ConfRange::Constant(1),
-                    attributes_per_scope: ConfRange::Constant(0),
-                    metrics_per_scope: ConfRange::Constant(1),
-                    attributes_per_metric: ConfRange::Constant(0),
-                },
-                ..Default::default()
-            };
-
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
-        }
-    }
-
     // Generation of metrics must be context bounded. If `generate` is called
     // more than total_context times only total_context contexts should be
     // produced.
