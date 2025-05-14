@@ -271,9 +271,9 @@ impl OpentelemetryMetrics {
         R: rand::Rng + ?Sized,
     {
         let context_cap = config.contexts.total_contexts.sample(rng);
-        // Moby Dick is 1.2Mb. 256Kb should be more than enough for metric
+        // Moby Dick is 1.2Mb. 128Kb should be more than enough for metric
         // names, descriptions, etc.
-        let str_pool = Rc::new(strings::Pool::with_size(rng, 256_000));
+        let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {
@@ -517,46 +517,6 @@ mod test {
         }
     }
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    proptest! {
-        #[test]
-        fn payload_not_exceed_max_bytes(
-            seed: u64,
-            total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
-            attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
-            attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX,
-            max_bytes in 64u16..u16::MAX)
-        {
-            let config = Config {
-                contexts: Contexts {
-                    total_contexts: ConfRange::Constant(total_contexts),
-                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
-                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
-                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
-                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
-                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
-                },
-                ..Default::default()
-            };
-
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            for _ in 0..steps {
-                bytes.clear();
-                metrics.to_bytes(&mut rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-                prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
-            }
-        }
-    }
-
     // Generation of metrics must be context bounded. If `generate` is called
     // more than total_context times only total_context contexts should be
     // produced.
@@ -605,19 +565,67 @@ mod test {
         }
     }
 
-    // We want to know that every payload produced by this type actually
-    // deserializes as a collection of OTEL metrics.
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    //
+    // NOTE this test is VERY SLOW. We crank the test cases down to get
+    // reasonable CI times. Please set PROPTEST_CASES envar locally when you
+    // make changes that might impact this result. I, blt, like to have a coffee
+    // while it runs.
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(25))]
         #[test]
-        fn payload_deserializes(
+        fn payload_not_exceed_max_bytes(
             seed: u64,
-            total_contexts in 1..1_000_u32,
+            total_contexts in 1..100_u32,
             attributes_per_resource in 0..20_u8,
             scopes_per_resource in 0..20_u8,
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            max_bytes in 8u16..u16::MAX
+            max_bytes in 128u16..4096_u16)
+        {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            metrics.to_bytes(&mut rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+            prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
+        }
+    }
+
+    // We want to know that every payload produced by this type actually
+    // deserializes as a collection of OTEL metrics.
+    //
+    // NOTE this test is VERY SLOW. We crank the test cases down to get
+    // reasonable CI times. Please set PROPTEST_CASES envar locally when you
+    // make changes that might impact this result. I, blt, like to have a coffee
+    // while it runs.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(25))]
+        #[test]
+        fn payload_deserializes(
+            seed: u64,
+            total_contexts in 1..100_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            max_bytes in 128..4098_u16
         ) {
             let config = Config {
                 contexts: Contexts {
