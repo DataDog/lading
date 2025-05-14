@@ -510,6 +510,8 @@ mod test {
                     let gen_2 = otel_metrics2.generate(&mut rng2, &mut b2).expect("gen_2 was not Ok");
                     prop_assert_eq!(gen_1, gen_2);
                     prop_assert_eq!(b1, b2);
+                } else {
+                    break;
                 }
             }
         }
