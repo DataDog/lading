@@ -15,7 +15,7 @@ use tokio::{
     sync::mpsc::{Sender, error::SendError},
     time::Instant,
 };
-use tracing::{Level, debug, error, info, span, warn};
+use tracing::{Level, error, info, span, warn};
 
 /// Error for `Cache::spin`
 #[derive(Debug, thiserror::Error)]
@@ -499,8 +499,6 @@ where
         ?total_bytes,
         "Constructing requested block cache"
     );
-    let mut block_sizes_skipped = 0;
-    let mut block_sizes_used = 0;
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);
     let mut bytes_remaining = total_bytes;
 

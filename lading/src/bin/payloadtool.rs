@@ -61,12 +61,12 @@ fn generate_and_check(
     for block in blocks.iter() {
         total_generated_bytes += block.total_bytes.get();
     }
+    let total_requested_bytes =
+        byte_unit::Byte::from_u128(total_bytes.get().into()).expect("total_bytes must be non-zero");
+    let total_requested_bytes_str = total_requested_bytes
+        .get_appropriate_unit(UnitType::Binary)
+        .to_string();
     if total_bytes.get().abs_diff(total_generated_bytes) > 1_000_000 {
-        let total_requested_bytes = byte_unit::Byte::from_u128(total_bytes.get().into())
-            .expect("total_bytes must be non-zero");
-        let total_requested_bytes_str = total_requested_bytes
-            .get_appropriate_unit(UnitType::Binary)
-            .to_string();
         let total_generated_bytes = byte_unit::Byte::from_u128(total_generated_bytes.into())
             .expect("total_generated_bytes must be non-zero");
         let total_generated_bytes_str = total_generated_bytes
