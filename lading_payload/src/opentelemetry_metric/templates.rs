@@ -38,58 +38,15 @@ impl Distribution<Ndp> for StandardUniform {
             time_unix_nano: rng.random(),
             // Unclear that this needs to be set.
             exemplars: Vec::new(),
-            // Equivalent to DoNotUse, the flag is ignored. If we ever set
-            // `value` to None this must be set to
+            // Equivalent to DoNotUse, the flag is ignored. This is discussed in
+            // the upstream OTLP protobuf definition, which we inherit from the
+            // SDK. If we ever set `value` to None this must be set to
             // DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK
             flags: 0,
             value: Some(value),
         })
     }
 }
-
-// struct Gauge(v1::Gauge);
-// impl Distribution<Gauge> for StandardUniform {
-//     fn sample<R>(&self, rng: &mut R) -> Gauge
-//     where
-//         R: Rng + ?Sized,
-//     {
-//         let total = rng.random_range(0..64);
-//         let data_points = StandardUniform
-//             .sample_iter(rng)
-//             .map(|ndp: NumberDataPoint| ndp.0)
-//             .take(total)
-//             .collect();
-//         Gauge(v1::Gauge { data_points })
-//     }
-// }
-
-// struct Sum(v1::Sum);
-// impl Distribution<Sum> for StandardUniform {
-//     fn sample<R>(&self, rng: &mut R) -> Sum
-//     where
-//         R: Rng + ?Sized,
-//     {
-//         // 0: Unspecified AggregationTemporality, MUST not be used
-//         // 1: Delta
-//         // 2: Cumulative
-//         let aggregation_temporality = *[1, 2]
-//             .choose(rng)
-//             .expect("failed to choose aggregation temporality");
-//         let is_monotonic = rng.random();
-//         let total = rng.random_range(0..64);
-//         let data_points = StandardUniform
-//             .sample_iter(rng)
-//             .map(|ndp: NumberDataPoint| ndp.0)
-//             .take(total)
-//             .collect();
-
-//         Sum(v1::Sum {
-//             data_points,
-//             aggregation_temporality,
-//             is_monotonic,
-//         })
-//     }
-// }
 
 /// Static description of a Metric (everything that defines a context).
 #[derive(Debug, Clone)]

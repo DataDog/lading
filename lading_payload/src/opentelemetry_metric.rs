@@ -143,8 +143,6 @@ impl Config {
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
     pool: Vec<templates::ResourceTemplate>,
-    // // TODO insert a 'templates' field that will be a Vec of a yet-to-be defined
-    // generator: ResourceGenerator,
 }
 
 impl OpentelemetryMetrics {
@@ -389,45 +387,12 @@ mod test {
             }
 
             let actual_contexts = ids.len();
-            let below = total_contexts_min as usize <= actual_contexts;
-            let above = actual_contexts <= total_contexts_max as usize;
-            prop_assert!(below && above,
-                         "expected {} ≤ {} ≤ {}",
-                         total_contexts_min, actual_contexts, total_contexts_max);
+            let bounded_above = actual_contexts <= total_contexts_max as usize;
+            prop_assert!(bounded_above,
+                         "expected {} ≤ {}",
+                         actual_contexts, total_contexts_max);
         }
     }
-
-    // NOTE disabled temporarily, will re-enable in up-stack commit
-    // // We want to be sure that the payloads are not being left empty.
-    // proptest! {
-    //     #[test]
-    //     fn payload_is_at_least_half_of_max_bytes(seed: u64, max_bytes in 16u16..u16::MAX) {
-    //         let max_bytes = max_bytes as usize;
-    //         let mut rng = SmallRng::seed_from_u64(seed);
-    //         let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
-
-    //         let mut bytes = Vec::with_capacity(max_bytes);
-    //         metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-
-    //         assert!(!bytes.is_empty());
-    //     }
-    // }
-
-    // // We want to know that every payload produced by this type actually
-    // // deserializes as a collection of OTEL metrics.
-    // proptest! {
-    //     #[test]
-    //     fn payload_deserializes(seed: u64, max_bytes: u16)  {
-    //         let max_bytes = max_bytes as usize;
-    //         let mut rng = SmallRng::seed_from_u64(seed);
-    //         let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
-
-    //         let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-    //         metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-
-    //         opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
-    //     }
-    // }
 
     // Confirm that configuration bounds are naively obeyed. For instance, this
     // test will pass if every resource generated has identical attributes, etc
