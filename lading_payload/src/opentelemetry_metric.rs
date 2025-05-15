@@ -61,6 +61,9 @@ use unit::UnitGenerator;
 // smallest_protobuf test
 const SMALLEST_PROTOBUF: usize = 31;
 
+/// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
+const TIME_INCREMENT_NANOS: u64 = 1_000_000;
+
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -257,8 +260,12 @@ impl Config {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
+    /// Template pool for metric generation
     pool: Pool,
+    /// Scratch buffer for serialization
     scratch: RefCell<BytesMut>,
+    /// Current tick count for monotonic timing (starts at 0)
+    tick: u64,
 }
 
 impl OpentelemetryMetrics {
@@ -279,6 +286,7 @@ impl OpentelemetryMetrics {
         Ok(Self {
             pool: Pool::new(context_cap, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
+            tick: 0,
         })
     }
 }
@@ -287,12 +295,19 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     type Output = v1::ResourceMetrics;
     type Error = Error;
 
+    /// Generate OTLP metrics with the following enhancements:
+    ///
+    /// * Monotonic sums are truly monotonic, incrementing by a random amount each tick
+    /// * Timestamps advance monotonically based on internal tick counter starting at epoch
+    /// * Each call advances the tick counter by a random amount (1-60)
     fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
-        // Retrieve a template from the pool, modify its timestamp and data
-        // points to randomize the data we send out.
+        let prev_tick = self.tick;
+        self.tick += rng.random_range(1..=60);
+        let tick_diff = self.tick - prev_tick;
+
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
@@ -302,15 +317,16 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             Err(e) => Err(e)?,
         };
 
-        // Randomize the data points in each metric. Metric kinds are preserved
-        // but timestamps are completely random as are point values.
+        // Update data points in each metric. For gauges we use random values,
+        // for accumulating sums we increment by a fixed amount per tick.
+        // All timestamps are updated based on the current tick.
         for scope_metrics in &mut tpl.scope_metrics {
             for metric in &mut scope_metrics.metrics {
                 if let Some(data) = &mut metric.data {
                     match data {
                         Data::Gauge(gauge) => {
                             for point in &mut gauge.data_points {
-                                point.time_unix_nano = rng.random();
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
                                 if let Some(value) = &mut point.value {
                                     match value {
                                         number_data_point::Value::AsDouble(v) => {
@@ -324,15 +340,46 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             }
                         }
                         Data::Sum(sum) => {
+                            let is_accumulating = sum.is_monotonic;
                             for point in &mut sum.data_points {
-                                point.time_unix_nano = rng.random();
-                                if let Some(value) = &mut point.value {
-                                    match value {
-                                        number_data_point::Value::AsDouble(v) => {
-                                            *v = rng.random();
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                if is_accumulating {
+                                    // For accumulating sums, monotonically
+                                    // increase by some factor of `tick_diff`
+                                    if let Some(value) = &mut point.value {
+                                        match value {
+                                            number_data_point::Value::AsDouble(v) => {
+                                                // Ensure the initial value is positive
+                                                if *v < 0.0 {
+                                                    *v = v.abs();
+                                                }
+                                                let increment =
+                                                    rng.random_range(1.0..10.0) * tick_diff as f64;
+                                                *v += increment;
+                                            }
+                                            #[allow(clippy::cast_possible_wrap)]
+                                            number_data_point::Value::AsInt(v) => {
+                                                // Ensure the initial value is positive
+                                                if *v < 0 {
+                                                    *v = v.abs();
+                                                }
+                                                let increment: i64 =
+                                                    rng.random_range(1..10) * tick_diff as i64;
+                                                *v += increment;
+                                            }
                                         }
-                                        number_data_point::Value::AsInt(v) => {
-                                            *v = rng.random();
+                                    }
+                                } else {
+                                    // For non-accumulating sums, use random
+                                    // values
+                                    if let Some(value) = &mut point.value {
+                                        match value {
+                                            number_data_point::Value::AsDouble(v) => {
+                                                *v = rng.random();
+                                            }
+                                            number_data_point::Value::AsInt(v) => {
+                                                *v = rng.random();
+                                            }
                                         }
                                     }
                                 }
@@ -425,7 +472,7 @@ mod test {
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
     use std::{
-        collections::HashSet,
+        collections::{HashMap, HashSet},
         hash::{DefaultHasher, Hash, Hasher},
     };
 
@@ -819,6 +866,174 @@ mod test {
                 let m2 = metric2.unwrap();
                 prop_assert_eq!(context_id(&m1), context_id(&m2));
                 prop_assert_eq!(m1, m2);
+            }
+        }
+    }
+
+    // Property: timestamps are monotonic
+    proptest! {
+        #[test]
+        fn timestamps_increase_monotonically(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+
+            let mut timestamps_by_metric: HashMap<u64, Vec<u64>> = HashMap::new();
+
+            for _ in 0..steps {
+                if let Ok(resource_metric) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metric in &resource_metric.scope_metrics {
+                        for metric in &scope_metric.metrics {
+                            let id = context_id(&resource_metric);
+
+                            if let Some(data) = &metric.data {
+                                match data {
+                                    metric::Data::Gauge(gauge) => {
+                                        for point in &gauge.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_insert_with(Vec::new)
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    metric::Data::Sum(sum) => {
+                                        for point in &sum.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_insert_with(Vec::new)
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    _ => {},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !timestamps_by_metric.is_empty() {
+                // For each metric, verify its timestamps increase monotonically
+                for (metric_id, timestamps) in &timestamps_by_metric {
+                    if timestamps.len() > 1 {
+                        for i in 1..timestamps.len() {
+                            let current = timestamps[i];
+                            let previous = timestamps[i-1]; // safety: iterator begins at 1
+                            prop_assert!(
+                                current >= previous,
+                                "Timestamp for metric {metric_id} did not increase monotonically: current={current}, previous={previous}",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Property: accumulated sums are monotonic
+    proptest! {
+        #[test]
+        fn accumulating_sums_only_increase(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..512_usize, // see note below about repetition
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                metric_weights: super::MetricWeights {
+                    gauge: 0,   // Only generate sum metrics
+                    sum: 100,
+                },
+            };
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+
+            let mut values: HashMap<u64, f64> = HashMap::new();
+
+            // Generate the initial batch of values. It's entirely possible we
+            // will not run into the same context_ids again. Please run this
+            // test with a very high number of cases. We have arbitrarily
+            // constrained the budget relative to other tests in this module for
+            // try and force repetition of contexts.
+            let mut budget = budget;
+            {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    let id = context_id(&resource_metrics);
+                    for scope_metric in &resource_metrics.scope_metrics {
+                        for metric in &scope_metric.metrics {
+                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                                if sum.is_monotonic {
+                                    for point in sum.data_points.iter() {
+                                        if let Some(number_data_point::Value::AsDouble(v)) = point.value {
+                                            values.insert(id, v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut budget = budget;
+            {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    let id = context_id(&resource_metrics);
+                    for scope_metric in &resource_metrics.scope_metrics {
+                        for metric in &scope_metric.metrics {
+                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                                if sum.is_monotonic {
+                                    for point in sum.data_points.iter() {
+                                        if let Some(number_data_point::Value::AsDouble(v)) = point.value {
+                                            if let Some(&previous_value) = values.get(&id) {
+                                                prop_assert!(
+                                                    v >= previous_value,
+                                                    "Monotonic sum decreased for {id}: previous={previous_value}, current={v}",
+                                                );
+                                            }
+                                            values.insert(id, v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
