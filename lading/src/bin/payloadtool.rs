@@ -4,11 +4,15 @@ use std::{io, num::NonZeroU32};
 
 use byte_unit::{Unit, UnitType};
 use clap::Parser;
+use jemallocator::Jemalloc;
 use lading::generator::http::Method;
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const UDP_PACKET_LIMIT_BYTES: byte_unit::Byte =
     byte_unit::Byte::from_u64_with_unit(65_507, Unit::B).expect("valid bytes");
@@ -51,26 +55,28 @@ fn generate_and_check(
         block::Cache::Fixed { blocks, .. } => blocks,
     };
     info!("Payload generation took {:?}", start.elapsed());
-    debug!("Payload: {:#?}", blocks);
+    trace!("Payload: {:#?}", blocks);
 
     let mut total_generated_bytes: u32 = 0;
     for block in blocks.iter() {
         total_generated_bytes += block.total_bytes.get();
     }
+    let total_requested_bytes =
+        byte_unit::Byte::from_u128(total_bytes.get().into()).expect("total_bytes must be non-zero");
+    let total_requested_bytes_str = total_requested_bytes
+        .get_appropriate_unit(UnitType::Binary)
+        .to_string();
     if total_bytes.get().abs_diff(total_generated_bytes) > 1_000_000 {
-        let total_requested_bytes = byte_unit::Byte::from_u128(total_bytes.get().into())
-            .expect("total_bytes must be non-zero");
-        let total_requested_bytes_str = total_requested_bytes
-            .get_appropriate_unit(UnitType::Binary)
-            .to_string();
         let total_generated_bytes = byte_unit::Byte::from_u128(total_generated_bytes.into())
             .expect("total_generated_bytes must be non-zero");
         let total_generated_bytes_str = total_generated_bytes
             .get_appropriate_unit(UnitType::Binary)
             .to_string();
         warn!(
-            "Generator failed to generate {total_requested_bytes_str}, instead only found {total_generated_bytes_str} of data"
+            "Generator failed to generate {total_requested_bytes_str}, producing {total_generated_bytes_str} of data"
         )
+    } else {
+        info!("Generator succeeded in generating {total_requested_bytes_str} of data")
     }
 
     Ok(())

@@ -46,7 +46,7 @@ pub use trace_agent::TraceAgent;
 
 pub mod apache_common;
 pub mod ascii;
-pub(crate) mod common;
+pub mod common;
 pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
@@ -84,6 +84,9 @@ pub enum Error {
     /// See [`unit::Error`]
     #[error(transparent)]
     Unit(#[from] opentelemetry_metric::unit::Error),
+    /// See [`prost::EncodeError`]
+    #[error(transparent)]
+    ProstEncode(#[from] prost::EncodeError),
 }
 
 /// To serialize into bytes

@@ -8,6 +8,7 @@ use opentelemetry_proto::tonic::{
     },
     resource,
 };
+use prost::Message;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
@@ -54,7 +55,7 @@ pub(crate) struct MetricTemplate {
     pub name: String,
     pub description: String,
     pub unit: String,
-    pub metadata: Vec<v1::KeyValue>,
+    pub metadata: Rc<Vec<v1::KeyValue>>,
     pub kind: Kind,
 }
 
@@ -176,8 +177,27 @@ impl MetricTemplate {
             description: self.description.clone(),
             unit: self.unit.clone(),
             data: Some(data),
-            metadata: self.metadata.clone(),
+            metadata: self.metadata.as_slice().to_owned(),
         }
+    }
+
+    /// Shrink self by removing data-points until `encoded_len() <= limit`.
+    pub(crate) fn fit_into(&self, limit: usize, rng: &mut impl Rng) -> metrics::v1::Metric {
+        let mut data = self.instantiate(rng);
+
+        while data.encoded_len() + 2 > limit {
+            let res = match data.data.as_mut() {
+                Some(Data::Gauge(g)) => g.data_points.pop(),
+                Some(Data::Sum(s)) => s.data_points.pop(),
+                None => None,
+                _ => unreachable!(),
+            };
+
+            if res.is_none() {
+                break; // cannot shrink further
+            }
+        }
+        data
     }
 }
 
@@ -244,7 +264,7 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
                     .ok_or(Error::StringGenerate)?
                     .to_owned(),
                 version: String::new(),
-                attributes,
+                attributes: attributes.as_slice().to_owned(),
                 dropped_attributes_count: 0,
             })
         };
@@ -315,7 +335,7 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
         } else {
             let attributes = self.tags.generate(rng)?;
             let res = resource::v1::Resource {
-                attributes,
+                attributes: attributes.as_slice().to_owned(),
                 dropped_attributes_count: 0,
             };
             Some(res)

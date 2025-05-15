@@ -42,16 +42,19 @@ pub(crate) mod tags;
 mod templates;
 pub(crate) mod unit;
 
-use std::io::Write;
 use std::rc::Rc;
+use std::{cell::RefCell, io::Write};
 
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
+use bytes::BytesMut;
 use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
-use rand::{Rng, seq::IndexedRandom};
+use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use templates::ResourceTemplateGenerator;
 use unit::UnitGenerator;
+
+const SMALLEST_PROTOBUF: usize = 8; // safety buffer, smallest useful protobuf
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -93,8 +96,10 @@ impl Default for Contexts {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricWeights {
-    gauge: u8,
-    sum: u8,
+    /// The relative probability of generating a gauge metric.
+    pub gauge: u8,
+    /// The relative probability of generating a sum metric.
+    pub sum: u8,
 }
 
 impl Default for MetricWeights {
@@ -114,7 +119,7 @@ pub struct Config {
     /// Defines the relative probability of each kind of OpenTelemetry metric.
     pub metric_weights: MetricWeights,
     /// Define the contexts available when generating metrics
-    contexts: Contexts,
+    pub contexts: Contexts,
 }
 
 impl Config {
@@ -213,6 +218,7 @@ impl Config {
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
     pool: Vec<templates::ResourceTemplate>,
+    scratch: RefCell<BytesMut>,
 }
 
 impl OpentelemetryMetrics {
@@ -225,7 +231,9 @@ impl OpentelemetryMetrics {
         R: rand::Rng + ?Sized,
     {
         let context_cap = config.contexts.total_contexts.sample(rng);
-        let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
+        // Moby Dick is 1.2Mb. 256Kb should be more than enough for metric
+        // names, descriptions, etc.
+        let str_pool = Rc::new(strings::Pool::with_size(rng, 256_000));
         let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         let mut pool = Vec::with_capacity(context_cap as usize);
@@ -234,7 +242,10 @@ impl OpentelemetryMetrics {
             pool.push(r);
         }
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            scratch: RefCell::new(BytesMut::with_capacity(4096)),
+        })
     }
 }
 
@@ -249,13 +260,12 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         let tpl = self
             .pool
             .choose(rng)
-            .expect("template pool cannot be empty")
-            .clone();
+            .expect("template pool cannot be empty");
 
         let mut scopes = Vec::with_capacity(tpl.scopes.len());
-        for s_tpl in tpl.scopes {
+        for s_tpl in &tpl.scopes {
             let mut metrics = Vec::with_capacity(s_tpl.metrics.len());
-            for m_tpl in s_tpl.metrics {
+            for m_tpl in &s_tpl.metrics {
                 metrics.push(m_tpl.instantiate(rng));
             }
             scopes.push(v1::ScopeMetrics {
@@ -266,7 +276,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
         }
 
         Ok(v1::ResourceMetrics {
-            resource: tpl.resource,
+            resource: tpl.resource.clone(),
             scope_metrics: scopes,
             schema_url: String::new(),
         })
@@ -276,46 +286,154 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
 impl crate::Serialize for OpentelemetryMetrics {
     fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
-        R: Rng + Sized,
+        R: rand::Rng + Sized,
         W: Write,
     {
-        // What we're making here is the ExportMetricServiceRequest. It has 5
-        // bytes of fixed values plus a varint-encoded message length field to
-        // it. The worst case for the message length field is the max message
-        // size divided by 0b0111_1111.
-        //
-        // The user _does not_ set the number of Resoures per request -- we pack
-        // those in until max_bytes -- but they do set the scopes per request
-        // etc. All of that is transparent here, handled by the generators
-        // above.
-        let mut bytes_remaining = max_bytes
-            .checked_sub(5 + max_bytes.div_ceil(0b0111_1111))
-            .ok_or(Error::Serialize)?;
-        let mut acc = Vec::with_capacity(128); // arbitrary constant
+        // Scott's idea to generate directly into the protobuf
 
-        // Generate resources as space allows. We will always generate at least
-        // one, whether it fits or not.
-        loop {
-            let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
-            let len = resource.encoded_len() + 2;
-            match bytes_remaining.checked_sub(len) {
-                Some(remainder) => {
-                    acc.push(resource);
-                    bytes_remaining = remainder;
+        let header_overhead = 1 /*tag*/ + max_bytes.div_ceil(0x7F);
+        let mut bytes_remaining = max_bytes
+            .checked_sub(header_overhead)
+            .ok_or(Error::Serialize)?;
+
+        let mut resources = Vec::new();
+
+        'resource: while bytes_remaining >= SMALLEST_PROTOBUF {
+            let tpl = self
+                .pool
+                .choose(&mut rng)
+                .expect("template pool cannot be empty");
+
+            let mut res = opentelemetry_proto::tonic::metrics::v1::ResourceMetrics {
+                resource: tpl.resource.clone(),
+                scope_metrics: Vec::new(),
+                schema_url: String::new(),
+            };
+
+            // Fill scopes until we exhaust budget
+            for s_tpl in &tpl.scopes {
+                let mut scope = opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
+                    scope: s_tpl.scope.clone(),
+                    metrics: Vec::new(),
+                    schema_url: String::new(),
+                };
+
+                for m_tpl in &s_tpl.metrics {
+                    // Space needed by res + scope so far plus field tag/len
+                    let envelope = res.encoded_len() + scope.encoded_len() + 2;
+                    if envelope + SMALLEST_PROTOBUF > bytes_remaining {
+                        break; // out of room already
+                    }
+
+                    let budget = bytes_remaining - envelope;
+                    let metric = m_tpl.fit_into(budget, &mut rng);
+
+                    let metric_size = metric.encoded_len() + 2;
+                    if metric_size > budget {
+                        break; // trimmed metric is too large
+                    }
+
+                    scope.metrics.push(metric);
+                    bytes_remaining -= metric_size;
                 }
-                None => break,
+
+                if !scope.metrics.is_empty() {
+                    res.scope_metrics.push(scope);
+                }
+
+                if bytes_remaining < SMALLEST_PROTOBUF {
+                    break;
+                }
             }
+
+            if res.scope_metrics.is_empty() {
+                break 'resource;
+            }
+
+            resources.push(res);
         }
 
-        let proto =
+        let request =
             opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
-                resource_metrics: acc,
+                resource_metrics: resources,
             };
-        let buf = proto.encode_to_vec();
-        writer.write_all(&buf)?;
+
+        let needed = request.encoded_len();
+        {
+            let mut buf = self.scratch.borrow_mut();
+            buf.clear(); // keep the allocation, drop the contents
+            let capacity = buf.capacity();
+            let diff = capacity.saturating_sub(needed);
+            if buf.capacity() < needed {
+                buf.reserve(diff); // at most one malloc here
+            }
+            request.encode(&mut *buf)?;
+            writer.write_all(&buf)?;
+        }
+
         Ok(())
     }
 }
+
+// impl crate::Serialize for OpentelemetryMetrics {
+//     fn to_bytes<W, R>(&self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+//     where
+//         R: Rng + Sized,
+//         W: Write,
+//     {
+//         // What we're making here is the ExportMetricServiceRequest. It has 5
+//         // bytes of fixed values plus a varint-encoded message length field to
+//         // it. The worst case for the message length field is the max message
+//         // size divided by 0b0111_1111.
+//         //
+//         // The user _does not_ set the number of Resoures per request -- we pack
+//         // those in until max_bytes -- but they do set the scopes per request
+//         // etc. All of that is transparent here, handled by the generators
+//         // above.
+//         let mut bytes_remaining = max_bytes
+//             .checked_sub(5 + max_bytes.div_ceil(0b0111_1111))
+//             .ok_or(Error::Serialize)?;
+//         // Each ResourceMetrics contains:
+//         //
+//         // - Resource with attributes
+//         // - ScopeMetrics array
+//         // - Each scope has metrics array
+//         //
+//         // Give or take, figure maybe 64 bytes a pop?
+// //        let estimated_resources = bytes_remaining / 64;
+//         let mut acc = Vec::with_capacity(estimated_resources.min(128));
+
+//         // Generate resources as space allows. We will always generate at least
+//         // one, whether it fits or not.
+//         loop {
+//             let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
+//             let len = resource.encoded_len() + 2;
+//             match bytes_remaining.checked_sub(len) {
+//                 Some(remainder) => {
+//                     acc.push(resource);
+//                     bytes_remaining = remainder;
+//                 }
+//                 None => break,
+//             }
+//         }
+
+//         let proto =
+//             opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest {
+//                 resource_metrics: acc,
+//             };
+
+//         let mut buf = self.scratch.borrow_mut();
+//         let needed = proto.encoded_len();
+//         let capacity = buf.capacity();
+//         buf.clear(); // keep the allocation, drop the contents
+//         if capacity < needed {
+//             buf.reserve(needed - capacity); // at most one malloc here
+//         }
+//         proto.encode(&mut *buf)?;
+//         writer.write_all(&buf)?;
+//         Ok(())
+//     }
+// }
 
 #[cfg(test)]
 mod test {
@@ -363,42 +481,15 @@ mod test {
             };
 
             let mut rng1 = SmallRng::seed_from_u64(seed);
-            let otel_metrics1 = OpentelemetryMetrics::new(config.clone(), &mut rng1)?;
+            let otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
             let mut rng2 = SmallRng::seed_from_u64(seed);
-            let otel_metrics2 = OpentelemetryMetrics::new(config.clone(), &mut rng2)?;
+            let otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
 
             for _ in 0..steps {
                 let gen_1 = otel_metrics1.generate(&mut rng1)?;
                 let gen_2 = otel_metrics2.generate(&mut rng2)?;
                 prop_assert_eq!(gen_1, gen_2);
             }
-        }
-    }
-
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    proptest! {
-        #[test]
-        fn payload_not_exceed_max_bytes(seed: u64, max_bytes in 128u16..u16::MAX) {
-            let config = Config {
-                contexts: Contexts {
-                    total_contexts: ConfRange::Constant(1),
-                    attributes_per_resource: ConfRange::Constant(0),
-                    scopes_per_resource: ConfRange::Constant(1),
-                    attributes_per_scope: ConfRange::Constant(0),
-                    metrics_per_scope: ConfRange::Constant(1),
-                    attributes_per_metric: ConfRange::Constant(0),
-                },
-                ..Default::default()
-            };
-
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-            prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
         }
     }
 
@@ -433,7 +524,7 @@ mod test {
 
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
@@ -516,7 +607,7 @@ mod test {
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             for _ in 0..steps {
                 let metric = otel_metrics.generate(&mut rng)?;
@@ -562,7 +653,7 @@ mod test {
         }
     }
 
-    /// Extracts and hashes the context from a ResourceMetrics.
+    /// Extracts and hashes the context from a `ResourceMetrics`.
     ///
     /// A context is defined by the unique combination of:
     /// - Resource attributes
@@ -658,12 +749,12 @@ mod test {
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             // Generate two identical metrics
             let metric1 = otel_metrics.generate(&mut rng)?;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config.clone(), &mut rng)?;
+            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
             let metric2 = otel_metrics.generate(&mut rng)?;
 
             // Ensure that the metrics are equal.

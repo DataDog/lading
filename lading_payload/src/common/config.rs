@@ -1,3 +1,5 @@
+//! Common configuration for all lading payloads
+
 use rand::distr::uniform::SampleUniform;
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use std::cmp;

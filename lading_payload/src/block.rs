@@ -489,17 +489,18 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
-    let mut bytes_remaining = total_bytes;
     let mut min_block_size = 0;
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
+
     info!(
         ?max_block_size,
         ?total_bytes,
         "Constructing requested block cache"
     );
+    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
+    let mut bytes_remaining = total_bytes;
 
     let start = Instant::now();
     let mut next_minute = 1;
