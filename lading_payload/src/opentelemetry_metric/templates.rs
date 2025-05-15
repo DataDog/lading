@@ -14,10 +14,10 @@ use rand::{
     seq::IndexedRandom,
 };
 
+use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, common::config::ConfRange, common::strings};
 
-use super::{Config, UnitGenerator, generate_attributes};
-
+const UNIQUE_TAG_RATIO: f32 = 0.75;
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Ndp
@@ -60,22 +60,38 @@ pub(crate) struct MetricTemplate {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MetricTemplateGenerator {
-    attributes_per_metric: ConfRange<u32>,
     kind_dist: WeightedIndex<u16>,
     unit_gen: UnitGenerator,
     str_pool: Rc<strings::Pool>,
+    tags: TagGenerator,
 }
 
 impl MetricTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let tags = TagGenerator::new(
+            rng.random(),
+            config.contexts.attributes_per_metric,
+            ConfRange::Inclusive { min: 3, max: 32 },
+            config.contexts.total_contexts.end() as usize,
+            Rc::clone(str_pool),
+            UNIQUE_TAG_RATIO,
+        )?;
+
         Ok(Self {
-            attributes_per_metric: config.contexts.attributes_per_metric,
             kind_dist: WeightedIndex::new([
                 u16::from(config.metric_weights.gauge),
                 u16::from(config.metric_weights.sum),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
+            tags,
         })
     }
 }
@@ -88,8 +104,7 @@ impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let count = self.attributes_per_metric.sample(rng);
-        let metadata = generate_attributes(&self.str_pool, rng, count)?;
+        let metadata = self.tags.generate(rng)?;
 
         let name = self
             .str_pool
@@ -141,7 +156,7 @@ pub(crate) enum Kind {
 impl MetricTemplate {
     /// Instantiate the template into a concrete `v1::Metric`
     pub(crate) fn instantiate<R: Rng + ?Sized>(&self, rng: &mut R) -> Metric {
-        let total_data_points = rng.random_range(0..60);
+        let total_data_points = rng.random_range(1..60);
         let data_points = (0..total_data_points)
             .map(|_| rng.random::<Ndp>().0)
             .collect();
@@ -169,25 +184,43 @@ impl MetricTemplate {
 /// Static description of a Scope and its metrics.
 #[derive(Debug, Clone)]
 pub(crate) struct ScopeTemplate {
-    pub scope: v1::InstrumentationScope,
+    pub scope: Option<InstrumentationScope>,
     pub metrics: Vec<MetricTemplate>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ScopeTemplateGenerator {
-    metrics_per_scope: ConfRange<u32>,
-    attributes_per_scope: ConfRange<u32>,
+    metrics_per_scope: ConfRange<u8>,
     metric_generator: MetricTemplateGenerator,
     str_pool: Rc<strings::Pool>,
+    tags: TagGenerator,
+    attributes_per_scope: ConfRange<u8>,
 }
 
 impl ScopeTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let tags = TagGenerator::new(
+            rng.random(),
+            config.contexts.attributes_per_scope,
+            ConfRange::Inclusive { min: 3, max: 32 },
+            config.contexts.total_contexts.end() as usize,
+            Rc::clone(str_pool),
+            UNIQUE_TAG_RATIO,
+        )?;
+
         Ok(Self {
             metrics_per_scope: config.contexts.metrics_per_scope,
-            attributes_per_scope: config.contexts.attributes_per_scope,
-            metric_generator: MetricTemplateGenerator::new(config, str_pool)?,
+            metric_generator: MetricTemplateGenerator::new(config, str_pool, rng)?,
             str_pool: Rc::clone(str_pool),
+            tags,
+            attributes_per_scope: config.contexts.attributes_per_scope,
         })
     }
 }
@@ -200,20 +233,22 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let total_attributes = self.attributes_per_scope.sample(rng);
-        let attributes = super::generate_attributes(&self.str_pool, rng, total_attributes)?;
-        let scope = InstrumentationScope {
-            name: self
-                .str_pool
-                .of_size_range(rng, 1_u8..16)
-                .ok_or(Error::StringGenerate)?
-                .to_owned(),
-            version: String::new(),
-            attributes,
-            dropped_attributes_count: 0,
+        let scope = if self.attributes_per_scope.start() == 0 {
+            None
+        } else {
+            let attributes = self.tags.generate(rng)?;
+            Some(InstrumentationScope {
+                name: self
+                    .str_pool
+                    .of_size_range(rng, 1_u8..16)
+                    .ok_or(Error::StringGenerate)?
+                    .to_owned(),
+                version: String::new(),
+                attributes,
+                dropped_attributes_count: 0,
+            })
         };
 
-        // metrics
         let total_metrics = self.metrics_per_scope.sample(rng);
         let mut metrics: Vec<MetricTemplate> = Vec::with_capacity(total_metrics as usize);
         for _ in 0..total_metrics {
@@ -234,19 +269,35 @@ pub(crate) struct ResourceTemplate {
 
 #[derive(Clone)]
 pub(crate) struct ResourceTemplateGenerator {
-    scopes_per_resource: ConfRange<u32>,
-    attributes_per_resource: ConfRange<u32>,
+    scopes_per_resource: ConfRange<u8>,
+    attributes_per_resource: ConfRange<u8>,
     scope_generator: ScopeTemplateGenerator,
-    str_pool: Rc<strings::Pool>,
+    tags: TagGenerator,
 }
 
 impl ResourceTemplateGenerator {
-    pub(crate) fn new(config: &Config, str_pool: &Rc<strings::Pool>) -> Result<Self, Error> {
+    pub(crate) fn new<R>(
+        config: &Config,
+        str_pool: &Rc<strings::Pool>,
+        rng: &mut R,
+    ) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        let tags = TagGenerator::new(
+            rng.random(),
+            config.contexts.attributes_per_resource,
+            ConfRange::Inclusive { min: 3, max: 32 },
+            config.contexts.total_contexts.end() as usize,
+            Rc::clone(str_pool),
+            UNIQUE_TAG_RATIO,
+        )?;
+
         Ok(Self {
             scopes_per_resource: config.contexts.scopes_per_resource,
             attributes_per_resource: config.contexts.attributes_per_resource,
-            scope_generator: ScopeTemplateGenerator::new(config, str_pool)?,
-            str_pool: Rc::clone(str_pool),
+            scope_generator: ScopeTemplateGenerator::new(config, str_pool, rng)?,
+            tags,
         })
     }
 }
@@ -259,15 +310,10 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
     where
         R: Rng + ?Sized,
     {
-        let unknown_resource = self.attributes_per_resource.start() == 0;
-        // If the range of resources admits 0 the field `unknown_resources` will
-        // be set and we give half-odds on there be no `resource` field set in
-        // the message.
-        let resource = if unknown_resource && rng.random_bool(0.5) {
+        let resource = if self.attributes_per_resource.start() == 0 {
             None
         } else {
-            let count = self.attributes_per_resource.sample(rng);
-            let attributes = generate_attributes(&self.str_pool, rng, count)?;
+            let attributes = self.tags.generate(rng)?;
             let res = resource::v1::Resource {
                 attributes,
                 dropped_attributes_count: 0,
@@ -275,6 +321,14 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
             Some(res)
         };
 
+        // NOTE we are aware that this may under-generate unique contexts. In
+        // particular, imagine that the user has configured things such that the
+        // natural entropy of the pool is very low, meaning most scopes produced
+        // are "equal". We will produce total_scopes scopes that have less
+        // uniqueness than the amount generated.
+        //
+        // This is a chronic issue with our current approach across multiple
+        // payloads and will require a deep think to repair.
         let total_scopes = self.scopes_per_resource.sample(rng);
         let mut scopes = Vec::with_capacity(total_scopes as usize);
         for _ in 0..total_scopes {

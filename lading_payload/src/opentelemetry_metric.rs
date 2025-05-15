@@ -38,6 +38,7 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
+pub(crate) mod tags;
 mod templates;
 pub(crate) mod unit;
 
@@ -45,10 +46,7 @@ use std::io::Write;
 use std::rc::Rc;
 
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
-use opentelemetry_proto::tonic::{
-    common::v1::{AnyValue, KeyValue, any_value},
-    metrics::v1,
-};
+use opentelemetry_proto::tonic::metrics::v1;
 use prost::Message;
 use rand::{Rng, seq::IndexedRandom};
 use serde::{Deserialize, Serialize as SerdeSerialize};
@@ -66,15 +64,15 @@ pub struct Contexts {
     pub total_contexts: ConfRange<u32>,
 
     /// The range of attributes for resources.
-    pub attributes_per_resource: ConfRange<u32>,
-    /// TODO
-    pub scopes_per_resource: ConfRange<u32>,
-    /// TODO
-    pub attributes_per_scope: ConfRange<u32>,
-    /// The range of attributes for scopes per resource.
-    pub metrics_per_scope: ConfRange<u32>,
-    /// The range of attributes for scopes per resource.
-    pub attributes_per_metric: ConfRange<u32>,
+    pub attributes_per_resource: ConfRange<u8>,
+    /// The range of scopes that will be generated per resource.
+    pub scopes_per_resource: ConfRange<u8>,
+    /// The range of attributes for each scope.
+    pub attributes_per_scope: ConfRange<u8>,
+    /// The range of metrics that will be generated per scope.
+    pub metrics_per_scope: ConfRange<u8>,
+    /// The range of attributes for each metric.
+    pub attributes_per_metric: ConfRange<u8>,
 }
 
 impl Default for Contexts {
@@ -84,7 +82,7 @@ impl Default for Contexts {
             attributes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             scopes_per_resource: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_scope: ConfRange::Constant(0),
-            metrics_per_scope: ConfRange::Inclusive { min: 0, max: 20 },
+            metrics_per_scope: ConfRange::Inclusive { min: 1, max: 20 },
             attributes_per_metric: ConfRange::Inclusive { min: 0, max: 10 },
         }
     }
@@ -155,42 +153,42 @@ impl Config {
 
         // Calculate minimum and maximum possible contexts based on composition
         let min_configured = match self.contexts.scopes_per_resource {
-            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(0) => 0u32,
             ConfRange::Constant(n) => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { min, .. } => min,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                n * metrics
+                u32::from(n) * metrics
             }
             ConfRange::Inclusive { min, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { min, .. } => min,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { min, .. } => u32::from(min),
                 };
-                min * metrics
+                u32::from(min) * metrics
             }
         };
 
         let max_configured = match self.contexts.scopes_per_resource {
-            ConfRange::Constant(0) => 0,
+            ConfRange::Constant(0) => 0u32,
             ConfRange::Constant(n) => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { max, .. } => max,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                n * metrics
+                u32::from(n) * metrics
             }
             ConfRange::Inclusive { max, .. } => {
                 let metrics = match self.contexts.metrics_per_scope {
-                    ConfRange::Constant(0) => 0,
-                    ConfRange::Constant(m) => m,
-                    ConfRange::Inclusive { max, .. } => max,
+                    ConfRange::Constant(0) => 0u32,
+                    ConfRange::Constant(m) => u32::from(m),
+                    ConfRange::Inclusive { max, .. } => u32::from(max),
                 };
-                max * metrics
+                u32::from(max) * metrics
             }
         };
 
@@ -211,12 +209,6 @@ impl Config {
     }
 }
 
-// Okay if you think about it OTel Metrics are in a tree. That tree is rooted at
-// the Resource, below the resources are Scope which contain Metrics. If we want
-// to have a bounded amount of contexts we need some way of counting how many
-// we've made where a context is the Resources X Scopes X Metric Names and so
-// the Resource is the top generator etc.
-
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
@@ -228,16 +220,13 @@ impl OpentelemetryMetrics {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    ///
-    /// # Panics
-    /// TODO
     pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
         let context_cap = config.contexts.total_contexts.sample(rng);
         let str_pool = Rc::new(strings::Pool::with_size(rng, 1_000_000));
-        let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool)?;
+        let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         let mut pool = Vec::with_capacity(context_cap as usize);
         for _ in 0..context_cap {
@@ -270,7 +259,7 @@ impl<'a> Generator<'a> for OpentelemetryMetrics {
                 metrics.push(m_tpl.instantiate(rng));
             }
             scopes.push(v1::ScopeMetrics {
-                scope: Some(s_tpl.scope.clone()),
+                scope: s_tpl.scope.clone(),
                 metrics,
                 schema_url: String::new(),
             });
@@ -299,12 +288,13 @@ impl crate::Serialize for OpentelemetryMetrics {
         // those in until max_bytes -- but they do set the scopes per request
         // etc. All of that is transparent here, handled by the generators
         // above.
-        let bytes_remaining = max_bytes.checked_sub(5 + max_bytes.div_ceil(0b0111_1111));
-        let Some(mut bytes_remaining) = bytes_remaining else {
-            return Ok(());
-        };
-
+        let mut bytes_remaining = max_bytes
+            .checked_sub(5 + max_bytes.div_ceil(0b0111_1111))
+            .ok_or(Error::Serialize)?;
         let mut acc = Vec::with_capacity(128); // arbitrary constant
+
+        // Generate resources as space allows. We will always generate at least
+        // one, whether it fits or not.
         loop {
             let resource: v1::ResourceMetrics = self.generate(&mut rng)?;
             let len = resource.encoded_len() + 2;
@@ -327,33 +317,6 @@ impl crate::Serialize for OpentelemetryMetrics {
     }
 }
 
-fn generate_attributes<R>(
-    str_pool: &strings::Pool,
-    rng: &mut R,
-    count: u32,
-) -> Result<Vec<KeyValue>, Error>
-where
-    R: Rng + ?Sized,
-{
-    let mut kvs = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let key = str_pool
-            .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-        let val = str_pool
-            .of_size_range(rng, 1_u8..16)
-            .ok_or(Error::StringGenerate)?;
-
-        kvs.push(KeyValue {
-            key: String::from(key),
-            value: Some(AnyValue {
-                value: Some(any_value::Value::StringValue(String::from(val))),
-            }),
-        });
-    }
-    Ok(kvs)
-}
-
 #[cfg(test)]
 mod test {
     use super::{Config, Contexts, OpentelemetryMetrics};
@@ -364,6 +327,7 @@ mod test {
     };
     use opentelemetry_proto::tonic::common::v1::any_value;
     use proptest::prelude::*;
+    use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
     use std::{
         collections::HashSet,
@@ -379,11 +343,11 @@ mod test {
         fn opentelemetry_metrics_generate_is_deterministic(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX
         ) {
             let config = Config {
@@ -415,10 +379,22 @@ mod test {
     // exceed `max_bytes`.
     proptest! {
         #[test]
-        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes in 128u16..u16::MAX) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(1),
+                    attributes_per_resource: ConfRange::Constant(0),
+                    scopes_per_resource: ConfRange::Constant(1),
+                    attributes_per_scope: ConfRange::Constant(0),
+                    metrics_per_scope: ConfRange::Constant(1),
+                    attributes_per_metric: ConfRange::Constant(0),
+                },
+                ..Default::default()
+            };
+
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(Config::default(), &mut rng).expect("failed to create metrics generator");
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
 
             let mut bytes = Vec::with_capacity(max_bytes);
             metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -434,12 +410,12 @@ mod test {
         fn contexts_bound_metric_generation(
             seed: u64,
             total_contexts_min in 1..4_u32,
-            total_contexts_max in 5..32_u32,
-            attributes_per_resource in 0..25_u32,
-            scopes_per_resource in 0..50_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 1..100_u32,
-            attributes_per_metric in 0..100_u32,
+            total_contexts_max in 5..100_u32,
+            attributes_per_resource in 0..25_u8,
+            scopes_per_resource in 1..10_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 1..10_u8,
+            attributes_per_metric in 0..100_u8,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -452,6 +428,8 @@ mod test {
                 },
                 ..Default::default()
             };
+
+            prop_assume!(config.valid().is_ok());
 
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -472,6 +450,43 @@ mod test {
         }
     }
 
+    // We want to know that every payload produced by this type actually
+    // deserializes as a collection of OTEL metrics.
+    proptest! {
+        #[test]
+        fn payload_deserializes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            max_bytes in 8u16..u16::MAX
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+
+            let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
+            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+        }
+    }
+
     // Confirm that configuration bounds are naively obeyed. For instance, this
     // test will pass if every resource generated has identical attributes, etc
     // etc. Confirmation of context bounds being obeyed -- implying examination
@@ -481,11 +496,11 @@ mod test {
         fn counts_within_bounds(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX
         ) {
             let config = Config {
@@ -624,11 +639,11 @@ mod test {
         fn context_is_equality(
             seed: u64,
             total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u32,
-            scopes_per_resource in 0..20_u32,
-            attributes_per_scope in 0..20_u32,
-            metrics_per_scope in 0..20_u32,
-            attributes_per_metric in 0..10_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
         ) {
             let config = Config {
                 contexts: Contexts {

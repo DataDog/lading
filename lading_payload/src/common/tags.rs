@@ -257,28 +257,31 @@ impl<'a> crate::Generator<'a> for Generator {
         let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
         let mut tag_store = self.tag_store.borrow_mut();
 
-        // If we have no unique tags yet, we must generate at least one
-        if tag_store.is_empty() {
-            let tag = self.tags.generate(&mut *rng)?;
-            tag_store.insert(tag);
-            tagset.push(tag);
-        }
-
-        // For remaining tags, decide whether to reuse existing tags or generate new ones
-        while tagset.len() < tags_count {
-            let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
-            let should_reuse = choose_existing_prob > self.unique_tag_probability;
-
-            if should_reuse && !tag_store.is_empty() {
-                // Reuse an existing tag
-                if let Some(tag) = tag_store.random_tag(&mut *rng) {
-                    tagset.push(*tag);
-                }
-            } else {
-                // Either we shouldn't reuse or have no tags to reuse - generate a new one
+        // Only generate tags if we need them
+        if tags_count > 0 {
+            // If we have no unique tags yet, we must generate at least one
+            if tag_store.is_empty() {
                 let tag = self.tags.generate(&mut *rng)?;
                 tag_store.insert(tag);
                 tagset.push(tag);
+            }
+
+            // For remaining tags, decide whether to reuse existing tags or generate new ones
+            while tagset.len() < tags_count {
+                let choose_existing_prob: f32 = OpenClosed01.sample(&mut *rng);
+                let should_reuse = choose_existing_prob > self.unique_tag_probability;
+
+                if should_reuse && !tag_store.is_empty() {
+                    // Reuse an existing tag
+                    if let Some(tag) = tag_store.random_tag(&mut *rng) {
+                        tagset.push(*tag);
+                    }
+                } else {
+                    // Either we shouldn't reuse or have no tags to reuse - generate a new one
+                    let tag = self.tags.generate(&mut *rng)?;
+                    tag_store.insert(tag);
+                    tagset.push(tag);
+                }
             }
         }
 
