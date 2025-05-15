@@ -952,6 +952,46 @@ mod test {
         }
     }
 
+    // Property: tick tally in OpentelemetryMetrics increase with calls to
+    // `generate`.
+    proptest! {
+        #[test]
+        fn increasing_ticks(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..4098_usize,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                metric_weights: super::MetricWeights {
+                    gauge: 0,   // Only generate sum metrics
+                    sum: 100,
+                },
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let prev = otel_metrics.tick;
+            let _ = otel_metrics.generate(&mut rng, &mut budget);
+            let cur = otel_metrics.tick;
+
+            prop_assert!(cur > prev, "Ticks did not advance properly: current: {cur}, previous: {prev}");
+        }
+    }
+
     // Property: accumulated sums are monotonic
     proptest! {
         #[test]
@@ -963,6 +1003,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
+            steps in 1..u8::MAX,
             budget in SMALLEST_PROTOBUF..512_usize, // see note below about repetition
         ) {
             let config = Config {
