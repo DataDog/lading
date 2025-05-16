@@ -19,3 +19,5 @@ cc 6c5fecad6ef2d4a0a58104a348850fdb43be5f0643c8419e9c8f5bc8947ee443 # shrinks to
 cc 96fb21ece082cb2a738c23df64ffa4002e9abb97d97c293635ef519949177ad3 # shrinks to seed = 0, total_contexts = 1, attributes_per_resource = 0, scopes_per_resource = 1, attributes_per_scope = 0, metrics_per_scope = 1, attributes_per_metric = 0, budget = 31
 cc 9abe11b8bced96c442d0b6ec33da804a6b90525dc2cbb40bf1df2222c1a3ed30 # shrinks to seed = 16609138957746546345, steps = 2, budget = 1697
 cc 71f9b3dcd5692e290ad9222f2fec063efc6af9a3a76be27bb37934655af2581c
+cc d6fb22247744874736a33213ae5e5115d1427e573b108797ceebf6e1ec4918c5 # shrinks to seed = 13411699595081898175, total_contexts = 2, attributes_per_resource = 3, scopes_per_resource = 2, attributes_per_scope = 1, metrics_per_scope = 3, attributes_per_metric = 2, steps = 1, budget = 467
+cc 03f848350451550bb39ecd64ac20132ecbb4aa2d794d9586d6b509872d8018ef # shrinks to seed = 4558513675196720091, total_contexts = 2, attributes_per_resource = 7, scopes_per_resource = 1, attributes_per_scope = 5, metrics_per_scope = 1, attributes_per_metric = 1, steps = 1, budget = 371

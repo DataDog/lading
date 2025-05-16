@@ -266,6 +266,10 @@ pub struct OpentelemetryMetrics {
     scratch: RefCell<BytesMut>,
     /// Current tick count for monotonic timing (starts at 0)
     tick: u64,
+    /// Accumulating sum increment, floating point
+    incr_f: f64,
+    /// Accumulating sum increment, integer
+    incr_i: i64,
 }
 
 impl OpentelemetryMetrics {
@@ -287,6 +291,8 @@ impl OpentelemetryMetrics {
             pool: Pool::new(context_cap, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
             tick: 0,
+            incr_f: 0.0,
+            incr_i: 0,
         })
     }
 }
@@ -304,9 +310,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     where
         R: rand::Rng + ?Sized,
     {
-        let prev_tick = self.tick;
         self.tick += rng.random_range(1..=60);
-        let tick_diff = self.tick - prev_tick;
+        self.incr_f += rng.random_range(1.0..=100.0);
+        self.incr_i += rng.random_range(1_i64..=100_i64);
 
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
@@ -349,23 +355,11 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     if let Some(value) = &mut point.value {
                                         match value {
                                             number_data_point::Value::AsDouble(v) => {
-                                                // Ensure the initial value is positive
-                                                if *v < 0.0 {
-                                                    *v = v.abs();
-                                                }
-                                                let increment =
-                                                    rng.random_range(1.0..10.0) * tick_diff as f64;
-                                                *v += increment;
+                                                *v += self.incr_f;
                                             }
                                             #[allow(clippy::cast_possible_wrap)]
                                             number_data_point::Value::AsInt(v) => {
-                                                // Ensure the initial value is positive
-                                                if *v < 0 {
-                                                    *v = v.abs();
-                                                }
-                                                let increment: i64 =
-                                                    rng.random_range(1..10) * tick_diff as i64;
-                                                *v += increment;
+                                                *v += self.incr_i;
                                             }
                                         }
                                     }
@@ -1003,7 +997,6 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX,
             budget in SMALLEST_PROTOBUF..512_usize, // see note below about repetition
         ) {
             let config = Config {
