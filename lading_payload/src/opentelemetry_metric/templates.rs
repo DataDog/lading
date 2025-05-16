@@ -1,14 +1,13 @@
 use std::rc::Rc;
 
 use opentelemetry_proto::tonic::{
-    common::v1::{self, InstrumentationScope},
+    common::v1::InstrumentationScope,
     metrics::{
         self,
-        v1::{Metric, NumberDataPoint, metric::Data},
+        v1::{Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data},
     },
     resource,
 };
-use prost::Message;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
@@ -19,6 +18,7 @@ use super::{Config, UnitGenerator, tags::TagGenerator};
 use crate::{Error, common::config::ConfRange, common::strings};
 
 const UNIQUE_TAG_RATIO: f32 = 0.75;
+
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Ndp
@@ -47,16 +47,6 @@ impl Distribution<Ndp> for StandardUniform {
             value: Some(value),
         })
     }
-}
-
-/// Static description of a Metric (everything that defines a context).
-#[derive(Debug, Clone)]
-pub(crate) struct MetricTemplate {
-    pub name: String,
-    pub description: String,
-    pub unit: String,
-    pub metadata: Rc<Vec<v1::KeyValue>>,
-    pub kind: Kind,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +88,7 @@ impl MetricTemplateGenerator {
 }
 
 impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
-    type Output = MetricTemplate;
+    type Output = Metric;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
@@ -135,12 +125,27 @@ impl<'a> crate::Generator<'a> for MetricTemplateGenerator {
             _ => unreachable!(),
         };
 
-        Ok(MetricTemplate {
+        let total_data_points = rng.random_range(1..60);
+        let data_points = (0..total_data_points)
+            .map(|_| rng.random::<Ndp>().0)
+            .collect();
+        let data = match kind {
+            Kind::Gauge => Data::Gauge(metrics::v1::Gauge { data_points }),
+            Kind::Sum {
+                aggregation_temporality,
+                is_monotonic,
+            } => Data::Sum(metrics::v1::Sum {
+                data_points,
+                aggregation_temporality,
+                is_monotonic,
+            }),
+        };
+        Ok(Metric {
             name,
             description,
             unit,
+            data: Some(data),
             metadata,
-            kind,
         })
     }
 }
@@ -152,60 +157,6 @@ pub(crate) enum Kind {
         aggregation_temporality: i32,
         is_monotonic: bool,
     },
-}
-
-impl MetricTemplate {
-    /// Instantiate the template into a concrete `v1::Metric`
-    pub(crate) fn instantiate<R: Rng + ?Sized>(&self, rng: &mut R) -> Metric {
-        let total_data_points = rng.random_range(1..60);
-        let data_points = (0..total_data_points)
-            .map(|_| rng.random::<Ndp>().0)
-            .collect();
-        let data = match self.kind {
-            Kind::Gauge => Data::Gauge(metrics::v1::Gauge { data_points }),
-            Kind::Sum {
-                aggregation_temporality,
-                is_monotonic,
-            } => Data::Sum(metrics::v1::Sum {
-                data_points,
-                aggregation_temporality,
-                is_monotonic,
-            }),
-        };
-        Metric {
-            name: self.name.clone(),
-            description: self.description.clone(),
-            unit: self.unit.clone(),
-            data: Some(data),
-            metadata: self.metadata.as_slice().to_owned(),
-        }
-    }
-
-    /// Shrink self by removing data-points until `encoded_len() <= limit`.
-    pub(crate) fn fit_into(&self, limit: usize, rng: &mut impl Rng) -> metrics::v1::Metric {
-        let mut data = self.instantiate(rng);
-
-        while data.encoded_len() + 2 > limit {
-            let res = match data.data.as_mut() {
-                Some(Data::Gauge(g)) => g.data_points.pop(),
-                Some(Data::Sum(s)) => s.data_points.pop(),
-                None => None,
-                _ => unreachable!(),
-            };
-
-            if res.is_none() {
-                break; // cannot shrink further
-            }
-        }
-        data
-    }
-}
-
-/// Static description of a Scope and its metrics.
-#[derive(Debug, Clone)]
-pub(crate) struct ScopeTemplate {
-    pub scope: Option<InstrumentationScope>,
-    pub metrics: Vec<MetricTemplate>,
 }
 
 #[derive(Clone)]
@@ -246,7 +197,7 @@ impl ScopeTemplateGenerator {
 }
 
 impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
-    type Output = ScopeTemplate;
+    type Output = ScopeMetrics;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
@@ -270,21 +221,18 @@ impl<'a> crate::Generator<'a> for ScopeTemplateGenerator {
         };
 
         let total_metrics = self.metrics_per_scope.sample(rng);
-        let mut metrics: Vec<MetricTemplate> = Vec::with_capacity(total_metrics as usize);
+        let mut metrics: Vec<Metric> = Vec::with_capacity(total_metrics as usize);
         for _ in 0..total_metrics {
             let m = self.metric_generator.generate(rng)?;
             metrics.push(m);
         }
 
-        Ok(ScopeTemplate { scope, metrics })
+        Ok(ScopeMetrics {
+            scope,
+            metrics,
+            schema_url: String::new(),
+        })
     }
-}
-
-/// Static description of an OTLP Resource (context top-level).
-#[derive(Debug, Clone)]
-pub(crate) struct ResourceTemplate {
-    pub resource: Option<resource::v1::Resource>,
-    pub scopes: Vec<ScopeTemplate>,
 }
 
 #[derive(Clone)]
@@ -323,7 +271,7 @@ impl ResourceTemplateGenerator {
 }
 
 impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
-    type Output = ResourceTemplate;
+    type Output = ResourceMetrics;
     type Error = Error;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
@@ -356,6 +304,10 @@ impl<'a> crate::Generator<'a> for ResourceTemplateGenerator {
             scopes.push(s);
         }
 
-        Ok(ResourceTemplate { resource, scopes })
+        Ok(ResourceMetrics {
+            resource,
+            scope_metrics: scopes,
+            schema_url: String::new(),
+        })
     }
 }
