@@ -490,6 +490,7 @@ where
     R: Rng + ?Sized,
 {
     let mut min_block_size = 0;
+    let mut min_actual_block_size = u32::MAX;
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
@@ -524,6 +525,7 @@ where
 
                 let total_bytes = block.total_bytes.get();
                 max_actual_block_size = max_actual_block_size.max(total_bytes);
+                min_actual_block_size = min_actual_block_size.min(total_bytes);
                 bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
                 block_cache.push(block);
             }
@@ -577,14 +579,14 @@ where
         let capacity_sum_str = Byte::from_u64(total_bytes.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
-        let min_block_str = Byte::from_u64(min_block_size.into())
-            .get_appropriate_unit(byte_unit::UnitType::Binary)
-            .to_string();
         let max_actual_block_str = Byte::from_u64(max_actual_block_size.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
+        let min_actual_block_str = Byte::from_u64(min_actual_block_size.into())
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
         info!(
-            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}."
+            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_actual_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}."
         );
 
         Ok(block_cache)

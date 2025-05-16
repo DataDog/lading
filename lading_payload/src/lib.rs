@@ -87,6 +87,9 @@ pub enum Error {
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),
+    /// See [`opentelemetry_metric::templates::PoolError`]
+    #[error("Unable to choose from pool: {0}")]
+    Pool(#[from] opentelemetry_metric::templates::PoolError),
 }
 
 /// To serialize into bytes
@@ -200,12 +203,33 @@ impl Serialize for Payload {
     }
 }
 
-/// Generate instance of `I` from source of randomness `S`.
+/// Generate instances of `Self::Output` from source of randomness.
 pub(crate) trait Generator<'a> {
     type Output: 'a;
     type Error: 'a;
 
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
+    where
+        R: rand::Rng + ?Sized;
+}
+
+/// Generate instances of `Self::Output` from source of randomness, constrained
+/// to byte budgets.
+pub(crate) trait SizedGenerator<'a> {
+    type Output: 'a;
+    type Error: 'a;
+
+    /// Generate a new instance of `Self::Output`. Implementations MUST uphold
+    /// the following properties:
+    ///
+    /// * `budget` is decremented if and only if return is Ok
+    /// * `budget` must be decremented only by the amount required to store
+    ///   returned instance of `Self::Output`.
+    fn generate<R>(
+        &'a mut self,
+        rng: &mut R,
+        budget: &mut usize,
+    ) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized;
 }

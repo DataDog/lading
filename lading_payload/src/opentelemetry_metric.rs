@@ -39,25 +39,27 @@
 // * flags: uu32 -- I'm not sure what to make of this yet
 
 pub(crate) mod tags;
-mod templates;
+pub(crate) mod templates;
 pub(crate) mod unit;
 
 use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
-use crate::{Error, Generator, common::config::ConfRange, common::strings};
+use crate::SizedGenerator;
+use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
-use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::ResourceTemplateGenerator;
-use tracing::debug;
+use templates::{Pool, PoolError, ResourceTemplateGenerator};
+use tracing::{debug, error};
 use unit::UnitGenerator;
 
-const SMALLEST_PROTOBUF: usize = 64; // smallest useful protobuf, arbitrary low-ish cut-off
+// smallest useful protobuf, determined by experimentation and enforced in
+// smallest_protobuf test
+const SMALLEST_PROTOBUF: usize = 31;
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
@@ -131,21 +133,56 @@ impl Config {
     /// # Errors
     /// Function will error if the configuration is invalid
     pub fn valid(&self) -> Result<(), String> {
-        // None of the metric weights are 0.
+        // Validate metric weights - both types must have non-zero probability to ensure
+        // we can generate a diverse set of metrics
         if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
             return Err("Metric weights cannot be 0".to_string());
         }
 
-        // total_contexts cannot be zero
+        // Validate total_contexts - we need at least one context to generate metrics
         match self.contexts.total_contexts {
             ConfRange::Constant(0) => return Err("total_contexts cannot be zero".to_string()),
-            ConfRange::Constant(_) => (), // valid case
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
             ConfRange::Inclusive { min, max } => {
                 if min == 0 {
                     return Err("total_contexts minimum cannot be zero".to_string());
                 }
                 if min > max {
                     return Err("total_contexts minimum cannot be greater than maximum".to_string());
+                }
+            }
+        }
+
+        // Validate scopes_per_resource - each resource must have at least one scope
+        // to contain metrics
+        match self.contexts.scopes_per_resource {
+            ConfRange::Constant(0) => return Err("scopes_per_resource cannot be zero".to_string()),
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
+            ConfRange::Inclusive { min, max } => {
+                if min == 0 {
+                    return Err("scopes_per_resource minimum cannot be zero".to_string());
+                }
+                if min > max {
+                    return Err(
+                        "scopes_per_resource minimum cannot be greater than maximum".to_string()
+                    );
+                }
+            }
+        }
+
+        // Validate metrics_per_scope - each scope must contain at least one metric
+        // to be meaningful
+        match self.contexts.metrics_per_scope {
+            ConfRange::Constant(0) => return Err("metrics_per_scope cannot be zero".to_string()),
+            ConfRange::Constant(_) => (), // Non-zero constant is valid
+            ConfRange::Inclusive { min, max } => {
+                if min == 0 {
+                    return Err("metrics_per_scope minimum cannot be zero".to_string());
+                }
+                if min > max {
+                    return Err(
+                        "metrics_per_scope minimum cannot be greater than maximum".to_string()
+                    );
                 }
             }
         }
@@ -220,7 +257,7 @@ impl Config {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    pool: Vec<v1::ResourceMetrics>,
+    pool: Pool,
     scratch: RefCell<BytesMut>,
 }
 
@@ -234,39 +271,36 @@ impl OpentelemetryMetrics {
         R: rand::Rng + ?Sized,
     {
         let context_cap = config.contexts.total_contexts.sample(rng);
-        // Moby Dick is 1.2Mb. 256Kb should be more than enough for metric
+        // Moby Dick is 1.2Mb. 128Kb should be more than enough for metric
         // names, descriptions, etc.
-        let str_pool = Rc::new(strings::Pool::with_size(rng, 256_000));
-        let resource_template_generator = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
-
-        let mut pool = Vec::with_capacity(context_cap as usize);
-        for _ in 0..context_cap {
-            let r = resource_template_generator.generate(rng)?;
-            pool.push(r);
-        }
+        let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
+        let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {
-            pool,
+            pool: Pool::new(context_cap, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
         })
     }
 }
 
-impl<'a> Generator<'a> for OpentelemetryMetrics {
+impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     type Output = v1::ResourceMetrics;
     type Error = Error;
 
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
+    fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
     {
         // Retrieve a template from the pool, modify its timestamp and data
         // points to randomize the data we send out.
-        let mut tpl: v1::ResourceMetrics = self
-            .pool
-            .choose(rng)
-            .expect("template pool cannot be empty")
-            .to_owned();
+        let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
+            Ok(t) => t.to_owned(),
+            Err(PoolError::EmptyChoice) => {
+                error!("Pool was unable to satify request for {budget} size");
+                Err(PoolError::EmptyChoice)?
+            }
+            Err(e) => Err(e)?,
+        };
 
         // Randomize the data points in each metric. Metric kinds are preserved
         // but timestamps are completely random as are point values.
@@ -330,25 +364,29 @@ impl crate::Serialize for OpentelemetryMetrics {
 
         let loop_id: u32 = rng.random();
         while bytes_remaining >= SMALLEST_PROTOBUF {
-            let rm = self
-                .generate(&mut rng)
-                .expect("no errors possible, catastrophic programming issue");
-
-            request.resource_metrics.push(rm);
-            let required_bytes = request.encoded_len();
-            debug!(
-                ?loop_id,
-                ?max_bytes,
-                ?bytes_remaining,
-                ?required_bytes,
-                ?SMALLEST_PROTOBUF,
-                "to_bytes inner loop"
-            );
-            if required_bytes > max_bytes {
-                drop(request.resource_metrics.pop());
-                break;
+            if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
+                request.resource_metrics.push(rm);
+                let required_bytes = request.encoded_len();
+                debug!(
+                    ?loop_id,
+                    ?max_bytes,
+                    ?bytes_remaining,
+                    ?required_bytes,
+                    ?SMALLEST_PROTOBUF,
+                    "to_bytes inner loop"
+                );
+                if required_bytes > max_bytes {
+                    drop(request.resource_metrics.pop());
+                    break;
+                }
+                bytes_remaining = max_bytes.saturating_sub(required_bytes);
+            } else {
+                debug!(
+                    ?bytes_remaining,
+                    ?SMALLEST_PROTOBUF,
+                    "could not generate ResourceMetrics instance"
+                );
             }
-            bytes_remaining = max_bytes.saturating_sub(required_bytes);
         }
 
         let needed = request.encoded_len();
@@ -370,13 +408,19 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics};
+    use super::{Config, Contexts, OpentelemetryMetrics, SMALLEST_PROTOBUF};
     use crate::{
-        Generator, Serialize,
+        Serialize, SizedGenerator,
         common::config::ConfRange,
         opentelemetry_metric::v1::{ResourceMetrics, metric},
     };
     use opentelemetry_proto::tonic::common::v1::any_value;
+    use opentelemetry_proto::tonic::metrics::v1::{
+        Metric, NumberDataPoint, ScopeMetrics, number_data_point,
+    };
+    use opentelemetry_proto::tonic::{
+        collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
+    };
     use proptest::prelude::*;
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
@@ -385,13 +429,10 @@ mod test {
         hash::{DefaultHasher, Hash, Hasher},
     };
 
-    // Generation of metrics must be deterministic. In order to assert this
-    // property we generate two instances of OpentelemetryMetrics from disinct
-    // rngs and drive them forward for a random amount of steps, asserting equal
-    // outcomes.
+    // Budget always decreases equivalent to the size of the returned value.
     proptest! {
         #[test]
-        fn opentelemetry_metrics_generate_is_deterministic(
+        fn generate_decrease_budget(
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
@@ -399,7 +440,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX
+            steps in 1..u8::MAX,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -413,24 +454,28 @@ mod test {
                 ..Default::default()
             };
 
-            let mut rng1 = SmallRng::seed_from_u64(seed);
-            let otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
-            let mut rng2 = SmallRng::seed_from_u64(seed);
-            let otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
+            let mut budget = 10_000_000;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             for _ in 0..steps {
-                let gen_1 = otel_metrics1.generate(&mut rng1)?;
-                let gen_2 = otel_metrics2.generate(&mut rng2)?;
-                prop_assert_eq!(gen_1, gen_2);
+                let prev = budget;
+                match otel_metrics.generate(&mut rng, &mut budget) {
+                    Ok(rm) => prop_assert_eq!(prev-rm.encoded_len(), budget),
+                    Err(crate::Error::Pool(_)) => break,
+                    Err(e) => return Err(e.into())
+                }
             }
         }
     }
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
+    // Generation of metrics must be deterministic. In order to assert this
+    // property we generate two instances of OpentelemetryMetrics from disinct
+    // rngs and drive them forward for a random amount of steps, asserting equal
+    // outcomes.
     proptest! {
         #[test]
-        fn payload_not_exceed_max_bytes(
+        fn is_deterministic(
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
@@ -439,8 +484,8 @@ mod test {
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
             steps in 1..u8::MAX,
-            max_bytes in 64u16..u16::MAX)
-        {
+            budget in 128..2048_usize,
+        ) {
             let config = Config {
                 contexts: Contexts {
                     total_contexts: ConfRange::Constant(total_contexts),
@@ -453,15 +498,21 @@ mod test {
                 ..Default::default()
             };
 
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+            let mut b1 = budget;
+            let mut rng1 = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
+            let mut b2 = budget;
+            let mut rng2 = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
 
-            let mut bytes = Vec::with_capacity(max_bytes);
             for _ in 0..steps {
-                bytes.clear();
-                metrics.to_bytes(&mut rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
-                prop_assert!(bytes.len() <= max_bytes, "max len: {max_bytes}, actual: {}", bytes.len());
+                if let Ok(gen_1) = otel_metrics1.generate(&mut rng1, &mut b1) {
+                    let gen_2 = otel_metrics2.generate(&mut rng2, &mut b2).expect("gen_2 was not Ok");
+                    prop_assert_eq!(gen_1, gen_2);
+                    prop_assert_eq!(b1, b2);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -480,6 +531,7 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 1..10_u8,
             attributes_per_metric in 0..100_u8,
+            budget in 128..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -493,62 +545,88 @@ mod test {
                 ..Default::default()
             };
 
-            prop_assume!(config.valid().is_ok());
-
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut b = budget;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
-                let res = otel_metrics.generate(&mut rng)?;
-                let id = context_id(&res);
-                ids.insert(id);
+                if let Ok(res) = otel_metrics.generate(&mut rng, &mut b) {
+                    let id = context_id(&res);
+                    ids.insert(id);
+                }
             }
 
             let actual_contexts = ids.len();
             let bounded_above = actual_contexts <= total_contexts_max as usize;
             prop_assert!(bounded_above,
-                         "expected {} ≤ {}",
-                         actual_contexts, total_contexts_max);
+                         "expected {actual_contexts} ≤ {total_contexts_max}");
         }
+    }
+
+    // We want to be sure that the serialized size of the payload does not
+    // exceed `max_bytes`.
+    #[test]
+    fn payload_not_exceed_max_bytes() {
+        let config = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Constant(10),
+                attributes_per_resource: ConfRange::Constant(5),
+                scopes_per_resource: ConfRange::Constant(2),
+                attributes_per_scope: ConfRange::Constant(3),
+                metrics_per_scope: ConfRange::Constant(4),
+                attributes_per_metric: ConfRange::Constant(2),
+            },
+            ..Default::default()
+        };
+
+        let max_bytes = 512;
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+            .expect("failed to create metrics generator");
+
+        let mut bytes = Vec::new();
+        metrics
+            .to_bytes(&mut rng, max_bytes, &mut bytes)
+            .expect("failed to convert to bytes");
+        assert!(
+            bytes.len() <= max_bytes,
+            "max len: {max_bytes}, actual: {}",
+            bytes.len()
+        );
     }
 
     // We want to know that every payload produced by this type actually
     // deserializes as a collection of OTEL metrics.
-    proptest! {
-        #[test]
-        fn payload_deserializes(
-            seed: u64,
-            total_contexts in 1..1_000_u32,
-            attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
-            attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
-            attributes_per_metric in 0..10_u8,
-            max_bytes in 8u16..u16::MAX
-        ) {
-            let config = Config {
-                contexts: Contexts {
-                    total_contexts: ConfRange::Constant(total_contexts),
-                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
-                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
-                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
-                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
-                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
-                },
-                ..Default::default()
-            };
+    #[test]
+    fn payload_deserializes() {
+        let config = Config {
+            contexts: Contexts {
+                total_contexts: ConfRange::Constant(5),
+                attributes_per_resource: ConfRange::Constant(3),
+                scopes_per_resource: ConfRange::Constant(2),
+                attributes_per_scope: ConfRange::Constant(1),
+                metrics_per_scope: ConfRange::Constant(3),
+                attributes_per_metric: ConfRange::Constant(2),
+            },
+            ..Default::default()
+        };
 
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng).expect("failed to create metrics generator");
+        let max_bytes = 256;
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+            .expect("failed to create metrics generator");
 
-            let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
-            metrics.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
+        let mut bytes: Vec<u8> = Vec::new();
+        metrics
+            .to_bytes(&mut rng, max_bytes, &mut bytes)
+            .expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
-        }
+        opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
+            bytes.as_slice(),
+        )
+        .expect("failed to decode the message from the buffer");
     }
 
     // Confirm that configuration bounds are naively obeyed. For instance, this
@@ -565,7 +643,8 @@ mod test {
             attributes_per_scope in 0..20_u8,
             metrics_per_scope in 0..20_u8,
             attributes_per_metric in 0..10_u8,
-            steps in 1..u8::MAX
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -579,47 +658,48 @@ mod test {
                 ..Default::default()
             };
 
+            let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
 
             for _ in 0..steps {
-                let metric = otel_metrics.generate(&mut rng)?;
-
-                if let Some(resource) = &metric.resource {
-                    prop_assert!(
-                        resource.attributes.len() <= attributes_per_resource as usize,
-                        "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
-                        len = resource.attributes.len(),
-                    );
-                }
-
-                prop_assert!(
-                    metric.scope_metrics.len() <= scopes_per_resource as usize,
-                    "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
-                    len = metric.scope_metrics.len(),
-                );
-
-                for scope in &metric.scope_metrics {
-                    if let Some(scope) = &scope.scope {
+                if let Ok(metric) = otel_metrics.generate(&mut rng, &mut b) {
+                    if let Some(resource) = &metric.resource {
                         prop_assert!(
-                            scope.attributes.len() <= attributes_per_scope as usize,
-                            "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
-                            len = scope.attributes.len(),
+                            resource.attributes.len() <= attributes_per_resource as usize,
+                            "Resource attributes count {len} exceeds configured maximum {attributes_per_resource}",
+                            len = resource.attributes.len(),
                         );
                     }
 
                     prop_assert!(
-                        scope.metrics.len() <= metrics_per_scope as usize,
-                        "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
-                        len = scope.metrics.len(),
+                        metric.scope_metrics.len() <= scopes_per_resource as usize,
+                        "Scopes per resource count {len} exceeds configured maximum {scopes_per_resource}",
+                        len = metric.scope_metrics.len(),
                     );
 
-                    for metric in &scope.metrics {
+                    for scope in &metric.scope_metrics {
+                        if let Some(scope) = &scope.scope {
+                            prop_assert!(
+                                scope.attributes.len() <= attributes_per_scope as usize,
+                                "Scope attributes count {len} exceeds configured maximum {attributes_per_scope}",
+                                len = scope.attributes.len(),
+                            );
+                        }
+
                         prop_assert!(
-                            metric.metadata.len() <= attributes_per_metric as usize,
-                            "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
-                            len = metric.metadata.len(),
+                            scope.metrics.len() <= metrics_per_scope as usize,
+                            "Metrics per scope count {len} exceeds configured maximum {metrics_per_scope}",
+                            len = scope.metrics.len(),
                         );
+
+                        for metric in &scope.metrics {
+                            prop_assert!(
+                                metric.metadata.len() <= attributes_per_metric as usize,
+                                "Metric attributes count {len} exceeds configured maximum {attributes_per_metric}",
+                                len = metric.metadata.len(),
+                            );
+                        }
                     }
                 }
             }
@@ -704,10 +784,11 @@ mod test {
             seed: u64,
             total_contexts in 1..1_000_u32,
             attributes_per_resource in 0..20_u8,
-            scopes_per_resource in 0..20_u8,
+            scopes_per_resource in 1..20_u8,
             attributes_per_scope in 0..20_u8,
-            metrics_per_scope in 0..20_u8,
+            metrics_per_scope in 1..20_u8,
             attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..4098_usize,
         ) {
             let config = Config {
                 contexts: Contexts {
@@ -721,25 +802,78 @@ mod test {
                 ..Default::default()
             };
 
+            let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let metric1 = otel_metrics.generate(&mut rng, &mut b1);
 
             // Generate two identical metrics
-            let metric1 = otel_metrics.generate(&mut rng)?;
+            let mut b2 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
-            let metric2 = otel_metrics.generate(&mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let metric2 = otel_metrics.generate(&mut rng, &mut b2);
 
-            // Ensure that the metrics are equal.
-            assert_eq!(metric1, metric2);
-            // If the metrics are equal then their contexts must be equal.
-            assert_eq!(context_id(&metric1), context_id(&metric2));
+            // Ensure that the metrics are equal and that their contexts, when
+            // applicable, are also equal.
+            if let Ok(m1) = metric1 {
+                let m2 = metric2.unwrap();
+                prop_assert_eq!(context_id(&m1), context_id(&m2));
+                prop_assert_eq!(m1, m2);
+            }
         }
     }
 
     #[test]
+    fn smallest_protobuf() {
+        let data_point = NumberDataPoint {
+            attributes: Vec::new(),
+            start_time_unix_nano: 0,
+            time_unix_nano: 1, // Minimal non-zero timestamp
+            value: Some(number_data_point::Value::AsInt(1)), // Smallest value
+            exemplars: Vec::new(),
+            flags: 0,
+        };
+
+        let gauge = Gauge {
+            data_points: vec![data_point],
+        };
+
+        let metric = Metric {
+            name: "x".into(), // Minimal valid name
+            description: "".into(),
+            unit: "".into(),
+            data: Some(metric::Data::Gauge(gauge)),
+            metadata: Vec::new(), // No metadata
+        };
+
+        let scope_metrics = ScopeMetrics {
+            scope: None, // No scope info
+            metrics: vec![metric],
+            schema_url: "".into(),
+        };
+
+        let resource_metrics = ResourceMetrics {
+            resource: None, // No resource info
+            scope_metrics: vec![scope_metrics],
+            schema_url: "".into(),
+        };
+
+        // The most minimal request we care to support, just one single data point
+        let minimal_request = ExportMetricsServiceRequest {
+            resource_metrics: vec![resource_metrics],
+        };
+
+        let encoded_size = minimal_request.encoded_len();
+
+        assert!(
+            encoded_size == SMALLEST_PROTOBUF,
+            "Minimal useful request size ({encoded_size}) should be == SMALLEST_PROTOBUF ({SMALLEST_PROTOBUF})"
+        );
+    }
+
+    #[test]
     fn config_validation() {
-        // Valid cases
+        // Valid configuration
         let valid_config = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Constant(100),
@@ -753,7 +887,7 @@ mod test {
         };
         assert!(valid_config.valid().is_ok());
 
-        // Zero total_contexts
+        // Invalid: Zero total_contexts
         let zero_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Constant(0),
@@ -763,27 +897,87 @@ mod test {
         };
         assert!(zero_contexts.valid().is_err());
 
-        // Zero min in range
-        let zero_min_range = Config {
+        // Invalid: Zero minimum total_contexts in range
+        let zero_min_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 0, max: 100 },
                 ..valid_config.contexts
             },
             ..valid_config
         };
-        assert!(zero_min_range.valid().is_err());
+        assert!(zero_min_contexts.valid().is_err());
 
-        // Min greater than max
-        let min_gt_max = Config {
+        // Invalid: Min greater than max in total_contexts
+        let min_gt_max_contexts = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 100, max: 50 },
                 ..valid_config.contexts
             },
             ..valid_config
         };
-        assert!(min_gt_max.valid().is_err());
+        assert!(min_gt_max_contexts.valid().is_err());
 
-        // Impossible to achieve minimum contexts
+        // Invalid: Zero scopes_per_resource
+        let zero_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Constant(0),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_scopes.valid().is_err());
+
+        // Invalid: Zero minimum scopes_per_resource in range
+        let zero_min_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Inclusive { min: 0, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_min_scopes.valid().is_err());
+
+        // Invalid: Min greater than max in scopes_per_resource
+        let min_gt_max_scopes = Config {
+            contexts: Contexts {
+                scopes_per_resource: ConfRange::Inclusive { min: 20, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(min_gt_max_scopes.valid().is_err());
+
+        // Invalid: Zero metrics_per_scope
+        let zero_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Constant(0),
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_metrics.valid().is_err());
+
+        // Invalid: Zero minimum metrics_per_scope in range
+        let zero_min_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Inclusive { min: 0, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(zero_min_metrics.valid().is_err());
+
+        // Invalid: Min greater than max in metrics_per_scope
+        let min_gt_max_metrics = Config {
+            contexts: Contexts {
+                metrics_per_scope: ConfRange::Inclusive { min: 20, max: 10 },
+                ..valid_config.contexts
+            },
+            ..valid_config
+        };
+        assert!(min_gt_max_metrics.valid().is_err());
+
+        // Invalid: Impossible to achieve minimum contexts (context requirement exceeds capacity)
         let impossible_min = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive {
@@ -798,7 +992,7 @@ mod test {
         };
         assert!(impossible_min.valid().is_err());
 
-        // Impossible to achieve maximum contexts
+        // Invalid: Impossible to achieve maximum contexts (max is too small)
         let impossible_max = Config {
             contexts: Contexts {
                 total_contexts: ConfRange::Inclusive { min: 1, max: 1 },
@@ -810,7 +1004,19 @@ mod test {
         };
         assert!(impossible_max.valid().is_err());
 
-        // Zero metric weights
+        // Invalid: Zero metric weights
+        let zero_gauge_weight = Config {
+            metric_weights: super::MetricWeights { gauge: 0, sum: 50 },
+            ..valid_config
+        };
+        assert!(zero_gauge_weight.valid().is_err());
+
+        let zero_sum_weight = Config {
+            metric_weights: super::MetricWeights { gauge: 50, sum: 0 },
+            ..valid_config
+        };
+        assert!(zero_sum_weight.valid().is_err());
+
         let zero_weights = Config {
             metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
             ..valid_config

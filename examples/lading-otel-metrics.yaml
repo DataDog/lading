@@ -9,7 +9,7 @@ generator:
       parallel_connections: 5
       method:
         post:
-          maximum_prebuild_cache_size_bytes: "2 MiB" # GiB"
+          maximum_prebuild_cache_size_bytes: "1 GiB"
           variant:
             # all numbers arbitraray
             opentelemetry_metrics:
@@ -18,7 +18,7 @@ generator:
                 sum: 50
               contexts:
                 total_contexts:
-                  constant: 100
+                  constant: 10000
                 # host., service. etc
                 attributes_per_resource:
                   inclusive:
