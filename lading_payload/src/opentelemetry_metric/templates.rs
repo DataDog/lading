@@ -117,8 +117,8 @@ impl Distribution<Ndp> for StandardUniform {
         R: Rng + ?Sized,
     {
         let value = match rng.random_range(0..=1) {
-            0 => metrics::v1::number_data_point::Value::AsDouble(rng.random()),
-            1 => metrics::v1::number_data_point::Value::AsInt(rng.random()),
+            0 => metrics::v1::number_data_point::Value::AsDouble(0.0),
+            1 => metrics::v1::number_data_point::Value::AsInt(0),
             _ => unreachable!(),
         };
 
