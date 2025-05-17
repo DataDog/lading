@@ -90,6 +90,15 @@ pub struct Block {
     pub total_bytes: NonZeroU32,
     /// The bytes of this block.
     pub bytes: Bytes,
+    /// Optional metadata for the block
+    pub metadata: BlockMetadata,
+}
+
+/// Metadata associated with a Block
+#[derive(Debug, Clone, Default, Copy)]
+pub struct BlockMetadata {
+    /// Number of data points in this block
+    pub data_points: Option<u64>,
 }
 
 /// Errors for the construction of the block cache
@@ -108,6 +117,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Block {
         Ok(Self {
             total_bytes: NonZeroU32::new(total_bytes).expect("total_bytes must be non-zero"),
             bytes,
+            metadata: BlockMetadata::default(),
         })
     }
 }
@@ -332,6 +342,7 @@ impl Cache {
                 let mut pyld = crate::OpentelemetryMetrics::new(*config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-metrics");
                 let _guard = span.enter();
+
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
         };
@@ -585,9 +596,21 @@ where
         let min_actual_block_str = Byte::from_u64(min_actual_block_size.into())
             .get_appropriate_unit(byte_unit::UnitType::Binary)
             .to_string();
-        info!(
-            "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_actual_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}."
-        );
+
+        let total_data_points: u64 = block_cache
+            .iter()
+            .filter_map(|b| b.metadata.data_points)
+            .sum();
+
+        if total_data_points > 0 {
+            info!(
+                "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_actual_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}. Total data points: {total_data_points}."
+            );
+        } else {
+            info!(
+                "Filled {filled_sum_str} of requested {capacity_sum_str}. Discovered minimum block size of {min_actual_block_str}, maximum: {max_actual_block_str}. Total success blocks: {success_block_sizes}. Total rejected blocks: {rejected_block_sizes}."
+            );
+        }
 
         Ok(block_cache)
     }
@@ -626,6 +649,16 @@ where
                 .expect("failed to get length of bytes"),
         )
         .ok_or(SpinError::Zero)?;
-        Ok(Block { total_bytes, bytes })
+
+        let mut metadata = BlockMetadata::default();
+        if let Some(data_points) = serializer.data_points_generated() {
+            metadata.data_points = Some(data_points);
+        }
+
+        Ok(Block {
+            total_bytes,
+            bytes,
+            metadata,
+        })
     }
 }

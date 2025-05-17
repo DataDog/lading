@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block cache generation now logs its number of rejected, success blocks once
   the cache is created.
 - Added configurable metric kind weights in OpenTelemetry metrics payload generator.
+- Added new telemetry to OpenTelemetry metrics generation: data points per
+  second. This opens the door for doing the same for other payloads.
 
 ## [0.25.9]
 ## Added
