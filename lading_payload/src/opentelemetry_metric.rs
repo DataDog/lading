@@ -260,9 +260,7 @@ impl Config {
 #[derive(Debug, Clone)]
 /// OTLP metric payload
 pub struct OpentelemetryMetrics {
-    /// Template pool for metric generation
     pool: Pool,
-    /// Scratch buffer for serialization
     scratch: RefCell<BytesMut>,
     /// Current tick count for monotonic timing (starts at 0)
     tick: u64,
@@ -270,6 +268,8 @@ pub struct OpentelemetryMetrics {
     incr_f: f64,
     /// Accumulating sum increment, integer
     incr_i: i64,
+    /// Number of data points in the most recent block generation
+    data_points_in_block: u64,
 }
 
 impl OpentelemetryMetrics {
@@ -293,7 +293,12 @@ impl OpentelemetryMetrics {
             tick: 0,
             incr_f: 0.0,
             incr_i: 0,
+            data_points_in_block: 0,
         })
+    }
+
+    pub fn data_points_generated(&self) -> Option<u64> {
+        Some(self.data_points_in_block)
     }
 }
 
@@ -314,6 +319,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
+        // Reset data point counter for this generation
+        self.data_points_in_block = 0;
+
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
@@ -326,11 +334,14 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         // Update data points in each metric. For gauges we use random values,
         // for accumulating sums we increment by a fixed amount per tick.
         // All timestamps are updated based on the current tick.
+        let mut data_points_count = 0;
+
         for scope_metrics in &mut tpl.scope_metrics {
             for metric in &mut scope_metrics.metrics {
                 if let Some(data) = &mut metric.data {
                     match data {
                         Data::Gauge(gauge) => {
+                            data_points_count += gauge.data_points.len() as u64;
                             for point in &mut gauge.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
                                 if let Some(value) = &mut point.value {
@@ -346,6 +357,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             }
                         }
                         Data::Sum(sum) => {
+                            data_points_count += sum.data_points.len() as u64;
                             let is_accumulating = sum.is_monotonic;
                             for point in &mut sum.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
@@ -384,6 +396,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                 }
             }
         }
+
+        // Update the data points count for this block
+        self.data_points_in_block = data_points_count;
 
         Ok(tpl)
     }
@@ -444,6 +459,10 @@ impl crate::Serialize for OpentelemetryMetrics {
         }
 
         Ok(())
+    }
+
+    fn data_points_generated(&self) -> Option<u64> {
+        self.data_points_generated()
     }
 }
 
