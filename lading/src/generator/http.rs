@@ -7,6 +7,7 @@
 //! `request_failure`: Failed requests
 //! `bytes_written`: Total bytes written
 //! `bytes_per_second`: Configured rate to send data
+//! `data_points_transmitted`: Total data points transmitted (for OpenTelemetry metrics)
 //!
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
@@ -233,12 +234,18 @@ impl Http {
                             let client = client.clone();
                             let labels = labels.clone();
 
+                            let data_points = blk.metadata.data_points;
                             let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);
                                 match client.request(request).await {
                                     Ok(response) => {
                                         counter!("bytes_written", &labels).increment(block_length as u64);
+
+                                        if let Some(dp) = data_points {
+                                            counter!("data_points_transmitted", &labels).increment(dp);
+                                        }
+
                                         let status = response.status();
                                         let mut status_labels = labels.clone();
                                         status_labels

@@ -104,6 +104,18 @@ pub trait Serialize {
     where
         R: Rng + Sized,
         W: Write;
+
+    /// Reports data points count for the most recently generated content.
+    ///
+    /// IMPORTANT: This method should be called immediately after `to_bytes` to
+    /// get accurate counts for the most recently generated block. The
+    /// information WILL be overwritten by subsequent calls to `to_bytes`.
+    ///
+    /// If this function returns None the serialize does not support tracking
+    /// data points.
+    fn data_points_generated(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// Sub-configuration for `TraceAgent` format
@@ -199,6 +211,14 @@ impl Serialize for Payload {
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
+        }
+    }
+
+    fn data_points_generated(&self) -> Option<u64> {
+        match self {
+            Payload::OtelMetrics(ser) => ser.data_points_generated(),
+            // Other implementations use the default None
+            _ => None,
         }
     }
 }

@@ -8,6 +8,7 @@
 //! `bytes_written`: Total bytes written
 //! `response_bytes`: Total bytes received
 //! `bytes_per_second`: Configured rate to send data
+//! `data_points_transmitted`: Total data points transmitted (for OpenTelemetry metrics)
 //!
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
@@ -290,6 +291,9 @@ impl Grpc {
                     match res {
                         Ok(res) => {
                             counter!("bytes_written", &self.metric_labels).increment(block_length as u64);
+                            if let Some(data_points) = blk.metadata.data_points {
+                                counter!("data_points_transmitted", &self.metric_labels).increment(data_points);
+                            }
                             counter!("request_ok", &self.metric_labels).increment(1);
                             counter!("response_bytes", &self.metric_labels).increment(res.into_inner() as u64);
                         }
