@@ -297,8 +297,8 @@ impl OpentelemetryMetrics {
         })
     }
 
-    pub fn data_points_generated(&self) -> Option<u64> {
-        Some(self.data_points_in_block)
+    fn data_points_generated(&self) -> u64 {
+        self.data_points_in_block
     }
 }
 
@@ -462,7 +462,7 @@ impl crate::Serialize for OpentelemetryMetrics {
     }
 
     fn data_points_generated(&self) -> Option<u64> {
-        self.data_points_generated()
+        Some(self.data_points_generated())
     }
 }
 
