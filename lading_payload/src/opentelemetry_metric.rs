@@ -268,8 +268,11 @@ pub struct OpentelemetryMetrics {
     incr_f: f64,
     /// Accumulating sum increment, integer
     incr_i: i64,
-    /// Number of data points in the most recent block generation
-    data_points_in_block: u64,
+    /// Number of data points in the most recent `ResourceMetrics` (set by
+    /// `generate`).
+    data_points_per_resource: u64,
+    /// Number of data points in the most recent block (set by `to_bytes`).
+    data_points_per_block: u64,
 }
 
 impl OpentelemetryMetrics {
@@ -293,12 +296,9 @@ impl OpentelemetryMetrics {
             tick: 0,
             incr_f: 0.0,
             incr_i: 0,
-            data_points_in_block: 0,
+            data_points_per_resource: 0,
+            data_points_per_block: 0,
         })
-    }
-
-    fn data_points_generated(&self) -> u64 {
-        self.data_points_in_block
     }
 }
 
@@ -308,8 +308,10 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
     /// Generate OTLP metrics with the following enhancements:
     ///
-    /// * Monotonic sums are truly monotonic, incrementing by a random amount each tick
-    /// * Timestamps advance monotonically based on internal tick counter starting at epoch
+    /// * Monotonic sums are truly monotonic, incrementing by a random amount
+    ///   each tick
+    /// * Timestamps advance monotonically based on internal tick counter
+    ///   starting at epoch
     /// * Each call advances the tick counter by a random amount (1-60)
     fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
@@ -318,9 +320,6 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.tick += rng.random_range(1..=60);
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
-
-        // Reset data point counter for this generation
-        self.data_points_in_block = 0;
 
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
@@ -397,8 +396,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
             }
         }
 
-        // Update the data points count for this block
-        self.data_points_in_block = data_points_count;
+        self.data_points_per_resource = data_points_count;
 
         Ok(tpl)
     }
@@ -418,10 +416,14 @@ impl crate::Serialize for OpentelemetryMetrics {
             resource_metrics: Vec::with_capacity(8),
         };
 
+        let mut total_data_points = 0;
         let loop_id: u32 = rng.random();
+
         while bytes_remaining >= SMALLEST_PROTOBUF {
             if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
+                total_data_points += self.data_points_per_resource;
                 request.resource_metrics.push(rm);
+
                 let required_bytes = request.encoded_len();
                 debug!(
                     ?loop_id,
@@ -432,6 +434,7 @@ impl crate::Serialize for OpentelemetryMetrics {
                     "to_bytes inner loop"
                 );
                 if required_bytes > max_bytes {
+                    total_data_points -= self.data_points_per_resource;
                     drop(request.resource_metrics.pop());
                     break;
                 }
@@ -458,11 +461,13 @@ impl crate::Serialize for OpentelemetryMetrics {
             writer.write_all(&buf)?;
         }
 
+        self.data_points_per_block = total_data_points;
+
         Ok(())
     }
 
     fn data_points_generated(&self) -> Option<u64> {
-        Some(self.data_points_generated())
+        Some(self.data_points_per_block)
     }
 }
 
