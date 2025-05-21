@@ -11,6 +11,8 @@ use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
 use metrics::counter;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use tracing::error;
@@ -54,6 +56,8 @@ pub enum BodyVariant {
     RawBytes,
     /// Respond with a hardcoded string value
     Static(String),
+    /// Respond with Otlp Metric Full Success, see <https://opentelemetry.io/docs/specs/otlp/#full-success-1>
+    OtlpMetric,
 }
 
 fn default_body_variant() -> BodyVariant {
@@ -210,6 +214,10 @@ impl Http {
             BodyVariant::Nothing => vec![],
             BodyVariant::RawBytes => config.raw_bytes.clone(),
             BodyVariant::Static(val) => val.as_bytes().to_vec(),
+            BodyVariant::OtlpMetric => {
+                let response = ExportMetricsServiceResponse::default();
+                response.encode_to_vec()
+            }
         };
 
         Ok(Self {
