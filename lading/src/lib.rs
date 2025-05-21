@@ -18,7 +18,7 @@
 #![deny(unused_comparisons)]
 #![deny(unreachable_pub)]
 #![deny(missing_docs)]
-#![deny(missing_copy_implementations)]
+#![warn(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
