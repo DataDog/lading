@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 mod common;
 pub mod http;
+pub mod otlp;
 pub mod splunk_hec;
 pub mod sqs;
 pub mod tcp;
@@ -40,6 +41,9 @@ pub enum Error {
     /// See [`crate::blackhole::sqs::Error`] for details.
     #[error(transparent)]
     Sqs(sqs::Error),
+    /// See [`crate::blackhole::otlp::Error`] for details.
+    #[error(transparent)]
+    Otlp(otlp::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -83,6 +87,8 @@ pub enum Inner {
     UnixDatagram(unix_datagram::Config),
     /// See [`crate::blackhole::sqs::Config`] for details.
     Sqs(sqs::Config),
+    /// See [`crate::blackhole::otlp::Config`] for details.
+    Otlp(otlp::Config),
 }
 
 #[derive(Debug)]
@@ -105,6 +111,8 @@ pub enum Server {
     UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::blackhole::sqs::Sqs`] for details.
     Sqs(sqs::Sqs),
+    /// See [`crate::blackhole::otlp::Otlp`] for details.
+    Otlp(otlp::Otlp),
 }
 
 impl Server {
@@ -136,6 +144,9 @@ impl Server {
             Inner::SplunkHec(conf) => {
                 Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, &conf, shutdown))
             }
+            Inner::Otlp(conf) => {
+                Self::Otlp(otlp::Otlp::new(&config.general, &conf, &shutdown).map_err(Error::Otlp)?)
+            }
         };
         Ok(server)
     }
@@ -158,6 +169,7 @@ impl Server {
             Server::UnixDatagram(inner) => Box::pin(inner.run()).await.map_err(Error::UnixDatagram),
             Server::Sqs(inner) => inner.run().await.map_err(Error::Sqs),
             Server::SplunkHec(inner) => inner.run().await.map_err(Error::SplunkHec),
+            Server::Otlp(inner) => inner.run().await.map_err(Error::Otlp),
         }
     }
 }

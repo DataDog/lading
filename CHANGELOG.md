@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added configurable metric kind weights in OpenTelemetry metrics payload generator.
 - Added new telemetry to OpenTelemetry metrics generation: data points per
   second. This opens the door for doing the same for other payloads.
+- Otlp specific blackhole with HTTP and gRPC support.
 
 ## [0.25.9]
 ## Added
