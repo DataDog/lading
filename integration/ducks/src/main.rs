@@ -377,12 +377,17 @@ async fn main() -> Result<(), anyhow::Error> {
         .context("ducks timeout argument must be a number")?;
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+    let (internal_shutdown_tx, mut internal_shutdown_rx) = mpsc::channel(1);
 
-    let server = DucksTarget { shutdown_tx };
+    let server = DucksTarget {
+        shutdown_tx: shutdown_tx.clone(),
+    };
 
     let rpc_server = tonic::transport::Server::builder()
         .add_service(IntegrationTargetServer::new(server))
-        .serve_with_incoming(ducks_comm);
+        .serve_with_incoming_shutdown(ducks_comm, async move {
+            internal_shutdown_rx.recv().await;
+        });
 
     tokio::select! {
         result = rpc_server => {
@@ -390,8 +395,15 @@ async fn main() -> Result<(), anyhow::Error> {
                 panic!("Server error: {e}");
             }
         },
-        _ = shutdown_rx.recv() => {},
-        _ = tokio::time::sleep(Duration::from_secs(timeout_seconds)) => { warn!("timed out") }
+        _ = shutdown_rx.recv() => {
+            // Forward the shutdown signal to the internal channel
+            let _ = internal_shutdown_tx.send(()).await;
+        },
+        _ = tokio::time::sleep(Duration::from_secs(timeout_seconds)) => {
+            warn!("timed out");
+            // Also send shutdown on timeout
+            let _ = internal_shutdown_tx.send(()).await;
+        }
     }
     debug!("shutting down");
 
