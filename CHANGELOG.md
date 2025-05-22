@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second. This opens the door for doing the same for other payloads.
 - HTTP blackhole now supports an OtlpMetric body variant and will always respond
   with a full success.
+- Otlp specific blackhole with HTTP and gRPC support.
 
 ## [0.25.9]
 ## Added
