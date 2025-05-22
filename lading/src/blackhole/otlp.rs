@@ -109,7 +109,6 @@ impl Otlp {
         })
     }
 
-
     /// Run [`Otlp`] to completion
     ///
     /// This function runs the OTLP server(s) until a shutdown signal is
@@ -122,7 +121,12 @@ impl Otlp {
         let mut join_set = JoinSet::new();
 
         if let Some(addr) = self.grpc_addr {
-            let grpc_task = grpc::run_server(addr, self.response_delay, &self.labels, self.concurrency_limit);
+            let grpc_task = grpc::run_server(
+                addr,
+                self.response_delay,
+                &self.labels,
+                self.concurrency_limit,
+            );
             join_set.spawn(async move {
                 grpc_task.await.unwrap_or_else(|e| {
                     error!("gRPC task failed: {}", e);
