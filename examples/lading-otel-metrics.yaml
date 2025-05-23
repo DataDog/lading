@@ -50,11 +50,11 @@ blackhole:
       binding_addr: "127.0.0.1:9091"
   - http:
       binding_addr: "127.0.0.1:9092"
-  - http:
-      binding_addr: "127.0.0.1:4217"  # OTLP HTTP endpoint
-      body_variant: "nothing"
-  # - grpc:
-  #     binding_addr: "127.0.0.1:4318"  # OTLP gRPC endpoint
+  - otlp:
+      grpc_addr: "127.0.0.1:4317"
+      http_addr: "127.0.0.1:4318"
+      concurrent_requests_max: 100
+      response_delay_millis: 0
 
 target_metrics:
   - prometheus:
