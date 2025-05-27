@@ -57,7 +57,6 @@ pub(crate) fn run_server(
 /// Handler for OTLP HTTP requests
 #[derive(Clone, Debug)]
 struct OtlpHttpHandler {
-    labels: Vec<(String, String)>,
     metrics_labels: Vec<(String, String)>,
     traces_labels: Vec<(String, String)>,
     logs_labels: Vec<(String, String)>,
@@ -92,7 +91,6 @@ impl OtlpHttpHandler {
             .expect("application/x-protobuf is a valid MIME type");
 
         Self {
-            labels: labels.to_vec(),
             metrics_labels,
             traces_labels,
             logs_labels,
@@ -130,8 +128,6 @@ impl OtlpHttpHandler {
         self,
         req: Request<hyper::body::Incoming>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-        counter!("requests_received", &self.labels).increment(1);
-
         // Fast-path for invalid paths
         let path_ref = req.uri().path();
         if path_ref != "/v1/metrics" && path_ref != "/v1/traces" && path_ref != "/v1/logs" {
@@ -142,18 +138,28 @@ impl OtlpHttpHandler {
                 .expect("Creating HTTP response should not fail"));
         }
 
+        // Determine signal-specific labels based on path
+        let signal_labels = match path_ref {
+            "/v1/metrics" => &self.metrics_labels,
+            "/v1/traces" => &self.traces_labels,
+            "/v1/logs" => &self.logs_labels,
+            _ => unreachable!(), // checked earlier
+        };
+
+        counter!("requests_received", signal_labels).increment(1);
+
         // Check for empty bodies using Content-Length when available
         if let Some(content_length) = req.headers().get(hyper::header::CONTENT_LENGTH) {
             if let Ok(length) = content_length.to_str() {
                 if let Ok(length) = length.parse::<u64>() {
                     if length == 0 {
-                        counter!("bytes_received", &self.labels).increment(0);
+                        counter!("bytes_received", signal_labels).increment(0);
 
                         let response_bytes = match path_ref {
                             "/v1/metrics" => self.empty_metrics_response.clone(),
                             "/v1/traces" => self.empty_traces_response.clone(),
                             "/v1/logs" => self.empty_logs_response.clone(),
-                            _ => unreachable!(), // We checked earlier
+                            _ => unreachable!(), // checked earlier
                         };
 
                         return self.build_response(response_bytes).await;
@@ -168,11 +174,11 @@ impl OtlpHttpHandler {
 
         let body_bytes = body.collect().await?.to_bytes();
 
-        counter!("bytes_received", &self.labels).increment(body_bytes.len() as u64);
+        counter!("bytes_received", signal_labels).increment(body_bytes.len() as u64);
         let response_bytes =
             match crate::codec::decode(content_encoding.as_ref(), body_bytes.clone()) {
                 Ok(decoded) => {
-                    counter!("decoded_bytes_received", &self.labels)
+                    counter!("decoded_bytes_received", signal_labels)
                         .increment(decoded.len() as u64);
 
                     match path.as_str() {
