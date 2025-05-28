@@ -54,36 +54,72 @@ pub(crate) fn run_server(
     })
 }
 
+/// Request format for OTLP HTTP
+#[derive(Clone, Copy, Debug)]
+enum RequestFormat {
+    Proto,
+    Json,
+}
+
+/// Response format for OTLP HTTP
+#[derive(Clone, Copy, Debug)]
+enum ResponseFormat {
+    Proto,
+    Json,
+}
+
 /// Handler for OTLP HTTP requests
 #[derive(Clone, Debug)]
 struct OtlpHttpHandler {
     labels: Vec<(String, String)>,
-    empty_metrics_response: Bytes,
-    empty_traces_response: Bytes,
-    empty_logs_response: Bytes,
-    content_type_header_value: http::HeaderValue,
+    empty_metrics_response_proto: Bytes,
+    empty_traces_response_proto: Bytes,
+    empty_logs_response_proto: Bytes,
+    empty_metrics_response_json: Bytes,
+    empty_traces_response_json: Bytes,
+    empty_logs_response_json: Bytes,
+    content_type_proto: http::HeaderValue,
+    content_type_json: http::HeaderValue,
     response_delay: Duration,
 }
 
 impl OtlpHttpHandler {
     fn new(response_delay: Duration, labels: &[(String, String)]) -> Self {
-        // Pre-compute empty responses
-        let empty_metrics_response =
-            Bytes::from(ExportMetricsServiceResponse::default().encode_to_vec());
-        let empty_traces_response =
-            Bytes::from(ExportTraceServiceResponse::default().encode_to_vec());
-        let empty_logs_response = Bytes::from(ExportLogsServiceResponse::default().encode_to_vec());
+        // Pre-compute empty responses for both formats
+        let empty_metrics = ExportMetricsServiceResponse::default();
+        let empty_traces = ExportTraceServiceResponse::default();
+        let empty_logs = ExportLogsServiceResponse::default();
 
-        let content_type_header_value = "application/x-protobuf"
+        let empty_metrics_response_proto = Bytes::from(empty_metrics.encode_to_vec());
+        let empty_traces_response_proto = Bytes::from(empty_traces.encode_to_vec());
+        let empty_logs_response_proto = Bytes::from(empty_logs.encode_to_vec());
+        let empty_metrics_response_json = Bytes::from(
+            serde_json::to_vec(&empty_metrics).expect("Failed to serialize empty metrics response"),
+        );
+        let empty_traces_response_json = Bytes::from(
+            serde_json::to_vec(&empty_traces).expect("Failed to serialize empty traces response"),
+        );
+        let empty_logs_response_json = Bytes::from(
+            serde_json::to_vec(&empty_logs).expect("Failed to serialize empty logs response"),
+        );
+
+        let content_type_proto = "application/x-protobuf"
             .parse()
             .expect("application/x-protobuf is a valid MIME type");
+        let content_type_json = "application/json"
+            .parse()
+            .expect("application/json is a valid MIME type");
 
         Self {
             labels: labels.to_vec(),
-            empty_metrics_response,
-            empty_traces_response,
-            empty_logs_response,
-            content_type_header_value,
+            empty_metrics_response_proto,
+            empty_traces_response_proto,
+            empty_logs_response_proto,
+            empty_metrics_response_json,
+            empty_traces_response_json,
+            empty_logs_response_json,
+            content_type_proto,
+            content_type_json,
             response_delay,
         }
     }
@@ -92,6 +128,7 @@ impl OtlpHttpHandler {
     async fn build_response(
         &self,
         response_bytes: Bytes,
+        content_type: &http::HeaderValue,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
         if self.response_delay.as_micros() > 0 {
             tokio::time::sleep(self.response_delay).await;
@@ -101,15 +138,13 @@ impl OtlpHttpHandler {
         let headers = response
             .headers_mut()
             .expect("Response builder should always provide headers_mut");
-        headers.insert(
-            hyper::header::CONTENT_TYPE,
-            self.content_type_header_value.clone(),
-        );
+        headers.insert(hyper::header::CONTENT_TYPE, content_type.clone());
         Ok(response
             .body(crate::full(response_bytes))
             .expect("Creating HTTP response should not fail"))
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_request(
         self,
         req: Request<hyper::body::Incoming>,
@@ -126,6 +161,35 @@ impl OtlpHttpHandler {
 
         counter!("requests_received", &self.labels).increment(1);
 
+        let request_format: RequestFormat = req
+            .headers()
+            .get(hyper::header::CONTENT_TYPE)
+            .and_then(|ct| ct.to_str().ok())
+            .map_or(RequestFormat::Proto, |ct| {
+                if ct.contains("application/json") {
+                    RequestFormat::Json
+                } else {
+                    RequestFormat::Proto
+                }
+            });
+        let response_format: ResponseFormat = req
+            .headers()
+            .get(hyper::header::ACCEPT)
+            .and_then(|accept| accept.to_str().ok())
+            .map_or_else(
+                || match request_format {
+                    RequestFormat::Json => ResponseFormat::Json,
+                    RequestFormat::Proto => ResponseFormat::Proto,
+                },
+                |accept| {
+                    if accept.contains("application/json") {
+                        ResponseFormat::Json
+                    } else {
+                        ResponseFormat::Proto
+                    }
+                },
+            );
+
         // Check for empty bodies using Content-Length when available
         if let Some(content_length) = req.headers().get(hyper::header::CONTENT_LENGTH) {
             if let Ok(length) = content_length.to_str() {
@@ -133,19 +197,41 @@ impl OtlpHttpHandler {
                     if length == 0 {
                         counter!("bytes_received", &self.labels).increment(0);
 
-                        let response_bytes = match path_ref {
-                            "/v1/metrics" => self.empty_metrics_response.clone(),
-                            "/v1/traces" => self.empty_traces_response.clone(),
-                            "/v1/logs" => self.empty_logs_response.clone(),
-                            _ => unreachable!(), // checked earlier
+                        let (response_bytes, content_type) = match (path_ref, response_format) {
+                            ("/v1/metrics", ResponseFormat::Json) => (
+                                self.empty_metrics_response_json.clone(),
+                                &self.content_type_json,
+                            ),
+                            ("/v1/metrics", ResponseFormat::Proto) => (
+                                self.empty_metrics_response_proto.clone(),
+                                &self.content_type_proto,
+                            ),
+                            ("/v1/traces", ResponseFormat::Json) => (
+                                self.empty_traces_response_json.clone(),
+                                &self.content_type_json,
+                            ),
+                            ("/v1/traces", ResponseFormat::Proto) => (
+                                self.empty_traces_response_proto.clone(),
+                                &self.content_type_proto,
+                            ),
+                            ("/v1/logs", ResponseFormat::Json) => (
+                                self.empty_logs_response_json.clone(),
+                                &self.content_type_json,
+                            ),
+                            ("/v1/logs", ResponseFormat::Proto) => (
+                                self.empty_logs_response_proto.clone(),
+                                &self.content_type_proto,
+                            ),
+                            _ => unreachable!(), // path already validated
                         };
 
-                        return self.build_response(response_bytes).await;
+                        return self.build_response(response_bytes, content_type).await;
                     }
                 }
             }
         }
 
+        // Non-empty body, implies a little more CPU work
         let content_encoding = req.headers().get(hyper::header::CONTENT_ENCODING).cloned();
         let path = path_ref.to_string();
         let (_, body) = req.into_parts();
@@ -153,6 +239,7 @@ impl OtlpHttpHandler {
         let body_bytes = body.collect().await?.to_bytes();
 
         counter!("bytes_received", &self.labels).increment(body_bytes.len() as u64);
+
         let response_bytes =
             match crate::codec::decode(content_encoding.as_ref(), body_bytes.clone()) {
                 Ok(decoded) => {
@@ -160,27 +247,49 @@ impl OtlpHttpHandler {
                         .increment(decoded.len() as u64);
 
                     match path.as_str() {
-                        "/v1/metrics" => self.process_metrics(&decoded),
-                        "/v1/traces" => self.process_traces(&decoded),
-                        "/v1/logs" => self.process_logs(&decoded),
-                        _ => unreachable!(
-                            "path previously checked, catastrophic programming mistake"
-                        ),
+                        "/v1/metrics" => {
+                            self.process_metrics(&decoded, request_format, response_format)
+                        }
+                        "/v1/traces" => {
+                            self.process_traces(&decoded, request_format, response_format)
+                        }
+                        "/v1/logs" => self.process_logs(&decoded, request_format, response_format),
+                        _ => unreachable!("path already validated"),
                     }
                 }
                 Err(response) => return Ok(response),
             };
 
-        self.build_response(response_bytes).await
+        let content_type = match response_format {
+            ResponseFormat::Json => &self.content_type_json,
+            ResponseFormat::Proto => &self.content_type_proto,
+        };
+
+        self.build_response(response_bytes, content_type).await
     }
 
-    fn process_metrics(&self, body_bytes: &[u8]) -> Bytes {
+    fn process_metrics(
+        &self,
+        body_bytes: &[u8],
+        request_format: RequestFormat,
+        response_format: ResponseFormat,
+    ) -> Bytes {
         if body_bytes.is_empty() {
-            return self.empty_metrics_response.clone();
+            return match response_format {
+                ResponseFormat::Json => self.empty_metrics_response_json.clone(),
+                ResponseFormat::Proto => self.empty_metrics_response_proto.clone(),
+            };
         }
 
         let mut total_points: u64 = 0;
-        if let Ok(request) = ExportMetricsServiceRequest::decode(body_bytes) {
+        let request_opt = match request_format {
+            RequestFormat::Json => {
+                serde_json::from_slice::<ExportMetricsServiceRequest>(body_bytes).ok()
+            }
+            RequestFormat::Proto => ExportMetricsServiceRequest::decode(body_bytes).ok(),
+        };
+
+        if let Some(request) = request_opt {
             for rm in &request.resource_metrics {
                 for sm in &rm.scope_metrics {
                     for m in &sm.metrics {
@@ -203,16 +312,34 @@ impl OtlpHttpHandler {
             counter!("data_points_received", &self.labels).increment(total_points);
         }
 
-        self.empty_metrics_response.clone()
+        match response_format {
+            ResponseFormat::Json => self.empty_metrics_response_json.clone(),
+            ResponseFormat::Proto => self.empty_metrics_response_proto.clone(),
+        }
     }
 
-    fn process_traces(&self, body_bytes: &[u8]) -> Bytes {
+    fn process_traces(
+        &self,
+        body_bytes: &[u8],
+        request_format: RequestFormat,
+        response_format: ResponseFormat,
+    ) -> Bytes {
         if body_bytes.is_empty() {
-            return self.empty_traces_response.clone();
+            return match response_format {
+                ResponseFormat::Json => self.empty_traces_response_json.clone(),
+                ResponseFormat::Proto => self.empty_traces_response_proto.clone(),
+            };
         }
 
         let mut total_spans: u64 = 0;
-        if let Ok(request) = ExportTraceServiceRequest::decode(body_bytes) {
+        let request_opt = match request_format {
+            RequestFormat::Json => {
+                serde_json::from_slice::<ExportTraceServiceRequest>(body_bytes).ok()
+            }
+            RequestFormat::Proto => ExportTraceServiceRequest::decode(body_bytes).ok(),
+        };
+
+        if let Some(request) = request_opt {
             for rs in &request.resource_spans {
                 for ss in &rs.scope_spans {
                     let spans_count = ss.spans.len() as u64;
@@ -225,16 +352,34 @@ impl OtlpHttpHandler {
             counter!("data_points_received", &self.labels).increment(total_spans);
         }
 
-        self.empty_traces_response.clone()
+        match response_format {
+            ResponseFormat::Json => self.empty_traces_response_json.clone(),
+            ResponseFormat::Proto => self.empty_traces_response_proto.clone(),
+        }
     }
 
-    fn process_logs(&self, body_bytes: &[u8]) -> Bytes {
+    fn process_logs(
+        &self,
+        body_bytes: &[u8],
+        request_format: RequestFormat,
+        response_format: ResponseFormat,
+    ) -> Bytes {
         if body_bytes.is_empty() {
-            return self.empty_logs_response.clone();
+            return match response_format {
+                ResponseFormat::Json => self.empty_logs_response_json.clone(),
+                ResponseFormat::Proto => self.empty_logs_response_proto.clone(),
+            };
         }
 
         let mut total_logs: u64 = 0;
-        if let Ok(request) = ExportLogsServiceRequest::decode(body_bytes) {
+        let request_opt = match request_format {
+            RequestFormat::Json => {
+                serde_json::from_slice::<ExportLogsServiceRequest>(body_bytes).ok()
+            }
+            RequestFormat::Proto => ExportLogsServiceRequest::decode(body_bytes).ok(),
+        };
+
+        if let Some(request) = request_opt {
             for rl in &request.resource_logs {
                 for sl in &rl.scope_logs {
                     let logs_count = sl.log_records.len() as u64;
@@ -247,6 +392,9 @@ impl OtlpHttpHandler {
             counter!("data_points_received", &self.labels).increment(total_logs);
         }
 
-        self.empty_logs_response.clone()
+        match response_format {
+            ResponseFormat::Json => self.empty_logs_response_json.clone(),
+            ResponseFormat::Proto => self.empty_logs_response_proto.clone(),
+        }
     }
 }
