@@ -55,6 +55,8 @@ nix = { version = "0.30", default-features = false, features = [
 num_cpus = { version = "1.16" }
 num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
+opentelemetry-proto = { version = "0.30.0", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
+prost = { workspace = true }
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
   "std",
@@ -82,7 +84,7 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tonic = { version = "0.12" }
+tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 uuid = { workspace = true }

@@ -515,6 +515,7 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
                     let res = resource::v1::Resource {
                         attributes: attributes.as_slice().to_owned(),
                         dropped_attributes_count: 0,
+                        entity_refs: vec![],
                     };
                     Some(res)
                 }
