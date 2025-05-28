@@ -31,38 +31,25 @@ pub(crate) fn run_server(
     labels.push(("protocol".to_string(), "grpc".to_string()));
     labels.extend_from_slice(base_labels);
 
-    // Signal-specific labels, pre-compute empty responses
-    let mut metrics_labels = Vec::with_capacity(labels.len() + 1);
-    metrics_labels.extend_from_slice(&labels);
-    metrics_labels.push(("signal".to_string(), "metrics".to_string()));
-    let mut traces_labels = Vec::with_capacity(labels.len() + 1);
-    traces_labels.extend_from_slice(&labels);
-    traces_labels.push(("signal".to_string(), "traces".to_string()));
-    let mut logs_labels = Vec::with_capacity(labels.len() + 1);
-    logs_labels.extend_from_slice(&labels);
-    logs_labels.push(("signal".to_string(), "logs".to_string()));
-
+    // Pre-compute empty responses
     let empty_metrics_response = ExportMetricsServiceResponse::default();
     let empty_traces_response = ExportTraceServiceResponse::default();
     let empty_logs_response = ExportLogsServiceResponse::default();
 
     let metrics_service = OtlpMetricsService {
         labels: labels.clone(),
-        metrics_labels,
         response_delay,
         empty_response: empty_metrics_response,
     };
 
     let traces_service = OtlpTracesService {
         labels: labels.clone(),
-        traces_labels,
         response_delay,
         empty_response: empty_traces_response,
     };
 
     let logs_service = OtlpLogsService {
         labels,
-        logs_labels,
         response_delay,
         empty_response: empty_logs_response,
     };
@@ -85,7 +72,6 @@ pub(crate) fn run_server(
 #[derive(Debug)]
 struct OtlpMetricsService {
     labels: Vec<(String, String)>,
-    metrics_labels: Vec<(String, String)>,
     response_delay: Duration,
     empty_response: ExportMetricsServiceResponse,
 }
@@ -121,7 +107,7 @@ impl MetricsService for OtlpMetricsService {
         }
 
         if total_points > 0 {
-            counter!("data_points_received", &self.metrics_labels).increment(total_points);
+            counter!("data_points_received", &self.labels).increment(total_points);
         }
 
         if self.response_delay.as_micros() > 0 {
@@ -135,7 +121,6 @@ impl MetricsService for OtlpMetricsService {
 #[derive(Debug)]
 struct OtlpTracesService {
     labels: Vec<(String, String)>,
-    traces_labels: Vec<(String, String)>,
     response_delay: Duration,
     empty_response: ExportTraceServiceResponse,
 }
@@ -161,7 +146,7 @@ impl TraceService for OtlpTracesService {
         }
 
         if total_spans > 0 {
-            counter!("data_points_received", &self.traces_labels).increment(total_spans);
+            counter!("data_points_received", &self.labels).increment(total_spans);
         }
 
         if self.response_delay.as_micros() > 0 {
@@ -175,7 +160,6 @@ impl TraceService for OtlpTracesService {
 #[derive(Debug)]
 struct OtlpLogsService {
     labels: Vec<(String, String)>,
-    logs_labels: Vec<(String, String)>,
     response_delay: Duration,
     empty_response: ExportLogsServiceResponse,
 }
@@ -201,7 +185,7 @@ impl LogsService for OtlpLogsService {
         }
 
         if total_logs > 0 {
-            counter!("data_points_received", &self.logs_labels).increment(total_logs);
+            counter!("data_points_received", &self.labels).increment(total_logs);
         }
 
         if self.response_delay.as_micros() > 0 {

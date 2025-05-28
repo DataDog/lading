@@ -57,9 +57,7 @@ pub(crate) fn run_server(
 /// Handler for OTLP HTTP requests
 #[derive(Clone, Debug)]
 struct OtlpHttpHandler {
-    metrics_labels: Vec<(String, String)>,
-    traces_labels: Vec<(String, String)>,
-    logs_labels: Vec<(String, String)>,
+    labels: Vec<(String, String)>,
     empty_metrics_response: Bytes,
     empty_traces_response: Bytes,
     empty_logs_response: Bytes,
@@ -69,17 +67,7 @@ struct OtlpHttpHandler {
 
 impl OtlpHttpHandler {
     fn new(response_delay: Duration, labels: &[(String, String)]) -> Self {
-        // Signal-specific labels, pre-compute empty responses
-        let mut metrics_labels = Vec::with_capacity(labels.len() + 1);
-        metrics_labels.extend_from_slice(labels);
-        metrics_labels.push(("signal".to_string(), "metrics".to_string()));
-        let mut traces_labels = Vec::with_capacity(labels.len() + 1);
-        traces_labels.extend_from_slice(labels);
-        traces_labels.push(("signal".to_string(), "traces".to_string()));
-        let mut logs_labels = Vec::with_capacity(labels.len() + 1);
-        logs_labels.extend_from_slice(labels);
-        logs_labels.push(("signal".to_string(), "logs".to_string()));
-
+        // Pre-compute empty responses
         let empty_metrics_response =
             Bytes::from(ExportMetricsServiceResponse::default().encode_to_vec());
         let empty_traces_response =
@@ -91,9 +79,7 @@ impl OtlpHttpHandler {
             .expect("application/x-protobuf is a valid MIME type");
 
         Self {
-            metrics_labels,
-            traces_labels,
-            logs_labels,
+            labels: labels.to_vec(),
             empty_metrics_response,
             empty_traces_response,
             empty_logs_response,
@@ -138,22 +124,14 @@ impl OtlpHttpHandler {
                 .expect("Creating HTTP response should not fail"));
         }
 
-        // Determine signal-specific labels based on path
-        let signal_labels = match path_ref {
-            "/v1/metrics" => &self.metrics_labels,
-            "/v1/traces" => &self.traces_labels,
-            "/v1/logs" => &self.logs_labels,
-            _ => unreachable!(), // checked earlier
-        };
-
-        counter!("requests_received", signal_labels).increment(1);
+        counter!("requests_received", &self.labels).increment(1);
 
         // Check for empty bodies using Content-Length when available
         if let Some(content_length) = req.headers().get(hyper::header::CONTENT_LENGTH) {
             if let Ok(length) = content_length.to_str() {
                 if let Ok(length) = length.parse::<u64>() {
                     if length == 0 {
-                        counter!("bytes_received", signal_labels).increment(0);
+                        counter!("bytes_received", &self.labels).increment(0);
 
                         let response_bytes = match path_ref {
                             "/v1/metrics" => self.empty_metrics_response.clone(),
@@ -174,11 +152,11 @@ impl OtlpHttpHandler {
 
         let body_bytes = body.collect().await?.to_bytes();
 
-        counter!("bytes_received", signal_labels).increment(body_bytes.len() as u64);
+        counter!("bytes_received", &self.labels).increment(body_bytes.len() as u64);
         let response_bytes =
             match crate::codec::decode(content_encoding.as_ref(), body_bytes.clone()) {
                 Ok(decoded) => {
-                    counter!("decoded_bytes_received", signal_labels)
+                    counter!("decoded_bytes_received", &self.labels)
                         .increment(decoded.len() as u64);
 
                     match path.as_str() {
@@ -222,7 +200,7 @@ impl OtlpHttpHandler {
         }
 
         if total_points > 0 {
-            counter!("data_points_received", &self.metrics_labels).increment(total_points);
+            counter!("data_points_received", &self.labels).increment(total_points);
         }
 
         self.empty_metrics_response.clone()
@@ -244,7 +222,7 @@ impl OtlpHttpHandler {
         }
 
         if total_spans > 0 {
-            counter!("data_points_received", &self.traces_labels).increment(total_spans);
+            counter!("data_points_received", &self.labels).increment(total_spans);
         }
 
         self.empty_traces_response.clone()
@@ -266,7 +244,7 @@ impl OtlpHttpHandler {
         }
 
         if total_logs > 0 {
-            counter!("data_points_received", &self.logs_labels).increment(total_logs);
+            counter!("data_points_received", &self.labels).increment(total_logs);
         }
 
         self.empty_logs_response.clone()
