@@ -1,0 +1,427 @@
+//! `NetFlow` v5 payload.
+
+use std::{
+    io::Write,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use rand::{Rng, distr::weighted::WeightedIndex, prelude::Distribution};
+use serde::{Deserialize, Serialize as SerdeSerialize};
+
+use crate::{Error, Serialize, common::config::ConfRange};
+
+/// `NetFlow` v5 packet header (24 bytes)
+#[derive(Debug, Clone)]
+struct NetFlowV5Header {
+    version: u16,           // NetFlow version (always 5)
+    count: u16,             // Number of flow records
+    sys_uptime: u32,        // Milliseconds since router boot
+    unix_secs: u32,         // Seconds since Unix epoch
+    unix_nsecs: u32,        // Nanoseconds since Unix epoch
+    flow_sequence: u32,     // Sequence counter of total flows
+    engine_type: u8,        // Type of flow switching engine
+    engine_id: u8,          // ID of flow switching engine
+    sampling_interval: u16, // Sampling interval
+}
+
+/// `NetFlow` v5 flow record (48 bytes)
+#[derive(Debug, Clone)]
+struct NetFlowV5Record {
+    srcaddr: u32,  // Source IP address
+    dstaddr: u32,  // Destination IP address
+    nexthop: u32,  // Next hop IP address
+    input: u16,    // Input interface index
+    output: u16,   // Output interface index
+    d_pkts: u32,   // Packets in the flow
+    d_octets: u32, // Total bytes in the flow
+    first: u32,    // SysUptime at start of flow
+    last: u32,     // SysUptime at end of flow
+    srcport: u16,  // TCP/UDP source port
+    dstport: u16,  // TCP/UDP destination port
+    pad1: u8,      // Unused padding
+    tcp_flags: u8, // Cumulative OR of TCP flags
+    prot: u8,      // IP protocol (TCP=6, UDP=17, etc.)
+    tos: u8,       // IP type of service
+    src_as: u16,   // Source BGP AS number
+    dst_as: u16,   // Destination BGP AS number
+    src_mask: u8,  // Source address prefix mask
+    dst_mask: u8,  // Destination address prefix mask
+    pad2: u16,     // Unused padding
+}
+
+/// Configuration for NetFlow v5 payload generation
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct Config {
+    /// Range for number of flow records per packet
+    pub flows_per_packet: ConfRange<u16>,
+
+    /// Range for source IP addresses (as u32)
+    pub src_ip_range: ConfRange<u32>,
+
+    /// Range for destination IP addresses (as u32)
+    pub dst_ip_range: ConfRange<u32>,
+
+    /// Range for source ports
+    pub src_port_range: ConfRange<u16>,
+
+    /// Range for destination ports
+    pub dst_port_range: ConfRange<u16>,
+
+    /// Range for packet counts in flows
+    pub packet_count_range: ConfRange<u32>,
+
+    /// Range for byte counts in flows
+    pub byte_count_range: ConfRange<u32>,
+
+    /// Range for flow duration in milliseconds
+    pub flow_duration_range: ConfRange<u32>,
+
+    /// Range for interface indices
+    pub interface_range: ConfRange<u16>,
+
+    /// Range for AS numbers
+    pub as_number_range: ConfRange<u16>,
+
+    /// Protocol weights (TCP, UDP, ICMP, Other)
+    pub protocol_weights: ProtocolWeights,
+
+    /// Engine type to use
+    pub engine_type: u8,
+
+    /// Engine ID to use
+    pub engine_id: u8,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            flows_per_packet: ConfRange::Inclusive { min: 1, max: 30 }, // Max 30 flows to stay under MTU
+            src_ip_range: ConfRange::Inclusive {
+                min: u32::from_be_bytes([10, 0, 0, 1]),       // 10.0.0.1
+                max: u32::from_be_bytes([10, 255, 255, 254]), // 10.255.255.254
+            },
+            dst_ip_range: ConfRange::Inclusive {
+                min: u32::from_be_bytes([192, 168, 1, 1]), // 192.168.1.1
+                max: u32::from_be_bytes([192, 168, 255, 254]), // 192.168.255.254
+            },
+            src_port_range: ConfRange::Inclusive {
+                min: 1024,
+                max: 65535,
+            },
+            dst_port_range: ConfRange::Inclusive { min: 1, max: 65535 },
+            packet_count_range: ConfRange::Inclusive { min: 1, max: 10000 },
+            byte_count_range: ConfRange::Inclusive {
+                min: 64,
+                max: 1_500_000,
+            },
+            flow_duration_range: ConfRange::Inclusive {
+                min: 1000,
+                max: 3_600_000,
+            }, // 1s to 1h
+            interface_range: ConfRange::Inclusive { min: 1, max: 254 },
+            as_number_range: ConfRange::Inclusive { min: 1, max: 65535 },
+            protocol_weights: ProtocolWeights::default(),
+            engine_type: 0,
+            engine_id: 0,
+        }
+    }
+}
+
+impl Config {
+    /// Validate the configuration
+    pub fn valid(&self) -> Result<(), String> {
+        let (flows_valid, reason) = self.flows_per_packet.valid();
+        if !flows_valid {
+            return Err(format!("flows_per_packet is invalid: {reason}"));
+        }
+
+        // Check that max flows won't exceed MTU (24 byte header + 48 bytes per flow)
+        if self.flows_per_packet.end() > 30 {
+            return Err(
+                "flows_per_packet maximum should not exceed 30 to stay within MTU limits"
+                    .to_string(),
+            );
+        }
+
+        let (src_ip_valid, reason) = self.src_ip_range.valid();
+        if !src_ip_valid {
+            return Err(format!("src_ip_range is invalid: {reason}"));
+        }
+
+        let (dst_ip_valid, reason) = self.dst_ip_range.valid();
+        if !dst_ip_valid {
+            return Err(format!("dst_ip_range is invalid: {reason}"));
+        }
+
+        Ok(())
+    }
+}
+
+/// Protocol distribution weights
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct ProtocolWeights {
+    /// Weight for TCP protocol
+    pub tcp: u8,
+    /// Weight for UDP protocol
+    pub udp: u8,
+    /// Weight for ICMP protocol
+    pub icmp: u8,
+    /// Weight for other protocols
+    pub other: u8,
+}
+
+impl Default for ProtocolWeights {
+    fn default() -> Self {
+        Self {
+            tcp: 70,  // 70%
+            udp: 25,  // 25%
+            icmp: 3,  // 3%
+            other: 2, // 2%
+        }
+    }
+}
+
+#[derive(Debug)]
+/// NetFlow v5 payload generator
+pub struct NetFlowV5 {
+    config: Config,
+    protocol_distribution: WeightedIndex<u16>,
+    flow_sequence: u32,
+    sys_uptime_base: u32,
+}
+
+impl NetFlowV5 {
+    /// Create a new NetFlow v5 payload generator
+    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        config.valid().map_err(|_e| Error::StringGenerate)?;
+
+        let protocol_weights = [
+            u16::from(config.protocol_weights.tcp),
+            u16::from(config.protocol_weights.udp),
+            u16::from(config.protocol_weights.icmp),
+            u16::from(config.protocol_weights.other),
+        ];
+
+        Ok(Self {
+            config,
+            protocol_distribution: WeightedIndex::new(protocol_weights)?,
+            flow_sequence: rng.random(),
+            sys_uptime_base: rng.random_range(0..86_400_000), // Random base uptime (0-24h)
+        })
+    }
+
+    /// Generate a NetFlow v5 header
+    fn generate_header<R>(&mut self, flow_count: u16, rng: &mut R) -> NetFlowV5Header
+    where
+        R: Rng + ?Sized,
+    {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+
+        let current_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000); // Add up to 1h
+
+        NetFlowV5Header {
+            version: 5,
+            count: flow_count,
+            sys_uptime: current_uptime,
+            unix_secs: now.as_secs() as u32,
+            unix_nsecs: (now.subsec_nanos() / 1000) * 1000, // Round to microseconds
+            flow_sequence: self.flow_sequence,
+            engine_type: self.config.engine_type,
+            engine_id: self.config.engine_id,
+            sampling_interval: 0, // No sampling
+        }
+    }
+
+    /// Generate a NetFlow v5 flow record
+    fn generate_flow_record<R>(&self, base_uptime: u32, rng: &mut R) -> NetFlowV5Record
+    where
+        R: Rng + ?Sized,
+    {
+        let protocol = match self.protocol_distribution.sample(rng) {
+            0 => 6,                         // TCP
+            1 => 17,                        // UDP
+            2 => 1,                         // ICMP
+            _ => rng.random_range(2..=255), // Other protocols
+        };
+
+        let flow_duration = self.config.flow_duration_range.sample(rng);
+        let first_uptime = base_uptime.saturating_sub(flow_duration);
+
+        // Generate realistic port combinations based on protocol
+        let (srcport, dstport) = if protocol == 6 || protocol == 17 {
+            // TCP or UDP
+            (
+                self.config.src_port_range.sample(rng),
+                self.config.dst_port_range.sample(rng),
+            )
+        } else {
+            (0, 0) // ICMP and others don't use ports
+        };
+
+        // Generate TCP flags if TCP
+        let tcp_flags = if protocol == 6 {
+            rng.random_range(0..=255) // Random combination of TCP flags
+        } else {
+            0
+        };
+
+        NetFlowV5Record {
+            srcaddr: self.config.src_ip_range.sample(rng),
+            dstaddr: self.config.dst_ip_range.sample(rng),
+            nexthop: 0, // Often 0 for directly connected
+            input: self.config.interface_range.sample(rng),
+            output: self.config.interface_range.sample(rng),
+            d_pkts: self.config.packet_count_range.sample(rng),
+            d_octets: self.config.byte_count_range.sample(rng),
+            first: first_uptime,
+            last: base_uptime,
+            srcport,
+            dstport,
+            pad1: 0,
+            tcp_flags,
+            prot: protocol,
+            tos: rng.random_range(0..=255),
+            src_as: self.config.as_number_range.sample(rng),
+            dst_as: self.config.as_number_range.sample(rng),
+            src_mask: rng.random_range(8..=32), // Reasonable subnet masks
+            dst_mask: rng.random_range(8..=32),
+            pad2: 0,
+        }
+    }
+
+    /// Write header to bytes in network byte order
+    fn write_header<W>(&self, header: &NetFlowV5Header, writer: &mut W) -> Result<(), Error>
+    where
+        W: Write,
+    {
+        writer.write_all(&header.version.to_be_bytes())?;
+        writer.write_all(&header.count.to_be_bytes())?;
+        writer.write_all(&header.sys_uptime.to_be_bytes())?;
+        writer.write_all(&header.unix_secs.to_be_bytes())?;
+        writer.write_all(&header.unix_nsecs.to_be_bytes())?;
+        writer.write_all(&header.flow_sequence.to_be_bytes())?;
+        writer.write_all(&[header.engine_type])?;
+        writer.write_all(&[header.engine_id])?;
+        writer.write_all(&header.sampling_interval.to_be_bytes())?;
+        Ok(())
+    }
+
+    /// Write flow record to bytes in network byte order
+    fn write_flow_record<W>(&self, record: &NetFlowV5Record, writer: &mut W) -> Result<(), Error>
+    where
+        W: Write,
+    {
+        writer.write_all(&record.srcaddr.to_be_bytes())?;
+        writer.write_all(&record.dstaddr.to_be_bytes())?;
+        writer.write_all(&record.nexthop.to_be_bytes())?;
+        writer.write_all(&record.input.to_be_bytes())?;
+        writer.write_all(&record.output.to_be_bytes())?;
+        writer.write_all(&record.d_pkts.to_be_bytes())?;
+        writer.write_all(&record.d_octets.to_be_bytes())?;
+        writer.write_all(&record.first.to_be_bytes())?;
+        writer.write_all(&record.last.to_be_bytes())?;
+        writer.write_all(&record.srcport.to_be_bytes())?;
+        writer.write_all(&record.dstport.to_be_bytes())?;
+        writer.write_all(&[record.pad1])?;
+        writer.write_all(&[record.tcp_flags])?;
+        writer.write_all(&[record.prot])?;
+        writer.write_all(&[record.tos])?;
+        writer.write_all(&record.src_as.to_be_bytes())?;
+        writer.write_all(&record.dst_as.to_be_bytes())?;
+        writer.write_all(&[record.src_mask])?;
+        writer.write_all(&[record.dst_mask])?;
+        writer.write_all(&record.pad2.to_be_bytes())?;
+        Ok(())
+    }
+}
+
+impl Serialize for NetFlowV5 {
+    fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
+    where
+        R: Rng + Sized,
+        W: Write,
+    {
+        const HEADER_SIZE: usize = 24;
+        const FLOW_RECORD_SIZE: usize = 48;
+
+        if max_bytes < HEADER_SIZE + FLOW_RECORD_SIZE {
+            // Not enough space for even one flow
+            return Ok(());
+        }
+
+        // Calculate maximum flows that fit in the byte budget
+        let max_flows_by_budget = (max_bytes - HEADER_SIZE) / FLOW_RECORD_SIZE;
+        let desired_flows = self.config.flows_per_packet.sample(&mut rng) as usize;
+        let actual_flows = desired_flows.min(max_flows_by_budget).min(30); // NetFlow v5 max is 30
+
+        if actual_flows == 0 {
+            return Ok(());
+        }
+
+        let header = self.generate_header(actual_flows as u16, &mut rng);
+        let base_uptime = header.sys_uptime;
+
+        // Write header
+        self.write_header(&header, writer)?;
+
+        // Write flow records
+        for _ in 0..actual_flows {
+            let flow_record = self.generate_flow_record(base_uptime, &mut rng);
+            self.write_flow_record(&flow_record, writer)?;
+        }
+
+        // Update sequence number for next packet
+        self.flow_sequence = self.flow_sequence.wrapping_add(actual_flows as u32);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
+
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
+            let max_bytes = max_bytes as usize;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let config = Config::default();
+            let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
+
+            let mut bytes = Vec::with_capacity(max_bytes);
+            netflow.to_bytes(rng, max_bytes, &mut bytes).unwrap();
+            prop_assert!(bytes.len() <= max_bytes);
+        }
+
+        #[test]
+        fn valid_netflow_packet_structure(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let config = Config::default();
+            let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
+
+            let mut bytes = Vec::new();
+            netflow.to_bytes(rng, 1500, &mut bytes).unwrap();
+
+            if !bytes.is_empty() {
+                // Should have at least header
+                prop_assert!(bytes.len() >= 24);
+                // Should be header + multiple of 48 bytes
+                prop_assert_eq!((bytes.len() - 24) % 48, 0);
+                // Check version is 5
+                prop_assert_eq!(u16::from_be_bytes([bytes[0], bytes[1]]), 5);
+            }
+        }
+    }
+}

@@ -1,0 +1,83 @@
+# Example configuration for NetFlow v5 load testing
+# This generates NetFlow v5 packets and sends them over UDP
+
+version: "1"
+
+target: null  # No target needed for generators
+
+generator:
+  udp:
+    seed: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]
+    addr: "127.0.0.1:9995"  # NetFlow collector address
+    variant:
+      net_flow_v5:
+        # Number of flow records per packet (1-30 to stay within MTU)
+        flows_per_packet:
+          min: 5
+          max: 20
+
+        # Source IP range (10.0.0.0/8 network)
+        src_ip_range:
+          min: 167772161   # 10.0.0.1 in u32
+          max: 184549374   # 10.255.255.254 in u32
+
+        # Destination IP range (192.168.0.0/16 network)
+        dst_ip_range:
+          min: 3232235521  # 192.168.1.1 in u32
+          max: 3232301054  # 192.168.255.254 in u32
+
+        # Port ranges
+        src_port_range:
+          min: 1024
+          max: 65535
+        dst_port_range:
+          min: 1
+          max: 65535
+
+        # Flow metrics
+        packet_count_range:
+          min: 1
+          max: 1000
+        byte_count_range:
+          min: 64
+          max: 150000
+        flow_duration_range:
+          min: 1000      # 1 second
+          max: 300000    # 5 minutes
+
+        # Interface and AS ranges
+        interface_range:
+          min: 1
+          max: 10
+        as_number_range:
+          min: 100
+          max: 65000
+
+        # Protocol distribution (weights)
+        protocol_weights:
+          tcp: 70    # 70% TCP traffic
+          udp: 25    # 25% UDP traffic
+          icmp: 3    # 3% ICMP traffic
+          other: 2   # 2% other protocols
+
+        # Router identification
+        engine_type: 1
+        engine_id: 0
+
+    # Traffic generation settings
+    bytes_per_second: "1MB"              # Rate limit
+    maximum_block_size: "1400B"          # Stay within MTU
+    maximum_prebuild_cache_size_bytes: "100MB"
+
+    # Throttling (optional)
+    throttle:
+      stable: {}  # Stable rate throttling
+
+# Observability configuration
+observer:
+  prometheus:
+    addr: "127.0.0.1:9090"
+
+# General settings
+general:
+  id: "netflow-v5-generator"
