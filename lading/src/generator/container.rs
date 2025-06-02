@@ -5,11 +5,15 @@
 //! for a shutdown signal.
 
 use bollard::Docker;
-use bollard::container::{
-    Config as ContainerConfig, CreateContainerOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+use bollard::models::ContainerCreateBody;
+use bollard::query_parameters::{
+    CreateContainerOptionsBuilder,
+    CreateImageOptionsBuilder,
+    InspectContainerOptionsBuilder,
+    RemoveContainerOptionsBuilder,
+    StartContainerOptions,
+    StopContainerOptionsBuilder,
 };
-use bollard::image::CreateImageOptions;
 use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -178,7 +182,8 @@ impl Container {
                 // Check that containers are still running every 10 seconds
                 _ = liveness_interval.tick() => {
                     for container in &containers {
-                        if let Some(state) = docker.inspect_container(&container.id, None).await?.state {
+                        let inspect_options = InspectContainerOptionsBuilder::default().build();
+                        if let Some(state) = docker.inspect_container(&container.id, Some(inspect_options)).await?.state {
                             if !state.running.unwrap_or(false) {
                                 return Err(Error::Generic(format!(
                                     "Container {id} is not running anymore",
@@ -212,11 +217,12 @@ impl Container {
 }
 
 async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
+    let create_image_options = CreateImageOptionsBuilder::default()
+        .from_image(full_image)
+        .build();
+        
     let mut pull_stream = docker.create_image(
-        Some(CreateImageOptions::<&str> {
-            from_image: full_image,
-            ..Default::default()
-        }),
+        Some(create_image_options),
         None,
         None,
     );
@@ -241,32 +247,35 @@ async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
 impl Config {
     /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
     #[must_use]
-    fn to_container_config<'a>(&'a self, full_image: &'a str) -> ContainerConfig<&'a str> {
-        ContainerConfig {
-            image: Some(full_image),
+    fn to_container_config(&self, full_image: &str) -> ContainerCreateBody {
+        // The Docker API requires exposed ports in the format {"<port>/<protocol>": {}}.
+        // For example: {"80/tcp": {}, "443/tcp": {}}
+        // The port specification is in the key, and the value must be an empty object.
+        // Bollard represents the empty object as HashMap<(), ()>, which is required by their API.
+        #[allow(clippy::zero_sized_map_values)]
+        let exposed_ports = self.exposed_ports.as_ref().map(|ports| {
+            ports
+                .iter()
+                .map(|port| {
+                    // Ensure port includes protocol (default to tcp if not specified)
+                    let port_with_protocol = if port.contains('/') {
+                        port.clone()
+                    } else {
+                        format!("{port}/tcp")
+                    };
+                    (port_with_protocol, HashMap::<(), ()>::new())
+                })
+                .collect()
+        });
+        
+        ContainerCreateBody {
+            image: Some(full_image.to_string()),
             tty: Some(true),
-            cmd: self
-                .args
-                .as_ref()
-                .map(|args| args.iter().map(String::as_str).collect()),
-            env: self
-                .env
-                .as_ref()
-                .map(|env| env.iter().map(String::as_str).collect()),
-            labels: self.labels.as_ref().map(|labels| {
-                labels
-                    .iter()
-                    .map(|(key, value)| (key.as_str(), value.as_str()))
-                    .collect()
-            }),
+            cmd: self.args.clone(),
+            env: self.env.clone(),
+            labels: self.labels.clone(),
             network_disabled: self.network_disabled,
-            #[allow(clippy::zero_sized_map_values)]
-            exposed_ports: self.exposed_ports.as_ref().map(|ports| {
-                ports
-                    .iter()
-                    .map(|port| (port.as_str(), HashMap::new()))
-                    .collect()
-            }),
+            exposed_ports,
             ..Default::default()
         }
     }
@@ -279,12 +288,13 @@ impl Config {
         let container_name = format!("lading_container_{}", Uuid::new_v4());
         debug!("Creating container: {container_name}");
 
+        let create_options = CreateContainerOptionsBuilder::default()
+            .name(&container_name)
+            .build();
+            
         let container = docker
             .create_container(
-                Some(CreateContainerOptions {
-                    name: &container_name,
-                    platform: None,
-                }),
+                Some(create_options),
                 self.to_container_config(full_image),
             )
             .await?;
@@ -295,7 +305,7 @@ impl Config {
         }
 
         docker
-            .start_container(&container.id, None::<StartContainerOptions<String>>)
+            .start_container(&container.id, None::<StartContainerOptions>)
             .await?;
 
         debug!("Started container: {id}", id = container.id);
@@ -309,21 +319,24 @@ async fn stop_and_remove_container(
     container: &ContainerCreateResponse,
 ) -> Result<(), Error> {
     info!("Stopping container: {id}", id = container.id);
+    let stop_options = StopContainerOptionsBuilder::default()
+        .t(5)
+        .build();
     if let Err(e) = docker
-        .stop_container(&container.id, Some(StopContainerOptions { t: 5 }))
+        .stop_container(&container.id, Some(stop_options))
         .await
     {
         warn!("Error stopping container {id}: {e}", id = container.id);
     }
 
     debug!("Removing container: {id}", id = container.id);
+    let remove_options = RemoveContainerOptionsBuilder::default()
+        .force(true)
+        .build();
     docker
         .remove_container(
             &container.id,
-            Some(RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            }),
+            Some(remove_options),
         )
         .await?;
 

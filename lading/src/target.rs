@@ -24,6 +24,7 @@ use std::{
 };
 
 use bollard::Docker;
+use bollard::query_parameters::InspectContainerOptionsBuilder;
 use lading_signal::Broadcaster;
 use metrics::gauge;
 use nix::{
@@ -209,7 +210,8 @@ impl Server {
         let docker = Docker::connect_with_socket_defaults()?;
 
         let pid: i64 = loop {
-            if let Ok(container) = docker.inspect_container(&config.name, None).await {
+            let inspect_options = InspectContainerOptionsBuilder::default().build();
+            if let Ok(container) = docker.inspect_container(&config.name, Some(inspect_options)).await {
                 if let Some(pid) = container.state.and_then(|state| state.pid) {
                     // In some cases docker will report pid 0 as the pid for the
                     // polled container. This is not usable by us and we believe
