@@ -7,12 +7,8 @@
 use bollard::Docker;
 use bollard::models::ContainerCreateBody;
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder,
-    CreateImageOptionsBuilder,
-    InspectContainerOptionsBuilder,
-    RemoveContainerOptionsBuilder,
-    StartContainerOptions,
-    StopContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, InspectContainerOptionsBuilder,
+    RemoveContainerOptionsBuilder, StartContainerOptions, StopContainerOptionsBuilder,
 };
 use bollard::secret::ContainerCreateResponse;
 use serde::{Deserialize, Serialize};
@@ -220,12 +216,8 @@ async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
     let create_image_options = CreateImageOptionsBuilder::default()
         .from_image(full_image)
         .build();
-        
-    let mut pull_stream = docker.create_image(
-        Some(create_image_options),
-        None,
-        None,
-    );
+
+    let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
 
     while let Some(item) = pull_stream.next().await {
         match item {
@@ -267,7 +259,7 @@ impl Config {
                 })
                 .collect()
         });
-        
+
         ContainerCreateBody {
             image: Some(full_image.to_string()),
             tty: Some(true),
@@ -291,12 +283,9 @@ impl Config {
         let create_options = CreateContainerOptionsBuilder::default()
             .name(&container_name)
             .build();
-            
+
         let container = docker
-            .create_container(
-                Some(create_options),
-                self.to_container_config(full_image),
-            )
+            .create_container(Some(create_options), self.to_container_config(full_image))
             .await?;
 
         debug!("Created container with id: {id}", id = container.id);
@@ -319,9 +308,7 @@ async fn stop_and_remove_container(
     container: &ContainerCreateResponse,
 ) -> Result<(), Error> {
     info!("Stopping container: {id}", id = container.id);
-    let stop_options = StopContainerOptionsBuilder::default()
-        .t(5)
-        .build();
+    let stop_options = StopContainerOptionsBuilder::default().t(5).build();
     if let Err(e) = docker
         .stop_container(&container.id, Some(stop_options))
         .await
@@ -330,14 +317,9 @@ async fn stop_and_remove_container(
     }
 
     debug!("Removing container: {id}", id = container.id);
-    let remove_options = RemoveContainerOptionsBuilder::default()
-        .force(true)
-        .build();
+    let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
     docker
-        .remove_container(
-            &container.id,
-            Some(remove_options),
-        )
+        .remove_container(&container.id, Some(remove_options))
         .await?;
 
     debug!("Removed container: {id}", id = container.id);

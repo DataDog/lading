@@ -211,7 +211,10 @@ impl Server {
 
         let pid: i64 = loop {
             let inspect_options = InspectContainerOptionsBuilder::default().build();
-            if let Ok(container) = docker.inspect_container(&config.name, Some(inspect_options)).await {
+            if let Ok(container) = docker
+                .inspect_container(&config.name, Some(inspect_options))
+                .await
+            {
                 if let Some(pid) = container.state.and_then(|state| state.pid) {
                     // In some cases docker will report pid 0 as the pid for the
                     // polled container. This is not usable by us and we believe
