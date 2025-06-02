@@ -45,6 +45,8 @@ or two of code. Do add comments that explain the "why" of a block of code, how
 it functions or is unusual in a way that an experienced engineer might not
 understand.
 
+Crate versions are always given as XX.YY and not XX.YY.ZZ.
+
 # Testing
 
 Where possible lading prefers property tests over unit tests and in especially
