@@ -23,13 +23,14 @@ these tools:
 * `cargo clippy`
 * `cargo fmt`
 
-We do not allow for warnings: all warnings are errors. Lading is written in a
-"naive" style where abstraction is not preferred if a duplicated pattern will
-satisfy. Our reasoning for this is it makes ramp-up for new engineers easier:
-all you must do is follow the pattern, not internalize a complex type
-hierarchy. There are obvious places in the code base where replicated patterns
-have been made into abstractions -- we follow the "shape" rule, if you have
-three or more repeats, make a jig -- but we do not start there.
+We do not allow for warnings: all warnings are errors. Deprecation warnings MUST
+be treated as errors. Lading is written in a "naive" style where abstraction is
+not preferred if a duplicated pattern will satisfy. Our reasoning for this is it
+makes ramp-up for new engineers easier: all you must do is follow the pattern,
+not internalize a complex type hierarchy. There are obvious places in the code
+base where replicated patterns have been made into abstractions -- we follow the
+"shape" rule, if you have three or more repeats, make a jig -- but we do not
+start there.
 
 Lading is written to be as easy to contribute to as possible. We ask that any
 dependency used in the project in more than one crate be present in the
