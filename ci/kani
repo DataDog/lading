@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if a crate argument was provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <crate>"
+    echo "Valid crates: lading_throttle, lading_payload"
+    exit 1
+fi
+
+CRATE="$1"
+
+# Validate the crate argument
+case "$CRATE" in
+    lading_throttle|lading_payload)
+        # Valid crate
+        ;;
+    *)
+        echo "Error: Invalid crate '$CRATE'"
+        echo "Valid crates: lading_throttle, lading_payload"
+        exit 1
+        ;;
+esac
+
+# Check if kani is installed
+if ! command -v cargo-kani &> /dev/null; then
+    echo "kani-verifier is not installed. Installing it now..."
+    cargo install kani-verifier
+fi
+
+echo "Running kani proofs for $CRATE..."
+
+# Run kani on the specified crate
+(cd "$CRATE" && cargo kani --solver cadical)
+
+echo "Kani proofs passed for $CRATE!"
