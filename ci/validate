@@ -3,8 +3,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# This script runs all CI checks in order from simplest to most complex
-# Exit on first failure
+# This script runs all CI checks in order from simplest to most complex. Exits
+# on the first failure.  Exit on first failure
 
 echo "=== Running CI validation suite ==="
 echo
@@ -13,13 +13,13 @@ echo
 run_check() {
     local script="$1"
     local name="$2"
-    
+
     echo ">>> Running $name..."
     if ! "$script"; then
-        echo "❌ $name failed!"
+        echo "FAILED: $name failed!"
         exit 1
     fi
-    echo "✅ $name passed!"
+    echo "PASSED: $name passed!"
     echo
 }
 
@@ -45,15 +45,15 @@ if command -v cargo-kani &> /dev/null; then
         run_check "$CI_DIR/kani $crate" "kani proofs for $crate"
     done
 else
-    echo "⚠️  Skipping kani proofs (kani not installed)"
+    echo "WARNING: Skipping kani proofs (kani not installed)"
 fi
 
 # Buf checks (optional)
 if command -v buf &> /dev/null; then
     run_check "$CI_DIR/buf" "buf checks"
 else
-    echo "⚠️  Skipping buf checks (buf not installed)"
+    echo "WARNING: Skipping buf checks (buf not installed)"
 fi
 
 echo
-echo "=== ✅ All CI checks passed! ==="
+echo "=== SUCCESS: All CI checks passed! ==="

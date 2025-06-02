@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if cargo-outdated is installed
+if ! command -v cargo-outdated &> /dev/null; then
+    echo "cargo-outdated is not installed. Installing it now..."
+    cargo install cargo-outdated
+fi
+
+echo "Checking for outdated dependencies..."
+cargo outdated --root-deps-only
+
+echo "Outdated check complete!"

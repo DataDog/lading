@@ -17,11 +17,8 @@ preference algorithms that have better worst-case behavior.
 
 # Code Style
 
-This project is subject attempts to automate code style to a great degree, using
-these tools:
-
-* `cargo clippy`
-* `cargo fmt`
+This project enforces code style through automated tooling. Use `ci/validate` to
+check style compliance - it will run formatting and linting checks for you.
 
 We do not allow for warnings: all warnings are errors. Deprecation warnings MUST
 be treated as errors. Lading is written in a "naive" style where abstraction is
@@ -55,19 +52,30 @@ critical components we require proofs. We use
 [proptest](https://github.com/proptest-rs/proptest) in this project for property
 tests and the [kani](https://github.com/model-checking/kani) proof tool.
 
-## Workflow
+# CRITICAL: Validation Workflow
 
-Changes to lading are subject this flow:
+You MUST run `ci/validate` after making any code changes. This is not optional.
+The script runs all checks in optimal order and exits on first failure.
 
-* `cargo check`
-* `cargo clippy`
-* `cargo nextest run`
-
-Proofs must be run with the `cargo kani` tool in the crate where proofs reside.
-
+Do not run individual cargo commands - use the ci scripts instead:
+- Use `ci/validate` for full validation
+- Use `ci/fmt` instead of `cargo fmt`
+- Use `ci/check` instead of `cargo check`
+- Use `ci/clippy` instead of `cargo clippy`
+- Use `ci/test` instead of `cargo nextest run`
+- Use `ci/kani <crate>` for kani proofs (valid crates: lading_throttle, lading_payload)
+- Use `ci/outdated` instead of `cargo outdated`
 
 # Tools
 
-To identify outdated dependencies: `cargo outdated --root-deps-only`.
+To identify outdated dependencies: Use `ci/outdated`
 
 To run micro-benchmarks: `cargo criterion`
+
+# Key Reminders for Claude
+
+1. ALWAYS use `ci/validate` after code changes - never skip this
+2. Do NOT run cargo commands directly - use the ci/ scripts
+3. When users ask about build/test failures, suggest running `ci/validate`
+4. If users are confused about project correctness criteria, point them to `ci/validate`
+5. The ci/ scripts are the single source of truth for validation
