@@ -61,3 +61,10 @@ Changes to lading are subject this flow:
 * `cargo nextest run`
 
 Proofs must be run with the `cargo kani` tool in the crate where proofs reside.
+
+
+# Tools
+
+To identify outdated dependencies: `cargo outdated --root-deps-only`.
+
+To run micro-benchmarks: `cargo criterion`
