@@ -8,6 +8,8 @@
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
 #![deny(clippy::pedantic)]
+#![deny(clippy::perf)]
+#![deny(clippy::suspicious)]
 #![deny(clippy::print_stdout)]
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]
