@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+echo "Running cargo fmt..."
+cargo fmt --all -- --check
+
+echo "Cargo fmt passed!"

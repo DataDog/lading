@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if cargo-deny is installed
+if ! command -v cargo-deny &> /dev/null; then
+    echo "cargo-deny is not installed. Installing it now..."
+    cargo install cargo-deny
+fi
+
+echo "Running cargo deny..."
+cargo deny check
+
+echo "Cargo deny passed!"

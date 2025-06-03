@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# This script runs all CI checks in order from simplest to most complex. Exits
+# on the first failure.  Exit on first failure
+
+echo "=== Running CI validation suite ==="
+echo
+
+# Function to run a script and handle errors
+run_check() {
+    local script="$1"
+    local name="$2"
+
+    echo ">>> Running $name..."
+    if ! "$script"; then
+        echo "FAILED: $name failed!"
+        exit 1
+    fi
+    echo "PASSED: $name passed!"
+    echo
+}
+
+# Get the directory where this script is located
+CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Run checks in order from simplest to most complex
+run_check "$CI_DIR/shellcheck" "shellcheck"
+run_check "$CI_DIR/fmt" "cargo fmt"
+run_check "$CI_DIR/check" "cargo check"
+run_check "$CI_DIR/clippy" "cargo clippy"
+run_check "$CI_DIR/deny" "cargo deny"
+run_check "$CI_DIR/test" "cargo nextest"
+run_check "$CI_DIR/integration-test" "integration tests"
+
+# Optional checks (don't fail if tools aren't available)
+echo ">>> Running optional checks..."
+
+# Kani proofs (optional)
+if command -v cargo-kani &> /dev/null; then
+    echo ">>> Running kani proofs for each crate..."
+    for crate in lading_throttle lading_payload; do
+        run_check "$CI_DIR/kani $crate" "kani proofs for $crate"
+    done
+else
+    echo "WARNING: Skipping kani proofs (kani not installed)"
+fi
+
+# Buf checks (optional)
+if command -v buf &> /dev/null; then
+    run_check "$CI_DIR/buf" "buf checks"
+else
+    echo "WARNING: Skipping buf checks (buf not installed)"
+fi
+
+echo
+echo "=== SUCCESS: All CI checks passed! ==="

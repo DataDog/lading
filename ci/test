@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if cargo-nextest is installed
+if ! command -v cargo-nextest &> /dev/null; then
+    echo "cargo-nextest is not installed. Installing it now..."
+    cargo install cargo-nextest
+fi
+
+echo "Running cargo nextest..."
+cargo nextest run --all-features
+
+echo "Tests passed!"

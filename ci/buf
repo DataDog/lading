@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if buf is installed
+if ! command -v buf &> /dev/null; then
+    echo "buf is not installed. Please install it first."
+    echo "See: https://docs.buf.build/installation"
+    exit 1
+fi
+
+echo "Running buf lint..."
+buf lint
+
+echo "Running buf breaking check..."
+buf breaking --against 'https://github.com/datadog/lading.git#branch=main'
+
+echo "Buf checks passed!"

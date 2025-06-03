@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if shellcheck is installed
+if ! command -v shellcheck &> /dev/null; then
+    echo "shellcheck is not installed. Please install it first."
+    echo "On macOS: brew install shellcheck"
+    echo "On Ubuntu/Debian: apt-get install shellcheck"
+    exit 1
+fi
+
+# Find all shell scripts in ci/ directory
+echo "Running shellcheck on all shell scripts in ci/"
+find ci -type f \( -name '*.sh' -o -name '*' \) | while read -r script; do
+    # Skip if it's not a shell script
+    if [[ ! -f "$script" ]] || ! head -n1 "$script" | grep -q '^#!/.*sh'; then
+        continue
+    fi
+    
+    echo "Checking: $script"
+    shellcheck "$script"
+done
+
+echo "Shellcheck passed!"
