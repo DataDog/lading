@@ -52,7 +52,7 @@ nix = { version = "0.30", default-features = false, features = [
   "process",
   "signal",
 ] }
-num_cpus = { version = "1.16" }
+num_cpus = { version = "1.17" }
 num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
 opentelemetry-proto = { version = "0.30.0", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
