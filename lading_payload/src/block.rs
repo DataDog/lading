@@ -345,6 +345,20 @@ impl Cache {
 
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
+            crate::Config::NetFlowV5(config) => {
+                match config.valid() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        warn!("Invalid NetFlowV5 configuration: {}", e);
+                        return Err(Error::InvalidConfig(e));
+                    }
+                }
+                let mut pyld = crate::NetFlowV5::new(*config, &mut rng)?;
+                let span = span!(Level::INFO, "fixed", payload = "netflow-v5");
+                let _guard = span.enter();
+
+                construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
+            }
         };
 
         let total_cycle_size = blocks
