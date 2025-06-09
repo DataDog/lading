@@ -37,9 +37,7 @@ where
 {
     #[inline]
     pub(crate) async fn wait(&mut self) -> Result<(), Error> {
-        // SAFETY: 1_u32 is a non-zero u32.
-        let one = unsafe { NonZeroU32::new_unchecked(1_u32) };
-        self.wait_for(one).await
+        self.wait_for(NonZeroU32::MIN).await
     }
 
     pub(crate) async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
