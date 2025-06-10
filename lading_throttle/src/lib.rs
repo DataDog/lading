@@ -20,6 +20,7 @@
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]
 #![deny(clippy::unwrap_used)]
+#![deny(clippy::mod_module_files)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]

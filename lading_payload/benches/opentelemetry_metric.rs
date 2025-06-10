@@ -3,7 +3,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use lading_payload::common::config::ConfRange;
 use lading_payload::{
     OpentelemetryMetrics, Serialize,
-    opentelemetry_metric::{Config, Contexts, MetricWeights},
+    opentelemetry::metric::{Config, Contexts, MetricWeights},
 };
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;

@@ -12,7 +12,7 @@ use prost::Message;
 use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use std::io::Write;
 
-use super::Generator;
+use crate::Generator;
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportTraceServiceRequest`](opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest)
 struct ExportTraceServiceRequest(Vec<Span>);
