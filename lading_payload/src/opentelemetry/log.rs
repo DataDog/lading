@@ -16,7 +16,7 @@ use prost::Message;
 use rand::Rng;
 use std::io::Write;
 
-use super::Generator;
+use crate::Generator;
 
 /// Wrapper to generate arbitrary OpenTelemetry [`ExportLogsServiceRequests`](opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest)
 struct ExportLogsServiceRequest(Vec<LogRecord>);

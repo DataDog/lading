@@ -477,7 +477,7 @@ mod test {
     use crate::{
         Serialize, SizedGenerator,
         common::config::ConfRange,
-        opentelemetry_metric::v1::{ResourceMetrics, metric},
+        opentelemetry::metric::v1::{ResourceMetrics, metric},
     };
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{

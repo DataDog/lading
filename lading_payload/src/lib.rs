@@ -19,6 +19,7 @@
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]
 #![deny(clippy::unwrap_used)]
+#![deny(clippy::mod_module_files)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]
@@ -46,9 +47,9 @@ pub use datadog_logs::DatadogLog;
 pub use dogstatsd::DogStatsD;
 pub use fluent::Fluent;
 pub use json::Json;
-pub use opentelemetry_log::OpentelemetryLogs;
-pub use opentelemetry_metric::OpentelemetryMetrics;
-pub use opentelemetry_trace::OpentelemetryTraces;
+pub use opentelemetry::log::OpentelemetryLogs;
+pub use opentelemetry::metric::OpentelemetryMetrics;
+pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
 pub use statik::Static;
 pub use syslog::Syslog5424;
@@ -61,9 +62,7 @@ pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
 pub mod json;
-pub mod opentelemetry_log;
-pub mod opentelemetry_metric;
-pub mod opentelemetry_trace;
+pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod statik;
@@ -93,13 +92,13 @@ pub enum Error {
     Weights(#[from] weighted::Error),
     /// See [`unit::Error`]
     #[error(transparent)]
-    Unit(#[from] opentelemetry_metric::unit::Error),
+    Unit(#[from] opentelemetry::metric::unit::Error),
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),
     /// See [`opentelemetry_metric::templates::PoolError`]
     #[error("Unable to choose from pool: {0}")]
-    Pool(#[from] opentelemetry_metric::templates::PoolError),
+    Pool(#[from] opentelemetry::metric::templates::PoolError),
 }
 
 /// To serialize into bytes
@@ -175,7 +174,7 @@ pub enum Config {
     /// Generates OpenTelemetry logs
     OpentelemetryLogs,
     /// Generates OpenTelemetry metrics
-    OpentelemetryMetrics(crate::opentelemetry_metric::Config),
+    OpentelemetryMetrics(crate::opentelemetry::metric::Config),
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
