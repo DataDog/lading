@@ -1,4 +1,4 @@
-use std::{cmp, collections::BTreeMap, rc::Rc};
+use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
     common::v1::InstrumentationScope,
@@ -9,106 +9,19 @@ use opentelemetry_proto::tonic::{
     resource,
 };
 use prost::Message;
+use rand::prelude::*;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
-    seq::{IndexedRandom, IteratorRandom},
 };
-use tracing::{debug, error};
+use tracing::debug;
 
-use super::{Config, UnitGenerator, tags::TagGenerator};
-use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common::strings};
+use super::{Config, UnitGenerator};
+use crate::opentelemetry::common::templates::Pool as GenericPool;
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO};
+use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
-const UNIQUE_TAG_RATIO: f32 = 0.75;
-
-/// Errors related to template generators
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum PoolError {
-    #[error("Choice could not be made on empty container.")]
-    EmptyChoice,
-    #[error("Generation error: {0}")]
-    Generator(#[from] GeneratorError),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Pool {
-    context_cap: u32,
-    /// key: encoded size; val: templates with that size
-    by_size: BTreeMap<usize, Vec<ResourceMetrics>>,
-    generator: ResourceTemplateGenerator,
-    len: u32,
-}
-
-impl Pool {
-    /// Build an empty pool that can hold at most `context_cap` templates.
-    pub(crate) fn new(context_cap: u32, generator: ResourceTemplateGenerator) -> Self {
-        Self {
-            context_cap,
-            by_size: BTreeMap::new(),
-            generator,
-            len: 0,
-        }
-    }
-
-    /// Return a `ResourceMetrics` from the pool.
-    ///
-    /// Instances of `ResourceMetrics` returned by this function are guaranteed
-    /// to be of an encoded size no greater than budget. No greater than
-    /// `context_cap` instances of `ResourceMetrics` will ever be stored in this
-    /// structure.
-    pub(crate) fn fetch<R>(
-        &mut self,
-        rng: &mut R,
-        budget: &mut usize,
-    ) -> Result<&ResourceMetrics, PoolError>
-    where
-        R: rand::Rng + ?Sized,
-    {
-        // If we are at context cap, search by_size for templates <= budget and
-        // return a random choice. If we are not at context cap, call
-        // ResourceMetrics::generator with the budget and then store the result
-        // for future use in `by_size`.
-        //
-        // Size search is in the interval (0, budget].
-
-        let upper = *budget;
-        let mut limit = *budget;
-
-        // Generate new instances until either context_cap is hit or the
-        // remaining space drops below our lookup interval.
-        if self.len < self.context_cap {
-            match self.generator.generate(rng, &mut limit) {
-                Ok(rm) => {
-                    let sz = rm.encoded_len();
-                    self.by_size.entry(sz).or_default().push(rm);
-                    self.len += 1;
-                }
-                Err(e) => return Err(PoolError::Generator(e)),
-            }
-        }
-
-        let (choice_sz, choices) = self
-            .by_size
-            .range(..=upper)
-            .choose(rng)
-            .ok_or(PoolError::EmptyChoice)?;
-
-        let choice = choices.choose(rng).ok_or(PoolError::EmptyChoice)?;
-        *budget = budget.saturating_sub(*choice_sz);
-
-        Ok(choice)
-    }
-}
-
-/// Errors related to template generators
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum GeneratorError {
-    #[error("Generator exhausted bytes budget prematurely")]
-    SizeExhausted,
-    /// failed to generate string
-    #[error("Failed to generate string")]
-    StringGenerate,
-}
+pub(crate) type Pool = GenericPool<ResourceMetrics, ResourceTemplateGenerator>;
 
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
