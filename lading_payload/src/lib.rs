@@ -96,9 +96,14 @@ pub enum Error {
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),
-    /// See [`opentelemetry_metric::templates::PoolError`]
+    /// See [`opentelemetry::common::PoolError`]
     #[error("Unable to choose from pool: {0}")]
-    Pool(#[from] opentelemetry::metric::templates::PoolError),
+    Pool(
+        #[from] opentelemetry::common::templates::PoolError<opentelemetry::common::GeneratorError>,
+    ),
+    /// Validation error
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 /// To serialize into bytes
@@ -172,7 +177,7 @@ pub enum Config {
     /// Generates OpenTelemetry traces
     OpentelemetryTraces,
     /// Generates OpenTelemetry logs
-    OpentelemetryLogs,
+    OpentelemetryLogs(crate::opentelemetry::log::Config),
     /// Generates OpenTelemetry metrics
     OpentelemetryMetrics(crate::opentelemetry::metric::Config),
     /// Generates `DogStatsD`
