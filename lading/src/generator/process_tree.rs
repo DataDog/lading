@@ -320,10 +320,9 @@ impl ProcessTree {
         loop {
             tokio::select! {
                 _ = self.throttle.wait() => {
-                    // Dummy --capture-path and --target-pid just to pass laging clap constraints
                     let output = Command::new(lading_path)
-                        .args(["--capture-path", "dummy"])
-                        .args(["--target-pid", "1"])
+                        .args(["--no-capture"])
+                        .args(["--no-target"])
                         .arg("process-tree-gen")
                         .arg("--config-content")
                         .arg(&self.config_content)
