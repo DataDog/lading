@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manner similar to OTel metrics.
 - Added a way to configure which aggregation temporality is used when using
   Opentelemetry `Sum` metric.
+- Introduce a `kubernetes` generator able to generate an arbitrary number
+  of Kubernetes resources.
 ## Changed
 - Lading toolchain is now 1.89.0
 ## Fixed

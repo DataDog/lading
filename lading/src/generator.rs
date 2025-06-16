@@ -21,6 +21,7 @@ pub mod file_gen;
 pub mod file_tree;
 pub mod grpc;
 pub mod http;
+pub mod kubernetes;
 pub mod passthru_file;
 pub mod process_tree;
 pub mod procfs;
@@ -72,6 +73,9 @@ pub enum Error {
     /// See [`crate::generator::container::Error`] for details.
     #[error(transparent)]
     Container(#[from] container::Error),
+    /// See [`crate::generator::kubernetes::Error`] for details.
+    #[error(transparent)]
+    Kubernetes(#[from] kubernetes::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -127,9 +131,12 @@ pub enum Inner {
     ProcFs(procfs::Config),
     /// See [`crate::generator::container::Config`] for details.
     Container(container::Config),
+    /// See [`crate::generator::kubernetes::Config`] for details.
+    Kubernetes(kubernetes::Config),
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 /// The generator server.
 ///
 /// All generators supported by lading are a variant of this enum. Please see
@@ -161,6 +168,8 @@ pub enum Server {
     ProcFs(procfs::ProcFs),
     /// See [`crate::generator::container::Container`] for details.
     Container(container::Container),
+    /// See [`crate::generator::kubernetes::Kubernetes`] for details.
+    Kubernetes(kubernetes::Kubernetes),
 }
 
 impl Server {
@@ -218,6 +227,11 @@ impl Server {
             Inner::Container(conf) => {
                 Self::Container(container::Container::new(config.general, &conf, shutdown)?)
             }
+            Inner::Kubernetes(conf) => Self::Kubernetes(kubernetes::Kubernetes::new(
+                config.general,
+                &conf,
+                shutdown,
+            )?),
         };
         Ok(srv)
     }
@@ -252,6 +266,7 @@ impl Server {
             Server::ProcessTree(inner) => inner.spin().await?,
             Server::ProcFs(inner) => inner.spin().await?,
             Server::Container(inner) => inner.spin().await?,
+            Server::Kubernetes(inner) => inner.spin().await?,
         }
 
         Ok(())
