@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - 'lading process-tree-gen' command is removed as it is currently unused
 - 'lading run' sub-command added as alias for current top-level CLI usage.
+- 'lading config-check' sub-command added to easily validate whether or
+  not a given lading config is structurally valid.
 
 ## [0.26.0]
 ## Added
