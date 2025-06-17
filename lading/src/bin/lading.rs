@@ -13,8 +13,7 @@ use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator,
-    inspector, observer,
+    generator, inspector, observer,
     target::{self, Behavior, Output},
     target_metrics,
 };
@@ -210,7 +209,6 @@ struct Opts {
     #[clap(long)]
     disable_inspector: bool,
 }
-
 
 fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
@@ -565,7 +563,6 @@ async fn inner_main(
     res
 }
 
-
 fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -576,7 +573,6 @@ fn main() -> Result<(), Error> {
     let version = env!("CARGO_PKG_VERSION");
     info!("Starting lading {version} run.");
     let opts: Opts = Opts::parse();
-
 
     let config = get_config(&opts, None);
 
