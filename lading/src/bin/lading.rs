@@ -7,13 +7,13 @@ use std::{
     str::FromStr,
 };
 
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{ArgGroup, Parser};
 use jemallocator::Jemalloc;
 use lading::{
     blackhole,
     captures::CaptureManager,
     config::{Config, Telemetry},
-    generator::{self, process_tree},
+    generator,
     inspector, observer,
     target::{self, Behavior, Output},
     target_metrics,
@@ -21,7 +21,6 @@ use lading::{
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use once_cell::sync::Lazy;
-use rand::{SeedableRng, rngs::StdRng};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -60,8 +59,6 @@ enum Error {
     CapturePath,
     #[error("Invalid path for prometheus socket")]
     PrometheusPath,
-    #[error("Process tree failed to generate tree")]
-    ProcessTree(#[from] process_tree::Error),
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
 }
@@ -212,31 +209,8 @@ struct Opts {
     /// whether to ignore inspector configuration, if present, and not run the inspector
     #[clap(long)]
     disable_inspector: bool,
-    /// Extra sub commands
-    #[clap(subcommand)]
-    extracmds: Option<ExtraCommands>,
 }
 
-#[derive(Subcommand, Debug)]
-#[clap(hide = true)]
-enum ExtraCommands {
-    ProcessTreeGen(ProcessTreeGen),
-}
-
-#[derive(Parser, Debug)]
-#[clap(group(
-    ArgGroup::new("config")
-        .required(true)
-        .args(&["config-path", "config-content"]),
-))]
-struct ProcessTreeGen {
-    /// path on disk to the configuration file
-    #[clap(long)]
-    config_path: Option<PathBuf>,
-    /// string repesanting the configuration
-    #[clap(long)]
-    config_content: Option<String>,
-}
 
 fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
@@ -591,48 +565,6 @@ async fn inner_main(
     res
 }
 
-fn run_process_tree(opts: ProcessTreeGen) -> Result<(), Error> {
-    let mut contents = String::new();
-
-    if let Some(path) = opts.config_path {
-        debug!(
-            "Attempting to open configuration file at: {}",
-            path.display()
-        );
-        let mut file: std::fs::File = std::fs::OpenOptions::new()
-            .read(true)
-            .open(&path)
-            .unwrap_or_else(|_| panic!("Could not open configuration file at: {}", path.display()));
-
-        file.read_to_string(&mut contents)?;
-    } else if let Some(str) = &opts.config_content {
-        contents = str.to_string()
-    } else {
-        unreachable!("clap ensures that exactly one target option is selected");
-    };
-
-    match process_tree::get_config(&contents) {
-        Ok(config) => {
-            info!("Generating a process tree.");
-
-            let mut rng = StdRng::from_seed(config.seed);
-            let nodes = process_tree::generate_tree(&mut rng, &config)?;
-
-            process_tree::spawn_tree(&nodes, config.process_sleep_ns.get())?;
-
-            info!("Bye. :)");
-        }
-        Err(e) => panic!("invalide configuration: {e}"),
-    }
-    Ok(())
-}
-
-fn run_extra_cmds(cmds: ExtraCommands) -> Result<(), Error> {
-    match cmds {
-        // This command will call fork and the process must be kept fork-safe up to this point.
-        ExtraCommands::ProcessTreeGen(opts) => run_process_tree(opts),
-    }
-}
 
 fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
@@ -645,11 +577,6 @@ fn main() -> Result<(), Error> {
     info!("Starting lading {version} run.");
     let opts: Opts = Opts::parse();
 
-    // handle extra commands
-    if let Some(cmds) = opts.extracmds {
-        run_extra_cmds(cmds)?;
-        return Ok(());
-    }
 
     let config = get_config(&opts, None);
 
