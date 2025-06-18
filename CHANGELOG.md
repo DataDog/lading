@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## Added
+- 'lading run' sub-command added as alias for current top-level CLI usage.
+
 ## Changed
 - 'lading process-tree-gen' command is removed as it is currently unused
 
