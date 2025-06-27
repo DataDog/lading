@@ -1,0 +1,71 @@
+generator:
+  - kubernetes:
+      manifest:
+        namespace: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: foobar
+  - kubernetes:
+      manifest:
+        pod: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            namespace: foobar
+          spec:
+            containers:
+              - name: sleep
+                image: busybox
+                command:
+                  - sleep
+                  - infinity
+      max_lifetime_seconds: 20
+      number_of_instances: 10
+  - kubernetes:
+      manifest:
+        deployment: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            namespace: foobar
+            name: foo
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: foo
+            template:
+              metadata:
+                labels:
+                  app: foo
+              spec:
+                containers:
+                  - name: sleep
+                    image: busybox
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        while true; do
+                          nc -l -s 0.0.0.0 -p 5000
+                        done
+                    ports:
+                      - containerPort: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
+  - kubernetes:
+      manifest:
+        service: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            namespace: foobar
+            name: foo
+          spec:
+            selector:
+              app: foo
+            ports:
+              - port: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
