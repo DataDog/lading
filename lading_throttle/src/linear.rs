@@ -1,10 +1,12 @@
-//! Stable throttle
+//! Linear throttle
 //!
-//! This throttle refills capacity at a steady rate.
+//! This throttle increases at a linear rate up to some maximum.
 
 use std::num::NonZeroU32;
 
-use super::{Clock, INTERVAL_TICKS, RealClock};
+use crate::INTERVAL_TICKS;
+
+use super::{Clock, RealClock};
 
 /// Errors produced by [`Stable`].
 #[derive(thiserror::Error, Debug, Clone, Copy)]
@@ -17,15 +19,15 @@ pub enum Error {
 #[derive(Debug)]
 /// A throttle type.
 ///
-/// This throttle is stable in that it will steadily refill units at a known
-/// rate and does not inspect the target in any way.
-pub struct Stable<C = RealClock> {
+/// This throttle is linear in that it refills up to some maximum at a known
+/// rate of change per tick.
+pub struct Linear<C = RealClock> {
     valve: Valve,
     /// The clock that `Stable` will use.
     clock: C,
 }
 
-impl<C> Stable<C>
+impl<C> Linear<C>
 where
     C: Clock + Send + Sync,
 {
@@ -47,22 +49,32 @@ where
         Ok(())
     }
 
-    pub(crate) fn with_clock(maximum_capacity: NonZeroU32, clock: C) -> Self {
+    pub(crate) fn with_clock(
+        initial_capacity: u32,
+        maximum_capacity: NonZeroU32,
+        rate_of_change: u32,
+        clock: C,
+    ) -> Self {
         Self {
-            valve: Valve::new(maximum_capacity),
+            valve: Valve::new(initial_capacity, maximum_capacity, rate_of_change),
             clock,
         }
     }
 }
 
-/// The non-async interior to Stable, about which we can make proof claims. The
+/// The non-async interior to Linear, about which we can make proof claims. The
 /// mechanical analogue isn't quite right but think of this as a poppet valve
-/// for the stable throttle.
+/// for the linear throttle.
 #[derive(Debug)]
 struct Valve {
+    /// The capacity to reset `capacity` to at each interval roll-over. Will
+    /// never be less than `initial_capacity`.
+    reset_capacity: u32,
     /// The maximum capacity of `Valve` past which no more capacity will be
     /// added.
     maximum_capacity: u32,
+    /// The rate at which `maximum_capacity` increases per interval roll-over.
+    rate_of_change: u32,
     /// The capacity of the `Valve`. This amount will be drawn on by every
     /// request. It is refilled to maximum at every interval roll-over.
     capacity: u32,
@@ -73,11 +85,13 @@ struct Valve {
 impl Valve {
     /// Create a new `Valve` instance with a maximum capacity, given in
     /// tick-units.
-    fn new(maximum_capacity: NonZeroU32) -> Self {
+    fn new(initial_capacity: u32, maximum_capacity: NonZeroU32, rate_of_change: u32) -> Self {
         let maximum_capacity = maximum_capacity.get();
         Self {
-            capacity: maximum_capacity,
+            reset_capacity: initial_capacity,
             maximum_capacity,
+            rate_of_change,
+            capacity: initial_capacity,
             interval: 0,
         }
     }
@@ -107,9 +121,15 @@ impl Valve {
         let current_interval = ticks_elapsed / INTERVAL_TICKS;
         if current_interval > self.interval {
             // We have rolled forward into a new interval. At this point the
-            // capacity is reset to maximum -- no matter how deep we are into
-            // the interval -- and we record the new interval index.
-            self.capacity = self.maximum_capacity;
+            // capacity is reset to reset_capacity -- no matter how deep we are
+            // into the interval -- and we record the new interval index.
+            self.capacity = self.reset_capacity;
+            if self.reset_capacity < self.maximum_capacity {
+                self.reset_capacity = self
+                    .reset_capacity
+                    .saturating_add(self.rate_of_change)
+                    .max(self.maximum_capacity);
+            }
             self.interval = current_interval;
         }
 
@@ -132,7 +152,8 @@ impl Valve {
 
 #[cfg(kani)]
 mod verification {
-    use crate::stable::{INTERVAL_TICKS, Valve};
+    use crate::INTERVAL_TICKS;
+    use crate::linear::Valve;
     use std::num::NonZeroU32;
 
     /// Capacity requests that are too large always error.
