@@ -227,7 +227,7 @@ mod verification {
         let maximum_capacity: NonZeroU32 = kani::any();
         let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
         let rate_of_change: u32 = kani::any();
-        
+
         let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
         let maximum_capacity = maximum_capacity.get();
 
@@ -253,7 +253,7 @@ mod verification {
         let maximum_capacity: NonZeroU32 = kani::any();
         let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
         let rate_of_change: u32 = kani::any();
-        
+
         let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
         let maximum_capacity = maximum_capacity.get();
 
@@ -266,6 +266,107 @@ mod verification {
         kani::assert(
             valve.interval == ticks_elapsed / INTERVAL_TICKS,
             "Interval should be consistent with ticks_elapsed.",
+        );
+    }
+
+    /// Reset capacity must never exceed maximum capacity.
+    #[kani::proof]
+    fn reset_capacity_bounded() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+        let maximum_capacity = maximum_capacity.get();
+
+        // Make multiple requests across intervals -- potentially -- to trigger
+        // reset_capacity updates.
+        for _ in 0..3 {
+            let ticks_elapsed: u64 = kani::any();
+            let request: u32 = kani::any_where(|r: &u32| *r <= maximum_capacity);
+            let _ = valve.request(ticks_elapsed, request);
+
+            kani::assert(
+                valve.reset_capacity <= maximum_capacity,
+                "Reset capacity should never exceed maximum capacity",
+            );
+        }
+    }
+
+    /// Capacity should reset to the prior reset_capacity when an interval roll-over
+    /// happens.
+    #[kani::proof]
+    fn capacity_resets_on_interval_change() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+
+        // Interval 0
+        let first_request: u32 = kani::any_where(|r: &u32| *r <= initial_capacity);
+        let _ = valve.request(0, first_request);
+
+        let prior_reset_capacity = valve.reset_capacity;
+
+        // Interval 1
+        let ticks_elapsed = INTERVAL_TICKS + 1;
+        let _ = valve.request(ticks_elapsed, 0);
+
+        kani::assert(
+            valve.capacity == prior_reset_capacity,
+            "Capacity should reset to the reset_capacity value from prior to the interval change",
+        );
+    }
+
+    /// reset_capacity should increase by rate_of_change each interval.
+    #[kani::proof]
+    fn rate_of_growth_preserved() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+
+        let original_reset_capacity = valve.reset_capacity;
+
+        // Move to next interval
+        let _ = valve.request(INTERVAL_TICKS + 1, 0);
+
+        if original_reset_capacity < maximum_capacity.get() {
+            let expected = original_reset_capacity
+                .saturating_add(rate_of_change)
+                .min(maximum_capacity.get());
+            kani::assert(
+                valve.reset_capacity == expected,
+                "Reset capacity should grow linearly by rate_of_change",
+            );
+        }
+    }
+
+    /// When a request exceeds current capacity, the throttle returns the time
+    /// remaining until the next interval boundary (not a guarantee of fulfillment)
+    #[kani::proof]
+    fn insufficient_capacity_returns_time_to_interval_boundary() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 =
+            kani::any_where(|i: &u32| *i > 0 && *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+
+        // Request more than available capacity
+        let request: u32 =
+            kani::any_where(|r: &u32| *r > initial_capacity && *r <= maximum_capacity.get());
+        let ticks_in_interval: u64 = kani::any_where(|t: &u64| *t < INTERVAL_TICKS);
+
+        let slop = valve
+            .request(ticks_in_interval, request)
+            .expect("request should succeed");
+
+        kani::assert(
+            slop == INTERVAL_TICKS - ticks_in_interval,
+            "Wait time should be exactly the time remaining until interval boundary",
         );
     }
 }
