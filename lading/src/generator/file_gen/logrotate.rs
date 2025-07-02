@@ -23,7 +23,7 @@ use std::{
 use byte_unit::Byte;
 use futures::future::join_all;
 use lading_throttle::Throttle;
-use metrics::{counter, gauge};
+use metrics::counter;
 use rand::{Rng, SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -109,6 +109,12 @@ pub enum Error {
     /// Name provided but no parent on the path
     #[error("Name provided but no parent on the path")]
     NameWithNoParent,
+    /// Both `bytes_per_second` and throttle config were specified
+    #[error("Cannot specify both bytes_per_second and throttle configuration")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Must specify either bytes_per_second or throttle configuration")]
+    NoThrottleConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -131,7 +137,7 @@ pub struct Config {
     /// Sets the [`crate::payload::Config`] of this template.
     pub variant: lading_payload::Config,
     /// Defines the number of bytes that written in each log file.
-    bytes_per_second: Byte,
+    bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
@@ -142,8 +148,7 @@ pub struct Config {
     #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<lading_throttle::Config>,
 }
 
 #[derive(Debug)]
@@ -183,9 +188,18 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second = NonZeroU32::new(config.bytes_per_second.as_u128() as u32)
-            .expect("bytes_per_second must be non-zero");
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+        let throttle_config = match (config.bytes_per_second, config.throttle) {
+            (Some(bytes_per_second), None) => {
+                let bytes_per_second = NonZeroU32::new(bytes_per_second.as_u128() as u32)
+                    .expect("bytes_per_second must be non-zero");
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle)) => throttle,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
 
         let maximum_bytes_per_log =
             NonZeroU32::new(config.maximum_bytes_per_log.as_u128() as u32).ok_or(Error::Zero)?;
@@ -200,7 +214,7 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
+            let throttle = Throttle::new_with_config(throttle_config);
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
@@ -227,10 +241,10 @@ impl Server {
             let child = Child::new(
                 &basename,
                 config.total_rotations,
-                bytes_per_second,
                 maximum_bytes_per_log,
                 block_cache,
                 throttle,
+                throttle_config,
                 shutdown.clone(),
                 child_labels,
             );
@@ -276,11 +290,11 @@ impl Server {
 struct Child {
     // Child maintains a set vector of names to use when 'rotating'.
     names: Vec<PathBuf>,
-    bytes_per_second: NonZeroU32,
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
     block_cache: block::Cache,
     throttle: Throttle,
+    throttle_config: lading_throttle::Config,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
 }
@@ -290,10 +304,10 @@ impl Child {
     fn new(
         basename: &Path,
         total_rotations: u8,
-        bytes_per_second: NonZeroU32,
         maximum_bytes_per_log: NonZeroU32,
         block_cache: block::Cache,
         throttle: Throttle,
+        throttle_config: lading_throttle::Config,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
     ) -> Self {
@@ -312,17 +326,23 @@ impl Child {
 
         Self {
             names,
-            bytes_per_second,
             maximum_bytes_per_log,
             block_cache,
             throttle,
+            throttle_config,
             shutdown,
             labels,
         }
     }
 
     async fn spin(mut self) -> Result<(), Error> {
-        let bytes_per_second = self.bytes_per_second.get() as usize;
+        let buffer_capacity = match self.throttle_config {
+            lading_throttle::Config::Stable { maximum_capacity }
+            | lading_throttle::Config::Linear {
+                maximum_capacity, ..
+            } => maximum_capacity.get() as usize,
+            lading_throttle::Config::AllOut => 1024 * 1024, // 1MiB buffer for all-out
+        };
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
 
@@ -341,7 +361,7 @@ impl Child {
             err,
         })?;
         let mut fp: BufWriter<fs::File> = BufWriter::with_capacity(
-            bytes_per_second,
+            buffer_capacity,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -379,7 +399,7 @@ impl Child {
                             write_bytes(&blk,
                                     &mut fp,
                                     &mut total_bytes_written,
-                                    bytes_per_second,
+                                    buffer_capacity,
                                     total_names,
                                     maximum_bytes_per_log,
                                     &self.names,
@@ -408,7 +428,7 @@ async fn write_bytes(
     blk: &Block,
     fp: &mut BufWriter<fs::File>,
     total_bytes_written: &mut u64,
-    bytes_per_second: usize,
+    buffer_capacity: usize,
     total_names: usize,
     maximum_bytes_per_log: u64,
     names: &[PathBuf],
@@ -467,7 +487,7 @@ async fn write_bytes(
         // Open a new fp to `path`, replacing `fp`. Any holders of the
         // file pointer still have it but the file no longer has a name.
         *fp = BufWriter::with_capacity(
-            bytes_per_second,
+            buffer_capacity,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(false)

@@ -26,7 +26,7 @@ use std::{
 use byte_unit::Byte;
 use futures::future::join_all;
 use lading_throttle::Throttle;
-use metrics::{counter, gauge};
+use metrics::counter;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -63,6 +63,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Both `bytes_per_second` and throttle config were specified
+    #[error("Cannot specify both bytes_per_second and throttle configuration")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Must specify either bytes_per_second or throttle configuration")]
+    NoThrottleConfig,
 }
 
 fn default_rotation() -> bool {
@@ -94,7 +100,7 @@ pub struct Config {
     /// written _continuously_ per second from this target. Higher bursts are
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
-    bytes_per_second: Byte,
+    bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
     maximum_prebuild_cache_size_bytes: Byte,
@@ -110,8 +116,7 @@ pub struct Config {
     #[serde(default = "default_rotation")]
     rotate: bool,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<lading_throttle::Config>,
 }
 
 #[derive(Debug)]
@@ -151,9 +156,18 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+        let throttle_config = match (config.bytes_per_second, config.throttle) {
+            (Some(bytes_per_second), None) => {
+                let bytes_per_second =
+                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle)) => throttle,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
 
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_file.as_u128() as u32).ok_or(Error::Zero)?;
@@ -168,7 +182,7 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throttle = Throttle::new_with_config(config.throttle, bytes_per_second);
+            let throttle = Throttle::new_with_config(throttle_config);
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed(
@@ -182,8 +196,8 @@ impl Server {
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
-                bytes_per_second,
                 throttle,
+                throttle_config,
                 block_cache,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
@@ -225,8 +239,8 @@ impl Server {
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    bytes_per_second: NonZeroU32,
     throttle: Throttle,
+    throttle_config: lading_throttle::Config,
     block_cache: block::Cache,
     rotate: bool,
     file_index: Arc<AtomicU32>,
@@ -235,7 +249,13 @@ struct Child {
 
 impl Child {
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
-        let bytes_per_second = self.bytes_per_second.get() as usize;
+        let buffer_capacity = match self.throttle_config {
+            lading_throttle::Config::Stable { maximum_capacity }
+            | lading_throttle::Config::Linear {
+                maximum_capacity, ..
+            } => maximum_capacity.get() as usize,
+            lading_throttle::Config::AllOut => 1024 * 1024, // 1MiB buffer for all-out
+        };
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
@@ -243,7 +263,7 @@ impl Child {
         let mut path = path_from_template(&self.path_template, file_index);
 
         let mut fp = BufWriter::with_capacity(
-            bytes_per_second,
+            buffer_capacity,
             fs::OpenOptions::new()
                 .create(true)
                 .truncate(true)
@@ -291,7 +311,7 @@ impl Child {
                                 // Open a new fp to `path`, replacing `fp`. Any holders of the
                                 // file pointer still have it but the file no longer has a name.
                                 fp = BufWriter::with_capacity(
-                                    bytes_per_second,
+                                    buffer_capacity,
                                     fs::OpenOptions::new()
                                         .create(true)
                                         .truncate(false)

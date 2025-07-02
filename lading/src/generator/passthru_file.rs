@@ -37,15 +37,14 @@ pub struct Config {
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
-    pub bytes_per_second: Byte,
+    pub bytes_per_second: Option<Byte>,
     /// The maximum size in bytes of the largest block in the prebuild cache.
     #[serde(default = "lading_payload::block::default_maximum_block_size")]
     pub maximum_block_size: Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: Byte,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<lading_throttle::Config>,
 }
 
 /// Errors produced by [`PassthruFile`].
@@ -63,6 +62,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
+    /// Both `bytes_per_second` and throttle config were specified
+    #[error("Cannot specify both bytes_per_second and throttle configuration")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Must specify either bytes_per_second or throttle configuration")]
+    NoThrottleConfig,
 }
 
 #[derive(Debug)]
@@ -103,9 +108,19 @@ impl PassthruFile {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+        let throttle_config = match (config.bytes_per_second, config.throttle) {
+            (Some(bytes_per_second), None) => {
+                let bytes_per_second =
+                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
+                gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle)) => throttle,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
 
         let maximum_prebuild_cache_size_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -125,7 +140,7 @@ impl PassthruFile {
         Ok(Self {
             path,
             block_cache,
-            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+            throttle: Throttle::new_with_config(throttle_config),
             metric_labels: labels,
             shutdown,
         })

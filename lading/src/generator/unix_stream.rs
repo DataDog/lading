@@ -14,7 +14,7 @@
 use crate::common::PeekableReceiver;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
-use metrics::{counter, gauge};
+use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
@@ -34,7 +34,7 @@ pub struct Config {
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
-    pub bytes_per_second: byte_unit::Byte,
+    pub bytes_per_second: Option<byte_unit::Byte>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
@@ -44,8 +44,7 @@ pub struct Config {
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<lading_throttle::Config>,
 }
 
 /// Errors produced by [`UnixStream`].
@@ -66,6 +65,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
+    /// Both `bytes_per_second` and throttle config were specified
+    #[error("Cannot specify both bytes_per_second and throttle configuration")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Must specify either bytes_per_second or throttle configuration")]
+    NoThrottleConfig,
 }
 
 #[derive(Debug)]
@@ -107,9 +112,18 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+        let throttle_config = match (config.bytes_per_second, config.throttle) {
+            (Some(bytes_per_second), None) => {
+                let bytes_per_second =
+                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle)) => throttle,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -126,7 +140,7 @@ impl UnixStream {
         Ok(Self {
             path: config.path,
             block_cache,
-            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+            throttle: Throttle::new_with_config(throttle_config),
             metric_labels: labels,
             shutdown,
         })

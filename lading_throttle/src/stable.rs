@@ -242,18 +242,21 @@ mod verification {
         let maximum_capacity: NonZeroU32 = kani::any();
         let mut valve = Valve::new(maximum_capacity);
         let maximum_capacity = maximum_capacity.get();
-        
+
         // Start with partial capacity by making an initial request
         let initial_request: u32 = kani::any_where(|r: &u32| *r > 0 && *r < maximum_capacity);
         let _ = valve.request(0, initial_request);
-        
+
         // Now request more than remaining capacity
         let remaining_capacity = maximum_capacity - initial_request;
-        let request: u32 = kani::any_where(|r: &u32| *r > remaining_capacity && *r <= maximum_capacity);
+        let request: u32 =
+            kani::any_where(|r: &u32| *r > remaining_capacity && *r <= maximum_capacity);
         let ticks_in_interval: u64 = kani::any_where(|t: &u64| *t < INTERVAL_TICKS);
-        
-        let slop = valve.request(ticks_in_interval, request).expect("request should succeed");
-        
+
+        let slop = valve
+            .request(ticks_in_interval, request)
+            .expect("request should succeed");
+
         kani::assert(
             slop == INTERVAL_TICKS - ticks_in_interval,
             "Wait time should be exactly the time remaining until interval boundary",
