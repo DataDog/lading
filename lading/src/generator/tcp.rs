@@ -71,6 +71,9 @@ pub enum Error {
     /// No throttle configuration provided
     #[error("Either bytes_per_second or throttle configuration must be provided")]
     NoThrottleConfig,
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 #[derive(Debug)]
@@ -118,7 +121,7 @@ impl Tcp {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle_config)) => (*throttle_config).into(),
+            (None, Some(throttle_config)) => throttle_config.clone().try_into()?,
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };

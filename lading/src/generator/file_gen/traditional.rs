@@ -69,6 +69,9 @@ pub enum Error {
     /// No throttle configuration provided
     #[error("Must specify either bytes_per_second or throttle configuration")]
     NoThrottleConfig,
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 fn default_rotation() -> bool {
@@ -164,7 +167,7 @@ impl Server {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle.into(),
+            (None, Some(throttle)) => throttle.try_into()?,
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };

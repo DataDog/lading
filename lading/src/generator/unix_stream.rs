@@ -71,6 +71,9 @@ pub enum Error {
     /// No throttle configuration provided
     #[error("Must specify either bytes_per_second or throttle configuration")]
     NoThrottleConfig,
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 #[derive(Debug)]
@@ -112,7 +115,7 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle_config = match (config.bytes_per_second, config.throttle) {
+        let throttle_config = match (config.bytes_per_second, &config.throttle) {
             (Some(bytes_per_second), None) => {
                 let bytes_per_second =
                     NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
@@ -120,7 +123,7 @@ impl UnixStream {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle.into(),
+            (None, Some(throttle)) => throttle.clone().try_into()?,
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };
