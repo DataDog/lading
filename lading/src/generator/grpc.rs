@@ -88,7 +88,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<lading_throttle::Config>,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -187,7 +187,7 @@ impl Grpc {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle,
+            (None, Some(throttle)) => throttle.into(),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };

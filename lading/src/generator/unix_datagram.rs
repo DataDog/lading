@@ -65,7 +65,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<lading_throttle::Config>,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -144,18 +144,19 @@ impl UnixDatagram {
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
-            let throttle = match (&config.bytes_per_second, &config.throttle) {
+            let throttle_config = match (&config.bytes_per_second, &config.throttle) {
                 (Some(bps), None) => {
                     let bytes_per_second =
                         NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                    Throttle::new_with_config(lading_throttle::Config::Stable {
+                    lading_throttle::Config::Stable {
                         maximum_capacity: bytes_per_second,
-                    })
+                    }
                 }
-                (None, Some(throttle_config)) => Throttle::new_with_config(*throttle_config),
+                (None, Some(throttle_config)) => (*throttle_config).into(),
                 (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
                 (None, None) => return Err(Error::NoThrottleConfig),
             };
+            let throttle = Throttle::new_with_config(throttle_config);
 
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)

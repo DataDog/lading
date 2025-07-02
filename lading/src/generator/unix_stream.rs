@@ -44,7 +44,7 @@ pub struct Config {
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
     /// The load throttle configuration
-    pub throttle: Option<lading_throttle::Config>,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 /// Errors produced by [`UnixStream`].
@@ -120,7 +120,7 @@ impl UnixStream {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle,
+            (None, Some(throttle)) => throttle.into(),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };

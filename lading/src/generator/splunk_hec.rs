@@ -90,7 +90,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<lading_throttle::Config>,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -198,17 +198,18 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle = match (&config.bytes_per_second, &config.throttle) {
+        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
             (Some(bps), None) => {
                 let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                Throttle::new_with_config(lading_throttle::Config::Stable {
+                lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
-                })
+                }
             }
-            (None, Some(throttle_config)) => Throttle::new_with_config(*throttle_config),
+            (None, Some(throttle_config)) => (*throttle_config).into(),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };
+        let throttle = Throttle::new_with_config(throttle_config);
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 

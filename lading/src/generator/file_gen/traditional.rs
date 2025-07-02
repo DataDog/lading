@@ -116,7 +116,7 @@ pub struct Config {
     #[serde(default = "default_rotation")]
     rotate: bool,
     /// The load throttle configuration
-    pub throttle: Option<lading_throttle::Config>,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 #[derive(Debug)]
@@ -164,7 +164,7 @@ impl Server {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle,
+            (None, Some(throttle)) => throttle.into(),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };
