@@ -246,23 +246,26 @@ mod verification {
         );
     }
 
-    // /// No matter the request size the valve's interval measure should always be
-    // /// consistent with the time passed in ticks_elapsed.
-    // #[kani::proof]
-    // fn interval_time_preserved() {
-    //     let maximum_capacity: NonZeroU32 = kani::any();
-    //     let mut valve = Valve::new(maximum_capacity);
-    //     let maximum_capacity = maximum_capacity.get();
+    /// No matter the request size the valve's interval measure should always be
+    /// consistent with the time passed in ticks_elapsed.
+    #[kani::proof]
+    fn interval_time_preserved() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+        
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+        let maximum_capacity = maximum_capacity.get();
 
-    //     let request: u32 = kani::any_where(|r: &u32| *r <= maximum_capacity);
-    //     // 2**32 microseconds is 1 hour 1 minutes and change. While callers
-    //     // _may_ be waiting longer this this we deem it unlikely.
-    //     let ticks_elapsed = kani::any::<u32>() as u64;
+        let request: u32 = kani::any_where(|r: &u32| *r <= maximum_capacity);
+        // 2**32 microseconds is 1 hour 1 minutes and change. While callers
+        // _may_ be waiting longer this this we deem it unlikely.
+        let ticks_elapsed = kani::any::<u32>() as u64;
 
-    //     let _ = valve.request(ticks_elapsed, request);
-    //     kani::assert(
-    //         valve.interval == ticks_elapsed / INTERVAL_TICKS,
-    //         "Interval should be consistent with ticks_elapsed.",
-    //     );
-    // }
+        let _ = valve.request(ticks_elapsed, request);
+        kani::assert(
+            valve.interval == ticks_elapsed / INTERVAL_TICKS,
+            "Interval should be consistent with ticks_elapsed.",
+        );
+    }
 }
