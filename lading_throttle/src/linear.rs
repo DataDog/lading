@@ -218,30 +218,33 @@ mod verification {
         );
     }
 
-    // /// If a request is made on the throttle such that capacity < request <=
-    // /// max_capacity and ticks_elapsed <= INTERVAL_TICKS then the request should
-    // /// return with non-zero slop and the internal capacity of the valve should
-    // /// not be reduced.
-    // #[kani::proof]
-    // fn request_out_in_cap_interval() {
-    //     let maximum_capacity: NonZeroU32 = kani::any();
-    //     let mut valve = Valve::new(maximum_capacity);
-    //     let maximum_capacity = maximum_capacity.get();
+    /// If a request is made on the throttle such that capacity < request <=
+    /// max_capacity and ticks_elapsed <= INTERVAL_TICKS then the request should
+    /// return with non-zero slop and the internal capacity of the valve should
+    /// not be reduced.
+    #[kani::proof]
+    fn request_out_in_cap_interval() {
+        let maximum_capacity: NonZeroU32 = kani::any();
+        let initial_capacity: u32 = kani::any_where(|i: &u32| *i <= maximum_capacity.get());
+        let rate_of_change: u32 = kani::any();
+        
+        let mut valve = Valve::new(initial_capacity, maximum_capacity, rate_of_change);
+        let maximum_capacity = maximum_capacity.get();
 
-    //     let original_capacity = valve.capacity;
-    //     let request: u32 =
-    //         kani::any_where(|r: &u32| original_capacity < *r && *r <= maximum_capacity);
-    //     let ticks_elapsed: u64 = kani::any_where(|t: &u64| *t <= INTERVAL_TICKS);
+        let original_capacity = valve.capacity;
+        let request: u32 =
+            kani::any_where(|r: &u32| original_capacity < *r && *r <= maximum_capacity);
+        let ticks_elapsed: u64 = kani::any_where(|t: &u64| *t <= INTERVAL_TICKS);
 
-    //     let slop = valve
-    //         .request(ticks_elapsed, request)
-    //         .expect("request failed");
-    //     kani::assert(slop > 0, "Should be forced to wait.");
-    //     kani::assert(
-    //         valve.capacity == original_capacity,
-    //         "Capacity should not be reduced.",
-    //     );
-    // }
+        let slop = valve
+            .request(ticks_elapsed, request)
+            .expect("request failed");
+        kani::assert(slop > 0, "Should be forced to wait.");
+        kani::assert(
+            valve.capacity == original_capacity,
+            "Capacity should not be reduced.",
+        );
+    }
 
     // /// No matter the request size the valve's interval measure should always be
     // /// consistent with the time passed in ticks_elapsed.
