@@ -123,7 +123,7 @@ impl UnixStream {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle)) => throttle.clone().try_into()?,
+            (None, Some(throttle)) => (*throttle).try_into()?,
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };

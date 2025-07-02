@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, num::NonZeroU32};
 
 /// Generator-specific throttle configuration with clearer field names
-#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum BytesThrottleConfig {
@@ -28,7 +28,7 @@ pub enum BytesThrottleConfig {
 }
 
 /// Error converting `BytesThrottleConfig` to internal throttle config
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ThrottleConversionError {
     /// Value exceeds u32 capacity
     #[error("Throttle value {0} exceeds maximum supported value")]

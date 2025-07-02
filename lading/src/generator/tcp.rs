@@ -121,7 +121,7 @@ impl Tcp {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle_config)) => throttle_config.clone().try_into()?,
+            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
             (None, None) => return Err(Error::NoThrottleConfig),
         };
