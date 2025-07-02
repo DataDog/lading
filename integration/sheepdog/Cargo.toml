@@ -12,7 +12,7 @@ anyhow = "1.0"
 escargot = "0.5.14"
 shared = { path = "../shared" }
 tempfile = "3.20"
-tokio = { version = "1.45", features = [
+tokio = { version = "1.46", features = [
   "rt",
   "macros",
   "fs",
