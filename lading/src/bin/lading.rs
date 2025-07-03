@@ -229,7 +229,9 @@ struct LadingArgs {
 #[derive(Subcommand)]
 enum Commands {
     /// Run lading with specified configuration
-    Run(RunCommand),
+    Run(Box<RunCommand>),
+    /// Validate configuration file and exit
+    ConfigCheck(ConfigCheckCommand),
 }
 
 #[derive(Args)]
@@ -238,33 +240,54 @@ struct RunCommand {
     args: LadingArgs,
 }
 
+#[derive(Args)]
+struct ConfigCheckCommand {
+    /// path on disk to the configuration file
+    #[clap(long, default_value_t = default_config_path())]
+    config_path: String,
+}
+
+fn load_config_contents(config_path: &str) -> Result<String, Error> {
+    if let Ok(env_var_value) = env::var("LADING_CONFIG") {
+        debug!("Using config from env var 'LADING_CONFIG'");
+        Ok(env_var_value)
+    } else {
+        debug!("Attempting to open configuration file at: {}", config_path);
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .open(config_path)
+            .map_err(|err| {
+                error!("Could not read config file '{}': {}", config_path, err);
+                err
+            })?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        Ok(contents)
+    }
+}
+
+fn parse_config(contents: &str) -> Result<Config, Error> {
+    serde_yaml::from_str(contents).map_err(|err| {
+        error!("Configuration validation failed: {}", err);
+        Error::SerdeYaml(err)
+    })
+}
+
+fn validate_config(config_path: &str) -> Result<Config, Error> {
+    let contents = load_config_contents(config_path)?;
+    let config = parse_config(&contents)?;
+    info!("Configuration file is valid");
+    Ok(config)
+}
+
 fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
         config
-    } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
-        debug!("Using config from env var 'LADING_CONFIG'");
-        env_var_value
     } else {
-        debug!(
-            "Attempting to open configuration file at: {}",
-            args.config_path
-        );
-        let mut file: std::fs::File = std::fs::OpenOptions::new()
-            .read(true)
-            .open(&args.config_path)
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Could not open configuration file at: {}",
-                    &args.config_path
-                )
-            });
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        contents
+        load_config_contents(&args.config_path)?
     };
 
-    let mut config: Config = serde_yaml::from_str(&contents)?;
+    let mut config = parse_config(&contents)?;
 
     let target = if args.no_target {
         None
@@ -608,6 +631,13 @@ fn main() -> Result<(), Error> {
     let args = match CliWithSubcommands::try_parse() {
         Ok(cli) => match cli.command {
             Commands::Run(run_cmd) => run_cmd.args,
+            Commands::ConfigCheck(config_check_cmd) => {
+                // Handle config-check command
+                match validate_config(&config_check_cmd.config_path) {
+                    Ok(_) => std::process::exit(0),
+                    Err(_) => std::process::exit(1),
+                }
+            }
         },
         Err(_) => {
             // Fall back to legacy parsing
