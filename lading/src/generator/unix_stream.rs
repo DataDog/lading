@@ -12,16 +12,25 @@
 //!
 
 use crate::common::PeekableReceiver;
+use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
-use tokio::{net, sync::mpsc, task::JoinError};
+use tokio::{
+    net,
+    sync::{broadcast::Receiver, mpsc},
+    task::{JoinError, JoinHandle},
+};
 use tracing::{debug, error, info, warn};
 
 use super::General;
+
+fn default_parallel_connections() -> u16 {
+    1
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +52,9 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
+    /// The total number of parallel connections to maintain
+    #[serde(default = "default_parallel_connections")]
+    pub parallel_connections: u16,
     /// The load throttle configuration
     pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
@@ -59,6 +71,15 @@ pub enum Error {
     /// Subtask error
     #[error("Subtask failure: {0}")]
     Subtask(#[from] JoinError),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
+    /// Startup send error.
+    #[error("Startup send error: {0}")]
+    StartupSend(#[from] tokio::sync::broadcast::error::SendError<()>),
+    /// Child startup wait error.
+    #[error("Child startup wait error: {0}")]
+    StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] byte_unit::ParseError),
@@ -82,11 +103,9 @@ pub enum Error {
 /// This generator is responsible for sending data to the target via UDS
 /// streams.
 pub struct UnixStream {
-    path: PathBuf,
-    throttle: Throttle,
-    block_cache: block::Cache,
-    metric_labels: Vec<(String, String)>,
+    handles: Vec<JoinHandle<Result<(), Error>>>,
     shutdown: lading_signal::Watcher,
+    startup: tokio::sync::broadcast::Sender<()>,
 }
 
 impl UnixStream {
@@ -103,7 +122,7 @@ impl UnixStream {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
-        config: Config,
+        config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
@@ -128,24 +147,37 @@ impl UnixStream {
             (None, None) => return Err(Error::NoThrottleConfig),
         };
 
-        let total_bytes =
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .ok_or(Error::Zero)?;
-        let block_cache = match config.block_cache_method {
-            block::CacheMethod::Fixed => block::Cache::fixed(
-                &mut rng,
-                total_bytes,
-                config.maximum_block_size.as_u128(),
-                &config.variant,
-            )?,
-        };
+        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+
+        let mut handles = Vec::new();
+        for _ in 0..config.parallel_connections {
+            let total_bytes =
+                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                    .ok_or(Error::Zero)?;
+            let block_cache = match config.block_cache_method {
+                block::CacheMethod::Fixed => block::Cache::fixed(
+                    &mut rng,
+                    total_bytes,
+                    config.maximum_block_size.as_u128(),
+                    &config.variant,
+                )?,
+            };
+
+            let child = Child {
+                path: config.path.clone(),
+                block_cache,
+                throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+                metric_labels: labels.clone(),
+                shutdown: shutdown.clone(),
+            };
+
+            handles.push(tokio::spawn(child.spin(startup.subscribe())));
+        }
 
         Ok(Self {
-            path: config.path,
-            block_cache,
-            throttle: Throttle::new_with_config(throttle_config),
-            metric_labels: labels,
+            handles,
             shutdown,
+            startup,
         })
     }
 
@@ -159,6 +191,32 @@ impl UnixStream {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
+        self.startup.send(())?;
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
+        for res in join_all(self.handles.drain(..)).await {
+            match res {
+                Ok(Ok(())) => continue,
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Child {
+    path: PathBuf,
+    throttle: Throttle,
+    block_cache: block::Cache,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+}
+
+impl Child {
+    async fn spin(mut self, mut startup_receiver: Receiver<()>) -> Result<(), Error> {
+        startup_receiver.recv().await?;
         debug!("UnixStream generator running");
 
         // Move the block_cache into an OS thread, exposing a channel between it
@@ -208,7 +266,8 @@ impl UnixStream {
                             // buffer.
                             let blk_max: usize = total_bytes.get() as usize;
                             let mut blk_offset = 0;
-                            let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
+                            // advance to the block that was previously peeked
+                            let blk = rcv.next().await.expect("failed to advance to the next block");
                             while blk_offset < blk_max {
                                 let stream = &socket;
 

@@ -197,7 +197,7 @@ impl Server {
 
                 Self::UnixStream(unix_stream::UnixStream::new(
                     config.general,
-                    conf,
+                    &conf,
                     shutdown,
                 )?)
             }
