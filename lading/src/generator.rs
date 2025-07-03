@@ -15,6 +15,7 @@ use tracing::{error, warn};
 
 use crate::target::TargetPidReceiver;
 
+mod common;
 pub mod container;
 pub mod file_gen;
 pub mod file_tree;

@@ -16,7 +16,7 @@ use byte_unit::{Byte, Unit};
 use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
-use metrics::{counter, gauge};
+use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, thread};
@@ -50,7 +50,7 @@ pub struct Config {
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
-    pub bytes_per_second: byte_unit::Byte,
+    pub bytes_per_second: Option<byte_unit::Byte>,
     /// The block sizes for messages to this target
     pub block_sizes: Option<Vec<byte_unit::Byte>>,
     /// The maximum size in bytes of the cache of prebuilt messages
@@ -65,8 +65,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -96,6 +95,15 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] byte_unit::ParseError),
+    /// Both `bytes_per_second` and throttle configurations provided
+    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Either bytes_per_second or throttle configuration must be provided")]
+    NoThrottleConfig,
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 #[derive(Debug)]
@@ -135,14 +143,24 @@ impl UnixDatagram {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
-
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
+            let throttle_config = match (&config.bytes_per_second, &config.throttle) {
+                (Some(bps), None) => {
+                    let bytes_per_second =
+                        NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
+                    lading_throttle::Config::Stable {
+                        maximum_capacity: bytes_per_second,
+                    }
+                }
+                (None, Some(throttle_config)) => (*throttle_config).try_into()?,
+                (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+                (None, None) => return Err(Error::NoThrottleConfig),
+            };
+            let throttle = Throttle::new_with_config(throttle_config);
+
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                     .ok_or(Error::Zero)?;
@@ -158,7 +176,7 @@ impl UnixDatagram {
             let child = Child {
                 path: config.path.clone(),
                 block_cache,
-                throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+                throttle,
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
             };

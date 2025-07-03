@@ -88,14 +88,16 @@ pub enum Error {
     /// Utf8 error
     #[error("Utf8 error: {0}")]
     Utf8(#[from] str::Utf8Error),
+    /// Both `max_tree_per_second` and throttle configurations provided
+    #[error("Both max_tree_per_second and throttle configurations provided. Use only one.")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Either max_tree_per_second or throttle configuration must be provided")]
+    NoThrottleConfig,
 }
 
 fn default_max_depth() -> NonZeroU32 {
     NonZeroU32::new(10).expect("default max depth given was 0")
-}
-
-fn default_max_tree_per_second() -> NonZeroU32 {
-    NonZeroU32::new(5).expect("default max tree per second given was 0")
 }
 
 // default to 100ms
@@ -220,8 +222,7 @@ pub struct Config {
     /// The seed for random operations against this target
     pub seed: [u8; 32],
     /// The number of process created per second
-    #[serde(default = "default_max_tree_per_second")]
-    pub max_tree_per_second: NonZeroU32,
+    pub max_tree_per_second: Option<NonZeroU32>,
     /// The maximum depth of the process tree
     #[serde(default = "default_max_depth")]
     pub max_depth: NonZeroU32,
@@ -234,8 +235,7 @@ pub struct Config {
     /// List of executables
     pub executables: Vec<Executable>,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<lading_throttle::Config>,
 }
 
 impl Config {
@@ -288,7 +288,14 @@ impl ProcessTree {
             ("component_name".to_string(), "process_tree".to_string()),
         ];
 
-        let throttle = Throttle::new_with_config(config.throttle, config.max_tree_per_second);
+        let throttle = match (&config.max_tree_per_second, &config.throttle) {
+            (Some(max_tps), None) => Throttle::new_with_config(lading_throttle::Config::Stable {
+                maximum_capacity: *max_tps,
+            }),
+            (None, Some(throttle_config)) => Throttle::new_with_config(*throttle_config),
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
         match serde_yaml::to_string(config) {
             Ok(serialized) => Ok(Self {
                 lading_path,

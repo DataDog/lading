@@ -37,7 +37,14 @@ use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
+pub mod linear;
 pub mod stable;
+
+// An 'interval' is the period in which all counters reset. The throttle makes
+// no claims on units, but consider if a user intends to produce 1Mb/s the
+// 'interval' is one second and each tick corresponds to one microsecond. Each
+// microsecond accumulates 1 byte.
+const INTERVAL_TICKS: u64 = 1_000_000;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 #[serde(deny_unknown_fields)]
@@ -47,13 +54,23 @@ pub enum Config {
     /// A throttle that allows the user to produce as fast as possible.
     AllOut,
     /// A throttle that attempts stable load
-    Stable,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::Stable
-    }
+    Stable {
+        /// The maximum capacity of the throttle, beyond which no interval will
+        /// grow greater.
+        maximum_capacity: NonZeroU32,
+    },
+    /// A throttle that linearly increases load from `initial_capacity` to
+    /// `maximum_capacity` with an increase of `rate_of_change` per tick.
+    Linear {
+        /// The initial capacity of the linear throttle, the lowest capacity at
+        /// interval tick 0.
+        initial_capacity: u32,
+        /// The maximum capacity of the throttle, beyond which no interval will
+        /// grow greater.
+        maximum_capacity: NonZeroU32,
+        /// The rate of change per interval tick.
+        rate_of_change: u32,
+    },
 }
 
 /// Errors produced by [`Throttle`].
@@ -62,6 +79,9 @@ pub enum Error {
     /// Stable
     #[error(transparent)]
     Stable(#[from] stable::Error),
+    /// Linear
+    #[error(transparent)]
+    Linear(#[from] linear::Error),
 }
 
 #[async_trait]
@@ -115,6 +135,8 @@ impl Clock for RealClock {
 pub enum Throttle<C = RealClock> {
     /// Load that comes from this variant is stable with respect to the clock
     Stable(stable::Stable<C>),
+    /// Load that comes from this variant is stable with respect to the clock
+    Linear(linear::Linear<C>),
     /// Load that comes from this variant is as fast as possible with respect to
     /// the clock
     AllOut,
@@ -123,10 +145,20 @@ pub enum Throttle<C = RealClock> {
 impl Throttle<RealClock> {
     /// Create a new instance of `Throttle` with a real-time clock
     #[must_use]
-    pub fn new_with_config(config: Config, maximum_capacity: NonZeroU32) -> Self {
+    pub fn new_with_config(config: Config) -> Self {
         match config {
-            Config::Stable => Throttle::Stable(stable::Stable::with_clock(
+            Config::Stable { maximum_capacity } => Throttle::Stable(stable::Stable::with_clock(
                 maximum_capacity,
+                RealClock::default(),
+            )),
+            Config::Linear {
+                initial_capacity,
+                maximum_capacity,
+                rate_of_change,
+            } => Throttle::Linear(linear::Linear::with_clock(
+                initial_capacity,
+                maximum_capacity,
+                rate_of_change,
                 RealClock::default(),
             )),
             Config::AllOut => Throttle::AllOut,
@@ -148,6 +180,7 @@ where
     pub async fn wait(&mut self) -> Result<(), Error> {
         match self {
             Throttle::Stable(inner) => inner.wait().await?,
+            Throttle::Linear(inner) => inner.wait().await?,
             Throttle::AllOut => (),
         }
 
@@ -163,6 +196,7 @@ where
     pub async fn wait_for(&mut self, request: NonZeroU32) -> Result<(), Error> {
         match self {
             Throttle::Stable(inner) => inner.wait_for(request).await?,
+            Throttle::Linear(inner) => inner.wait_for(request).await?,
             Throttle::AllOut => (),
         }
 

@@ -108,9 +108,8 @@ pub struct Config {
     #[serde(default = "default_rename_per_name")]
     /// The number of rename per second
     pub rename_per_second: NonZeroU32,
-    /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    // Note: Unlike other generators, file_tree uses separate throttles for open and rename operations
+    // with their rates specified by open_per_second and rename_per_second fields
 }
 
 #[derive(Debug)]
@@ -144,8 +143,12 @@ impl FileTree {
             ("component_name".to_string(), "file_tree".to_string()),
         ];
 
-        let open_throttle = Throttle::new_with_config(config.throttle, config.open_per_second);
-        let rename_throttle = Throttle::new_with_config(config.throttle, config.rename_per_second);
+        let open_throttle = Throttle::new_with_config(lading_throttle::Config::Stable {
+            maximum_capacity: config.open_per_second,
+        });
+        let rename_throttle = Throttle::new_with_config(lading_throttle::Config::Stable {
+            maximum_capacity: config.rename_per_second,
+        });
         Ok(Self {
             name_len: config.name_len,
             open_throttle,

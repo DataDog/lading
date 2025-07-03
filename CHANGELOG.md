@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## Added
+- Introduced a linear throttle into the project, allowing users to specify
+  stable, linear and all-out throttles. Configuration is updated so that
+  'capacity' exists in the throttle struct itself, without breaking use-cases
+  where bytes-per-second are specified directly. bytes-per-second implies a
+  stable throttle.
 
 ## [0.26.0]
 ## Added

@@ -86,12 +86,11 @@ pub struct Config {
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
     /// The bytes per second to send or receive from the target
-    pub bytes_per_second: byte_unit::Byte,
+    pub bytes_per_second: Option<byte_unit::Byte>,
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    #[serde(default)]
-    pub throttle: lading_throttle::Config,
+    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -127,6 +126,15 @@ pub enum Error {
     /// Wrapper around [`hyper::Error`].
     #[error("HTTP error: {0}")]
     Hyper(#[from] hyper::Error),
+    /// Both `bytes_per_second` and throttle configurations provided
+    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
+    ConflictingThrottleConfig,
+    /// No throttle configuration provided
+    #[error("Either bytes_per_second or throttle configuration must be provided")]
+    NoThrottleConfig,
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -193,9 +201,18 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
+        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
+            (Some(bps), None) => {
+                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
+        let throttle = Throttle::new_with_config(throttle_config);
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 
@@ -234,7 +251,7 @@ impl SplunkHec {
             uri,
             token: config.token,
             block_cache,
-            throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+            throttle,
             metric_labels: labels,
             shutdown,
         })
