@@ -99,6 +99,7 @@ async-pidfd = "0.1"
 tempfile = "3.20"
 warp = "0.3"
 proptest = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
 default = []
@@ -109,3 +110,7 @@ doctest = false
 
 [[bin]]
 name = "lading"
+
+[[bench]]
+name = "prometheus_parser_bench"
+harness = false

@@ -175,12 +175,23 @@ pub(crate) async fn scrape_metrics(
                 additional_labels.push((tag_name.clone(), tag_val.clone()));
             }
             if let Some(labels) = parsed_metric.labels {
-                all_labels = Some([labels, additional_labels].concat());
+                // Convert borrowed label data to owned
+                let owned_labels: Vec<(String, String)> = labels
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.into_owned()))
+                    .collect();
+                all_labels = Some([owned_labels, additional_labels].concat());
             } else {
                 all_labels = Some(additional_labels);
             }
         } else {
-            all_labels = parsed_metric.labels;
+            // Convert borrowed label data to owned if present
+            all_labels = parsed_metric.labels.map(|labels| {
+                labels
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.into_owned()))
+                    .collect()
+            });
         }
 
         let value = parsed_metric.value;
