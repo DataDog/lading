@@ -148,11 +148,6 @@ impl Prometheus {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
 pub(crate) async fn scrape_metrics(
     client: &reqwest::Client,
     uri: &str,
@@ -169,6 +164,19 @@ pub(crate) async fn scrape_metrics(
         return;
     };
 
+    parse_prometheus_metrics(&text, tags, metrics);
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+pub(crate) fn parse_prometheus_metrics(
+    text: &str,
+    tags: Option<&FxHashMap<String, String>>,
+    metrics: Option<&Vec<String>>,
+) {
     // remember the type for each metric across lines
     let mut typemap = FxHashMap::default();
 
@@ -365,6 +373,26 @@ mod tests {
     memory_usage_bytes{process="test"} foobar
     "#;
 
+    fn parse_and_get_metrics(
+        s: &str,
+        tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
+    ) -> HashMap<
+        CompositeKey,
+        (
+            Option<metrics::Unit>,
+            Option<metrics::SharedString>,
+            metrics_util::debugging::DebugValue,
+        ),
+    > {
+        let dr = metrics_util::debugging::DebuggingRecorder::new();
+        let snapshotter = dr.snapshotter();
+        dr.install().expect("failed to install recorder");
+
+        parse_prometheus_metrics(s, tags.as_ref(), None);
+
+        snapshotter.snapshot().into_hashmap()
+    }
+
     async fn run_scrape_and_parse_metrics(
         s: &str,
         tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
@@ -412,10 +440,10 @@ mod tests {
         snapshotter.snapshot().into_hashmap()
     }
 
-    #[tokio::test]
-    async fn test_gauge_with_two_series() {
+    #[test]
+    fn test_gauge_with_two_series() {
         let tags = None;
-        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
+        let snapshot = parse_and_get_metrics(SINGLE_GAUGE_TWO_SERIES, tags);
 
         assert_eq!(snapshot.len(), 2);
 
@@ -458,10 +486,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_count_zero_labels() {
+    #[test]
+    fn test_count_zero_labels() {
         let tags = None;
-        let snapshot = run_scrape_and_parse_metrics(COUNT_ZERO_LABELS, tags).await;
+        let snapshot = parse_and_get_metrics(COUNT_ZERO_LABELS, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -479,10 +507,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_count_one_labels() {
+    #[test]
+    fn test_count_one_labels() {
         let tags = None;
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, tags).await;
+        let snapshot = parse_and_get_metrics(GAUGE_ONE_LABEL, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -503,11 +531,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_count_one_labels_with_sub_agent_label() {
+    #[test]
+    fn test_count_one_labels_with_sub_agent_label() {
         let mut tags: FxHashMap<String, String> = FxHashMap::default();
         tags.insert("sub-agent".to_string(), "testing-agent".to_string());
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_ONE_LABEL, Some(tags)).await;
+        let snapshot = parse_and_get_metrics(GAUGE_ONE_LABEL, Some(tags));
 
         assert_eq!(snapshot.len(), 1);
 
@@ -531,10 +559,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_gauge_label_with_spaces() {
+    #[test]
+    fn test_gauge_label_with_spaces() {
         let tags = None;
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_LABEL_WITH_SPACES, tags).await;
+        let snapshot = parse_and_get_metrics(GAUGE_LABEL_WITH_SPACES, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -562,17 +590,25 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_gauge_invalid_value() {
-        let snapshot = run_scrape_and_parse_metrics(GAUGE_INVALID_VALUE, None).await;
+    #[test]
+    fn test_gauge_invalid_value() {
+        let snapshot = parse_and_get_metrics(GAUGE_INVALID_VALUE, None);
+
+        assert_eq!(snapshot.len(), 0);
+    }
+
+    #[test]
+    fn test_counter_invalid_value() {
+        let snapshot = parse_and_get_metrics(COUNTER_INVALID_VALUE, None);
 
         assert_eq!(snapshot.len(), 0);
     }
 
     #[tokio::test]
-    async fn test_counter_invalid_value() {
-        let snapshot = run_scrape_and_parse_metrics(COUNTER_INVALID_VALUE, None).await;
+    async fn test_http_scraping_integration() {
+        let tags = None;
+        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
 
-        assert_eq!(snapshot.len(), 0);
+        assert_eq!(snapshot.len(), 2);
     }
 }
