@@ -8,6 +8,7 @@ members = [
   "lading_payload",
   "lading_throttle",
 ]
+exclude = ["fuzz"]
 
 [workspace.dependencies]
 bytes = { version = "1.10", default-features = false, features = ["std"] }

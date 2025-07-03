@@ -4,12 +4,16 @@
 //! software.
 //!
 
-use std::{str::FromStr, time::Duration};
+pub mod parser;
+
+use std::time::Duration;
 
 use metrics::{counter, gauge};
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
+
+use self::parser::{MetricType as ParserMetricType, PrometheusParser};
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
@@ -30,33 +34,6 @@ pub struct Config {
     metrics: Option<Vec<String>>,
     /// Optional additional tags to label target metrics
     tags: Option<FxHashMap<String, String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MetricType {
-    Gauge,
-    Counter,
-    Histogram,
-    Summary,
-}
-
-#[derive(Debug)]
-enum MetricTypeParseError {
-    UnknownType,
-}
-
-impl FromStr for MetricType {
-    type Err = MetricTypeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "counter" => Ok(Self::Counter),
-            "gauge" => Ok(Self::Gauge),
-            "histogram" => Ok(Self::Histogram),
-            "summary" => Ok(Self::Summary),
-            _ => Err(MetricTypeParseError::UnknownType),
-        }
-    }
 }
 
 /// The `Prometheus` target metrics implementation.
@@ -169,73 +146,26 @@ pub(crate) async fn scrape_metrics(
         return;
     };
 
-    // remember the type for each metric across lines
-    let mut typemap = FxHashMap::default();
+    // Use the new parser
+    let mut parser = PrometheusParser::new();
+    let parsed_metrics = parser.parse_text(&text);
 
-    // this deserves a real parser, but this will do for now.
-    // Format doc: https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md
-    for line in text.lines().filter_map(|l| {
-        let line = l.trim();
-        if line.is_empty() { None } else { Some(line) }
-    }) {
-        if line.starts_with("# HELP") {
-            continue;
-        }
-
-        if line.starts_with("# TYPE") {
-            let mut parts = line.split_ascii_whitespace().skip(2);
-            let name = parts.next().expect("parts iterator is missing name");
-            let metric_type = parts.next().expect("parts iterator is missing metric type");
-            let metric_type: MetricType = metric_type.parse().expect("failed to parse metric type");
-            // summary and histogram metrics additionally report names suffixed with _sum, _count, _bucket
-            if matches!(metric_type, MetricType::Histogram | MetricType::Summary) {
-                typemap.insert(format!("{name}_sum"), metric_type);
-                typemap.insert(format!("{name}_count"), metric_type);
-                typemap.insert(format!("{name}_bucket"), metric_type);
-            }
-            typemap.insert(name.to_owned(), metric_type);
-            continue;
-        }
-
-        let mut parts = if line.contains('}') {
-            line.split_inclusive('}').collect::<Vec<&str>>()
-        } else {
-            // line contains no labels
-            line.split_ascii_whitespace().collect::<Vec<&str>>()
-        }
-        .into_iter();
-
-        let name_and_labels = parts
-            .next()
-            .expect("parts iterator is missing name and labels");
-        let value = parts
-            .next()
-            .expect("parts iterator is missing value")
-            .split_ascii_whitespace()
-            .next()
-            .expect("parts iterator is missing value");
-
-        if value.contains('#') {
-            trace!("Unknown format: {value}");
-            continue;
-        }
-
-        let (name, labels) = {
-            if let Some((name, labels)) = name_and_labels.split_once('{') {
-                let labels = labels.trim_end_matches('}');
-                let labels = labels.split(',').map(|label| {
-                    let (label_name, label_value) = label
-                        .split_once('=')
-                        .expect("label failed to split on first =");
-                    let label_value = label_value.trim_matches('\"');
-                    (label_name.to_owned(), label_value.to_owned())
-                });
-                let labels = labels.collect::<Vec<_>>();
-                (name, Some(labels))
-            } else {
-                (name_and_labels, None)
+    for metric_result in parsed_metrics {
+        let parsed_metric = match metric_result {
+            Ok(m) => m,
+            Err(e) => {
+                trace!("Failed to parse metric: {:?}", e);
+                continue;
             }
         };
+
+        let name = parsed_metric.name.replace("__", ".");
+
+        if let Some(metrics) = metrics {
+            if !metrics.contains(&name) {
+                continue;
+            }
+        }
 
         // Add lading labels including user defined tags for this endpoint
         let all_labels: Option<Vec<(String, String)>>;
@@ -244,34 +174,19 @@ pub(crate) async fn scrape_metrics(
             for (tag_name, tag_val) in tags {
                 additional_labels.push((tag_name.clone(), tag_val.clone()));
             }
-            if let Some(labels) = labels {
+            if let Some(labels) = parsed_metric.labels {
                 all_labels = Some([labels, additional_labels].concat());
             } else {
                 all_labels = Some(additional_labels);
             }
         } else {
-            all_labels = labels;
+            all_labels = parsed_metric.labels;
         }
 
-        let metric_type = typemap.get(name);
-        let name = name.replace("__", ".");
+        let value = parsed_metric.value;
 
-        if let Some(metrics) = metrics {
-            if !metrics.contains(&name) {
-                continue;
-            }
-        }
-
-        match metric_type {
-            Some(MetricType::Gauge) => {
-                let value: f64 = match value.parse() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!("failed to parse gauge value {value} for metric {name}: {e}");
-                        continue;
-                    }
-                };
-
+        match parsed_metric.metric_type {
+            Some(ParserMetricType::Gauge) => {
                 if value.is_nan() {
                     warn!("Skipping NaN gauge value");
                     continue;
@@ -279,15 +194,7 @@ pub(crate) async fn scrape_metrics(
 
                 gauge!(format!("target/{name}"), &all_labels.unwrap_or_default()).set(value);
             }
-            Some(MetricType::Counter) => {
-                let value: f64 = match value.parse() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!("failed to parse counter value {value} for metric {name}: {e}");
-                        continue;
-                    }
-                };
-
+            Some(ParserMetricType::Counter) => {
                 if value.is_nan() {
                     warn!("Skipping NaN counter value");
                     continue;
