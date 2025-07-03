@@ -38,11 +38,11 @@ rpc_duration_seconds_count 2693
 "#;
 
 fn benchmark_parser(c: &mut Criterion) {
-    use lading::target_metrics::prometheus::parser::PrometheusParser;
+    use lading::target_metrics::prometheus::parser::Parser;
 
     c.bench_function("prometheus_parser", |b| {
         b.iter(|| {
-            let mut parser = PrometheusParser::new();
+            let mut parser = Parser::new();
             let results = parser.parse_text(black_box(SAMPLE_METRICS));
 
             // Ensure we actually process the results
@@ -53,7 +53,7 @@ fn benchmark_parser(c: &mut Criterion) {
 }
 
 fn benchmark_large_metrics(c: &mut Criterion) {
-    use lading::target_metrics::prometheus::parser::PrometheusParser;
+    use lading::target_metrics::prometheus::parser::Parser;
 
     // Generate a large metrics payload
     let mut large_metrics = String::with_capacity(1_000_000);
@@ -82,7 +82,7 @@ fn benchmark_large_metrics(c: &mut Criterion) {
 
     c.bench_function("prometheus_parser_large", |b| {
         b.iter(|| {
-            let mut parser = PrometheusParser::new();
+            let mut parser = Parser::new();
             let results = parser.parse_text(black_box(&large_metrics));
             let count = results.iter().filter(|r| r.is_ok()).count();
             black_box(count);
@@ -91,7 +91,7 @@ fn benchmark_large_metrics(c: &mut Criterion) {
 }
 
 fn benchmark_escaped_labels(c: &mut Criterion) {
-    use lading::target_metrics::prometheus::parser::PrometheusParser;
+    use lading::target_metrics::prometheus::parser::Parser;
 
     // Metrics with lots of escaped labels that require allocation
     let escaped_metrics = r#"
@@ -103,7 +103,7 @@ escaped_metric{json="{\"key\": \"value\", \"array\": [1, 2, 3]}"} 3.0
 
     c.bench_function("prometheus_parser_escaped", |b| {
         b.iter(|| {
-            let mut parser = PrometheusParser::new();
+            let mut parser = Parser::new();
             let results = parser.parse_text(black_box(&escaped_metrics));
             let count = results.iter().filter(|r| r.is_ok()).count();
             black_box(count);

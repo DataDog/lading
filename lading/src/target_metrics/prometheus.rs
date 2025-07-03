@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
-use self::parser::{MetricType as ParserMetricType, PrometheusParser};
+use self::parser::{MetricType, Parser};
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
@@ -146,8 +146,7 @@ pub(crate) async fn scrape_metrics(
         return;
     };
 
-    // Use the new parser
-    let mut parser = PrometheusParser::new();
+    let mut parser = Parser::new();
     let parsed_metrics = parser.parse_text(&text);
 
     for metric_result in parsed_metrics {
@@ -197,7 +196,7 @@ pub(crate) async fn scrape_metrics(
         let value = parsed_metric.value;
 
         match parsed_metric.metric_type {
-            Some(ParserMetricType::Gauge) => {
+            Some(MetricType::Gauge) => {
                 if value.is_nan() {
                     warn!("Skipping NaN gauge value");
                     continue;
@@ -205,7 +204,7 @@ pub(crate) async fn scrape_metrics(
 
                 gauge!(format!("target/{name}"), &all_labels.unwrap_or_default()).set(value);
             }
-            Some(ParserMetricType::Counter) => {
+            Some(MetricType::Counter) => {
                 if value.is_nan() {
                     warn!("Skipping NaN counter value");
                     continue;
@@ -237,8 +236,8 @@ pub(crate) async fn scrape_metrics(
     }
 }
 
-#[allow(clippy::needless_raw_string_hashes)]
-#[allow(clippy::mutable_key_type)]
+#[allow(clippy::needless_raw_string_hashes)] // Test data is more readable with consistent raw string format
+#[allow(clippy::mutable_key_type)] // CompositeKey has interior mutability
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
