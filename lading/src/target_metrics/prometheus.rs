@@ -14,8 +14,9 @@ use serde::Deserialize;
 use tracing::{error, info, trace, warn};
 
 // Regex to match Prometheus label pairs: label_name="label_value"
+// The value can be empty (e.g., label="")
 static LABEL_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(\w+)="([^"]+)""#).expect("Failed to compile label regex"));
+    Lazy::new(|| Regex::new(r#"(\w+)="([^"]*)""#).expect("Failed to compile label regex"));
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
@@ -353,49 +354,6 @@ mod tests {
     use warp;
     use warp::Filter;
 
-    const SINGLE_GAUGE_TWO_SERIES: &str = r#"
-    # HELP workloadmeta_stored_entities Number of entities in the store.
-    # TYPE workloadmeta_stored_entities gauge
-    workloadmeta_stored_entities{kind="container",source="node_orchestrator"} 35
-    workloadmeta_stored_entities{kind="container",source="runtime"} 36
-    "#;
-
-    const COUNT_ZERO_LABELS: &str = r#"
-    # TYPE request_count counter
-    request_count 1027
-    "#;
-
-    const GAUGE_ONE_LABEL: &str = r#"
-    # TYPE memory_usage_bytes gauge
-    memory_usage_bytes{process="test"} 5264384
-    "#;
-
-    const GAUGE_LABEL_WITH_SPACES: &str = r#"
-    # TYPE vector_build_info gauge
-    vector_build_info{arch="aarch64",debug="false",host="d0cf527728fe",revision="745babd 2024-09-11 14:55:36.802851761",rust_version="1.78",version="0.41.1"} 1 1729113558073
-    "#;
-
-    const GAUGE_INVALID_VALUE: &str = r#"
-    # TYPE memory_usage_bytes gauge
-    memory_usage_bytes{process="test"} foobar
-    "#;
-
-    const COUNTER_INVALID_VALUE: &str = r#"
-    # TYPE memory_usage_bytes counter
-    memory_usage_bytes{process="test"} foobar
-    "#;
-
-    const GAUGE_LABEL_VALUE_WITH_COMMA: &str = r#"
-    # HELP go_info Information about the Go environment.
-    # TYPE go_info gauge
-    go_info{version="go1.25rc1 X:jsonv2,greenteagc"} 1
-    "#;
-
-    const GAUGE_MULTIPLE_LABELS_WITH_SPECIAL_CHARS: &str = r#"
-    # TYPE test_metric gauge
-    test_metric{label1="value1",label2="value,with,commas",label3="value=with=equals",label4="normal"} 42
-    "#;
-
     fn parse_and_get_metrics(
         s: &str,
         tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
@@ -465,8 +423,15 @@ mod tests {
 
     #[test]
     fn test_gauge_with_two_series() {
+        let prom_text = r#"
+        # HELP workloadmeta_stored_entities Number of entities in the store.
+        # TYPE workloadmeta_stored_entities gauge
+        workloadmeta_stored_entities{kind="container",source="node_orchestrator"} 35
+        workloadmeta_stored_entities{kind="container",source="runtime"} 36
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(SINGLE_GAUGE_TWO_SERIES, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 2);
 
@@ -511,8 +476,13 @@ mod tests {
 
     #[test]
     fn test_count_zero_labels() {
+        let prom_text = r#"
+        # TYPE request_count counter
+        request_count 1027
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(COUNT_ZERO_LABELS, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -532,8 +502,13 @@ mod tests {
 
     #[test]
     fn test_count_one_labels() {
+        let prom_text = r#"
+        # TYPE memory_usage_bytes gauge
+        memory_usage_bytes{process="test"} 5264384
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(GAUGE_ONE_LABEL, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -556,9 +531,14 @@ mod tests {
 
     #[test]
     fn test_count_one_labels_with_sub_agent_label() {
+        let prom_text = r#"
+        # TYPE memory_usage_bytes gauge
+        memory_usage_bytes{process="test"} 5264384
+        "#;
+
         let mut tags: FxHashMap<String, String> = FxHashMap::default();
         tags.insert("sub-agent".to_string(), "testing-agent".to_string());
-        let snapshot = parse_and_get_metrics(GAUGE_ONE_LABEL, Some(tags));
+        let snapshot = parse_and_get_metrics(prom_text, Some(tags));
 
         assert_eq!(snapshot.len(), 1);
 
@@ -584,8 +564,13 @@ mod tests {
 
     #[test]
     fn test_gauge_label_with_spaces() {
+        let prom_text = r#"
+        # TYPE vector_build_info gauge
+        vector_build_info{arch="aarch64",debug="false",host="d0cf527728fe",revision="745babd 2024-09-11 14:55:36.802851761",rust_version="1.78",version="0.41.1"} 1 1729113558073
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(GAUGE_LABEL_WITH_SPACES, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -615,30 +600,53 @@ mod tests {
 
     #[test]
     fn test_gauge_invalid_value() {
-        let snapshot = parse_and_get_metrics(GAUGE_INVALID_VALUE, None);
+        let prom_text = r#"
+        # TYPE memory_usage_bytes gauge
+        memory_usage_bytes{process="test"} foobar
+        "#;
+
+        let snapshot = parse_and_get_metrics(prom_text, None);
 
         assert_eq!(snapshot.len(), 0);
     }
 
     #[test]
     fn test_counter_invalid_value() {
-        let snapshot = parse_and_get_metrics(COUNTER_INVALID_VALUE, None);
+        let prom_text = r#"
+        # TYPE memory_usage_bytes counter
+        memory_usage_bytes{process="test"} foobar
+        "#;
+
+        let snapshot = parse_and_get_metrics(prom_text, None);
 
         assert_eq!(snapshot.len(), 0);
     }
 
     #[tokio::test]
     async fn test_http_scraping_integration() {
+        let prom_text = r#"
+        # HELP workloadmeta_stored_entities Number of entities in the store.
+        # TYPE workloadmeta_stored_entities gauge
+        workloadmeta_stored_entities{kind="container",source="node_orchestrator"} 35
+        workloadmeta_stored_entities{kind="container",source="runtime"} 36
+        "#;
+
         let tags = None;
-        let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
+        let snapshot = run_scrape_and_parse_metrics(prom_text, tags).await;
 
         assert_eq!(snapshot.len(), 2);
     }
 
     #[test]
     fn test_gauge_label_value_with_comma() {
+        let prom_text = r#"
+        # HELP go_info Information about the Go environment.
+        # TYPE go_info gauge
+        go_info{version="go1.25rc1 X:jsonv2,greenteagc"} 1
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(GAUGE_LABEL_VALUE_WITH_COMMA, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -661,8 +669,13 @@ mod tests {
 
     #[test]
     fn test_gauge_multiple_labels_with_special_chars() {
+        let prom_text = r#"
+        # TYPE test_metric gauge
+        test_metric{label1="value1",label2="value,with,commas",label3="value=with=equals",label4="normal"} 42
+        "#;
+
         let tags = None;
-        let snapshot = parse_and_get_metrics(GAUGE_MULTIPLE_LABELS_WITH_SPECIAL_CHARS, tags);
+        let snapshot = parse_and_get_metrics(prom_text, tags);
 
         assert_eq!(snapshot.len(), 1);
 
@@ -683,6 +696,168 @@ mod tests {
         match metric.2 {
             metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 42.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_edge_case_labels() {
+        let prom_text = r#"
+        # TYPE edge_cases gauge
+        edge_cases{empty="",spaces="value with spaces",underscore_123="test",path="/var/log/app.log",url="https://example.com/path?query=1"} 1
+        "#;
+
+        let tags = None;
+        let snapshot = parse_and_get_metrics(prom_text, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/edge_cases",
+                    vec![
+                        Label::new("empty", ""),
+                        Label::new("spaces", "value with spaces"),
+                        Label::new("underscore_123", "test"),
+                        Label::new("path", "/var/log/app.log"),
+                        Label::new("url", "https://example.com/path?query=1"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_unicode_labels() {
+        let prom_text = r#"
+        # TYPE unicode_test gauge
+        unicode_test{emoji="🚀",chinese="你好",mixed="hello-世界"} 1
+        "#;
+
+        let tags = None;
+        let snapshot = parse_and_get_metrics(prom_text, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/unicode_test",
+                    vec![
+                        Label::new("emoji", "🚀"),
+                        Label::new("chinese", "你好"),
+                        Label::new("mixed", "hello-世界"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_numeric_label_names() {
+        let prom_text = r#"
+        # TYPE numeric_names gauge
+        numeric_names{label_123="value",_underscore="test",ALL_CAPS="VALUE",mixedCase_123="test"} 1
+        "#;
+
+        let tags = None;
+        let snapshot = parse_and_get_metrics(prom_text, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/numeric_names",
+                    vec![
+                        Label::new("label_123", "value"),
+                        Label::new("_underscore", "test"),
+                        Label::new("ALL_CAPS", "VALUE"),
+                        Label::new("mixedCase_123", "test"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_no_labels() {
+        let prom_text = r#"
+        # TYPE no_labels gauge
+        no_labels 42
+        "#;
+
+        let tags = None;
+        let snapshot = parse_and_get_metrics(prom_text, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts("target/no_labels", vec![]),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 42.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_mixed_quotes() {
+        let prom_text = r#"
+        # TYPE mixed_quotes gauge
+        mixed_quotes{quoted="value",unquoted=novalue,another="test"} 1
+        "#;
+
+        let tags = None;
+        let snapshot = parse_and_get_metrics(prom_text, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        // The regex should only capture properly quoted labels
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/mixed_quotes",
+                    vec![
+                        Label::new("quoted", "value"),
+                        Label::new("another", "test"),
+                        // Note: "unquoted" label is skipped because it doesn't match the regex
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
         }
