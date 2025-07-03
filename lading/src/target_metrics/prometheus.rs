@@ -7,9 +7,15 @@
 use std::{str::FromStr, time::Duration};
 
 use metrics::{counter, gauge};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use tracing::{error, info, trace, warn};
+
+// Regex to match Prometheus label pairs: label_name="label_value"
+static LABEL_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(\w+)="([^"]+)""#).expect("Failed to compile label regex"));
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 /// Errors produced by [`Prometheus`]
@@ -229,16 +235,22 @@ pub(crate) fn parse_prometheus_metrics(
         }
 
         let (name, labels) = {
-            if let Some((name, labels)) = name_and_labels.split_once('{') {
-                let labels = labels.trim_end_matches('}');
-                let labels = labels.split(',').map(|label| {
-                    let (label_name, label_value) = label
-                        .split_once('=')
-                        .expect("label failed to split on first =");
-                    let label_value = label_value.trim_matches('\"');
-                    (label_name.to_owned(), label_value.to_owned())
-                });
-                let labels = labels.collect::<Vec<_>>();
+            if let Some((name, labels_str)) = name_and_labels.split_once('{') {
+                let labels_str = labels_str.trim_end_matches('}');
+                let labels: Vec<(String, String)> = LABEL_REGEX
+                    .captures_iter(labels_str)
+                    .map(|cap| {
+                        let label_name = cap
+                            .get(1)
+                            .expect("regex should have label name capture group")
+                            .as_str();
+                        let label_value = cap
+                            .get(2)
+                            .expect("regex should have label value capture group")
+                            .as_str();
+                        (label_name.to_owned(), label_value.to_owned())
+                    })
+                    .collect();
                 (name, Some(labels))
             } else {
                 (name_and_labels, None)
@@ -371,6 +383,17 @@ mod tests {
     const COUNTER_INVALID_VALUE: &str = r#"
     # TYPE memory_usage_bytes counter
     memory_usage_bytes{process="test"} foobar
+    "#;
+
+    const GAUGE_LABEL_VALUE_WITH_COMMA: &str = r#"
+    # HELP go_info Information about the Go environment.
+    # TYPE go_info gauge
+    go_info{version="go1.25rc1 X:jsonv2,greenteagc"} 1
+    "#;
+
+    const GAUGE_MULTIPLE_LABELS_WITH_SPECIAL_CHARS: &str = r#"
+    # TYPE test_metric gauge
+    test_metric{label1="value1",label2="value,with,commas",label3="value=with=equals",label4="normal"} 42
     "#;
 
     fn parse_and_get_metrics(
@@ -610,5 +633,58 @@ mod tests {
         let snapshot = run_scrape_and_parse_metrics(SINGLE_GAUGE_TWO_SERIES, tags).await;
 
         assert_eq!(snapshot.len(), 2);
+    }
+
+    #[test]
+    fn test_gauge_label_value_with_comma() {
+        let tags = None;
+        let snapshot = parse_and_get_metrics(GAUGE_LABEL_VALUE_WITH_COMMA, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/go_info",
+                    vec![Label::new("version", "go1.25rc1 X:jsonv2,greenteagc")],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 1.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
+    }
+
+    #[test]
+    fn test_gauge_multiple_labels_with_special_chars() {
+        let tags = None;
+        let snapshot = parse_and_get_metrics(GAUGE_MULTIPLE_LABELS_WITH_SPECIAL_CHARS, tags);
+
+        assert_eq!(snapshot.len(), 1);
+
+        let metric = snapshot
+            .get(&CompositeKey::new(
+                MetricKind::Gauge,
+                Key::from_parts(
+                    "target/test_metric",
+                    vec![
+                        Label::new("label1", "value1"),
+                        Label::new("label2", "value,with,commas"),
+                        Label::new("label3", "value=with=equals"),
+                        Label::new("label4", "normal"),
+                    ],
+                ),
+            ))
+            .expect("metric not found");
+        match metric.2 {
+            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+                assert_eq!(ordered_float, 42.0);
+            }
+            _ => panic!("unexpected metric type"),
+        }
     }
 }
