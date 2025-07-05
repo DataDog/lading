@@ -1,0 +1,180 @@
+generator:
+  - kubernetes:
+      manifest:
+        node: |
+          apiVersion: v1
+          kind: Node
+          metadata:
+            annotations:
+              node.alpha.kubernetes.io/ttl: "0"
+              kwok.x-k8s.io/node: fake
+            labels:
+              beta.kubernetes.io/arch: amd64
+              beta.kubernetes.io/os: linux
+              kubernetes.io/arch: amd64
+              kubernetes.io/hostname: kwok-node
+              kubernetes.io/os: linux
+              kubernetes.io/role: agent
+              node-role.kubernetes.io/agent: ""
+              type: kwok
+            name: kwok-node
+          spec:
+            taints: # Avoid scheduling actual running pods to fake Node
+            - effect: NoSchedule
+              key: kwok.x-k8s.io/node
+              value: fake
+          status:
+            allocatable:
+              cpu: 32
+              memory: 256Gi
+              pods: 110
+            capacity:
+              cpu: 32
+              memory: 256Gi
+              pods: 110
+            nodeInfo:
+              architecture: amd64
+              bootID: ""
+              containerRuntimeVersion: ""
+              kernelVersion: ""
+              kubeProxyVersion: fake
+              kubeletVersion: fake
+              machineID: ""
+              operatingSystem: linux
+              osImage: ""
+              systemUUID: ""
+            phase: Running
+      number_of_instances: 10
+  - kubernetes:
+      manifest:
+        namespace: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: foobar
+  - kubernetes:
+      manifest:
+        pod: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            namespace: foobar
+          spec:
+            containers:
+              - name: sleep
+                image: busybox
+                command:
+                  - sleep
+                  - infinity
+      max_lifetime_seconds: 20
+      number_of_instances: 2
+  - kubernetes:
+      manifest:
+        deployment: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            namespace: foobar
+            name: foo
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: foo
+            template:
+              metadata:
+                labels:
+                  app: foo
+              spec:
+                containers:
+                  - name: netcat
+                    image: busybox
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        while true; do
+                          nc -l -s 0.0.0.0 -p 5000
+                        done
+                    ports:
+                      - containerPort: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
+  - kubernetes:
+      manifest:
+        service: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            namespace: foobar
+            name: foo
+          spec:
+            selector:
+              app: foo
+            ports:
+              - port: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
+  - kubernetes:
+      manifest:
+        deployment: |
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            namespace: foobar
+            name: bar
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: bar
+            template:
+              metadata:
+                labels:
+                  app: bar
+              spec:
+                nodeSelector:
+                  type: kwok
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - key: type
+                          operator: In
+                          values:
+                          - kwok
+                tolerations:
+                  - key: kwok.x-k8s.io/node
+                    operator: Equal
+                    value: fake
+                    effect: NoSchedule
+                containers:
+                  - name: netcat
+                    image: busybox
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        while true; do
+                          nc -l -s 0.0.0.0 -p 5000
+                        done
+                    ports:
+                      - containerPort: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
+  - kubernetes:
+      manifest:
+        service: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            namespace: foobar
+            name: bar
+          spec:
+            selector:
+              app: bar
+            ports:
+              - port: 5000
+      max_lifetime_seconds: 20
+      number_of_instances: 2
