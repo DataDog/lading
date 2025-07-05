@@ -139,7 +139,7 @@ impl FromStr for CliKeyValues {
 #[clap(group(
     ArgGroup::new("telemetry")
         .required(true)
-        .args(&["capture_path", "prometheus_addr", "prometheus_path"]),
+        .args(&["capture_path", "prometheus_addr", "prometheus_path", "no_capture"]),
 ))]
 #[clap(group(
      ArgGroup::new("experiment-duration")
@@ -196,6 +196,9 @@ struct Opts {
     /// capture-path
     #[clap(long)]
     prometheus_addr: Option<String>,
+    /// disable capture
+    #[clap(long)]
+    no_capture: bool,
     /// the maximum time to wait, in seconds, for controlled shutdown
     #[clap(long, default_value_t = 30)]
     max_shutdown_delay: u16,
@@ -227,7 +230,7 @@ enum ExtraCommands {
 #[clap(group(
     ArgGroup::new("config")
         .required(true)
-        .args(&["config-path", "config-content"]),
+        .args(&["config_path", "config_content"]),
 ))]
 struct ProcessTreeGen {
     /// path on disk to the configuration file
