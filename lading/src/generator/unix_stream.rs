@@ -42,8 +42,8 @@ pub struct Config {
     pub path: PathBuf,
     /// The payload variant
     pub variant: lading_payload::Config,
-    /// The bytes per second to send or receive from the target
-    pub bytes_per_second: Option<byte_unit::Byte>,
+    /// The bytes per second to send or receive from the target, per connection.
+    pub bytes_per_second: byte_unit::Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
@@ -52,7 +52,8 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
-    /// The total number of parallel connections to maintain
+    /// The total number of parallel connections to maintain, see documentation
+    /// on `bytes_per_second`.
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
@@ -134,18 +135,12 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle_config = match (config.bytes_per_second, &config.throttle) {
-            (Some(bytes_per_second), None) => {
-                let bytes_per_second =
-                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                }
-            }
-            (None, Some(throttle)) => (*throttle).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
+        let bytes_per_second =
+            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
+        // Report total load: per-connection rate * number of connections
+        let total_bytes_per_second =
+            bytes_per_second.get() as u64 * config.parallel_connections as u64;
+        gauge!("bytes_per_second", &labels).set(total_bytes_per_second as f64);
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
