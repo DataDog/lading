@@ -29,6 +29,7 @@ pub mod service_check;
 
 const MAX_CONTEXTS: u32 = 1_000_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
+const LENGTH_PREFIX_SIZE: usize = std::mem::size_of::<u32>();
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
@@ -566,9 +567,15 @@ impl DogStatsD {
         R: Rng + Sized,
         W: Write,
     {
-        let mut bytes_remaining = max_bytes.saturating_sub(std::mem::size_of::<usize>());
+        // If max_bytes is less than the length prefix size, we can't write anything
+        if max_bytes < LENGTH_PREFIX_SIZE {
+            return Ok(());
+        }
+
+        let mut bytes_remaining = max_bytes.saturating_sub(LENGTH_PREFIX_SIZE);
         let mut members = Vec::new();
-        // generate as many messages as we can fit
+        // Generate as many messages as we can fit, If we couldn't fit any
+        // members, don't write anything.
         loop {
             let member: Member = self.member_generator.generate(&mut rng)?;
             let encoding = format!("{member}");
@@ -581,7 +588,7 @@ impl DogStatsD {
                 None => break,
             }
         }
-        if bytes_remaining == max_bytes {
+        if members.is_empty() {
             return Ok(());
         }
 
