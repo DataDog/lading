@@ -90,6 +90,15 @@ Always add comments for:
 - Workarounds for external limitations
 - Any code that would make an experienced engineer pause and wonder "why?"
 
+NEVER write comments that state the obvious like:
+- "Create a handle for each connection" when the code says `let handle = block_cache.handle()`
+- "Loop through connections" before a for loop
+- "Check if condition" before an if statement
+- "Return the result" before a return statement
+
+If the code is self-documenting, DO NOT add a comment. Comments should provide
+insight that cannot be gleaned from reading the code itself.
+
 Crate versions are always given as XX.YY and not XX.YY.ZZ.
 
 # Testing
