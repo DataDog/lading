@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc f965826968fbd8d98defd9d210ec30e6062a03847e01d71196388f42cd8cfc5e # shrinks to name = "_", label_suffix = "", value = "0"
+cc a06321cbe8b295f0faddef00310ddc33521956d7e9d3c7cae84ac1ee160d46b0 # shrinks to name = "_", metric_type = "histogram"

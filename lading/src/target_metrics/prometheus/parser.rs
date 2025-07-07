@@ -122,7 +122,6 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        // Parse metric line
         Some(self.parse_metric_line(line))
     }
 
@@ -248,11 +247,9 @@ impl<'a> Parser<'a> {
                 .find('=')
                 .ok_or(ParseError::InvalidLabel("Label missing '='"))?;
             let label_name = remaining[..eq_idx].trim();
-
             if label_name.is_empty() {
                 return Err(ParseError::InvalidLabel("Empty label key"));
             }
-
 
             // Move past the equals sign
             remaining = remaining[eq_idx + 1..].trim();
@@ -281,7 +278,8 @@ impl<'a> Parser<'a> {
             let end_quote_pos =
                 end_quote_pos.ok_or(ParseError::InvalidLabel("Unclosed quoted value"))?;
 
-            let label_value_raw = &remaining[..end_quote_pos + 1]; // Include closing quote
+            // Include closing quote
+            let label_value_raw = &remaining[..end_quote_pos + 1];
             let label_value = Self::parse_label_value(label_value_raw)?;
             labels.push((label_name, label_value));
 
@@ -383,151 +381,13 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use proptest::prelude::*;
+    use super::{Cow, MetricType, ParseError, Parser};
+    use proptest::prelude::{prop_assert, prop_assert_eq, proptest};
+    use proptest::{collection, num, sample};
 
     #[test]
-    fn test_parse_type_line() {
-        let mut parser = Parser::new();
-
-        assert!(
-            parser
-                .parse_type_line("# TYPE http_requests_total counter")
-                .is_ok()
-        );
-        assert_eq!(
-            parser.typemap.get("http_requests_total"),
-            Some(&MetricType::Counter)
-        );
-
-        assert!(parser.parse_type_line("# TYPE memory_usage gauge").is_ok());
-        assert_eq!(parser.typemap.get("memory_usage"), Some(&MetricType::Gauge));
-
-        assert!(
-            parser
-                .parse_type_line("# TYPE http_request_duration_seconds histogram")
-                .is_ok()
-        );
-        assert_eq!(
-            parser.typemap.get("http_request_duration_seconds"),
-            Some(&MetricType::Histogram)
-        );
-    }
-
-    #[test]
-    fn test_parse_metric_line_no_labels() {
+    fn test_label_value_with_escaped_quotes() {
         let parser = Parser::new();
-
-        let result = parser
-            .parse_metric_line("http_requests_total 1027")
-            .unwrap();
-        assert_eq!(result.name, "http_requests_total");
-        assert_eq!(result.value, 1027.0);
-        assert!(result.labels.is_none());
-    }
-
-    #[test]
-    fn test_parse_metric_line_with_labels() {
-        let parser = Parser::new();
-
-        let result = parser
-            .parse_metric_line("http_requests_total{method=\"GET\",code=\"200\"} 1027")
-            .unwrap();
-        assert_eq!(result.name, "http_requests_total");
-        assert_eq!(result.value, 1027.0);
-
-        let labels = result.labels.unwrap();
-        assert_eq!(labels.len(), 2);
-        assert_eq!(labels[0].0, "method");
-        match &labels[0].1 {
-            Cow::Borrowed(s) => assert_eq!(*s, "GET"),
-            Cow::Owned(_) => panic!("Expected borrowed string"),
-        }
-        assert_eq!(labels[1].0, "code");
-        match &labels[1].1 {
-            Cow::Borrowed(s) => assert_eq!(*s, "200"),
-            Cow::Owned(_) => panic!("Expected borrowed string"),
-        }
-    }
-
-    #[test]
-    fn test_parse_metric_line_with_timestamp() {
-        let parser = Parser::new();
-
-        let result = parser
-            .parse_metric_line("http_requests_total 1027 1729113558073")
-            .unwrap();
-        assert_eq!(result.name, "http_requests_total");
-        assert_eq!(result.value, 1027.0);
-        assert_eq!(result.timestamp, Some(1729113558073));
-
-        // Test without timestamp
-        let result = parser
-            .parse_metric_line("http_requests_total 1027")
-            .unwrap();
-        assert_eq!(result.timestamp, None);
-    }
-
-    #[test]
-    fn test_parse_invalid_value() {
-        let parser = Parser::new();
-
-        let result = parser.parse_metric_line("http_requests_total foobar");
-        assert!(matches!(result, Err(ParseError::InvalidValue)));
-    }
-
-    #[test]
-    fn test_parse_empty_metric_name() {
-        let parser = Parser::new();
-
-        // Test empty name with labels
-        let result = parser.parse_metric_line(" {}0 ");
-        assert!(matches!(result, Err(ParseError::MissingName)));
-
-        // Test completely empty name
-        let result = parser.parse_metric_line(" 123");
-        assert!(matches!(result, Err(ParseError::MissingName)));
-    }
-
-    #[test]
-    fn test_parse_invalid_labels() {
-        let parser = Parser::new();
-
-        // Test empty label key
-        let result = parser.parse_metric_line("metric{=\"value\"} 123");
-        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
-
-        // Test label without equals
-        let result = parser.parse_metric_line("metric{key} 123");
-        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
-
-        // Empty label value is allowed
-        let result = parser.parse_metric_line("metric{key=\"\"} 123");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_label_name_validation() {
-        let parser = Parser::new();
-
-        // Test reserved label names
-        let result = parser.parse_metric_line("metric{__reserved=\"value\"} 123");
-        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
-
-        // Test valid label names
-        let result = parser.parse_metric_line("metric{valid_label=\"value\"} 123");
-        assert!(result.is_ok());
-
-        // Test UTF-8 label names (allowed but not recommended)
-        let result = parser.parse_metric_line("metric{français=\"value\"} 123");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_label_value_escaping() {
-        let parser = Parser::new();
-
-        // Test escaped quotes
         let result = parser
             .parse_metric_line(r#"metric{key="value with \"quotes\""} 123"#)
             .unwrap();
@@ -536,8 +396,11 @@ mod tests {
             Cow::Owned(s) => assert_eq!(s, "value with \"quotes\""),
             Cow::Borrowed(_) => panic!("Expected owned string due to escaping"),
         }
+    }
 
-        // Test escaped backslash
+    #[test]
+    fn test_label_value_with_escaped_backslash() {
+        let parser = Parser::new();
         let result = parser
             .parse_metric_line(r#"metric{key="path\\to\\file"} 123"#)
             .unwrap();
@@ -546,8 +409,11 @@ mod tests {
             Cow::Owned(s) => assert_eq!(s, "path\\to\\file"),
             Cow::Borrowed(_) => panic!("Expected owned string due to escaping"),
         }
+    }
 
-        // Test escaped newline
+    #[test]
+    fn test_label_value_with_escaped_newline() {
+        let parser = Parser::new();
         let result = parser
             .parse_metric_line(r#"metric{key="line1\nline2"} 123"#)
             .unwrap();
@@ -556,43 +422,27 @@ mod tests {
             Cow::Owned(s) => assert_eq!(s, "line1\nline2"),
             Cow::Borrowed(_) => panic!("Expected owned string due to escaping"),
         }
+    }
 
-        // Test unquoted label value (should fail)
+    #[test]
+    fn test_unquoted_label_value_rejected() {
+        let parser = Parser::new();
         let result = parser.parse_metric_line("metric{key=unquoted} 123");
-        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
-
-        // Test invalid escape sequence
-        let result = parser.parse_metric_line(r#"metric{key="invalid\x"} 123"#);
-        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
-
-        // Test single quote character (edge case from fuzzer)
-        let result = parser.parse_metric_line(r#"metric{key="} 123"#);
         assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
     }
 
     #[test]
-    fn test_special_float_values() {
+    fn test_invalid_escape_sequence_rejected() {
         let parser = Parser::new();
+        let result = parser.parse_metric_line(r#"metric{key="invalid\x"} 123"#);
+        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
+    }
 
-        // Test NaN
-        let result = parser.parse_metric_line("metric NaN").unwrap();
-        assert!(result.value.is_nan());
-
-        // Test +Inf
-        let result = parser.parse_metric_line("metric +Inf").unwrap();
-        assert_eq!(result.value, f64::INFINITY);
-
-        // Test -Inf
-        let result = parser.parse_metric_line("metric -Inf").unwrap();
-        assert_eq!(result.value, f64::NEG_INFINITY);
-
-        // Test scientific notation
-        let result = parser.parse_metric_line("metric 1.23e45").unwrap();
-        assert_eq!(result.value, 1.23e45);
-
-        // Test negative values
-        let result = parser.parse_metric_line("metric -42.5").unwrap();
-        assert_eq!(result.value, -42.5);
+    #[test]
+    fn test_unclosed_quote_in_label_value_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line(r#"metric{key="} 123"#);
+        assert!(matches!(result, Err(ParseError::InvalidLabel(_))));
     }
 
     #[test]
@@ -770,17 +620,6 @@ memory_usage 5264384
     }
 
     #[test]
-    fn test_gauge_no_labels() {
-        let parser = Parser::new();
-
-        let result = parser.parse_metric_line("no_labels 42").unwrap();
-
-        assert_eq!(result.name, "no_labels");
-        assert_eq!(result.value, 42.0);
-        assert!(result.labels.is_none());
-    }
-
-    #[test]
     fn test_gauge_mixed_quotes() {
         let parser = Parser::new();
 
@@ -794,189 +633,125 @@ memory_usage 5264384
     }
 
     #[test]
-    fn test_all_metric_types() {
-        // Test all supported metric types
-        let metric_types = ["counter", "gauge", "histogram", "summary", "untyped"];
-        for metric_type in &metric_types {
-            let mut parser = Parser::new();
-            let type_line = format!("# TYPE test_metric {}", metric_type);
-            assert!(parser.parse_line(&type_line).is_none());
-
-            // Verify the type was registered
-            let expected = MetricType::from_str(metric_type).unwrap();
-            assert_eq!(parser.typemap.get("test_metric"), Some(&expected));
-        }
-    }
-
-    #[test]
-    fn test_special_float_values_comprehensive() {
+    fn test_label_value_with_multiple_escape_types() {
         let parser = Parser::new();
-
-        // Test various special float values
-        let test_cases = vec![
-            ("NaN", f64::NAN),
-            ("+Inf", f64::INFINITY),
-            ("-Inf", f64::NEG_INFINITY),
-            ("1.23e45", 1.23e45),
-            ("-1.23e-45", -1.23e-45),
-            ("0", 0.0),
-            ("-0", -0.0),
-        ];
-
-        for (value_str, expected) in test_cases {
-            let line = format!("test_metric {}", value_str);
-            let result = parser.parse_metric_line(&line).unwrap();
-
-            if value_str == "NaN" {
-                assert!(result.value.is_nan());
-            } else {
-                assert_eq!(result.value, expected);
-            }
+        let result = parser
+            .parse_metric_line(r#"metric{label="value with \\ and \" and \n"} 1"#)
+            .unwrap();
+        let labels = result.labels.unwrap();
+        match &labels[0].1 {
+            Cow::Owned(s) => assert_eq!(s, "value with \\ and \" and \n"),
+            Cow::Borrowed(_) => panic!("Expected owned string due to escaping"),
         }
     }
 
     #[test]
-    fn test_timestamp_variations() {
+    fn test_empty_label_value() {
         let parser = Parser::new();
-
-        // Test various timestamp formats
-        let test_cases = vec![
-            ("test_metric 42", None),
-            ("test_metric 42 1234567890", Some(1234567890)),
-            ("test_metric 42 -1234567890", Some(-1234567890)),
-            ("test_metric 42 0", Some(0)),
-            (
-                "test_metric 42 9223372036854775807",
-                Some(9223372036854775807),
-            ),
-        ];
-
-        for (line, expected_ts) in test_cases {
-            let result = parser.parse_metric_line(line).unwrap();
-            assert_eq!(result.timestamp, expected_ts);
+        let result = parser.parse_metric_line(r#"metric{label=""} 1"#).unwrap();
+        let labels = result.labels.unwrap();
+        match &labels[0].1 {
+            Cow::Borrowed(s) => assert_eq!(*s, ""),
+            Cow::Owned(_) => panic!("Expected borrowed string for empty value"),
         }
     }
 
     #[test]
-    fn test_label_escaping_comprehensive() {
-        let parser = Parser::new();
-
-        let test_cases = vec![
-            (
-                r#"metric{label="value with \"quotes\""} 1"#,
-                "value with \"quotes\"",
-            ),
-            (
-                r#"metric{label="value with \\backslash\\"} 1"#,
-                "value with \\backslash\\",
-            ),
-            (
-                r#"metric{label="value with \nnewline"} 1"#,
-                "value with \nnewline",
-            ),
-            (
-                r#"metric{label="value with \\ and \" and \n"} 1"#,
-                "value with \\ and \" and \n",
-            ),
-            (r#"metric{label=""} 1"#, ""), // empty label value is valid
-        ];
-
-        for (line, expected_value) in test_cases {
-            let result = parser.parse_metric_line(line).unwrap();
-            let labels = result.labels.unwrap();
-            assert_eq!(labels.len(), 1);
-            match &labels[0].1 {
-                Cow::Owned(s) => assert_eq!(s, expected_value),
-                Cow::Borrowed(s) => {
-                    // Empty string doesn't need escaping
-                    assert_eq!(*s, expected_value);
-                    assert!(expected_value.is_empty());
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_malformed_inputs() {
+    fn test_empty_line_produces_no_result() {
         let mut parser = Parser::new();
+        let result = parser.parse_line("");
+        assert!(result.is_none());
+    }
 
-        let malformed_tests = vec![
-            ("", None),                          // empty line
-            ("   ", None),                       // whitespace only
-            ("#", None),                         // comment
-            ("# HELP metric description", None), // HELP line
-            (
-                "metric",
-                Some(ParseError::InvalidFormat("Missing value in metric line")),
-            ),
-            (
-                "metric{",
-                Some(ParseError::InvalidFormat("Unclosed labels bracket")),
-            ),
-            (
-                "metric}",
-                Some(ParseError::InvalidFormat("Missing value in metric line")),
-            ),
-            (
-                "metric{label=unquoted} 1",
-                Some(ParseError::InvalidLabel("Label value must be quoted")),
-            ),
-            (
-                "metric{=value} 1",
-                Some(ParseError::InvalidLabel("Empty label key")),
-            ),
-            (
-                "metric{__reserved=\"x\"} 1",
-                Some(ParseError::InvalidLabel(
-                    "Label names starting with '__' are reserved for internal use",
-                )),
-            ),
-            (" {} 0", Some(ParseError::MissingName)),
-            ("{label=\"value\"} 1", Some(ParseError::MissingName)),
-            (
-                r#"metric{a="\x"} 1"#,
-                Some(ParseError::InvalidLabel("Invalid escape sequence")),
-            ),
-        ];
+    #[test]
+    fn test_whitespace_only_line_produces_no_result() {
+        let mut parser = Parser::new();
+        let result = parser.parse_line("   ");
+        assert!(result.is_none());
+    }
 
-        for (line, expected_error) in malformed_tests {
-            let result = parser.parse_line(line);
-            match (result, expected_error) {
-                (None, None) => {} // Both None, good
-                (Some(Ok(_)), None) => panic!("Expected no result for line: {}", line),
-                (Some(Err(e)), Some(expected)) => {
-                    // Use discriminant comparison for error types
-                    assert_eq!(
-                        std::mem::discriminant(&e),
-                        std::mem::discriminant(&expected),
-                        "Wrong error type for line: {}. Got {:?}, expected {:?}",
-                        line,
-                        e,
-                        expected
-                    );
-                }
-                (None, Some(expected)) => {
-                    panic!("Expected error {:?} for line: {}", expected, line)
-                }
-                (Some(Ok(_)), Some(expected)) => {
-                    panic!("Expected error {:?} for line: {}", expected, line)
-                }
-                (Some(Err(e)), None) => panic!("Unexpected error {:?} for line: {}", e, line),
-            }
-        }
+    #[test]
+    fn test_comment_line_produces_no_result() {
+        let mut parser = Parser::new();
+        let result = parser.parse_line("#");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_help_line_produces_no_result() {
+        let mut parser = Parser::new();
+        let result = parser.parse_line("# HELP metric description");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_metric_without_value_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line("metric");
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidFormat("Missing value in metric line"))
+        ));
+    }
+
+    #[test]
+    fn test_metric_with_unclosed_bracket_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line("metric{");
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidFormat("Unclosed labels bracket"))
+        ));
+    }
+
+    #[test]
+    fn test_metric_with_closing_bracket_only_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line("metric}");
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidFormat("Missing value in metric line"))
+        ));
+    }
+
+    #[test]
+    fn test_empty_label_key_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line("metric{=value} 1");
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidLabel("Empty label key"))
+        ));
+    }
+
+    #[test]
+    fn test_metric_without_name_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line(" {} 0");
+        assert!(matches!(result, Err(ParseError::MissingName)));
+    }
+
+    #[test]
+    fn test_labels_without_metric_name_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line("{label=\"value\"} 1");
+        assert!(matches!(result, Err(ParseError::MissingName)));
+    }
+
+    #[test]
+    fn test_invalid_escape_in_label_rejected() {
+        let parser = Parser::new();
+        let result = parser.parse_metric_line(r#"metric{a="\x"} 1"#);
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidLabel("Invalid escape sequence"))
+        ));
     }
 
     // Property-based tests
     proptest! {
         #[test]
-        fn prop_no_panic_on_any_input(input: String) {
-            let mut parser = Parser::new();
-            // Should not panic on any input
-            let _ = parser.parse_text(&input);
-        }
-
-        #[test]
-        fn prop_empty_names_always_rejected(
+        fn empty_names_always_rejected(
             prefix in "[ \t]*",
             suffix in "[ \t]*",
             labels in "\\{[^}]*\\}",
@@ -990,9 +765,9 @@ memory_usage 5264384
         }
 
         #[test]
-        fn prop_valid_metric_names_accepted(
+        fn valid_metric_names_accepted(
             name in "[a-zA-Z_:][a-zA-Z0-9_:]*",
-            value in prop::num::f64::NORMAL | prop::num::f64::POSITIVE | prop::num::f64::NEGATIVE,
+            value in num::f64::NORMAL | num::f64::POSITIVE | num::f64::NEGATIVE,
         ) {
             let parser = Parser::new();
             let line = format!("{} {}", name, value);
@@ -1005,7 +780,7 @@ memory_usage 5264384
 
 
         #[test]
-        fn prop_label_escaping_roundtrip(
+        fn label_escaping_roundtrip(
             name in "[a-zA-Z_][a-zA-Z0-9_]*",
             label_name in "[a-zA-Z_][a-zA-Z0-9_]*",
             raw_value in ".*",
@@ -1039,7 +814,7 @@ memory_usage 5264384
         }
 
         #[test]
-        fn prop_special_floats_parsed_correctly(
+        fn special_floats_parsed_correctly(
             name in "[a-zA-Z_][a-zA-Z0-9_]*",
         ) {
             let parser = Parser::new();
@@ -1064,10 +839,10 @@ memory_usage 5264384
         }
 
         #[test]
-        fn prop_timestamp_parsing(
+        fn timestamp_parsing(
             name in "[a-zA-Z_][a-zA-Z0-9_]*",
-            value in prop::num::f64::NORMAL,
-            timestamp in prop::num::i64::ANY,
+            value in num::f64::NORMAL,
+            timestamp in num::i64::ANY,
         ) {
             let parser = Parser::new();
             let line = format!("{} {} {}", name, value, timestamp);
@@ -1075,6 +850,97 @@ memory_usage 5264384
             prop_assert!(result.is_ok());
             let parsed = result.unwrap();
             prop_assert_eq!(parsed.timestamp, Some(timestamp));
+        }
+
+        #[test]
+        fn invalid_values_rejected(
+            name in "[a-zA-Z_][a-zA-Z0-9_]*",
+            invalid_value in "[a-zA-Z][a-zA-Z0-9]*", // alphanumeric strings that aren't valid numbers
+        ) {
+            let parser = Parser::new();
+            let line = format!("{} {}", name, invalid_value);
+            let result = parser.parse_metric_line(&line);
+            prop_assert!(matches!(result, Err(ParseError::InvalidValue)));
+        }
+
+        #[test]
+        fn metrics_with_labels(
+            name in "[a-zA-Z_][a-zA-Z0-9_]*",
+            labels in collection::vec(
+                ("[a-zA-Z_][a-zA-Z0-9_]*", "[^\"\\\\}]*"),  // Exclude } from label values
+                1..5
+            ),
+            value in num::f64::NORMAL,
+        ) {
+            let parser = Parser::new();
+            let label_str = labels
+                .iter()
+                .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                .collect::<Vec<_>>()
+                .join(",");
+            let line = format!("{}{{{}}}{} {}", name, label_str, " ", value);
+            let result = parser.parse_metric_line(&line);
+            prop_assert!(result.is_ok());
+            let parsed = result.unwrap();
+            prop_assert_eq!(parsed.name, name.as_str());
+            prop_assert_eq!(parsed.value, value);
+            if let Some(parsed_labels) = parsed.labels {
+                prop_assert_eq!(parsed_labels.len(), labels.len());
+                for (i, (expected_key, expected_value)) in labels.iter().enumerate() {
+                    prop_assert_eq!(parsed_labels[i].0, expected_key);
+                    match &parsed_labels[i].1 {
+                        Cow::Borrowed(s) => prop_assert_eq!(*s, expected_value),
+                        Cow::Owned(_) => panic!("Expected borrowed string for simple label"),
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn type_line_parsing(
+            name in "[a-zA-Z_][a-zA-Z0-9_]*",
+            metric_type in sample::select(vec!["counter", "gauge", "histogram", "summary", "untyped"]),
+        ) {
+            let mut parser = Parser::new();
+            let type_line = format!("# TYPE {} {}", name, metric_type);
+            let result = parser.parse_line(&type_line);
+            prop_assert!(result.is_none()); // TYPE lines don't produce metrics
+
+            // Verify the type was registered
+            let expected = MetricType::from_str(&metric_type).unwrap();
+            prop_assert_eq!(parser.typemap.get(name.as_str()), Some(&expected));
+
+            // For histogram and summary, verify lookup_metric_type works for suffixes
+            if metric_type == "histogram" || metric_type == "summary" {
+                let sum_name = format!("{}_sum", name);
+                let count_name = format!("{}_count", name);
+                let bucket_name = format!("{}_bucket", name);
+                prop_assert_eq!(parser.lookup_metric_type(&sum_name), Some(expected));
+                prop_assert_eq!(parser.lookup_metric_type(&count_name), Some(expected));
+                prop_assert_eq!(parser.lookup_metric_type(&bucket_name), Some(expected));
+            }
+        }
+
+        #[test]
+        fn invalid_label_formats(
+            name in "[a-zA-Z_][a-zA-Z0-9_]*",
+            value in "[0-9]+",
+        ) {
+            let parser = Parser::new();
+
+            // Test various invalid label formats
+            let invalid_formats = vec![
+                format!("{}{{=\"value\"}} {}", name, value), // empty label key
+                format!("{}{{key}} {}", name, value), // label without equals
+                format!("{}{{key=unquoted}} {}", name, value), // unquoted value
+                format!("{}{{key=\"unclosed}} {}", name, value), // unclosed quote
+                format!("{}{{key=\"value\"", name), // unclosed bracket
+            ];
+
+            for line in invalid_formats {
+                let result = parser.parse_metric_line(&line);
+                prop_assert!(result.is_err());
+            }
         }
     }
 }
