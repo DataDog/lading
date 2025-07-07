@@ -12,7 +12,6 @@
 //!
 
 use crate::common::PeekableReceiver;
-use futures::future::join_all;
 use lading_payload::block::{self, Block};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
@@ -22,7 +21,7 @@ use std::{num::NonZeroU32, path::PathBuf, thread};
 use tokio::{
     net,
     sync::{broadcast::Receiver, mpsc},
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinSet},
 };
 use tracing::{debug, error, info, warn};
 
@@ -96,7 +95,7 @@ pub enum Error {
 /// This generator is responsible for sending data to the target via UDS
 /// streams.
 pub struct UnixStream {
-    handles: Vec<JoinHandle<Result<(), Error>>>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
     startup: tokio::sync::broadcast::Sender<()>,
 }
@@ -131,12 +130,12 @@ impl UnixStream {
             NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
         // Report total load: per-connection rate * number of connections
         let total_bytes_per_second =
-            bytes_per_second.get() as u64 * config.parallel_connections as u64;
+            u64::from(bytes_per_second.get()) * u64::from(config.parallel_connections);
         gauge!("bytes_per_second", &labels).set(total_bytes_per_second as f64);
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
-        let mut handles = Vec::new();
+        let mut handles = JoinSet::new();
         for _ in 0..config.parallel_connections {
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -158,7 +157,7 @@ impl UnixStream {
                 shutdown: shutdown.clone(),
             };
 
-            handles.push(tokio::spawn(child.spin(startup.subscribe())));
+            handles.spawn(child.spin(startup.subscribe()));
         }
 
         Ok(Self {
@@ -181,7 +180,7 @@ impl UnixStream {
         self.startup.send(())?;
         self.shutdown.recv().await;
         info!("shutdown signal received");
-        for res in join_all(self.handles.drain(..)).await {
+        while let Some(res) = self.handles.join_next().await {
             match res {
                 Ok(Ok(())) => continue,
                 Ok(Err(err)) => return Err(err),
