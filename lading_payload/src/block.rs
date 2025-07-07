@@ -268,13 +268,8 @@ impl Handle {
 /// et al.
 ///
 /// We expect to expand the different modes of `Cache` operation in the future.
-pub enum Cache {
-    /// A fixed size cache of blocks. Blocks are looped over in a round-robin
-    /// fashion.
-    Fixed {
-        /// Shared cache data
-        data: Arc<CacheData>,
-    },
+pub struct Cache {
+    data: Arc<CacheData>,
 }
 
 impl Cache {
@@ -458,7 +453,7 @@ impl Cache {
             .map(|block| u64::from(block.total_bytes.get()))
             .sum();
 
-        Ok(Self::Fixed {
+        Ok(Self {
             data: Arc::new(CacheData {
                 blocks,
                 total_cycle_size,
@@ -472,11 +467,9 @@ impl Cache {
     /// allowing multiple handles to read from the same cache independently.
     #[must_use]
     pub fn handle(&self) -> Handle {
-        match self {
-            Self::Fixed { data } => Handle {
-                cache: Arc::clone(data),
-                idx: 0,
-            },
+        Handle {
+            cache: Arc::clone(&self.data),
+            idx: 0,
         }
     }
 
@@ -485,9 +478,7 @@ impl Cache {
     /// This is primarily useful for inspection and debugging purposes.
     #[must_use]
     pub fn blocks(&self) -> &[Block] {
-        match self {
-            Self::Fixed { data } => &data.blocks,
-        }
+        &self.data.blocks
     }
 
     /// Run `Cache` forward on the user-provided mpsc sender.
@@ -502,15 +493,11 @@ impl Cache {
     /// is closed.
     #[allow(clippy::needless_pass_by_value)]
     pub fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
-        match self {
-            Self::Fixed { data } => {
-                let mut idx = 0;
-                let blocks = &data.blocks;
-                loop {
-                    snd.blocking_send(blocks[idx].clone())?;
-                    idx = (idx + 1) % blocks.len();
-                }
-            }
+        let mut idx = 0;
+        let blocks = &self.data.blocks;
+        loop {
+            snd.blocking_send(blocks[idx].clone())?;
+            idx = (idx + 1) % blocks.len();
         }
     }
 }
