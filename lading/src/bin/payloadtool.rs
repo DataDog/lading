@@ -50,10 +50,8 @@ fn generate_and_check(
 ) -> Result<(), Error> {
     let mut rng = StdRng::from_seed(seed);
     let start = Instant::now();
-    let blocks = match block::Cache::fixed(&mut rng, total_bytes, max_block_size.as_u128(), config)?
-    {
-        block::Cache::Fixed { blocks, .. } => blocks,
-    };
+    let block_cache = block::Cache::fixed(&mut rng, total_bytes, max_block_size.as_u128(), config)?;
+    let blocks = block_cache.blocks();
     info!("Payload generation took {:?}", start.elapsed());
     trace!("Payload: {:#?}", blocks);
 

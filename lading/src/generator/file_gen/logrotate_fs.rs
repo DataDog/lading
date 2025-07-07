@@ -145,6 +145,7 @@ impl Server {
             config.maximum_block_size.as_u128(),
             &config.variant,
         )?;
+        let handle = block_cache.handle();
 
         let start_time = std::time::Instant::now();
         let start_time_system = std::time::SystemTime::now();
@@ -154,7 +155,7 @@ impl Server {
             start_time.elapsed().as_secs(),
             config.total_rotations,
             config.maximum_bytes_per_log.as_u128() as u64,
-            block_cache,
+            handle,
             config.max_depth,
             config.concurrent_logs,
             config.load_profile.to_model(),

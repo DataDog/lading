@@ -289,7 +289,7 @@ pub(crate) struct State {
     root_inode: Inode,
     now: Tick,
     initial_tick: Tick,
-    block_cache: block::Cache,
+    handle: block::Handle,
     max_bytes_per_file: u64,
     max_rotations: u8,
     // [GroupID, [Names]]. The interior Vec have size `max_rotations`.
@@ -307,7 +307,7 @@ impl std::fmt::Debug for State {
             .field("nodes", &self.nodes)
             .field("root_inode", &self.root_inode)
             .field("now", &self.now)
-            // intentionally leaving out block_cache
+            // intentionally leaving out handle
             // intentionally leaving out inode_scratch
             .field("max_rotations", &self.max_rotations)
             .field("max_bytes_per_file", &self.max_bytes_per_file)
@@ -348,14 +348,14 @@ pub(crate) enum NodeType {
 
 impl State {
     /// Create a new instance of `State`.
-    #[tracing::instrument(skip(rng, block_cache))]
+    #[tracing::instrument(skip(rng, handle))]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         rng: &mut R,
         initial_tick: Tick,
         max_rotations: u8,
         max_bytes_per_file: u64,
-        block_cache: block::Cache,
+        handle: block::Handle,
         max_depth: u8,
         concurrent_logs: u16,
         load_profile: LoadProfile,
@@ -380,7 +380,7 @@ impl State {
             root_inode,
             initial_tick,
             now: initial_tick,
-            block_cache,
+            handle,
             max_bytes_per_file,
             max_rotations,
             group_names: Vec::new(),
@@ -850,11 +850,11 @@ impl State {
                 let end_offset = offset as u64 + to_read as u64;
                 file.max_offset_observed = file.max_offset_observed.max(end_offset);
 
-                // Get data from block_cache without worrying about blocks
-                let data = self.block_cache.read_at(offset as u64, to_read);
+                // Get data from handle without worrying about blocks
+                let data = self.handle.read_at(offset as u64, to_read);
                 assert!(
                     data.len() == to_read,
-                    "Data returned from block_cache is distinct from the read size: {l} != {to_read}",
+                    "Data returned from handle is distinct from the read size: {l} != {to_read}",
                     l = data.len()
                 );
 
@@ -1038,13 +1038,14 @@ mod test {
                             &lading_payload::Config::Ascii,
                         )
                         .expect("block construction");
+                        let handle = block_cache.handle();
 
                         State::new(
                             &mut rng,
                             initial_tick,
                             max_rotations,
                             max_bytes_per_file,
-                            block_cache,
+                            handle,
                             max_depth,
                             concurrent_logs,
                             load_profile,
