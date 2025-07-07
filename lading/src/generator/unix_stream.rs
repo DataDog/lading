@@ -109,10 +109,7 @@ impl UnixStream {
 
         let bytes_per_second =
             NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        // Report total load: per-connection rate * number of connections
-        let total_bytes_per_second =
-            u64::from(bytes_per_second.get()) * u64::from(config.parallel_connections);
-        gauge!("bytes_per_second", &labels).set(total_bytes_per_second as f64);
+        gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)

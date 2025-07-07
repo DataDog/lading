@@ -491,7 +491,7 @@ impl DogStatsD {
     /// # Errors
     ///
     /// Function will error if a member could not be generated
-    pub fn generate<R>(&self, rng: &mut R) -> Result<Member, crate::Error>
+    pub fn generate<R>(&self, rng: &mut R) -> Result<Member<'_>, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
