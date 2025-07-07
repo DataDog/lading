@@ -208,7 +208,6 @@ impl Handle {
             // map our offset into the domain of the blocks, then seek forward
             // until we find the block we need to start reading from. Then we
             // read into `data`.
-
             let offset_within_cycle = current_offset % total_cycle_size;
             let mut block_start = 0;
             for block in blocks {
