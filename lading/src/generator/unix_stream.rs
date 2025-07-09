@@ -12,7 +12,7 @@
 //!
 
 use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block::{self, Block, Handle};
 use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
@@ -135,23 +135,26 @@ impl UnixStream {
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
+        // Create the cache once before the loop
+        let total_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Fixed => block::Cache::fixed(
+                &mut rng,
+                total_bytes,
+                config.maximum_block_size.as_u128(),
+                &config.variant,
+            )?,
+        };
+
         let mut handles = JoinSet::new();
         for _ in 0..config.parallel_connections {
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                    .ok_or(Error::Zero)?;
-            let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => block::Cache::fixed(
-                    &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.as_u128(),
-                    &config.variant,
-                )?,
-            };
+            let handle = block_cache.handle();
 
             let child = Child {
                 path: config.path.clone(),
-                block_cache,
+                handle,
                 throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
@@ -195,7 +198,7 @@ impl UnixStream {
 struct Child {
     path: PathBuf,
     throttle: Throttle,
-    block_cache: block::Cache,
+    handle: Handle,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
@@ -205,12 +208,12 @@ impl Child {
         startup_receiver.recv().await?;
         debug!("UnixStream generator running");
 
-        // Move the block_cache into an OS thread, exposing a channel between it
+        // Move the block_handle into an OS thread, exposing a channel between it
         // and this async context.
-        let block_cache = self.block_cache;
+        let handle = self.handle;
         let (snd, rcv) = mpsc::channel(1024);
         let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        thread::Builder::new().spawn(move || handle.spin(snd))?;
 
         let mut current_connection = None;
 

@@ -22,10 +22,16 @@ fuzz_target!(|input: Input| {
     }
 
     let mut rng = SmallRng::from_seed(input.seed);
+    // Use the maximum block size from the array
+    let max_block_size = input.block_bytes_sizes
+        .iter()
+        .map(|size| size.get() as u128)
+        .max()
+        .unwrap_or(1024);
     let _res = Cache::fixed(
         &mut rng,
         input.total_bytes,
-        &input.block_bytes_sizes,
+        max_block_size,
         &lading_payload::Config::ApacheCommon,
     );
 });
