@@ -5,7 +5,7 @@ mod uptime;
 
 use std::io;
 
-use metrics::gauge;
+use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::FxHashMap;
@@ -14,6 +14,25 @@ use tracing::{error, warn};
 use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
+
+/// Determines if a child process is forked but not exec'd by comparing with its
+/// parent.
+///
+/// When a process forks, the child initially shares memory with the parent
+/// until it calls `exec` to replace its memory space with a new program. During
+/// this fork-but-not-exec state, both processes have identical exe paths and
+/// command lines.
+///
+/// This heuristic is critical for accurate memory accounting in lading. Without
+/// it, we double-count memory usage because the forked child and its parent:
+/// the child appears to have its own memory in `/proc/<pid>/smaps` but it's
+/// actually sharing pages with the parent.
+///
+/// Returns true if the child is forked but not exec'd, false otherwise.
+#[inline]
+fn forked_but_not_execd(child: &ProcessInfo, parent: &ProcessInfo) -> bool {
+    child.exe == parent.exe && child.cmdline == parent.cmdline
+}
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -91,7 +110,8 @@ impl Sampler {
         self.process_info.clear();
 
         for process in ProcessDescendantsIterator::new(self.parent.pid) {
-            let process_info = match initialize_process_info(process.pid()).await {
+            let pid = process.pid();
+            let process_info = match initialize_process_info(pid).await {
                 Ok(Some(info)) => info,
                 Ok(None) => {
                     warn!("Could not initialize process info, will retry.");
@@ -102,10 +122,21 @@ impl Sampler {
                     return Ok(());
                 }
             };
-            self.process_info.insert(process.pid(), process_info);
+
+            if let Ok(stat) = process.stat() {
+                let parent_pid = stat.ppid;
+                if let Some(parent_info) = self.process_info.get(&parent_pid) {
+                    if forked_but_not_execd(&process_info, parent_info) {
+                        counter!("process_skipped").increment(1);
+                        processes_skipped += 1;
+                        continue;
+                    }
+                }
+            }
+
+            self.process_info.insert(pid, process_info);
 
             processes_found += 1;
-            let pid = process.pid();
             match self.handle_process(process, &mut aggr, include_smaps).await {
                 Ok(true) => {
                     // handled successfully
@@ -364,4 +395,168 @@ async fn proc_cmdline(pid: i32) -> Result<String, Error> {
         parts.join(" ")
     };
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    prop_compose! {
+        /// Generate a valid executable path
+        fn arb_exe_path()(
+            components in prop::collection::vec("[a-zA-Z0-9_-]+", 1..5),
+        ) -> String {
+            format!("/usr/bin/{}", components.join("/"))
+        }
+    }
+
+    prop_compose! {
+        /// Generate a command line with arguments
+        fn arb_cmdline()(
+            cmd in "[a-zA-Z0-9_-]+",
+            args in prop::collection::vec("[a-zA-Z0-9_=-]+", 0..5),
+        ) -> String {
+            if args.is_empty() {
+                cmd
+            } else {
+                format!("{} {}", cmd, args.join(" "))
+            }
+        }
+    }
+
+    prop_compose! {
+        /// Generate process info for testing
+        fn arb_process_info()(
+            exe in arb_exe_path(),
+            cmdline in arb_cmdline(),
+            comm in "[a-zA-Z0-9_-]+",
+            pid in 1..100000i32,
+        ) -> ProcessInfo {
+            ProcessInfo {
+                exe,
+                cmdline,
+                comm,
+                pid_s: pid.to_string(),
+                stat_sampler: stat::Sampler::new(),
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn identical_processes_are_forked_but_not_execed(
+            exe in arb_exe_path(),
+            cmdline in arb_cmdline(),
+            comm1 in "[a-zA-Z0-9_-]+",
+            comm2 in "[a-zA-Z0-9_-]+",
+            pid1 in 1..100000i32,
+            pid2 in 1..100000i32,
+        ) {
+            let parent = ProcessInfo {
+                exe: exe.clone(),
+                cmdline: cmdline.clone(),
+                comm: comm1,
+                pid_s: pid1.to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+            let child = ProcessInfo {
+                exe,
+                cmdline,
+                comm: comm2,
+                pid_s: pid2.to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+
+            assert!(forked_but_not_execd(&child, &parent),
+                "Processes with identical exe and cmdline should be detected as forked-but-not-execed");
+        }
+
+        #[test]
+        fn different_exe_means_execed(
+            parent in arb_process_info(),
+            mut child in arb_process_info(),
+        ) {
+            // Ensure child has different exe
+            child.exe = format!("{}_different", parent.exe);
+
+            assert!(!forked_but_not_execd(&child, &parent),
+                "Processes with different exe paths should NOT be detected as forked-but-not-execed");
+        }
+
+        #[test]
+        fn different_cmdline_means_execed(
+            parent in arb_process_info(),
+            mut child in arb_process_info(),
+        ) {
+            // Ensure child has same exe but different cmdline
+            child.exe = parent.exe.clone();
+            child.cmdline = format!("{} --extra-arg", parent.cmdline);
+
+            assert!(!forked_but_not_execd(&child, &parent),
+                "Processes with different cmdlines should NOT be detected as forked-but-not-execed");
+        }
+
+        #[test]
+        fn empty_strings_handled_correctly(
+            has_exe in prop::bool::ANY,
+            has_cmdline in prop::bool::ANY,
+        ) {
+            let parent = ProcessInfo {
+                exe: if has_exe { "/bin/test".to_string() } else { String::new() },
+                cmdline: if has_cmdline { "test arg".to_string() } else { String::new() },
+                comm: "test".to_string(),
+                pid_s: "1".to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+            let child = ProcessInfo {
+                exe: if has_exe { "/bin/test".to_string() } else { String::new() },
+                cmdline: if has_cmdline { "test arg".to_string() } else { String::new() },
+                comm: "test".to_string(),
+                pid_s: "2".to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+
+            // Both have same exe and cmdline (even if empty), so should be detected
+            assert!(forked_but_not_execd(&child, &parent));
+        }
+
+        #[test]
+        fn whitespace_sensitivity(
+            base_cmdline in arb_cmdline(),
+            extra_spaces in prop::collection::vec(prop::bool::ANY, 0..3),
+        ) {
+            let parent = ProcessInfo {
+                exe: "/bin/test".to_string(),
+                cmdline: base_cmdline.clone(),
+                comm: "test".to_string(),
+                pid_s: "1".to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+
+            // Add extra spaces based on the bool vector
+            let mut modified_cmdline = base_cmdline.clone();
+            for add_space in extra_spaces {
+                if add_space {
+                    modified_cmdline.push(' ');
+                }
+            }
+
+            let child = ProcessInfo {
+                exe: "/bin/test".to_string(),
+                cmdline: modified_cmdline.clone(),
+                comm: "test".to_string(),
+                pid_s: "2".to_string(),
+                stat_sampler: stat::Sampler::new(),
+            };
+
+            // If cmdlines differ (even by whitespace), should NOT be detected as forked-but-not-execed
+            if base_cmdline != modified_cmdline {
+                assert!(!forked_but_not_execd(&child, &parent),
+                    "Even whitespace differences should mean the process has exec'd");
+            } else {
+                assert!(forked_but_not_execd(&child, &parent));
+            }
+        }
+    }
 }
