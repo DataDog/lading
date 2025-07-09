@@ -98,6 +98,11 @@ ALWAYS prefer property tests over unit tests. Unit tests are insufficient for
 lading's requirements. We use [proptest](https://github.com/proptest-rs/proptest)
 for property testing.
 
+Test naming conventions:
+- Don't prefix test names with `test_` - they're obviously tests
+- Don't prefix property test generators with `prop_` - they're obviously property tests
+- Use descriptive names that explain what property or behavior is being tested
+
 Critical components are those which must function correctly or lading itself
 cannot function. These require proofs using [kani](https://github.com/model-checking/kani):
 - Throttling (MUST be correct - lading is used to make throughput claims)
