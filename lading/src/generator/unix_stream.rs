@@ -42,7 +42,7 @@ pub struct Config {
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target, per connection.
-    pub bytes_per_second: byte_unit::Byte,
+    pub bytes_per_second: Option<byte_unit::Byte>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
@@ -134,12 +134,18 @@ impl UnixStream {
             labels.push(("id".to_string(), id));
         }
 
-        let bytes_per_second =
-            NonZeroU32::new(config.bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-        // Report total load: per-connection rate * number of connections
-        let total_bytes_per_second =
-            u64::from(bytes_per_second.get()) * u64::from(config.parallel_connections);
-        gauge!("bytes_per_second", &labels).set(total_bytes_per_second as f64);
+        let throttle_config = match (config.bytes_per_second, &config.throttle) {
+            (Some(bytes_per_second), None) => {
+                let bytes_per_second = NonZeroU32::new(bytes_per_second.as_u128() as u32)
+                    .expect("bytes_per_second must be non-zero");
+                lading_throttle::Config::Stable {
+                    maximum_capacity: bytes_per_second,
+                }
+            }
+            (None, Some(throttle)) => (*throttle).try_into()?,
+            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
+            (None, None) => return Err(Error::NoThrottleConfig),
+        };
 
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
@@ -160,7 +166,7 @@ impl UnixStream {
             let child = Child {
                 path: config.path.clone(),
                 block_cache,
-                throttle: Throttle::new_with_config(config.throttle, bytes_per_second),
+                throttle: Throttle::new_with_config(throttle_config),
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
             };
