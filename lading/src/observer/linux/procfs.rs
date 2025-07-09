@@ -123,14 +123,13 @@ impl Sampler {
                 }
             };
 
-            if let Some(parent_process) = process.parent() {
-                if let Ok(parent_pid) = parent_process {
-                    if let Some(parent_info) = self.process_info.get(&parent_pid) {
-                        if forked_but_not_execd(&process_info, parent_info) {
-                            counter!("process_skipped").increment(1);
-                            processes_skipped += 1;
-                            continue;
-                        }
+            if let Ok(stat) = process.stat() {
+                let parent_pid = stat.ppid;
+                if let Some(parent_info) = self.process_info.get(&parent_pid) {
+                    if forked_but_not_execd(&process_info, parent_info) {
+                        counter!("process_skipped").increment(1);
+                        processes_skipped += 1;
+                        continue;
                     }
                 }
             }
