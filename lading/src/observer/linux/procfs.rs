@@ -19,7 +19,7 @@ const BYTES_PER_KIBIBYTE: u64 = 1024;
 /// parent.
 ///
 /// When a process forks, the child initially shares memory with the parent
-/// until it calls exec() to replace its memory space with a new program. During
+/// until it calls `exec` to replace its memory space with a new program. During
 /// this fork-but-not-exec state, both processes have identical exe paths and
 /// command lines.
 ///
@@ -30,7 +30,7 @@ const BYTES_PER_KIBIBYTE: u64 = 1024;
 ///
 /// Returns true if the child is forked but not exec'd, false otherwise.
 #[inline]
-pub(crate) fn forked_but_not_execd(child: &ProcessInfo, parent: &ProcessInfo) -> bool {
+fn forked_but_not_execd(child: &ProcessInfo, parent: &ProcessInfo) -> bool {
     child.exe == parent.exe && child.cmdline == parent.cmdline
 }
 
