@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   'capacity' exists in the throttle struct itself, without breaking use-cases
   where bytes-per-second are specified directly. bytes-per-second implies a
   stable throttle.
+- Added NetFlow v5 payload generation support for network flow monitoring.
 
 ## [0.26.0]
 ## Added
