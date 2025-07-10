@@ -1,0 +1,5 @@
+include:
+  - .gitlab/*.yml
+
+stages:
+  - fuzz
