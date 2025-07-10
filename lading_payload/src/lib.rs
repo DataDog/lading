@@ -47,6 +47,7 @@ pub use datadog_logs::DatadogLog;
 pub use dogstatsd::DogStatsD;
 pub use fluent::Fluent;
 pub use json::Json;
+pub use netflow::NetFlowV5;
 pub use opentelemetry::log::OpentelemetryLogs;
 pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
@@ -62,6 +63,7 @@ pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
 pub mod json;
+pub mod netflow;
 pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
@@ -180,6 +182,8 @@ pub enum Config {
     DogStatsD(crate::dogstatsd::Config),
     /// Generates `TraceAgent` payloads in JSON format
     TraceAgent(Encoding),
+    /// Generates NetFlow v5 packets
+    NetFlowV5(crate::netflow::Config),
 }
 
 #[derive(Debug)]
@@ -198,6 +202,7 @@ pub(crate) enum Payload {
     OtelMetrics(OpentelemetryMetrics),
     DogStatsdD(DogStatsD),
     TraceAgent(TraceAgent),
+    NetFlowV5(NetFlowV5),
 }
 
 impl Serialize for Payload {
@@ -220,6 +225,7 @@ impl Serialize for Payload {
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::NetFlowV5(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 
