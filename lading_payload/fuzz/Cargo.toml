@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
-rand = { version = "0.8", default-features = false, features = [
+rand = { version = "0.9", default-features = false, features = [
   "small_rng",
   "std",
   "std_rng",
