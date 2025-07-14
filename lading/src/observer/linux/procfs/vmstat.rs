@@ -140,7 +140,7 @@ pgmajfault 55555
 "#;
         let vmstat_data = proc_vmstat_inner(vmstat_content).unwrap();
 
-        assert_eq!(vmstat_data.len(), 28);
+        assert_eq!(vmstat_data.len(), 29);
         assert_eq!(vmstat_data.get("nr_free_pages"), Some(&1234567));
         assert_eq!(vmstat_data.get("pgpgin"), Some(&12345678));
         assert_eq!(vmstat_data.get("pgpgout"), Some(&9876543));
