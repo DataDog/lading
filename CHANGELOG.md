@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stable throttle.
 - `unix_stream` generator now supports `parallel_connections` in a manner similar to
   `unix_datagram`.
+- Added a `/proc/vmstat` observer.
 
 ## [0.26.0]
 ## Added
