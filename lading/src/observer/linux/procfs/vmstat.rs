@@ -90,7 +90,7 @@ mod test {
 
     #[test]
     fn parse_vmstat_malformed_line() {
-        let vmstat_content = "nr_free_pages 123456\ninvalid line\n";
+        let vmstat_content = "nr_free_pages 123456\ninvalid_line\n";
         let result = proc_vmstat_inner(vmstat_content);
 
         assert!(result.is_err());
