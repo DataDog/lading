@@ -41,7 +41,7 @@ pub struct Config {
     pub path: PathBuf,
     /// The payload variant
     pub variant: lading_payload::Config,
-    /// The bytes per second to send or receive from the target
+    /// The bytes per second to send or receive from the target, per connection.
     pub bytes_per_second: Option<byte_unit::Byte>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
@@ -51,7 +51,8 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
-    /// The total number of parallel connections to maintain
+    /// The total number of parallel connections to maintain, see documentation
+    /// on `bytes_per_second`.
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
