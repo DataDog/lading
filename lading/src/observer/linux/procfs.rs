@@ -2,6 +2,7 @@
 mod memory;
 mod stat;
 mod uptime;
+mod vmstat;
 
 use std::io;
 
@@ -53,6 +54,9 @@ pub enum Error {
     /// Wrapper for [`uptime::Error`]
     #[error("Unable to read uptime: {0}")]
     Uptime(#[from] uptime::Error),
+    /// Wrapper for [`vmstat::Error`]
+    #[error("Unable to read vmstat: {0}")]
+    Vmstat(#[from] vmstat::Error),
 }
 
 macro_rules! report_status_field {
@@ -153,6 +157,11 @@ impl Sampler {
         gauge!("total_rss_bytes").set(aggr.rss as f64);
         gauge!("total_pss_bytes").set(aggr.pss as f64);
         gauge!("processes_found").set(processes_found as f64);
+
+        // Collect system-wide virtual memory statistics
+        if let Err(e) = vmstat::poll().await {
+            warn!("Couldn't process `/proc/vmstat`: {e}");
+        }
 
         // If we skipped any processes, log a warning.
         if processes_skipped > 0 {
