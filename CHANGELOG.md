@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.26.1]
+## [0.27.0]
 ## Added
 - Introduced a linear throttle into the project, allowing users to specify
   stable, linear and all-out throttles. Configuration is updated so that
