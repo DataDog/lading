@@ -51,7 +51,6 @@ fn proc_vmstat_inner(contents: &str) -> Result<FxHashMap<&str, u64>, Error> {
             continue;
         }
 
-        // Avoid Vec allocation by using iterator directly
         let mut parts = line.split_whitespace();
         let field_name = parts
             .next()
