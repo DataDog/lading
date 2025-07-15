@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use jemallocator::Jemalloc;
 use lading::{
     blackhole,
@@ -125,8 +125,24 @@ impl FromStr for CliKeyValues {
     }
 }
 
+// Parser for subcommand structure
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
+struct CliWithSubcommands {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+// Parser for legacy flat structure (deprecated)
+#[derive(Parser)]
+#[clap(version, about, long_about = None)]
+struct CliFlatLegacy {
+    #[command(flatten)]
+    args: LadingArgs,
+}
+
+// Shared arguments used by both modes
+#[derive(clap::Args)]
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
@@ -142,7 +158,7 @@ impl FromStr for CliKeyValues {
            .required(false)
            .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
 ))]
-struct Opts {
+struct LadingArgs {
     /// path on disk to the configuration file
     #[clap(long, default_value_t = default_config_path())]
     config_path: String,
@@ -210,7 +226,19 @@ struct Opts {
     disable_inspector: bool,
 }
 
-fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
+#[derive(Subcommand)]
+enum Commands {
+    /// Run lading with specified configuration
+    Run(RunCommand),
+}
+
+#[derive(Args)]
+struct RunCommand {
+    #[command(flatten)]
+    args: LadingArgs,
+}
+
+fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error> {
     let contents = if let Some(config) = config {
         config
     } else if let Ok(env_var_value) = env::var("LADING_CONFIG") {
@@ -219,13 +247,16 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     } else {
         debug!(
             "Attempting to open configuration file at: {}",
-            ops.config_path
+            args.config_path
         );
         let mut file: std::fs::File = std::fs::OpenOptions::new()
             .read(true)
-            .open(&ops.config_path)
+            .open(&args.config_path)
             .unwrap_or_else(|_| {
-                panic!("Could not open configuration file at: {}", &ops.config_path)
+                panic!(
+                    "Could not open configuration file at: {}",
+                    &args.config_path
+                )
             });
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
@@ -235,29 +266,29 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
 
     let mut config: Config = serde_yaml::from_str(&contents)?;
 
-    let target = if ops.no_target {
+    let target = if args.no_target {
         None
-    } else if let Some(pid) = ops.target_pid {
+    } else if let Some(pid) = args.target_pid {
         Some(target::Config::Pid(target::PidConfig {
             pid: pid.try_into().expect("Could not convert pid to i32"),
         }))
-    } else if let Some(name) = &ops.target_container {
+    } else if let Some(name) = &args.target_container {
         Some(target::Config::Docker(target::DockerConfig {
             name: name.clone(),
         }))
-    } else if let Some(path) = &ops.target_path {
+    } else if let Some(path) = &args.target_path {
         Some(target::Config::Binary(target::BinaryConfig {
             command: path.clone(),
-            arguments: ops.target_arguments.clone(),
-            inherit_environment: ops.target_inherit_environment,
-            environment_variables: ops
+            arguments: args.target_arguments.clone(),
+            inherit_environment: args.target_inherit_environment,
+            environment_variables: args
                 .target_environment_variables
                 .clone()
                 .unwrap_or_default()
                 .inner,
             output: Output {
-                stderr: ops.target_stderr_path.clone(),
-                stdout: ops.target_stdout_path.clone(),
+                stderr: args.target_stderr_path.clone(),
+                stdout: args.target_stdout_path.clone(),
             },
         }))
     } else {
@@ -265,22 +296,22 @@ fn get_config(ops: &Opts, config: Option<String>) -> Result<Config, Error> {
     };
     config.target = target;
 
-    let options_global_labels = ops.global_labels.clone().unwrap_or_default();
-    if let Some(ref prom_addr) = ops.prometheus_addr {
+    let options_global_labels = args.global_labels.clone().unwrap_or_default();
+    if let Some(ref prom_addr) = args.prometheus_addr {
         config.telemetry = Telemetry::Prometheus {
             addr: prom_addr.parse()?,
             global_labels: options_global_labels.inner,
         };
-    } else if let Some(ref prom_path) = ops.prometheus_path {
+    } else if let Some(ref prom_path) = args.prometheus_path {
         config.telemetry = Telemetry::PrometheusSocket {
             path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
             global_labels: options_global_labels.inner,
         };
-    } else if let Some(ref capture_path) = ops.capture_path {
+    } else if let Some(ref capture_path) = args.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
-            expiration: Duration::from_secs(ops.capture_expiriation_seconds.unwrap_or(u64::MAX)),
+            expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
         };
     } else {
         match config.telemetry {
@@ -572,21 +603,34 @@ fn main() -> Result<(), Error> {
 
     let version = env!("CARGO_PKG_VERSION");
     info!("Starting lading {version} run.");
-    let opts: Opts = Opts::parse();
 
-    let config = get_config(&opts, None);
-
-    let experiment_duration = if opts.experiment_duration_infinite {
-        Duration::MAX
-    } else {
-        Duration::from_secs(opts.experiment_duration_seconds.into())
+    // Two-parser fallback logic until CliFlatLegacy is removed
+    let args = match CliWithSubcommands::try_parse() {
+        Ok(cli) => match cli.command {
+            Commands::Run(run_cmd) => run_cmd.args,
+        },
+        Err(_) => {
+            // Fall back to legacy parsing
+            match CliFlatLegacy::try_parse() {
+                Ok(legacy) => legacy.args,
+                Err(err) => err.exit(),
+            }
+        }
     };
 
-    let warmup_duration = Duration::from_secs(opts.warmup_duration_seconds.into());
+    let config = get_config(&args, None);
+
+    let experiment_duration = if args.experiment_duration_infinite {
+        Duration::MAX
+    } else {
+        Duration::from_secs(args.experiment_duration_seconds.into())
+    };
+
+    let warmup_duration = Duration::from_secs(args.warmup_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
-    let max_shutdown_delay = Duration::from_secs(opts.max_shutdown_delay.into());
-    let disable_inspector = opts.disable_inspector;
+    let max_shutdown_delay = Duration::from_secs(args.max_shutdown_delay.into());
+    let disable_inspector = args.disable_inspector;
 
     let runtime = Builder::new_multi_thread()
         .enable_io()
@@ -627,8 +671,8 @@ generator: []
         let capture_arg = format!("--capture-path={}", capture_path.display());
 
         let args = vec!["lading", "--no-target", capture_arg.as_str()];
-        let ops: &Opts = &Opts::parse_from(args);
-        let config = get_config(ops, Some(contents.to_string()));
+        let legacy_cli = CliFlatLegacy::parse_from(args);
+        let config = get_config(&legacy_cli.args, Some(contents.to_string()));
         let exit_code = inner_main(
             Duration::from_millis(2500),
             Duration::from_millis(5000),

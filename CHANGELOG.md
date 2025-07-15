@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `/proc/vmstat` observer.
 ## Changed
 - 'lading process-tree-gen' command is removed as it is currently unused
+- 'lading run' sub-command added as alias for current top-level CLI usage.
 
 ## [0.26.0]
 ## Added
