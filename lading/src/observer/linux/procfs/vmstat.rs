@@ -1,5 +1,6 @@
 use metrics::gauge;
 use rustc_hash::FxHashMap;
+use std::hash::BuildHasherDefault;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -41,8 +42,8 @@ pub(crate) async fn poll() -> Result<(), Error> {
 ///
 /// Function errors if the file is malformed or contains unparseable values.
 #[inline]
-fn proc_vmstat_inner(contents: &str) -> Result<FxHashMap<String, u64>, Error> {
-    let mut vmstat_data = FxHashMap::default();
+fn proc_vmstat_inner(contents: &str) -> Result<FxHashMap<&str, u64>, Error> {
+    let mut vmstat_data = FxHashMap::with_capacity_and_hasher(128, BuildHasherDefault::default());
 
     for line in contents.lines() {
         let line = line.trim();
@@ -50,14 +51,19 @@ fn proc_vmstat_inner(contents: &str) -> Result<FxHashMap<String, u64>, Error> {
             continue;
         }
 
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 2 {
-            return Err(Error::Malformed("line does not contain exactly two fields"));
+        let mut parts = line.split_whitespace();
+        let field_name = parts
+            .next()
+            .ok_or(Error::Malformed("line does not contain field name"))?;
+        let value_str = parts
+            .next()
+            .ok_or(Error::Malformed("line does not contain value"))?;
+
+        if parts.next().is_some() {
+            return Err(Error::Malformed("line contains more than two fields"));
         }
 
-        let field_name = parts[0].to_string();
-        let value = parts[1].parse::<u64>()?;
-
+        let value = value_str.parse::<u64>()?;
         vmstat_data.insert(field_name, value);
     }
 
