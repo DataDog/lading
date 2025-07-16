@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Build the validation Docker image
+echo "Building Linux validation environment..."
+docker build -f ./ci/Dockerfile.validate -t lading-validate .
+
+# Run validation in the container
+echo "Running validation in Linux container..."
+docker run --rm -v "$(pwd):/workspace" lading-validate
+
+echo "Linux validation passed!"
