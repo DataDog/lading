@@ -60,6 +60,10 @@ When handling errors:
 This project enforces code style through automated tooling. Use `ci/validate` to
 check style compliance - it will run formatting and linting checks for you.
 
+**Module organization**: Never use `mod.rs` files. Always name modules directly
+(e.g., use `foo.rs` instead of `foo/mod.rs`). This makes the codebase easier to
+navigate and grep.
+
 We do not allow for warnings: all warnings are errors. Deprecation warnings MUST
 be treated as errors. Lading is written in a "naive" style where abstraction is
 not preferred if a duplicated pattern will satisfy. Our reasoning for this is it
@@ -183,3 +187,4 @@ When in doubt, implement rather than import.
 12. Generators must be deterministic - no randomness without explicit seeding
 13. Pre-compute in initialization, not in hot paths
 14. Think about how your code affects the measurement of the target
+15. NEVER use mod.rs files - always name modules directly (e.g., foo.rs not foo/mod.rs)
