@@ -8,9 +8,34 @@ use std::io;
 
 use metrics::{counter, gauge};
 use nix::errno::Errno;
+use nix::unistd;
 use procfs::process::Process;
 use rustc_hash::FxHashMap;
+use tokio::fs;
 use tracing::{error, warn};
+
+/// Defines the methods available for detecting forked-but-not-exec'd processes
+///
+/// The long-term approach is to use flag-based detection exclusively.
+/// The heuristic method is maintained temporarily for validation and transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectionMode {
+    /// TEMPORARY: Use the original heuristic (identical exe and cmdline) for backward compatibility
+    /// This will be deprecated once flag-based detection is fully validated
+    HeuristicLegacy,
+    /// PREFERRED: Use the PF_FORKNOEXEC flag in process flags (long-term approach)
+    Flag,
+    /// VALIDATION: Use both methods and log disagreements for validation purposes
+    /// This helps validate the flag-based approach before full transition
+    ValidationMode,
+}
+
+/// Default to validation mode during transition period
+impl Default for DetectionMode {
+    fn default() -> Self {
+        DetectionMode::ValidationMode
+    }
+}
 
 use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
 
@@ -30,9 +55,69 @@ const BYTES_PER_KIBIBYTE: u64 = 1024;
 /// actually sharing pages with the parent.
 ///
 /// Returns true if the child is forked but not exec'd, false otherwise.
+/// Check if process has PF_FORKNOEXEC flag set
 #[inline]
-fn forked_but_not_execd(child: &ProcessInfo, parent: &ProcessInfo) -> bool {
-    child.exe == parent.exe && child.cmdline == parent.cmdline
+fn has_forknoexec_flag(flags: u32) -> bool {
+    // PF_FORKNOEXEC flag is bit 0x00000040
+    (flags & 0x00000040) != 0
+}
+
+/// Determines if a child process is forked but not exec'd based on the configured detection mode
+///
+/// This function is designed for transition from heuristic to flag-based detection.
+/// The flag-based approach is the preferred long-term solution.
+fn forked_but_not_execd(child: &ProcessInfo, parent: &ProcessInfo, mode: DetectionMode) -> bool {
+    // Legacy heuristic: identical exe and cmdline (temporary, for validation)
+    let heuristic_detected = child.exe == parent.exe && child.cmdline == parent.cmdline;
+
+    // Preferred flag-based detection using PF_FORKNOEXEC flag (long-term approach)
+    let flag_detected = has_forknoexec_flag(child.process_flags);
+
+    match mode {
+        DetectionMode::HeuristicLegacy => {
+            // Legacy mode for backward compatibility - will be deprecated
+            heuristic_detected
+        }
+        DetectionMode::Flag => {
+            // Preferred approach - direct flag checking
+            flag_detected
+        }
+        DetectionMode::ValidationMode => {
+            // Validation mode: use both methods and log disagreements
+            if heuristic_detected != flag_detected {
+                warn!(
+                    "Fork-no-exec detection disagreement for child PID {}: \
+                     heuristic={}, flag={} | \
+                     child_exe='{}', parent_exe='{}' | \
+                     child_cmdline='{}', parent_cmdline='{}' | \
+                     child_flags=0x{:08x}, flag_bit_set={}",
+                    child.pid_s,
+                    heuristic_detected,
+                    flag_detected,
+                    child.exe,
+                    parent.exe,
+                    child.cmdline,
+                    parent.cmdline,
+                    child.process_flags,
+                    has_forknoexec_flag(child.process_flags)
+                );
+
+                // Increment disagreement counter for monitoring
+                counter!("fork_no_exec_detection_disagreements").increment(1);
+
+                // Track the specific disagreement patterns
+                if heuristic_detected && !flag_detected {
+                    counter!("fork_no_exec_heuristic_only_detections").increment(1);
+                } else if !heuristic_detected && flag_detected {
+                    counter!("fork_no_exec_flag_only_detections").increment(1);
+                }
+            }
+
+            // During validation, prefer flag-based detection as it's more reliable
+            // This helps us transition to the long-term approach
+            flag_detected
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -75,22 +160,30 @@ struct ProcessInfo {
     comm: String,
     pid_s: String,
     stat_sampler: stat::Sampler,
+    /// Process flags from /proc/<pid>/stat field 9
+    /// Includes PF_FORKNOEXEC flag (0x00000040) when a process is forked but not exec'd
+    process_flags: u32,
 }
 
 #[derive(Debug)]
 pub(crate) struct Sampler {
     parent: Process,
     process_info: FxHashMap<i32, ProcessInfo>,
+    /// Detection mode for fork-no-exec processes
+    detection_mode: DetectionMode,
 }
 
 impl Sampler {
     pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let process_info = FxHashMap::default();
+        // Default to using the original heuristic method
+        let detection_mode = DetectionMode::default();
 
         Ok(Self {
             parent,
             process_info,
+            detection_mode,
         })
     }
 
@@ -115,7 +208,17 @@ impl Sampler {
 
         for process in ProcessDescendantsIterator::new(self.parent.pid) {
             let pid = process.pid();
-            let process_info = match initialize_process_info(pid).await {
+
+            // Get stat data first to avoid duplicate reads
+            let stat_data = match process.stat() {
+                Ok(stat) => Some(stat),
+                Err(e) => {
+                    warn!("Could not read stat for pid {}: {:?}", pid, e);
+                    None
+                }
+            };
+
+            let process_info = match initialize_process_info(pid, stat_data.as_ref()).await {
                 Ok(Some(info)) => info,
                 Ok(None) => {
                     warn!("Could not initialize process info, will retry.");
@@ -127,10 +230,11 @@ impl Sampler {
                 }
             };
 
-            if let Ok(stat) = process.stat() {
+            // Check for fork-no-exec using the configured detection mode
+            if let Some(stat) = &stat_data {
                 let parent_pid = stat.ppid;
                 if let Some(parent_info) = self.process_info.get(&parent_pid) {
-                    if forked_but_not_execd(&process_info, parent_info) {
+                    if forked_but_not_execd(&process_info, parent_info, self.detection_mode) {
                         counter!("process_skipped").increment(1);
                         processes_skipped += 1;
                         continue;
@@ -322,7 +426,13 @@ impl Sampler {
 }
 
 /// Initialize [`ProcessInfo`] for a process. Returns `None` if the process should be skipped.
-async fn initialize_process_info(pid: i32) -> Result<Option<ProcessInfo>, Error> {
+///
+/// If `stat_data` is provided, it will be used to extract process flags instead of reading
+/// the stat file again. This optimizes performance by avoiding duplicate file reads.
+async fn initialize_process_info(
+    pid: i32,
+    stat_data: Option<&procfs::process::Stat>,
+) -> Result<Option<ProcessInfo>, Error> {
     let exe = match proc_exe(pid).await {
         Ok(exe) => exe,
         Err(e) => {
@@ -347,12 +457,30 @@ async fn initialize_process_info(pid: i32) -> Result<Option<ProcessInfo>, Error>
 
     let pid_s = format!("{pid}");
     let stat_sampler = stat::Sampler::new();
+
+    // Extract process flags from stat data if available, otherwise read from file
+    let process_flags = if let Some(stat) = stat_data {
+        // Extract flags from the provided stat data (field 9 in /proc/<pid>/stat)
+        stat.flags
+    } else {
+        // Fallback to reading the file if stat data wasn't provided
+        match get_process_flags(pid).await {
+            Ok(flags) => flags,
+            Err(e) => {
+                // Non-critical error, log warning and proceed with zero flags
+                warn!("Couldn't read process flags for pid {}: {:?}", pid, e);
+                0
+            }
+        }
+    };
+
     let info = ProcessInfo {
         cmdline,
         exe,
         comm,
         pid_s,
         stat_sampler,
+        process_flags,
     };
 
     Ok(Some(info))
@@ -406,6 +534,39 @@ async fn proc_cmdline(pid: i32) -> Result<String, Error> {
     Ok(res)
 }
 
+/// Extract process flags from /proc/<pid>/stat
+///
+/// The 9th field in /proc/<pid>/stat contains the process flags, including
+/// PF_FORKNOEXEC (0x00000040) which is set in a freshly forked process
+/// that hasn't executed a new program yet.
+async fn get_process_flags(pid: i32) -> Result<u32, Error> {
+    // Read the stat file contents
+    let stat_path = format!("/proc/{pid}/stat");
+    let content = fs::read_to_string(&stat_path)
+        .await
+        .map_err(|e| Error::ProcStatIo(e))?;
+
+    // Parse the content - fields are space-separated, but the 2nd field (comm) can contain spaces
+    // and is wrapped in parentheses, so we need to handle it carefully
+
+    // Find the closing parenthesis of the comm field
+    if let Some(end_comm) = content.rfind(')') {
+        // Skip pid and comm fields, then split the rest
+        let fields: Vec<&str> = content[(end_comm + 1)..].split_whitespace().collect();
+
+        // The flags field is now the 7th field (after skipping pid and comm)
+        // Which is field index 6 (zero-based)
+        if fields.len() > 6 {
+            return fields[6]
+                .parse::<u32>()
+                .map_err(|e| Error::ProcStatParse(e));
+        }
+    }
+
+    // If we couldn't parse the flags, return an error
+    Err(Error::ProcStatMalformed("Could not parse process flags"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +602,7 @@ mod tests {
             cmdline in arb_cmdline(),
             comm in "[a-zA-Z0-9_-]+",
             pid in 1..100000i32,
+            process_flags in prop::num::u32::ANY,
         ) -> ProcessInfo {
             ProcessInfo {
                 exe,
@@ -448,19 +610,41 @@ mod tests {
                 comm,
                 pid_s: pid.to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags,
+            }
+        }
+    }
+
+    prop_compose! {
+        /// Generate process info with specific flags for testing
+        fn arb_process_info_with_flags(flags: u32)(
+            exe in arb_exe_path(),
+            cmdline in arb_cmdline(),
+            comm in "[a-zA-Z0-9_-]+",
+            pid in 1..100000i32,
+        ) -> ProcessInfo {
+            ProcessInfo {
+                exe,
+                cmdline,
+                comm,
+                pid_s: pid.to_string(),
+                stat_sampler: stat::Sampler::new(),
+                process_flags: flags,
             }
         }
     }
 
     proptest! {
         #[test]
-        fn identical_processes_are_forked_but_not_execed(
+        fn identical_processes_are_forked_but_not_execed_heuristic(
             exe in arb_exe_path(),
             cmdline in arb_cmdline(),
             comm1 in "[a-zA-Z0-9_-]+",
             comm2 in "[a-zA-Z0-9_-]+",
             pid1 in 1..100000i32,
             pid2 in 1..100000i32,
+            flags1 in prop::num::u32::ANY,
+            flags2 in prop::num::u32::ANY,
         ) {
             let parent = ProcessInfo {
                 exe: exe.clone(),
@@ -468,6 +652,7 @@ mod tests {
                 comm: comm1,
                 pid_s: pid1.to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: flags1,
             };
             let child = ProcessInfo {
                 exe,
@@ -475,10 +660,12 @@ mod tests {
                 comm: comm2,
                 pid_s: pid2.to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: flags2,
             };
 
-            assert!(forked_but_not_execd(&child, &parent),
-                "Processes with identical exe and cmdline should be detected as forked-but-not-execed");
+            // Test heuristic legacy mode
+            assert!(forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy),
+                "Processes with identical exe and cmdline should be detected as forked-but-not-execed in heuristic mode");
         }
 
         #[test]
@@ -489,7 +676,7 @@ mod tests {
             // Ensure child has different exe
             child.exe = format!("{}_different", parent.exe);
 
-            assert!(!forked_but_not_execd(&child, &parent),
+            assert!(!forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy),
                 "Processes with different exe paths should NOT be detected as forked-but-not-execed");
         }
 
@@ -502,7 +689,7 @@ mod tests {
             child.exe = parent.exe.clone();
             child.cmdline = format!("{} --extra-arg", parent.cmdline);
 
-            assert!(!forked_but_not_execd(&child, &parent),
+            assert!(!forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy),
                 "Processes with different cmdlines should NOT be detected as forked-but-not-execed");
         }
 
@@ -517,6 +704,7 @@ mod tests {
                 comm: "test".to_string(),
                 pid_s: "1".to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: 0,
             };
             let child = ProcessInfo {
                 exe: if has_exe { "/bin/test".to_string() } else { String::new() },
@@ -524,10 +712,11 @@ mod tests {
                 comm: "test".to_string(),
                 pid_s: "2".to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: 0,
             };
 
             // Both have same exe and cmdline (even if empty), so should be detected
-            assert!(forked_but_not_execd(&child, &parent));
+            assert!(forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy));
         }
 
         #[test]
@@ -541,6 +730,7 @@ mod tests {
                 comm: "test".to_string(),
                 pid_s: "1".to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: 0,
             };
 
             // Add extra spaces based on the bool vector
@@ -557,15 +747,90 @@ mod tests {
                 comm: "test".to_string(),
                 pid_s: "2".to_string(),
                 stat_sampler: stat::Sampler::new(),
+                process_flags: 0,
             };
 
             // If cmdlines differ (even by whitespace), should NOT be detected as forked-but-not-execed
             if base_cmdline != modified_cmdline {
-                assert!(!forked_but_not_execd(&child, &parent),
+                assert!(!forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy),
                     "Even whitespace differences should mean the process has exec'd");
             } else {
-                assert!(forked_but_not_execd(&child, &parent));
+                assert!(forked_but_not_execd(&child, &parent, DetectionMode::HeuristicLegacy));
             }
         }
+
+        #[test]
+        fn flag_detection_with_pf_forknoexec(
+            parent in arb_process_info(),
+            mut child in arb_process_info(),
+        ) {
+            // Set PF_FORKNOEXEC flag (0x00000040) on child process
+            child.process_flags = 0x00000040;
+            
+            // Even with different exe/cmdline, flag detection should catch it
+            child.exe = format!("{}_different", parent.exe);
+            child.cmdline = format!("{}_different", parent.cmdline);
+            
+            assert!(forked_but_not_execd(&child, &parent, DetectionMode::Flag),
+                "Process with PF_FORKNOEXEC flag should be detected as forked-but-not-execed");
+        }
+
+        #[test]
+        fn flag_detection_without_pf_forknoexec(
+            parent in arb_process_info(),
+            mut child in arb_process_info(),
+        ) {
+            // Clear PF_FORKNOEXEC flag on child process
+            child.process_flags = child.process_flags & !0x00000040;
+            
+            // Even with identical exe/cmdline, flag detection should not catch it
+            child.exe = parent.exe.clone();
+            child.cmdline = parent.cmdline.clone();
+            
+            assert!(!forked_but_not_execd(&child, &parent, DetectionMode::Flag),
+                "Process without PF_FORKNOEXEC flag should NOT be detected as forked-but-not-execed in flag mode");
+        }
+
+        #[test]
+        fn validation_mode_disagreement_flag_only(
+            parent in arb_process_info(),
+            mut child in arb_process_info(),
+        ) {
+            // Heuristic says no (different exe/cmdline), flag says yes (PF_FORKNOEXEC set)
+            child.exe = format!("{}_different", parent.exe);
+            child.cmdline = format!("{}_different", parent.cmdline);
+            child.process_flags = child.process_flags | 0x00000040; // Set PF_FORKNOEXEC
+            
+            // ValidationMode should prefer flag-based detection (true)
+            assert!(forked_but_not_execd(&child, &parent, DetectionMode::ValidationMode),
+                "ValidationMode should prefer flag-based detection even when heuristic disagrees");
+        }
+    }
+
+    #[test]
+    fn has_forknoexec_flag_detection() {
+        // Test flag detection with various flag combinations
+        assert!(has_forknoexec_flag(0x00000040), "Should detect PF_FORKNOEXEC flag when set alone");
+        assert!(has_forknoexec_flag(0x00000041), "Should detect PF_FORKNOEXEC flag when set with other flags");
+        assert!(has_forknoexec_flag(0xFFFFFFFF), "Should detect PF_FORKNOEXEC flag when all flags are set");
+        
+        assert!(!has_forknoexec_flag(0x00000000), "Should not detect PF_FORKNOEXEC flag when no flags are set");
+        assert!(!has_forknoexec_flag(0x0000003F), "Should not detect PF_FORKNOEXEC flag when other flags are set but not PF_FORKNOEXEC");
+        assert!(!has_forknoexec_flag(0xFFFFFFBF), "Should not detect PF_FORKNOEXEC flag when it's specifically cleared");
+    }
+
+    #[test]
+    fn detection_modes_enum_properties() {
+        // Ensure default is ValidationMode for transition period
+        assert_eq!(DetectionMode::default(), DetectionMode::ValidationMode);
+        
+        // Ensure all modes are Copy and Clone
+        let mode = DetectionMode::Flag;
+        let _copied = mode;
+        let _cloned = mode.clone();
+        
+        // Ensure Debug formatting works
+        let debug_str = format!("{:?}", DetectionMode::ValidationMode);
+        assert!(debug_str.contains("ValidationMode"));
     }
 }
