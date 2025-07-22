@@ -8,7 +8,6 @@ use std::io;
 
 use metrics::{counter, gauge};
 use nix::errno::Errno;
-use nix::unistd;
 use procfs::process::Process;
 use rustc_hash::FxHashMap;
 use tokio::fs;
@@ -19,11 +18,13 @@ use tracing::{error, warn};
 /// The long-term approach is to use flag-based detection exclusively.
 /// The heuristic method is maintained temporarily for validation and transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DetectionMode {
+pub(super) enum DetectionMode {
     /// TEMPORARY: Use the original heuristic (identical exe and cmdline) for backward compatibility
     /// This will be deprecated once flag-based detection is fully validated
+    #[allow(dead_code)]
     HeuristicLegacy,
-    /// PREFERRED: Use the PF_FORKNOEXEC flag in process flags (long-term approach)
+    /// PREFERRED: Use the `PF_FORKNOEXEC` flag in process flags (long-term approach)
+    #[allow(dead_code)]
     Flag,
     /// VALIDATION: Use both methods and log disagreements for validation purposes
     /// This helps validate the flag-based approach before full transition
@@ -55,11 +56,11 @@ const BYTES_PER_KIBIBYTE: u64 = 1024;
 /// actually sharing pages with the parent.
 ///
 /// Returns true if the child is forked but not exec'd, false otherwise.
-/// Check if process has PF_FORKNOEXEC flag set
+/// Check if process has `PF_FORKNOEXEC` flag set
 #[inline]
 fn has_forknoexec_flag(flags: u32) -> bool {
     // PF_FORKNOEXEC flag is bit 0x00000040
-    (flags & 0x00000040) != 0
+    (flags & 0x0000_0040) != 0
 }
 
 /// Determines if a child process is forked but not exec'd based on the configured detection mode
@@ -142,6 +143,15 @@ pub enum Error {
     /// Wrapper for [`vmstat::Error`]
     #[error("Unable to read vmstat: {0}")]
     Vmstat(#[from] vmstat::Error),
+    /// Error reading /proc/[pid]/stat file
+    #[error("Unable to read /proc/[pid]/stat: {0}")]
+    ProcStatIo(#[source] io::Error),
+    /// Error parsing /proc/[pid]/stat content
+    #[error("Unable to parse /proc/[pid]/stat: {0}")]
+    ProcStatParse(#[source] std::num::ParseIntError),
+    /// Malformed /proc/[pid]/stat content
+    #[error("Malformed /proc/[pid]/stat: {0}")]
+    ProcStatMalformed(&'static str),
 }
 
 macro_rules! report_status_field {
@@ -161,7 +171,7 @@ struct ProcessInfo {
     pid_s: String,
     stat_sampler: stat::Sampler,
     /// Process flags from /proc/<pid>/stat field 9
-    /// Includes PF_FORKNOEXEC flag (0x00000040) when a process is forked but not exec'd
+    /// Includes `PF_FORKNOEXEC` flag (0x00000040) when a process is forked but not exec'd
     process_flags: u32,
 }
 
@@ -537,14 +547,14 @@ async fn proc_cmdline(pid: i32) -> Result<String, Error> {
 /// Extract process flags from /proc/<pid>/stat
 ///
 /// The 9th field in /proc/<pid>/stat contains the process flags, including
-/// PF_FORKNOEXEC (0x00000040) which is set in a freshly forked process
+/// `PF_FORKNOEXEC` (0x00000040) which is set in a freshly forked process
 /// that hasn't executed a new program yet.
 async fn get_process_flags(pid: i32) -> Result<u32, Error> {
     // Read the stat file contents
     let stat_path = format!("/proc/{pid}/stat");
     let content = fs::read_to_string(&stat_path)
         .await
-        .map_err(|e| Error::ProcStatIo(e))?;
+        .map_err(Error::ProcStatIo)?;
 
     // Parse the content - fields are space-separated, but the 2nd field (comm) can contain spaces
     // and is wrapped in parentheses, so we need to handle it carefully
@@ -557,9 +567,7 @@ async fn get_process_flags(pid: i32) -> Result<u32, Error> {
         // The flags field is now the 7th field (after skipping pid and comm)
         // Which is field index 6 (zero-based)
         if fields.len() > 6 {
-            return fields[6]
-                .parse::<u32>()
-                .map_err(|e| Error::ProcStatParse(e));
+            return fields[6].parse::<u32>().map_err(Error::ProcStatParse);
         }
     }
 
