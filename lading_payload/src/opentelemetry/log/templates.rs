@@ -88,6 +88,24 @@ impl<'a> crate::SizedGenerator<'a> for LogTemplateGenerator {
         let original_budget: usize = *budget;
         let mut inner_budget: usize = *budget;
 
+        // LogRecords without attributes are valid but we use attribute
+        // generator as a place to figure out whether we should continue
+        // attempting to generate this instance.
+        //
+        // There are two cases to consider when TagGenerator::generate signals
+        // SizeExhausted:
+        //
+        // * inner_buget == original_budget, meaning no attributes were able to
+        //   be created and
+        // * inner_budget != original_budget, meaning _some_ attributes were
+        //   created but we're out of budget
+        //
+        // In the first case we have no capacity available to generate even the
+        // smallest structure in a LogRecord and so we bail out with the whole
+        // generation being exhausted. In the second, we accept that there are
+        // some bytes remaining but not enough to generate a valid LogRecord, so
+        // we dump the attributes and attempt to make a LogRecord with blank
+        // attributes in the bytes remaining.
         let attributes = match self.tags.generate(rng, &mut inner_budget) {
             Ok(attrs) => attrs,
             Err(GeneratorError::SizeExhausted) => {
