@@ -223,12 +223,15 @@ impl<'a> crate::SizedGenerator<'a> for ScopeTemplateGenerator {
         let original_budget: usize = *budget;
         let mut inner_budget: usize = *budget;
 
+        // For an explanation of this pattern, please see the note in
+        // `LogTemplateGenerator::generate`.
         let scope_attributes = match self.tags.generate(rng, &mut inner_budget) {
             Ok(attrs) => attrs,
             Err(GeneratorError::SizeExhausted) => {
                 if inner_budget == original_budget {
                     return Err(GeneratorError::SizeExhausted);
                 }
+                inner_budget = original_budget;
                 Vec::new()
             }
             Err(e) => return Err(e),
@@ -331,12 +334,15 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         let original_budget: usize = *budget;
         let mut inner_budget: usize = *budget;
 
+        // For an explanation of this pattern, please see the note in
+        // `LogTemplateGenerator::generate`.
         let resource_attributes = match self.tags.generate(rng, &mut inner_budget) {
             Ok(attrs) => attrs,
             Err(GeneratorError::SizeExhausted) => {
                 if inner_budget == original_budget {
                     return Err(GeneratorError::SizeExhausted);
                 }
+                inner_budget = original_budget;
                 Vec::new()
             }
             Err(e) => return Err(e),
