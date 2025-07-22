@@ -38,7 +38,6 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
-// tags module moved to common
 pub(crate) mod templates;
 pub(crate) mod unit;
 
