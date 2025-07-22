@@ -562,12 +562,10 @@ async fn get_process_flags(pid: i32) -> Result<u32, Error> {
     // Find the closing parenthesis of the comm field
     if let Some(end_comm) = content.rfind(')') {
         // Skip pid and comm fields, then split the rest
-        let fields: Vec<&str> = content[(end_comm + 1)..].split_whitespace().collect();
-
         // The flags field is now the 7th field (after skipping pid and comm)
         // Which is field index 6 (zero-based)
-        if fields.len() > 6 {
-            return fields[6].parse::<u32>().map_err(Error::ProcStatParse);
+        if let Some(flags_str) = content[(end_comm + 1)..].split_whitespace().nth(6) {
+            return flags_str.parse::<u32>().map_err(Error::ProcStatParse);
         }
     }
 
