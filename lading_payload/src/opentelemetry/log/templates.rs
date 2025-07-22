@@ -94,6 +94,13 @@ impl<'a> crate::SizedGenerator<'a> for LogTemplateGenerator {
                 if inner_budget == original_budget {
                     return Err(GeneratorError::SizeExhausted);
                 }
+                // If attribute population was partial -- signaled by
+                // inner_budget being drawn down on -- we return the budget back
+                // and live with no attributes. We do this because OTLP is
+                // expensive to generate and we may be able to create a
+                // reasonable instance of a `LogRecord` with the budget
+                // otherwise on hand.
+                inner_budget = original_budget;
                 Vec::new()
             }
             Err(e) => return Err(e),
