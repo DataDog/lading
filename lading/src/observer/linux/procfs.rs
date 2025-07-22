@@ -766,11 +766,11 @@ mod tests {
         ) {
             // Set PF_FORKNOEXEC flag (0x00000040) on child process
             child.process_flags = 0x00000040;
-            
+
             // Even with different exe/cmdline, flag detection should catch it
             child.exe = format!("{}_different", parent.exe);
             child.cmdline = format!("{}_different", parent.cmdline);
-            
+
             assert!(forked_but_not_execd(&child, &parent, DetectionMode::Flag),
                 "Process with PF_FORKNOEXEC flag should be detected as forked-but-not-execed");
         }
@@ -782,11 +782,11 @@ mod tests {
         ) {
             // Clear PF_FORKNOEXEC flag on child process
             child.process_flags = child.process_flags & !0x00000040;
-            
+
             // Even with identical exe/cmdline, flag detection should not catch it
             child.exe = parent.exe.clone();
             child.cmdline = parent.cmdline.clone();
-            
+
             assert!(!forked_but_not_execd(&child, &parent, DetectionMode::Flag),
                 "Process without PF_FORKNOEXEC flag should NOT be detected as forked-but-not-execed in flag mode");
         }
@@ -800,7 +800,7 @@ mod tests {
             child.exe = format!("{}_different", parent.exe);
             child.cmdline = format!("{}_different", parent.cmdline);
             child.process_flags = child.process_flags | 0x00000040; // Set PF_FORKNOEXEC
-            
+
             // ValidationMode should prefer flag-based detection (true)
             assert!(forked_but_not_execd(&child, &parent, DetectionMode::ValidationMode),
                 "ValidationMode should prefer flag-based detection even when heuristic disagrees");
@@ -810,25 +810,43 @@ mod tests {
     #[test]
     fn has_forknoexec_flag_detection() {
         // Test flag detection with various flag combinations
-        assert!(has_forknoexec_flag(0x00000040), "Should detect PF_FORKNOEXEC flag when set alone");
-        assert!(has_forknoexec_flag(0x00000041), "Should detect PF_FORKNOEXEC flag when set with other flags");
-        assert!(has_forknoexec_flag(0xFFFFFFFF), "Should detect PF_FORKNOEXEC flag when all flags are set");
-        
-        assert!(!has_forknoexec_flag(0x00000000), "Should not detect PF_FORKNOEXEC flag when no flags are set");
-        assert!(!has_forknoexec_flag(0x0000003F), "Should not detect PF_FORKNOEXEC flag when other flags are set but not PF_FORKNOEXEC");
-        assert!(!has_forknoexec_flag(0xFFFFFFBF), "Should not detect PF_FORKNOEXEC flag when it's specifically cleared");
+        assert!(
+            has_forknoexec_flag(0x00000040),
+            "Should detect PF_FORKNOEXEC flag when set alone"
+        );
+        assert!(
+            has_forknoexec_flag(0x00000041),
+            "Should detect PF_FORKNOEXEC flag when set with other flags"
+        );
+        assert!(
+            has_forknoexec_flag(0xFFFFFFFF),
+            "Should detect PF_FORKNOEXEC flag when all flags are set"
+        );
+
+        assert!(
+            !has_forknoexec_flag(0x00000000),
+            "Should not detect PF_FORKNOEXEC flag when no flags are set"
+        );
+        assert!(
+            !has_forknoexec_flag(0x0000003F),
+            "Should not detect PF_FORKNOEXEC flag when other flags are set but not PF_FORKNOEXEC"
+        );
+        assert!(
+            !has_forknoexec_flag(0xFFFFFFBF),
+            "Should not detect PF_FORKNOEXEC flag when it's specifically cleared"
+        );
     }
 
     #[test]
     fn detection_modes_enum_properties() {
         // Ensure default is ValidationMode for transition period
         assert_eq!(DetectionMode::default(), DetectionMode::ValidationMode);
-        
+
         // Ensure all modes are Copy and Clone
         let mode = DetectionMode::Flag;
         let _copied = mode;
         let _cloned = mode.clone();
-        
+
         // Ensure Debug formatting works
         let debug_str = format!("{:?}", DetectionMode::ValidationMode);
         assert!(debug_str.contains("ValidationMode"));
