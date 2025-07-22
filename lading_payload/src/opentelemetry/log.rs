@@ -250,6 +250,8 @@ impl OpentelemetryLogs {
     where
         R: rand::Rng + ?Sized,
     {
+        config.valid().map_err(Error::Validation)?;
+
         let context_cap = config.contexts.total_contexts.sample(rng);
         let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;

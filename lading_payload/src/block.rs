@@ -336,7 +336,7 @@ impl Cache {
                 match config.valid() {
                     Ok(()) => (),
                     Err(e) => {
-                        warn!("Invalid OpentelemetryLogs configuration: {}", e);
+                        warn!("Invalid OpentelemetryLogs configuration: {e}");
                         return Err(Error::InvalidConfig(e));
                     }
                 }
