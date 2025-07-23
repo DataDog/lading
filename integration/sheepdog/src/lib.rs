@@ -423,7 +423,8 @@ generator:
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
-            variant: "opentelemetry_logs"
+            variant:
+              opentelemetry_logs: {}
         headers:
             Content-Type: "application/x-protobuf"
         "#,

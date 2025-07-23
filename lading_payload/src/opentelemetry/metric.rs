@@ -38,7 +38,6 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
-pub(crate) mod tags;
 pub(crate) mod templates;
 pub(crate) mod unit;
 
@@ -53,7 +52,7 @@ use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
 use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::{Pool, PoolError, ResourceTemplateGenerator};
+use templates::{Pool, ResourceTemplateGenerator};
 use tracing::{debug, error};
 use unit::UnitGenerator;
 
@@ -323,9 +322,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
-            Err(PoolError::EmptyChoice) => {
+            Err(crate::opentelemetry::common::templates::PoolError::EmptyChoice) => {
                 error!("Pool was unable to satify request for {budget} size");
-                Err(PoolError::EmptyChoice)?
+                Err(crate::opentelemetry::common::templates::PoolError::EmptyChoice)?
             }
             Err(e) => Err(e)?,
         };

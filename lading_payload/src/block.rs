@@ -332,8 +332,15 @@ impl Cache {
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
-            crate::Config::OpentelemetryLogs => {
-                let mut pyld = crate::OpentelemetryLogs::new(&mut rng);
+            crate::Config::OpentelemetryLogs(config) => {
+                match config.valid() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        warn!("Invalid OpentelemetryLogs configuration: {e}");
+                        return Err(Error::InvalidConfig(e));
+                    }
+                }
+                let mut pyld = crate::OpentelemetryLogs::new(*config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-logs");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
