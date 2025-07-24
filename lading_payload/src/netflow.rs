@@ -84,6 +84,9 @@ pub struct Config {
     /// Range for AS numbers
     pub as_number_range: ConfRange<u16>,
 
+    /// Range for ToS (Type of Service) values
+    pub tos_range: ConfRange<u8>,
+
     /// Protocol weights (TCP, UDP, ICMP, Other)
     pub protocol_weights: ProtocolWeights,
 
@@ -122,6 +125,7 @@ impl Default for Config {
             }, // 1s to 1h
             interface_range: ConfRange::Inclusive { min: 1, max: 254 },
             as_number_range: ConfRange::Inclusive { min: 1, max: 65535 },
+            tos_range: ConfRange::Inclusive { min: 0, max: 255 },
             protocol_weights: ProtocolWeights::default(),
             engine_type: 0,
             engine_id: 0,
@@ -153,6 +157,11 @@ impl Config {
         let (dst_ip_valid, reason) = self.dst_ip_range.valid();
         if !dst_ip_valid {
             return Err(format!("dst_ip_range is invalid: {reason}"));
+        }
+
+        let (tos_valid, reason) = self.tos_range.valid();
+        if !tos_valid {
+            return Err(format!("tos_range is invalid: {reason}"));
         }
 
         Ok(())
@@ -289,7 +298,7 @@ impl NetFlowV5 {
             pad1: 0,
             tcp_flags,
             prot: protocol,
-            tos: rng.random_range(0..=255),
+            tos: self.config.tos_range.sample(rng),
             src_as: self.config.as_number_range.sample(rng),
             dst_as: self.config.as_number_range.sample(rng),
             src_mask: rng.random_range(8..=32), // Reasonable subnet masks
