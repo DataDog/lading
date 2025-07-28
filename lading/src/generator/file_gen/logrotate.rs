@@ -197,6 +197,7 @@ impl Server {
                     .expect("bytes_per_second must be non-zero");
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
+                    timeout_micros: 0,
                 }
             }
             (None, Some(throttle)) => (*throttle).try_into()?,
@@ -340,7 +341,9 @@ impl Child {
 
     async fn spin(mut self) -> Result<(), Error> {
         let buffer_capacity = match self.throttle_config {
-            lading_throttle::Config::Stable { maximum_capacity }
+            lading_throttle::Config::Stable {
+                maximum_capacity, ..
+            }
             | lading_throttle::Config::Linear {
                 maximum_capacity, ..
             } => maximum_capacity.get() as usize,

@@ -54,6 +54,7 @@ impl TryFrom<BytesThrottleConfig> for lading_throttle::Config {
                 let value = NonZeroU32::new(value).ok_or(ThrottleConversionError::Zero)?;
                 Ok(lading_throttle::Config::Stable {
                     maximum_capacity: value,
+                    timeout_micros: 0,
                 })
             }
             BytesThrottleConfig::Linear {

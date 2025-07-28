@@ -40,6 +40,9 @@ use tokio::time::{self, Duration, Instant};
 pub mod linear;
 pub mod stable;
 
+// Re-export MAX_ROLLED_INTERVALS for use in proofs
+pub use stable::MAX_ROLLED_INTERVALS;
+
 // An 'interval' is the period in which all counters reset. The throttle makes
 // no claims on units, but consider if a user intends to produce 1Mb/s the
 // 'interval' is one second and each tick corresponds to one microsecond. Each
@@ -58,6 +61,10 @@ pub enum Config {
         /// The maximum capacity of the throttle, beyond which no interval will
         /// grow greater.
         maximum_capacity: NonZeroU32,
+        /// The timeout in microseconds for rolled capacity. When 0 (default),
+        /// no capacity rolls over between intervals.
+        #[serde(default)]
+        timeout_micros: u64,
     },
     /// A throttle that linearly increases load from `initial_capacity` to
     /// `maximum_capacity` with an increase of `rate_of_change` per tick.
@@ -147,8 +154,12 @@ impl Throttle<RealClock> {
     #[must_use]
     pub fn new_with_config(config: Config) -> Self {
         match config {
-            Config::Stable { maximum_capacity } => Throttle::Stable(stable::Stable::with_clock(
+            Config::Stable {
                 maximum_capacity,
+                timeout_micros,
+            } => Throttle::Stable(stable::Stable::with_clock(
+                maximum_capacity,
+                timeout_micros,
                 RealClock::default(),
             )),
             Config::Linear {
