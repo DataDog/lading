@@ -174,6 +174,7 @@ impl UnixDatagram {
                         NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
                     lading_throttle::Config::Stable {
                         maximum_capacity: bytes_per_second,
+                        timeout_micros: 0,
                     }
                 }
                 (None, Some(throttle_config)) => (*throttle_config).try_into()?,

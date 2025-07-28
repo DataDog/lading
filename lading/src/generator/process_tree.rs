@@ -295,6 +295,7 @@ impl ProcessTree {
         let throttle = match (&config.max_tree_per_second, &config.throttle) {
             (Some(max_tps), None) => Throttle::new_with_config(lading_throttle::Config::Stable {
                 maximum_capacity: *max_tps,
+                timeout_micros: 0,
             }),
             (None, Some(throttle_config)) => Throttle::new_with_config(*throttle_config),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
