@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manner similar to OTel metrics.
 ## Changed
 - Lading toolchain is now 1.89.0
+- Stable throttle now has a 'timeout' configuration parameter to model IO done
+  with timeout.
 
 ## [0.27.0]
 ## Added
