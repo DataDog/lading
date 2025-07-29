@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [unreleased]
+## Added
+- Stable throttle now has a 'timeout' configuration parameter to model IO done
+  with timeout.
+
 ## [0.28.0]
 ## Added
 - Added configuration surface area to the OTel logs payload generator, in a
