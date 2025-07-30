@@ -14,7 +14,7 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 bytes = { workspace = true }
-byte-unit = { workspace = true, features = [] }
+byte-unit = { workspace = true }
 opentelemetry-proto = { version = "0.30.0", features = [
   "trace",
   "metrics",
@@ -23,7 +23,7 @@ opentelemetry-proto = { version = "0.30.0", features = [
   "with-serde",
 ] }
 prost = { workspace = true }
-rand = { workspace = true, default-features = false, features = [
+rand = { workspace = true, features = [
   "small_rng",
   "std",
   "std_rng",

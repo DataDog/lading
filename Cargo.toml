@@ -11,7 +11,7 @@ members = [
 
 [workspace.dependencies]
 bytes = { version = "1.10", default-features = false, features = ["std"] }
-byte-unit = { version = "5.1", features = ["serde"] }
+byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
 metrics = { version = "0.23" }
 metrics-util = { version = "0.17" }
 metrics-exporter-prometheus = { version = "0.15", default-features = false, features = [
