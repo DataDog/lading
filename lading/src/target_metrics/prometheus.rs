@@ -367,9 +367,10 @@ mod tests {
     > {
         let dr = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
-        dr.install().expect("failed to install recorder");
 
-        parse_prometheus_metrics(s, tags.as_ref(), None);
+        metrics::with_local_recorder(&dr, || {
+            parse_prometheus_metrics(s, tags.as_ref(), None);
+        });
 
         snapshotter.snapshot().into_hashmap()
     }
@@ -412,7 +413,7 @@ mod tests {
 
         let dr = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
-        dr.install().expect("failed to install recorder");
+        let _guard = metrics::set_default_local_recorder(&dr);
 
         experiment_started_broadcaster.signal();
 
