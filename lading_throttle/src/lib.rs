@@ -40,9 +40,6 @@ use tokio::time::{self, Duration, Instant};
 pub mod linear;
 pub mod stable;
 
-// Re-export MAX_ROLLED_INTERVALS for use in proofs
-pub use stable::MAX_ROLLED_INTERVALS;
-
 // An 'interval' is the period in which all counters reset. The throttle makes
 // no claims on units, but consider if a user intends to produce 1Mb/s the
 // 'interval' is one second and each tick corresponds to one microsecond. Each
