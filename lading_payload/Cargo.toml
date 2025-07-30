@@ -32,7 +32,7 @@ rmp-serde = { version = "1.1", default-features = false }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_tuple = { version = "1.0", default-features = false }
+serde_tuple = { version = "1.1", default-features = false }
 thiserror = { workspace = true }
 time = { version = "0.3", features = ["formatting"] }
 tracing = { workspace = true }
