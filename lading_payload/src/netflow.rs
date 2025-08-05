@@ -25,7 +25,7 @@ struct NetFlowV5Header {
 }
 
 /// `NetFlow` v5 flow record (48 bytes)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct NetFlowV5Record {
     srcaddr: u32,  // Source IP address
     dstaddr: u32,  // Destination IP address
@@ -95,6 +95,37 @@ pub struct Config {
 
     /// Engine ID to use
     pub engine_id: u8,
+
+    /// Aggregation settings for generating related flows
+    pub aggregation: AggregationConfig,
+}
+
+/// Configuration for flow aggregation and port rollup
+#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct AggregationConfig {
+    /// Flow aggregation ratio - generates additional flows with identical 5-tuples
+    /// A ratio of 1.6 means for every base flow, generate 0.6 additional identical flows
+    /// Set to 1.0 to disable flow aggregation
+    pub flow_aggregation_ratio: f32,
+
+    /// Port rollup ratio - generates additional flows with same src/dst IPs and dst port
+    /// but different source ports. A ratio of 5.0 means generate 4 additional flows
+    /// with different source ports for each base flow
+    /// Set to 1.0 to disable port rollup
+    pub port_rollup_ratio: f32,
+
+    /// Maximum time variance in milliseconds for aggregated flows
+    /// Aggregated flows will have timestamps within this range of the base flow
+    pub time_variance_ms: u32,
+
+    /// Whether to apply small variations to packet/byte counts in aggregated flows
+    pub vary_counts: bool,
+
+    /// Maximum percentage variation for packet/byte counts (0.0-1.0)
+    /// Only used if vary_counts is true
+    pub count_variation_percent: f32,
 }
 
 impl Default for Config {
@@ -129,6 +160,7 @@ impl Default for Config {
             protocol_weights: ProtocolWeights::default(),
             engine_type: 0,
             engine_id: 0,
+            aggregation: AggregationConfig::default(),
         }
     }
 }
@@ -164,6 +196,19 @@ impl Config {
             return Err(format!("tos_range is invalid: {reason}"));
         }
 
+        // Validate aggregation configuration
+        if self.aggregation.flow_aggregation_ratio < 1.0 {
+            return Err("flow_aggregation_ratio must be >= 1.0".to_string());
+        }
+
+        if self.aggregation.port_rollup_ratio < 1.0 {
+            return Err("port_rollup_ratio must be >= 1.0".to_string());
+        }
+
+        if self.aggregation.count_variation_percent < 0.0 || self.aggregation.count_variation_percent > 1.0 {
+            return Err("count_variation_percent must be between 0.0 and 1.0".to_string());
+        }
+
         Ok(())
     }
 }
@@ -190,6 +235,18 @@ impl Default for ProtocolWeights {
             udp: 25,  // 25%
             icmp: 3,  // 3%
             other: 2, // 2%
+        }
+    }
+}
+
+impl Default for AggregationConfig {
+    fn default() -> Self {
+        Self {
+            flow_aggregation_ratio: 1.0,      // No aggregation by default
+            port_rollup_ratio: 1.0,           // No port rollup by default
+            time_variance_ms: 1000,           // 1 second variance
+            vary_counts: true,                // Apply small variations
+            count_variation_percent: 0.1,     // 10% variation
         }
     }
 }
@@ -307,6 +364,64 @@ impl NetFlowV5 {
         }
     }
 
+    /// Generate aggregated flows for a base flow record
+    fn generate_aggregated_flows<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
+    where
+        R: Rng + ?Sized,
+    {
+        let mut flows = Vec::new();
+
+        // Generate flow aggregation (identical 5-tuples)
+        if self.config.aggregation.flow_aggregation_ratio > 1.0 {
+            let additional_flows = (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
+            for _ in 0..additional_flows {
+                let mut aggregated_flow = *base_record;
+                self.apply_aggregation_variations(&mut aggregated_flow, base_uptime, rng);
+                flows.push(aggregated_flow);
+            }
+        }
+
+        // Generate port rollup flows (same src/dst IPs and dst port, different src ports)
+        if self.config.aggregation.port_rollup_ratio > 1.0 && (base_record.prot == 6 || base_record.prot == 17) {
+            let additional_flows = (self.config.aggregation.port_rollup_ratio - 1.0).round() as u32;
+            for _ in 0..additional_flows {
+                let mut rollup_flow = *base_record;
+                // Keep same dst_ip, dst_port, protocol, but change src_port
+                rollup_flow.srcport = self.config.src_port_range.sample(rng);
+                self.apply_aggregation_variations(&mut rollup_flow, base_uptime, rng);
+                flows.push(rollup_flow);
+            }
+        }
+
+        flows
+    }
+
+    /// Apply variations to aggregated flows (timing and count variations)
+    fn apply_aggregation_variations<R>(&self, flow: &mut NetFlowV5Record, base_uptime: u32, rng: &mut R)
+    where
+        R: Rng + ?Sized,
+    {
+        // Apply time variance
+        if self.config.aggregation.time_variance_ms > 0 {
+            let time_offset = rng.random_range(0..=self.config.aggregation.time_variance_ms);
+            flow.first = flow.first.saturating_add(time_offset);
+            flow.last = base_uptime.saturating_add(time_offset);
+        }
+
+        // Apply count variations if enabled
+        if self.config.aggregation.vary_counts {
+            let variation = self.config.aggregation.count_variation_percent;
+            
+            // Vary packet count
+            let pkt_variation = (flow.d_pkts as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
+            flow.d_pkts = (flow.d_pkts as i32 + pkt_variation).max(1) as u32;
+            
+            // Vary byte count
+            let byte_variation = (flow.d_octets as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
+            flow.d_octets = (flow.d_octets as i32 + byte_variation).max(64) as u32;
+        }
+    }
+
     /// Write header to bytes in network byte order
     fn write_header<W>(&self, header: &NetFlowV5Header, writer: &mut W) -> Result<(), Error>
     where
@@ -367,25 +482,44 @@ impl Serialize for NetFlowV5 {
             return Ok(());
         }
 
+        // Generate base flows and their aggregated flows
+        let mut all_flows = Vec::new();
+        let desired_base_flows = self.config.flows_per_packet.sample(&mut rng) as usize;
+
+        for _ in 0..desired_base_flows {
+            let base_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000);
+            let base_flow = self.generate_flow_record(base_uptime, &mut rng);
+            all_flows.push(base_flow);
+
+            // Generate aggregated flows for this base flow
+            let aggregated_flows = self.generate_aggregated_flows(&base_flow, base_uptime, &mut rng);
+            all_flows.extend(aggregated_flows);
+        }
+
         // Calculate maximum flows that fit in the byte budget
         let max_flows_by_budget = (max_bytes - HEADER_SIZE) / FLOW_RECORD_SIZE;
-        let desired_flows = self.config.flows_per_packet.sample(&mut rng) as usize;
-        let actual_flows = desired_flows.min(max_flows_by_budget).min(30); // NetFlow v5 max is 30
+        let actual_flows = all_flows.len().min(max_flows_by_budget).min(30); // NetFlow v5 max is 30
 
         if actual_flows == 0 {
             return Ok(());
         }
 
+        // Skip if we can't fit all desired flows
+        if actual_flows < all_flows.len() {
+            return Ok(());
+        }
+
+        // Truncate flows to fit the packet
+        all_flows.truncate(actual_flows);
+
         let header = self.generate_header(actual_flows as u16, &mut rng);
-        let base_uptime = header.sys_uptime;
 
         // Write header
         self.write_header(&header, writer)?;
 
         // Write flow records
-        for _ in 0..actual_flows {
-            let flow_record = self.generate_flow_record(base_uptime, &mut rng);
-            self.write_flow_record(&flow_record, writer)?;
+        for flow_record in &all_flows {
+            self.write_flow_record(flow_record, writer)?;
         }
 
         // Update sequence number for next packet
@@ -430,6 +564,59 @@ mod test {
                 prop_assert_eq!((bytes.len() - 24) % 48, 0);
                 // Check version is 5
                 prop_assert_eq!(u16::from_be_bytes([bytes[0], bytes[1]]), 5);
+            }
+        }
+
+        #[test]
+        fn aggregation_generates_additional_flows(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut config = Config::default();
+            
+            // Set aggregation ratios
+            config.aggregation.flow_aggregation_ratio = 2.0; // Double the flows
+            config.aggregation.port_rollup_ratio = 1.0; // No port rollup
+            config.flows_per_packet = ConfRange::Constant(5); // Always 5 base flows
+            
+            let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
+
+            let mut bytes = Vec::new();
+            netflow.to_bytes(rng, 1500, &mut bytes).unwrap();
+
+            if !bytes.is_empty() {
+                // Should have header (24 bytes) + flow records (48 bytes each)
+                let flow_count = (bytes.len() - 24) / 48;
+                // With 2.0 aggregation ratio, should have approximately 10 flows (5 base + 5 aggregated)
+                // Allow some variance due to randomness in the implementation
+                prop_assert!(flow_count >= 8 && flow_count <= 12);
+            }
+        }
+
+        #[test]
+        fn port_rollup_generates_different_source_ports(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut config = Config::default();
+            
+            // Set port rollup ratio
+            config.aggregation.flow_aggregation_ratio = 1.0; // No flow aggregation
+            config.aggregation.port_rollup_ratio = 3.0; // Triple the flows with different ports
+            config.flows_per_packet = ConfRange::Constant(2); // 2 base flows
+            
+            // Force TCP protocol to ensure port rollup applies
+            config.protocol_weights.tcp = 100;
+            config.protocol_weights.udp = 0;
+            config.protocol_weights.icmp = 0;
+            config.protocol_weights.other = 0;
+            
+            let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
+
+            let mut bytes = Vec::new();
+            netflow.to_bytes(rng, 1500, &mut bytes).unwrap();
+
+            if !bytes.is_empty() {
+                let flow_count = (bytes.len() - 24) / 48;
+                // With 3.0 port rollup ratio and TCP only, should have approximately 6 flows (2 base + 4 rollup)
+                // Allow some variance due to the truncated multiplication
+                prop_assert!(flow_count >= 4 && flow_count <= 8);
             }
         }
     }
