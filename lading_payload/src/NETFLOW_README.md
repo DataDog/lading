@@ -73,6 +73,55 @@ generator:
 | `protocol_weights` | ProtocolWeights | Protocol distribution weights | TCP:70, UDP:25, ICMP:3, Other:2 |
 | `engine_type` | u8 | Flow switching engine type | 0 |
 | `engine_id` | u8 | Flow switching engine ID | 0 |
+| `aggregation` | AggregationConfig | Flow aggregation settings | See below |
+
+## Flow Aggregation Configuration
+
+The NetFlow v5 generator supports flow aggregation features to simulate realistic network traffic patterns:
+
+### Flow Aggregation Ratio
+
+The `flow_aggregation_ratio` setting generates additional flows with identical 5-tuples (source IP, destination IP, source port, destination port, protocol) to simulate traffic aggregation scenarios commonly seen in real networks.
+
+- **Ratio of 1.0**: No aggregation (default)
+- **Ratio of 1.6**: For every base flow, generate 0.6 additional identical flows (60% more flows)
+- **Ratio of 2.0**: For every base flow, generate 1 additional identical flow (double the flows)
+
+### Port Rollup Ratio
+
+The `port_rollup_ratio` setting generates additional flows with the same source IP, destination IP, and destination port, but with different ephemeral source ports. This simulates scenarios where multiple client connections from the same source reach the same destination service.
+
+- **Ratio of 1.0**: No port rollup (default)
+- **Ratio of 5.0**: For every base flow, generate 4 additional flows with different source ports
+- **Only applies to TCP and UDP protocols** (ICMP and other protocols do not use ports)
+
+### Aggregation Configuration Options
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `flow_aggregation_ratio` | f32 | Additional flows with identical 5-tuples | 1.0 |
+| `port_rollup_ratio` | f32 | Additional flows with different source ports | 1.0 |
+| `time_variance_ms` | u32 | Time variance for aggregated flows (ms) | 1000 |
+| `vary_counts` | bool | Apply variations to packet/byte counts | true |
+| `count_variation_percent` | f32 | Percentage variation for counts (0.0-1.0) | 0.1 |
+
+### Aggregation Example
+
+```yaml
+generator:
+  udp:
+    variant:
+      net_flow_v5:
+        flows_per_packet:
+          min: 5
+          max: 20
+        aggregation:
+          flow_aggregation_ratio: 1.6    # 60% more identical flows
+          port_rollup_ratio: 5.0         # 4 additional flows with different src ports
+          time_variance_ms: 2000         # 2 second time variance
+          vary_counts: true              # Apply count variations
+          count_variation_percent: 0.15  # 15% variation
+```
 
 ## IP Address Configuration
 
