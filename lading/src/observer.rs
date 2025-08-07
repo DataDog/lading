@@ -97,13 +97,34 @@ impl Server {
     ) -> Result<(), Error> {
         use crate::observer::linux::Sampler;
 
-        let target_pid = pid_snd
-            .recv()
-            .await
-            .expect("target failed to transmit PID, catastrophic failure");
+        let target_pid = match pid_snd.recv().await {
+            Ok(pid) => pid,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                tracing::warn!("Observer lagged behind target PID broadcast, but target should be running");
+                // In lag case, we don't have the PID but target should be running
+                // This is not ideal but we'll continue - observer functionality will be limited
+                None
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return Err(Error::from(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "target PID channel closed before PID was received",
+                )));
+            }
+        };
         drop(pid_snd);
 
-        let target_pid = target_pid.expect("observer cannot be used in no-target mode");
+        let target_pid = match target_pid {
+            Some(pid) => pid,
+            None => {
+                // This can happen in no-target mode or if we lagged behind the PID broadcast
+                tracing::error!("Observer cannot function without target PID");
+                return Err(Error::from(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "observer cannot be used when target PID is unavailable",
+                )));
+            }
+        };
 
         let mut sample_delay = tokio::time::interval(sample_period);
         let mut sampler = Sampler::new(

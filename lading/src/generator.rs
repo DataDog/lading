@@ -235,7 +235,22 @@ impl Server {
     /// error.
     pub async fn run(self, mut pid_snd: TargetPidReceiver) -> Result<(), Error> {
         // Pause until the target process is running.
-        let _ = pid_snd.recv().await;
+        // Handle broadcast lag errors by retrying - this can happen with multiple generators
+        loop {
+            match pid_snd.recv().await {
+                Ok(_) => break, // Successfully received target PID
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Channel lagged, but target PID was sent - continue with generator
+                    warn!("Generator lagged behind target PID broadcast, continuing anyway");
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Channel closed without sending PID - this is an error condition
+                    error!("Target PID channel closed before PID was received");
+                    return Ok(()); // Return early to avoid panic
+                }
+            }
+        }
         drop(pid_snd);
 
         match self {
