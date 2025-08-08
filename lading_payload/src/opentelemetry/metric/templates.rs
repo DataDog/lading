@@ -9,7 +9,6 @@ use opentelemetry_proto::tonic::{
     resource,
 };
 use prost::Message;
-use rand::prelude::*;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
@@ -110,7 +109,8 @@ impl MetricTemplateGenerator {
         Ok(Self {
             kind_dist: WeightedIndex::new([
                 u16::from(config.metric_weights.gauge),
-                u16::from(config.metric_weights.sum),
+                u16::from(config.metric_weights.sum_delta),
+                u16::from(config.metric_weights.sum_cumulative),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -167,7 +167,11 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let kind = match self.kind_dist.sample(rng) {
             0 => Kind::Gauge,
             1 => Kind::Sum {
-                aggregation_temporality: *[1, 2].choose(rng).expect("cannot fail"),
+                aggregation_temporality: 1,
+                is_monotonic: rng.random_bool(0.5),
+            },
+            2 => Kind::Sum {
+                aggregation_temporality: 2,
                 is_monotonic: rng.random_bool(0.5),
             },
             _ => unreachable!(),

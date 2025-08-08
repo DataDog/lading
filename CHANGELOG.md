@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Added configuration surface area to the OTel logs payload generator, in a
   manner similar to OTel metrics.
+- Added a way to configure which aggregation temporality is used when using
+  Opentelemetry `Sum` metric.
 ## Changed
 - Lading toolchain is now 1.89.0
 ## Fixed

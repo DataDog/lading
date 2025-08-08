@@ -498,7 +498,8 @@ generator:
               opentelemetry_metrics:
                 metric_weights:
                   gauge: 50
-                  sum: 50
+                  sum_delta: 25
+                  sum_cumulative: 25
         headers:
             Content-Type: "application/x-protobuf"
         "#,

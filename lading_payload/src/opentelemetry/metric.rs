@@ -105,15 +105,18 @@ impl Default for Contexts {
 pub struct MetricWeights {
     /// The relative probability of generating a gauge metric.
     pub gauge: u8,
-    /// The relative probability of generating a sum metric.
-    pub sum: u8,
+    /// The relative probability of generating a sum delta metric.
+    pub sum_delta: u8,
+    /// The relative probability of generating a sum cumulative metric.
+    pub sum_cumulative: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50, // 50%
-            sum: 50,   // 50%
+            gauge: 50,          // 50%
+            sum_delta: 25,      // 25%
+            sum_cumulative: 25, // 25%
         }
     }
 }
@@ -138,7 +141,10 @@ impl Config {
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
-        if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
+        if self.metric_weights.gauge == 0
+            || self.metric_weights.sum_delta == 0
+            || self.metric_weights.sum_cumulative == 0
+        {
             return Err("Metric weights cannot be 0".to_string());
         }
 
@@ -1046,7 +1052,8 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
@@ -1085,7 +1092,8 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
@@ -1330,19 +1338,31 @@ mod test {
 
         // Invalid: Zero metric weights
         let zero_gauge_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 50 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 25,
+                sum_cumulative: 25,
+            },
             ..valid_config
         };
         assert!(zero_gauge_weight.valid().is_err());
 
         let zero_sum_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 50, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 50,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
 
         let zero_weights = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_weights.valid().is_err());
