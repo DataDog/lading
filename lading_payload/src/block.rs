@@ -540,9 +540,16 @@ where
     // objective and iterate over these, choosing random block sizes between the
     // discovered floor and the maximum user-provided block size.
     while bytes_remaining > 0 {
-        // A block_size is always in the range [min_block_size,
-        // max_block_size).
-        let block_size = rng.random_range(min_block_size..max_block_size);
+        // Handle edge case where min equals max
+        let block_size = if min_block_size == max_block_size {
+            min_block_size
+        } else if min_block_size > max_block_size {
+            error!("Cannot generate blocks: min_block_size ({}) > max_block_size ({})", min_block_size, max_block_size);
+            return Err(SpinError::EmptyBlock.into());
+        } else {
+            // A block_size is in the range [min_block_size, max_block_size)
+            rng.random_range(min_block_size..max_block_size)
+        };
 
         match construct_block(&mut rng, serializer, block_size) {
             Ok(block) => {
@@ -570,7 +577,6 @@ where
                 );
                 let proposed_min = (f64::from(block_size) * 0.25) as u32;
                 // Ensure min_block_size always increases by at least some amount to avoid infinite loops
-                // but don't exceed max_block_size
                 min_block_size = min_block_size
                     .max(proposed_min)
                     .max(min_block_size + 64)

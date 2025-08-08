@@ -76,9 +76,16 @@ generator:
             # 1.6 means for every base flow, generate 0.6 additional identical flows
             flow_aggregation_ratio: 1.6
             
-            # Port rollup ratio - generates additional flows with same src/dst IPs and dst port
-            # but different source ports. 5.0 means generate 4 additional flows with different src ports
-            port_rollup_ratio: 5.0
+            # Percentage of flows that should have port rollup applied (0.0-1.0)
+            # 0.3 means 30% of eligible flows will get port rollup
+            port_rollup_percentage_of_flows: 0.3
+            
+            # Range for number of additional port rollup flows per selected flow
+            # Each selected flow will generate 2-6 additional flows with different source ports
+            port_rollup_range:
+              inclusive:
+                min: 2
+                max: 6
             
             # Maximum time variance in milliseconds for aggregated flows
             # Aggregated flows will have timestamps within this range of the base flow
@@ -87,6 +94,26 @@ generator:
             # Whether to apply small variations to packet/byte counts in aggregated flows
             vary_counts: true
             
+            # Maximum percentage variation for packet/byte counts (0.0-1.0)
+            count_variation_percent: 0.15  # 15% variation
+
+          # Aggregation settings for generating related flows
+          aggregation:
+            # Flow aggregation ratio - generates additional flows with identical 5-tuples
+            # 1.6 means for every base flow, generate 0.6 additional identical flows
+            flow_aggregation_ratio: 1.6
+
+            # Port rollup ratio - generates additional flows with same src/dst IPs and dst port
+            # but different source ports. 5.0 means generate 4 additional flows with different src ports
+            port_rollup_ratio: 5.0
+
+            # Maximum time variance in milliseconds for aggregated flows
+            # Aggregated flows will have timestamps within this range of the base flow
+            time_variance_ms: 2000  # 2 seconds
+
+            # Whether to apply small variations to packet/byte counts in aggregated flows
+            vary_counts: true
+
             # Maximum percentage variation for packet/byte counts (0.0-1.0)
             count_variation_percent: 0.15  # 15% variation
 
