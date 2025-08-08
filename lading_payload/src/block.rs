@@ -565,7 +565,17 @@ where
                 // _too_ far off the minimum viable size we scale the block size
                 // by -75% -- an arbitrary figure -- and set that as the new
                 // minimum block size.
-                min_block_size = (f64::from(block_size) * 0.25) as u32;
+                println!(
+                    //"NetFlow DEBUG Block size {block_size} was rejected, setting new minimum block size."
+                );
+                let proposed_min = (f64::from(block_size) * 0.25) as u32;
+                // Ensure min_block_size always increases by at least some amount to avoid infinite loops
+                // but don't exceed max_block_size
+                min_block_size = min_block_size
+                    .max(proposed_min)
+                    .max(min_block_size + 64)
+                    .min(max_block_size);
+                //println!("NetFlow DEBUG New minimum block size is {min_block_size}.");
             }
             Err(e) => {
                 error!("Unexpected error during block construction: {e}");
