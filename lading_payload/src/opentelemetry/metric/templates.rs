@@ -513,3 +513,57 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::SizedGenerator;
+
+    #[test]
+    fn metric_template_generator_generate() {
+        // Test gauge generation
+        let mut config = Config::default();
+        config.metric_weights.gauge = 100;
+        config.metric_weights.sum_delta = 0;
+        config.metric_weights.sum_cumulative = 0;
+
+        let data = generate_metric_data_from_config(config);
+        assert!(matches!(data, Data::Gauge(_)));
+
+        // Test sum delta generation
+        let mut config = Config::default();
+        config.metric_weights.gauge = 0;
+        config.metric_weights.sum_delta = 100;
+        config.metric_weights.sum_cumulative = 0;
+
+        let data = generate_metric_data_from_config(config);
+        assert!(matches!(data, Data::Sum(sum) if sum.aggregation_temporality == 1));
+
+        // Test sum cumulative generation
+        let mut config = Config::default();
+        config.metric_weights.gauge = 0;
+        config.metric_weights.sum_delta = 0;
+        config.metric_weights.sum_cumulative = 100;
+
+        let data = generate_metric_data_from_config(config);
+        assert!(matches!(data, Data::Sum(sum) if sum.aggregation_temporality == 2));
+    }
+
+    fn generate_metric_data_from_config(config: Config) -> Data {
+        let mut rng = rand::rng();
+
+        let generator_result = MetricTemplateGenerator::new(
+            &config,
+            &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
+            &mut rng,
+        );
+        assert!(generator_result.is_ok());
+        let mut generator = generator_result.unwrap();
+
+        let result = generator.generate(&mut rng, &mut 1024);
+        assert!(result.is_ok());
+        let metric = result.unwrap();
+        assert!(metric.data.is_some());
+        metric.data.unwrap()
+    }
+}
