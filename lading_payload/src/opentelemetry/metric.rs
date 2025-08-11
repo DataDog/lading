@@ -704,7 +704,7 @@ mod test {
         };
 
         let max_bytes = 512;
-        let mut rng = SmallRng::seed_from_u64(42);
+        let mut rng = SmallRng::seed_from_u64(1);
         let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
             .expect("failed to create metrics generator");
 
