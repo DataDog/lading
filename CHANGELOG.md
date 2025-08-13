@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   context cap number of templates were not pre-generated. This had a knock-on
   effect of requiring a potentially infinite loop in one of the payload
   generators.
+- OTel metrics generation now skews data points, no longer using a normal
+  distribution derived number of points.
 
 ## [0.27.0]
 ## Added
