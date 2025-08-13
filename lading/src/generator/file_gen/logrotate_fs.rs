@@ -223,6 +223,7 @@ impl LogrotateFS {
 }
 
 #[tracing::instrument(skip(state))]
+#[allow(clippy::similar_names)] // ctime and crtime are standard Unix file time names
 fn getattr_helper(
     state: &mut MutexGuard<model::State>,
     start_time_system: std::time::SystemTime,

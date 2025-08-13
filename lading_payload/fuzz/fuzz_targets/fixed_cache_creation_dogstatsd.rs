@@ -16,6 +16,11 @@ struct Input {
 }
 
 fuzz_target!(|input: Input| {
+    // Limit total bytes to 100MB to prevent OOM
+    if input.total_bytes.get() > 100_000_000 {
+        return;
+    }
+
     for byte_size in &input.block_bytes_sizes {
         if byte_size > &input.total_bytes || byte_size.get() > 10_000_000 {
             return;
@@ -23,10 +28,17 @@ fuzz_target!(|input: Input| {
     }
 
     let mut rng = SmallRng::from_seed(input.seed);
+    let max_block_size = input
+        .block_bytes_sizes
+        .iter()
+        .filter(|&size| size.get() <= 10_000_000)
+        .max()
+        .copied()
+        .unwrap_or(NonZeroU32::new(1).unwrap());
     let _res = Cache::fixed(
         &mut rng,
         input.total_bytes,
-        &input.block_bytes_sizes,
+        u128::from(max_block_size.get()),
         &lading_payload::Config::DogStatsD(input.config),
     );
 });
