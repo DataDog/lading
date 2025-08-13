@@ -336,7 +336,7 @@ impl Regions {
             }
 
             str_regions.push(&contents[start_index..]);
-        };
+        }
 
         str_regions
     }
