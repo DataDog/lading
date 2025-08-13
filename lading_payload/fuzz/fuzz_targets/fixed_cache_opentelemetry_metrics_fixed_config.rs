@@ -3,33 +3,36 @@
 use arbitrary;
 use libfuzzer_sys::fuzz_target;
 use rand::{SeedableRng, rngs::SmallRng};
-use std::num::NonZeroU32;
+use std::num::NonZeroU16;
 
 use lading_payload::Serialize;
+use lading_payload::common::config::ConfRange;
 use lading_payload::opentelemetry::metric;
 
 #[derive(arbitrary::Arbitrary, Debug)]
 struct Input {
     seed: [u8; 32],
-    budget_bytes: NonZeroU32,
-    config: metric::Config,
+    budget_bytes: NonZeroU16,
 }
 
-const MAX_CONTEXTS: u32 = 5_000;
-const MAX_BUDGET: usize = 8 * 1024 * 1024; // MiB
+const MAX_BUDGET: usize = 1 * 1024; // KiB
+
+// This fuzz test is specifically for use in debugging PR #1447. It is otherwise
+// improved on by fixed_cache_opentelemetry_metrics and should be removed once
+// PR #1447 is closed.
 
 fuzz_target!(|input: Input| {
-    // Validate inputs, skipping if too large to fit into memory or just plain invalid.
-    if input.config.valid().is_err() {
-        return;
-    }
-    let total_contexts = match input.config.contexts.total_contexts {
-        lading_payload::common::config::ConfRange::Constant(n) => n,
-        lading_payload::common::config::ConfRange::Inclusive { max, .. } => max,
+    let config = metric::Config {
+        contexts: metric::Contexts {
+            total_contexts: ConfRange::Constant(10),
+            attributes_per_resource: ConfRange::Constant(5),
+            scopes_per_resource: ConfRange::Constant(2),
+            attributes_per_scope: ConfRange::Constant(3),
+            metrics_per_scope: ConfRange::Constant(4),
+            attributes_per_metric: ConfRange::Constant(2),
+        },
+        ..Default::default()
     };
-    if total_contexts > MAX_CONTEXTS {
-        return;
-    }
 
     let budget = input.budget_bytes.get() as usize;
     if budget > MAX_BUDGET {
@@ -43,7 +46,7 @@ fuzz_target!(|input: Input| {
     // generate `budget` bytes into a vec. If the vec ends up being larger than
     // the budget, failure.
     let mut rng = SmallRng::from_seed(input.seed);
-    let mut metrics = metric::OpentelemetryMetrics::new(input.config, &mut rng)
+    let mut metrics = metric::OpentelemetryMetrics::new(config, &mut rng)
         .expect("failed to create metrics generator");
 
     let mut bytes = Vec::with_capacity(budget);

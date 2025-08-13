@@ -74,3 +74,9 @@ name = "fixed_cache_opentelemetry_metrics"
 path = "fuzz_targets/fixed_cache_opentelemetry_metrics.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fixed_cache_opentelemetry_metrics_fixed_config"
+path = "fuzz_targets/fixed_cache_opentelemetry_metrics_fixed_config.rs"
+test = false
+doc = false
