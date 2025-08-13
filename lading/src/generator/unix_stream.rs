@@ -197,7 +197,7 @@ impl UnixStream {
         info!("shutdown signal received");
         while let Some(res) = self.handles.join_next().await {
             match res {
-                Ok(Ok(())) => continue,
+                Ok(Ok(())) => {}
                 Ok(Err(err)) => return Err(err),
                 Err(err) => return Err(Error::Child(err)),
             }

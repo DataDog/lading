@@ -122,16 +122,16 @@ impl fmt::Display for Event<'_> {
         if let Some(source_type_name) = self.source_type_name {
             write!(f, "|s:{source_type_name}")?;
         }
-        if let Some(tags) = &self.tags {
-            if !tags.is_empty() {
-                write!(f, "|#")?;
-                let mut commas_remaining = tags.len() - 1;
-                for tag in tags {
-                    write!(f, "{tag}")?;
-                    if commas_remaining != 0 {
-                        write!(f, ",")?;
-                        commas_remaining -= 1;
-                    }
+        if let Some(tags) = &self.tags
+            && !tags.is_empty()
+        {
+            write!(f, "|#")?;
+            let mut commas_remaining = tags.len() - 1;
+            for tag in tags {
+                write!(f, "{tag}")?;
+                if commas_remaining != 0 {
+                    write!(f, ",")?;
+                    commas_remaining -= 1;
                 }
             }
         }

@@ -630,7 +630,7 @@ mod test {
     }
 
     // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
+    // exceed `budget`.
     #[test]
     fn payload_not_exceed_max_bytes() {
         let config = Config {

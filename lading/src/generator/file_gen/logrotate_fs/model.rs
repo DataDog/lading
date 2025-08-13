@@ -435,11 +435,10 @@ impl State {
                         for &child_inode in &dir.children {
                             if let Some(Node::Directory { name, .. }) =
                                 state.nodes.get(&child_inode)
+                                && name == &dir_name
                             {
-                                if name == &dir_name {
-                                    found_inode = Some(child_inode);
-                                    break;
-                                }
+                                found_inode = Some(child_inode);
+                                break;
                             }
                         }
 
@@ -563,10 +562,11 @@ impl State {
         // Update each File's bytes_per_tick but do not advance time, as that is
         // done later.
         for node in self.nodes.values_mut() {
-            if let Node::File { file } = node {
-                if !file.read_only && !file.unlinked {
-                    file.bytes_per_tick = bytes_per_tick;
-                }
+            if let Node::File { file } = node
+                && !file.read_only
+                && !file.unlinked
+            {
+                file.bytes_per_tick = bytes_per_tick;
             }
         }
 
@@ -728,10 +728,11 @@ impl State {
     fn gc(&mut self) {
         let mut to_remove = Vec::new();
         for (&inode, node) in &self.nodes {
-            if let Node::File { file } = node {
-                if file.unlinked && file.open_handles == 0 {
-                    to_remove.push(inode);
-                }
+            if let Node::File { file } = node
+                && file.unlinked
+                && file.open_handles == 0
+            {
+                to_remove.push(inode);
             }
         }
         for inode in to_remove {

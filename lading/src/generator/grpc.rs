@@ -40,7 +40,7 @@ use super::General;
 pub enum Error {
     /// The remote RPC endpoint returned an error.
     #[error("RPC endpoint error: {0}")]
-    Rpc(#[from] tonic::Status),
+    Rpc(Box<tonic::Status>),
     /// gRPC transport error
     #[error("gRPC transport error: {0}")]
     Transport(#[from] tonic::transport::Error),
@@ -65,6 +65,12 @@ pub enum Error {
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+}
+
+impl From<tonic::Status> for Error {
+    fn from(status: tonic::Status) -> Self {
+        Error::Rpc(Box::new(status))
+    }
 }
 
 /// Config for [`Grpc`]

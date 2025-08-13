@@ -275,7 +275,7 @@ impl Server {
         info!("shutdown signal received");
         for res in join_all(self.handles.drain(..)).await {
             match res {
-                Ok(Ok(())) => continue,
+                Ok(Ok(())) => {}
                 Ok(Err(err)) => {
                     error!("join_all error: {err}");
                     return Err(err);

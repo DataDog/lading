@@ -25,7 +25,7 @@ use hyper::StatusCode;
 pub(crate) fn decode(
     content_encoding: Option<&hyper::header::HeaderValue>,
     mut body: Bytes,
-) -> Result<Bytes, hyper::Response<BoxBody<Bytes, hyper::Error>>> {
+) -> Result<Bytes, Box<hyper::Response<BoxBody<Bytes, hyper::Error>>>> {
     if let Some(content_encoding) = content_encoding {
         let content_encoding = String::from_utf8_lossy(content_encoding.as_bytes());
 
@@ -40,14 +40,14 @@ pub(crate) fn decode(
                     let mut decoded = Vec::new();
                     MultiGzDecoder::new(body.reader())
                         .read_to_end(&mut decoded)
-                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
+                        .map_err(|error| Box::new(encoding_error_to_response(&encoding, error)))?;
                     decoded.into()
                 }
                 "deflate" => {
                     let mut decoded = Vec::new();
                     ZlibDecoder::new(body.reader())
                         .read_to_end(&mut decoded)
-                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
+                        .map_err(|error| Box::new(encoding_error_to_response(&encoding, error)))?;
                     decoded.into()
                 }
                 "zstd" => {
@@ -55,17 +55,19 @@ pub(crate) fn decode(
                     zstd::Decoder::new(body.reader())
                         .map_err(|error| encoding_error_to_response(&encoding, error))?
                         .read_to_end(&mut decoded)
-                        .map_err(|error| encoding_error_to_response(&encoding, error))?;
+                        .map_err(|error| Box::new(encoding_error_to_response(&encoding, error)))?;
 
                     decoded.into()
                 }
                 encoding => {
-                    return Err(hyper::Response::builder()
-                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                        .body(crate::full(format!(
-                            "Unsupported encoding type: {encoding}"
-                        )))
-                        .expect("failed to build response"));
+                    return Err(Box::new(
+                        hyper::Response::builder()
+                            .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                            .body(crate::full(format!(
+                                "Unsupported encoding type: {encoding}"
+                            )))
+                            .expect("failed to build response"),
+                    ));
                 }
             }
         }
