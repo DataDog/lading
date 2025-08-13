@@ -57,7 +57,7 @@ use tracing::{debug, error};
 use unit::UnitGenerator;
 
 /// Smallest useful protobuf, determined by experimentation and enforced in
-/// smallest_protobuf test.
+/// `smallest_protobuf` test.
 pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
@@ -134,6 +134,7 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+    #[allow(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
@@ -190,30 +191,26 @@ impl Config {
         }
 
         // Validate attributes_per_resource range
-        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_resource {
-            if min > max {
-                return Err(
-                    "attributes_per_resource minimum cannot be greater than maximum".to_string(),
-                );
-            }
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_resource
+            && min > max
+        {
+            return Err(
+                "attributes_per_resource minimum cannot be greater than maximum".to_string(),
+            );
         }
 
         // Validate attributes_per_scope range
-        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_scope {
-            if min > max {
-                return Err(
-                    "attributes_per_scope minimum cannot be greater than maximum".to_string(),
-                );
-            }
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_scope
+            && min > max
+        {
+            return Err("attributes_per_scope minimum cannot be greater than maximum".to_string());
         }
 
         // Validate attributes_per_metric range
-        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_metric {
-            if min > max {
-                return Err(
-                    "attributes_per_metric minimum cannot be greater than maximum".to_string(),
-                );
-            }
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_metric
+            && min > max
+        {
+            return Err("attributes_per_metric minimum cannot be greater than maximum".to_string());
         }
 
         let min_contexts = match self.contexts.total_contexts {
