@@ -23,6 +23,34 @@ use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
 pub(crate) type Pool = GenericPool<ResourceMetrics, ResourceTemplateGenerator>;
 
+/// Generate a random number between min and max (inclusive) with heavy bias toward min.
+/// Uses exponential decay: each doubling of the range has half the probability.
+///
+/// For example, with min=1, max=60:
+/// - ~50% chance of returning 1
+/// - ~25% chance of returning 2-3  
+/// - ~12.5% chance of returning 4-7
+/// - And so on...
+fn weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) -> u32 {
+    if min >= max {
+        return min;
+    }
+
+    let range = max - min + 1;
+    let mut current = min;
+    let mut step = 1;
+
+    while current < max {
+        if rng.random_bool(0.5) {
+            return rng.random_range(current..=current.min(max));
+        }
+        current = (current + step).min(max);
+        step = step * 2;
+    }
+
+    max
+}
+
 struct Ndp(NumberDataPoint);
 impl Distribution<Ndp> for StandardUniform {
     fn sample<R>(&self, rng: &mut R) -> Ndp
@@ -145,7 +173,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             _ => unreachable!(),
         };
 
-        let total_data_points = rng.random_range(1..60);
+        // Use weighted distribution: heavily favors small numbers (1-2) but can go up to 60
+        let total_data_points = weighted_range(rng, 1, 60);
         let data_points = (0..total_data_points)
             .map(|_| rng.random::<Ndp>().0)
             .collect();
