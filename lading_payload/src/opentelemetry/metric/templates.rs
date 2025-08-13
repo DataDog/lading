@@ -28,7 +28,7 @@ pub(crate) type Pool = GenericPool<ResourceMetrics, ResourceTemplateGenerator>;
 ///
 /// For example, with min=1, max=60:
 /// - ~50% chance of returning 1
-/// - ~25% chance of returning 2-3  
+/// - ~25% chance of returning 2-3
 /// - ~12.5% chance of returning 4-7
 /// - And so on...
 fn weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) -> u32 {
@@ -36,7 +36,6 @@ fn weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) -> u32 {
         return min;
     }
 
-    let range = max - min + 1;
     let mut current = min;
     let mut step = 1;
 
@@ -45,7 +44,7 @@ fn weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) -> u32 {
             return rng.random_range(current..=current.min(max));
         }
         current = (current + step).min(max);
-        step = step * 2;
+        step *= 2;
     }
 
     max
