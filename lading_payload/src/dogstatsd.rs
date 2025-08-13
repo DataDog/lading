@@ -38,7 +38,6 @@ const LENGTH_PREFIX_SIZE: usize = std::mem::size_of::<u32>();
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct KindWeights {
     metric: u8,
     event: u8,
@@ -72,7 +71,6 @@ impl Default for KindWeights {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct MetricWeights {
     count: u8,
     gauge: u8,
@@ -114,7 +112,6 @@ impl Default for MetricWeights {
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct ValueConf {
     /// Odds out of 256 that the value will be a float and not an integer.
     float_probability: f32,
@@ -156,59 +153,45 @@ pub struct Config {
     /// The unique metric contexts to generate. A context is a set of unique
     /// metric name + tags
     pub contexts: ConfRange<u32>,
-
     /// The range of unique service check names.
     pub service_check_names: ConfRange<u16>,
-
     /// Length for a dogstatsd message name
     pub name_length: ConfRange<u16>,
-
     /// Length for a dogstatsd tag
     pub tag_length: ConfRange<u16>,
-
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
     pub tags_per_msg: ConfRange<u8>,
-
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
     pub multivalue_pack_probability: f32,
-
     /// The count of values that will be generated if multi-value is chosen to
     /// be generated
     pub multivalue_count: ConfRange<u16>,
-
     /// Range of possible values for the sampling rate sent in dogstatsd messages
     pub sampling_range: ConfRange<f32>,
-
     /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
     pub sampling_probability: f32,
-
     /// Defines the relative probability of each kind of `DogStatsD` kinds of
     /// payload.
     pub kind_weights: KindWeights,
-
     /// Defines the relative probability of each kind of `DogStatsD` metric.
     pub metric_weights: MetricWeights,
-
     /// The configuration of values that appear in all metrics.
     pub value: ValueConf,
-
     /// Whether completed blocks should use length-prefix framing.
     ///
     /// If enabled, each block emitted from this generator will have
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
     pub length_prefix_framed: bool,
-
     /// This is a ratio between 0.10 and 1.0 which determines how many
     /// individual tags are unique vs re-used tags.
     /// If this is 1, then every single tag will be unique.
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
-
     /// If true, a fixed `smp.` (4 bytes) prefix will be prepended
     /// to each metric name.
     pub prefix_metric_names: bool,

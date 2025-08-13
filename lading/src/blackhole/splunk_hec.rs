@@ -95,7 +95,7 @@ async fn srv(
     counter!("bytes_received", &*labels).increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
-        Err(response) => Ok(response),
+        Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &*labels).increment(body.len() as u64);
 

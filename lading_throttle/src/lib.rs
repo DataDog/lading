@@ -113,7 +113,7 @@ impl Clock for RealClock {
     ///
     /// # Panics
     ///
-    /// Function will panic if the number of ticks elapsed is greater than u64::MAX.
+    /// Function will panic if the number of ticks elapsed is greater than `u64::MAX`.
     #[allow(clippy::cast_possible_truncation)]
     fn ticks_elapsed(&self) -> u64 {
         let now = Instant::now();

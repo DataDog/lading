@@ -463,13 +463,12 @@ async fn inner_main(
     //
     // INSPECTOR
     //
-    if let Some(inspector_conf) = config.inspector {
-        if !disable_inspector {
-            let tgt_rcv = tgt_snd.subscribe();
-            let inspector_server =
-                inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
-            let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
-        }
+    if let Some(inspector_conf) = config.inspector
+        && !disable_inspector
+    {
+        let tgt_rcv = tgt_snd.subscribe();
+        let inspector_server = inspector::Server::new(inspector_conf, shutdown_watcher.clone())?;
+        let _isrv = tokio::spawn(inspector_server.run(tgt_rcv));
     }
 
     //

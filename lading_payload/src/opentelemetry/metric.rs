@@ -630,35 +630,45 @@ mod test {
     }
 
     // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        let config = Config {
-            contexts: Contexts {
-                total_contexts: ConfRange::Constant(10),
-                attributes_per_resource: ConfRange::Constant(5),
-                scopes_per_resource: ConfRange::Constant(2),
-                attributes_per_scope: ConfRange::Constant(3),
-                metrics_per_scope: ConfRange::Constant(4),
-                attributes_per_metric: ConfRange::Constant(2),
-            },
-            ..Default::default()
-        };
+    // exceed `budget`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
 
-        let max_bytes = 512;
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
-            .expect("failed to create metrics generator");
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+                .expect("failed to create metrics generator");
 
-        let mut bytes = Vec::new();
-        metrics
-            .to_bytes(&mut rng, max_bytes, &mut bytes)
-            .expect("failed to convert to bytes");
-        assert!(
-            bytes.len() <= max_bytes,
-            "max len: {max_bytes}, actual: {}",
-            bytes.len()
-        );
+            let mut bytes = Vec::new();
+            metrics
+                .to_bytes(&mut rng, budget, &mut bytes)
+                .expect("failed to convert to bytes");
+            assert!(
+                bytes.len() <= budget,
+                "max len: {budget}, actual: {}",
+                bytes.len()
+            );
+        }
     }
 
     // We want to know that every payload produced by this type actually

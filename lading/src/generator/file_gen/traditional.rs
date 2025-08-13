@@ -230,7 +230,7 @@ impl Server {
         info!("shutdown signal received");
         for res in join_all(self.handles.drain(..)).await {
             match res {
-                Ok(Ok(())) => continue,
+                Ok(Ok(())) => {}
                 Ok(Err(err)) => return Err(err),
                 Err(err) => return Err(Error::Child(err)),
             }

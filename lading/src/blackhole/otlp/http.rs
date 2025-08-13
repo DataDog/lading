@@ -191,44 +191,42 @@ impl OtlpHttpHandler {
             );
 
         // Check for empty bodies using Content-Length when available
-        if let Some(content_length) = req.headers().get(hyper::header::CONTENT_LENGTH) {
-            if let Ok(length) = content_length.to_str() {
-                if let Ok(length) = length.parse::<u64>() {
-                    if length == 0 {
-                        counter!("bytes_received", &self.labels).increment(0);
+        if let Some(content_length) = req.headers().get(hyper::header::CONTENT_LENGTH)
+            && let Ok(length) = content_length.to_str()
+            && let Ok(length) = length.parse::<u64>()
+            && length == 0
+        {
+            counter!("bytes_received", &self.labels).increment(0);
 
-                        let (response_bytes, content_type) = match (path_ref, response_format) {
-                            ("/v1/metrics", ResponseFormat::Json) => (
-                                self.empty_metrics_response_json.clone(),
-                                &self.content_type_json,
-                            ),
-                            ("/v1/metrics", ResponseFormat::Proto) => (
-                                self.empty_metrics_response_proto.clone(),
-                                &self.content_type_proto,
-                            ),
-                            ("/v1/traces", ResponseFormat::Json) => (
-                                self.empty_traces_response_json.clone(),
-                                &self.content_type_json,
-                            ),
-                            ("/v1/traces", ResponseFormat::Proto) => (
-                                self.empty_traces_response_proto.clone(),
-                                &self.content_type_proto,
-                            ),
-                            ("/v1/logs", ResponseFormat::Json) => (
-                                self.empty_logs_response_json.clone(),
-                                &self.content_type_json,
-                            ),
-                            ("/v1/logs", ResponseFormat::Proto) => (
-                                self.empty_logs_response_proto.clone(),
-                                &self.content_type_proto,
-                            ),
-                            _ => unreachable!(), // path already validated
-                        };
+            let (response_bytes, content_type) = match (path_ref, response_format) {
+                ("/v1/metrics", ResponseFormat::Json) => (
+                    self.empty_metrics_response_json.clone(),
+                    &self.content_type_json,
+                ),
+                ("/v1/metrics", ResponseFormat::Proto) => (
+                    self.empty_metrics_response_proto.clone(),
+                    &self.content_type_proto,
+                ),
+                ("/v1/traces", ResponseFormat::Json) => (
+                    self.empty_traces_response_json.clone(),
+                    &self.content_type_json,
+                ),
+                ("/v1/traces", ResponseFormat::Proto) => (
+                    self.empty_traces_response_proto.clone(),
+                    &self.content_type_proto,
+                ),
+                ("/v1/logs", ResponseFormat::Json) => (
+                    self.empty_logs_response_json.clone(),
+                    &self.content_type_json,
+                ),
+                ("/v1/logs", ResponseFormat::Proto) => (
+                    self.empty_logs_response_proto.clone(),
+                    &self.content_type_proto,
+                ),
+                _ => unreachable!(), // path already validated
+            };
 
-                        return self.build_response(response_bytes, content_type).await;
-                    }
-                }
-            }
+            return self.build_response(response_bytes, content_type).await;
         }
 
         // Non-empty body, implies a little more CPU work
@@ -257,7 +255,7 @@ impl OtlpHttpHandler {
                         _ => unreachable!("path already validated"),
                     }
                 }
-                Err(response) => return Ok(response),
+                Err(response) => return Ok(*response),
             };
 
         let content_type = match response_format {

@@ -277,10 +277,10 @@ pub(crate) fn parse_prometheus_metrics(
         let metric_type = typemap.get(name);
         let name = name.replace("__", ".");
 
-        if let Some(metrics) = metrics {
-            if !metrics.contains(&name) {
-                continue;
-            }
+        if let Some(metrics) = metrics
+            && !metrics.contains(&name)
+        {
+            continue;
         }
 
         match metric_type {

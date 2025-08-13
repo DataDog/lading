@@ -179,14 +179,13 @@ impl Container {
                 _ = liveness_interval.tick() => {
                     for container in &containers {
                         let inspect_options = InspectContainerOptionsBuilder::default().build();
-                        if let Some(state) = docker.inspect_container(&container.id, Some(inspect_options)).await?.state {
-                            if !state.running.unwrap_or(false) {
+                        if let Some(state) = docker.inspect_container(&container.id, Some(inspect_options)).await?.state
+                            && !state.running.unwrap_or(false) {
                                 return Err(Error::Generic(format!(
                                     "Container {id} is not running anymore",
                                     id = container.id
                                 )));
                             }
-                        }
                     }
                 }
 

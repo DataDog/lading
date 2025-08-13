@@ -247,7 +247,7 @@ fn getattr_helper(
         FileAttr {
             ino: attr.inode as u64,
             size: attr.size,
-            blocks: (attr.size + 511) / 512,
+            blocks: attr.size.div_ceil(512),
             atime,
             mtime,
             ctime,
