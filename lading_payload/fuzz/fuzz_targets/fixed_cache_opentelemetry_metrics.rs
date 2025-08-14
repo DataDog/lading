@@ -16,7 +16,7 @@ struct Input {
 }
 
 const MAX_CONTEXTS: u32 = 5_000;
-const MAX_BUDGET: usize = 8 * 1024 * 1024; // MiB
+const MAX_BUDGET: usize = 1 * 1024 * 1024; // MiB
 
 fuzz_target!(|input: Input| {
     // Validate inputs, skipping if too large to fit into memory or just plain invalid.
