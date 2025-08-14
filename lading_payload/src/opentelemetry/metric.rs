@@ -488,12 +488,6 @@ impl crate::Serialize for OpentelemetryMetrics {
                 }
                 bytes_remaining = max_bytes.saturating_sub(required_bytes);
             } else {
-                debug!(
-                    ?bytes_remaining,
-                    ?SMALLEST_PROTOBUF,
-                    "could not generate ResourceMetrics instance"
-                );
-
                 // Belt with suspenders time: verify no templates could possibly
                 // fit. If we pass this assertion, break as no template will
                 // ever fit the requested max_bytes.

@@ -204,12 +204,9 @@ mod tests {
         // Second fetch with 200 budget:
         // - Pool is not at capacity (1 < 10)
         // - Tries to generate new 500-byte item (fails - exceeds budget)
-        // - SHOULD check existing templates and return the 100-byte item
-        // - BUG: Currently returns error without checking existing templates
         let mut budget = 200;
         let result = pool.fetch(&mut rng, &mut budget);
 
-        // This SHOULD succeed by returning the existing 100-byte template
         assert!(
             result.is_ok(),
             "fetch() should return existing 100-byte template when generation fails"
