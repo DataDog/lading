@@ -493,6 +493,15 @@ impl crate::Serialize for OpentelemetryMetrics {
                     ?SMALLEST_PROTOBUF,
                     "could not generate ResourceMetrics instance"
                 );
+
+                // Belt with suspenders time: verify no templates could possibly
+                // fit. If we pass this assertion, break as no template will
+                // ever fit the requested max_bytes.
+                assert!(
+                    !self.pool.template_fits(bytes_remaining),
+                    "Pool claims template fits {bytes_remaining} bytes but generate() failed, indicative of a logic error",
+                );
+                break;
             }
         }
 
