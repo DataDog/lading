@@ -56,9 +56,9 @@ use templates::{Pool, ResourceTemplateGenerator};
 use tracing::{debug, error};
 use unit::UnitGenerator;
 
-// smallest useful protobuf, determined by experimentation and enforced in
-// smallest_protobuf test
-const SMALLEST_PROTOBUF: usize = 31;
+/// Smallest useful protobuf, determined by experimentation and enforced in
+/// `smallest_protobuf` test.
+pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
@@ -134,6 +134,7 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+    #[allow(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
@@ -187,6 +188,29 @@ impl Config {
                     );
                 }
             }
+        }
+
+        // Validate attributes_per_resource range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_resource
+            && min > max
+        {
+            return Err(
+                "attributes_per_resource minimum cannot be greater than maximum".to_string(),
+            );
+        }
+
+        // Validate attributes_per_scope range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_scope
+            && min > max
+        {
+            return Err("attributes_per_scope minimum cannot be greater than maximum".to_string());
+        }
+
+        // Validate attributes_per_metric range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_metric
+            && min > max
+        {
+            return Err("attributes_per_metric minimum cannot be greater than maximum".to_string());
         }
 
         let min_contexts = match self.contexts.total_contexts {
@@ -418,6 +442,31 @@ impl crate::Serialize for OpentelemetryMetrics {
         let mut total_data_points = 0;
         let loop_id: u32 = rng.random();
 
+        // Build up the request by adding ResourceMetrics one by one until we
+        // would exceed max_bytes.
+        //
+        // Example: max_bytes = 1000
+        //
+        // - Request with 0 ResourceMetrics: encoded size = 100 bytes
+        // - Add ResourceMetrics #1: encoded size = 400 bytes (still under 1000,
+        //   continue)
+        // - Add ResourceMetrics #2: encoded size = 700 bytes (still under 1000,
+        //   continue)
+        // - Add ResourceMetrics #3: encoded size = 1050 bytes (over 1000!)
+        // - Code detects overflow, pops #3, breaks the loop
+        // - Request now has #1 and #2, encoded size = 700 bytes
+        //
+        // When we call generate we pass bytes_remaining as the budget. After
+        // adding ResourceMetrics #2, we set bytes_remaining = 1000 - 700 =
+        // 300. So when generating #3, we tell it "you have 300 bytes to work
+        // with". The generate method might return something that encodes to 250
+        // bytes on its own.
+        //
+        // But, protobuf encoding isn't strictly additive. When we add that 250
+        // byte ResourceMetrics to a request that's already 700 bytes, the
+        // combined encoding might be > 1000 bytes (not 950) due to additional
+        // framing, length prefixes, field tags or whatever.  We handle this by
+        // checking after adding and removing the item if it exceeds the budget.
         while bytes_remaining >= SMALLEST_PROTOBUF {
             if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
                 total_data_points += self.data_points_per_resource;

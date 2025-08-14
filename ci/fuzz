@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if both crate and target arguments were provided
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <crate> <target>"
+    echo "Valid crates: lading_payload"
+    echo ""
+    echo "To see available targets, run:"
+    echo "  cd <crate> && cargo fuzz list"
+    exit 1
+fi
+
+CRATE="$1"
+TARGET="$2"
+
+# Validate the crate argument
+case "$CRATE" in
+    lading_payload)
+        # Valid crate
+        ;;
+    *)
+        echo "Error: Invalid crate '$CRATE'"
+        echo "Valid crates: lading_payload"
+        exit 1
+        ;;
+esac
+
+# Check if cargo fuzz is installed
+if ! command -v cargo-fuzz &> /dev/null; then
+    echo "cargo-fuzz not installed. Installing it now..."
+    cargo install cargo-fuzz
+fi
+
+echo "Running fuzz test: ${CRATE}/${TARGET}..."
+(cd "${CRATE}" && rustup run nightly cargo fuzz run --jobs 8 --build-std --release "${TARGET}")
