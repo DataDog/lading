@@ -27,56 +27,123 @@ members = ["."]
 [profile.release]
 debug = 1
 
+
 [[bin]]
-name = "fixed_cache_creation"
-path = "fuzz_targets/fixed_cache_creation.rs"
+name = "dogstatsd_serializer_to_bytes"
+path = "fuzz_targets/dogstatsd_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_fluent"
-path = "fuzz_targets/fixed_cache_creation_fluent.rs"
+name = "opentelemetry_metrics_serializer_to_bytes"
+path = "fuzz_targets/opentelemetry_metrics_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_apache_common"
-path = "fuzz_targets/fixed_cache_creation_apache_common.rs"
+name = "opentelemetry_logs_serializer_to_bytes"
+path = "fuzz_targets/opentelemetry_logs_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_ascii"
-path = "fuzz_targets/fixed_cache_creation_ascii.rs"
+name = "apache_common_serializer_to_bytes"
+path = "fuzz_targets/apache_common_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_dogstatsd"
-path = "fuzz_targets/fixed_cache_creation_dogstatsd.rs"
+name = "ascii_serializer_to_bytes"
+path = "fuzz_targets/ascii_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_datadog_log"
-path = "fuzz_targets/fixed_cache_creation_datadog_log.rs"
+name = "json_serializer_to_bytes"
+path = "fuzz_targets/json_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_creation_json"
-path = "fuzz_targets/fixed_cache_creation_json.rs"
+name = "fluent_serializer_to_bytes"
+path = "fuzz_targets/fluent_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_opentelemetry_metrics"
-path = "fuzz_targets/fixed_cache_opentelemetry_metrics.rs"
+name = "datadog_log_serializer_to_bytes"
+path = "fuzz_targets/datadog_log_serializer_to_bytes.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fixed_cache_opentelemetry_metrics_fixed_config"
-path = "fuzz_targets/fixed_cache_opentelemetry_metrics_fixed_config.rs"
+name = "syslog5424_serializer_to_bytes"
+path = "fuzz_targets/syslog5424_serializer_to_bytes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "trace_agent_serializer_to_bytes"
+path = "fuzz_targets/trace_agent_serializer_to_bytes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dogstatsd_cache_fixed_next_block"
+path = "fuzz_targets/dogstatsd_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "opentelemetry_metrics_cache_fixed_next_block"
+path = "fuzz_targets/opentelemetry_metrics_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "opentelemetry_logs_cache_fixed_next_block"
+path = "fuzz_targets/opentelemetry_logs_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "apache_common_cache_fixed_next_block"
+path = "fuzz_targets/apache_common_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ascii_cache_fixed_next_block"
+path = "fuzz_targets/ascii_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "json_cache_fixed_next_block"
+path = "fuzz_targets/json_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fluent_cache_fixed_next_block"
+path = "fuzz_targets/fluent_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "datadog_log_cache_fixed_next_block"
+path = "fuzz_targets/datadog_log_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "syslog5424_cache_fixed_next_block"
+path = "fuzz_targets/syslog5424_cache_fixed_next_block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "trace_agent_cache_fixed_next_block"
+path = "fuzz_targets/trace_agent_cache_fixed_next_block.rs"
 test = false
 doc = false

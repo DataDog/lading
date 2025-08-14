@@ -187,21 +187,35 @@ pub enum Config {
     TraceAgent(Encoding),
 }
 
+/// Unified payload type for all serializers
 #[derive(Debug)]
 #[allow(dead_code, clippy::large_enum_variant)]
-pub(crate) enum Payload {
+pub enum Payload {
+    /// Apache Common Log format
     ApacheCommon(ApacheCommon),
+    /// ASCII text
     Ascii(Ascii),
+    /// Datadog Log format
     DatadogLog(DatadogLog),
+    /// Fluent message format
     Fluent(Fluent),
+    /// JSON format
     Json(Json),
+    /// Splunk HEC format
     SplunkHec(splunk_hec::SplunkHec),
+    /// Static file content
     Static(Static),
+    /// Syslog RFC 5424 format
     Syslog(Syslog5424),
+    /// OpenTelemetry traces
     OtelTraces(OpentelemetryTraces),
+    /// OpenTelemetry logs
     OtelLogs(OpentelemetryLogs),
+    /// OpenTelemetry metrics
     OtelMetrics(OpentelemetryMetrics),
+    /// DogStatsD metrics
     DogStatsdD(DogStatsD),
+    /// Datadog Trace Agent format
     TraceAgent(TraceAgent),
 }
 
