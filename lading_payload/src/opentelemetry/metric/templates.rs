@@ -518,52 +518,53 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
 mod test {
     use super::*;
     use crate::SizedGenerator;
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
 
-    #[test]
-    fn metric_template_generator_generate() {
-        // Test gauge generation
-        let mut config = Config::default();
-        config.metric_weights.gauge = 100;
-        config.metric_weights.sum_delta = 0;
-        config.metric_weights.sum_cumulative = 0;
+    proptest! {
+        #[test]
+        fn metric_template_generator_generate(
+            seed: u64,
+            gauge in 0..2_u8,
+            sum_delta in 0..2_u8,
+            sum_cumulative in 0..2_u8,
+        ) {
+            if gauge == 0 && sum_delta == 0 && sum_cumulative == 0 {
+                return Ok(());
+            }
 
-        let data = generate_metric_data_from_config(config);
-        assert!(matches!(data, Data::Gauge(_)));
+            let mut config = Config::default();
+            config.metric_weights.gauge = gauge;
+            config.metric_weights.sum_delta = sum_delta;
+            config.metric_weights.sum_cumulative = sum_cumulative;
 
-        // Test sum delta generation
-        let mut config = Config::default();
-        config.metric_weights.gauge = 0;
-        config.metric_weights.sum_delta = 100;
-        config.metric_weights.sum_cumulative = 0;
+            let mut rng = SmallRng::seed_from_u64(seed);
 
-        let data = generate_metric_data_from_config(config);
-        assert!(matches!(data, Data::Sum(sum) if sum.aggregation_temporality == 1));
+            let generator_result = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
+                &mut rng,
+            );
+            assert!(generator_result.is_ok());
+            let mut generator = generator_result.unwrap();
 
-        // Test sum cumulative generation
-        let mut config = Config::default();
-        config.metric_weights.gauge = 0;
-        config.metric_weights.sum_delta = 0;
-        config.metric_weights.sum_cumulative = 100;
-
-        let data = generate_metric_data_from_config(config);
-        assert!(matches!(data, Data::Sum(sum) if sum.aggregation_temporality == 2));
-    }
-
-    fn generate_metric_data_from_config(config: Config) -> Data {
-        let mut rng = rand::rng();
-
-        let generator_result = MetricTemplateGenerator::new(
-            &config,
-            &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
-            &mut rng,
-        );
-        assert!(generator_result.is_ok());
-        let mut generator = generator_result.unwrap();
-
-        let result = generator.generate(&mut rng, &mut 1024);
-        assert!(result.is_ok());
-        let metric = result.unwrap();
-        assert!(metric.data.is_some());
-        metric.data.unwrap()
+            for _ in 0..100 {
+                let result = generator.generate(&mut rng, &mut 1024);
+                assert!(result.is_ok());
+                let metric = result.unwrap();
+                assert!(metric.data.is_some());
+                match metric.data.unwrap() {
+                    Data::Gauge(_) => assert!(gauge >= 1),
+                    Data::Sum(sum) => {
+                        match sum.aggregation_temporality {
+                            1 => assert!(sum_delta >= 1),
+                            2 => assert!(sum_cumulative >= 1),
+                            _ => panic!("invalid aggregation temporality"),
+                        }
+                    }
+                    _ => panic!("invalid metric data"),
+                }
+            }
+        }
     }
 }
