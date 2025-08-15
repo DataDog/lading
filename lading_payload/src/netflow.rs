@@ -404,33 +404,42 @@ impl NetFlowV5 {
         }
     }
 
-    /// Generate aggregated flows for a base flow record
-    fn generate_aggregated_flows<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
+    /// Check if a flow should get flow aggregation based on percentage
+    fn should_apply_flow_aggregation<R>(&self, rng: &mut R) -> bool
+    where
+        R: Rng + ?Sized,
+    {
+        self.config.aggregation.flow_aggregation_percentage_of_flows > 0.0
+            && self.config.aggregation.flow_aggregation_ratio > 1.0
+            && rng.random::<f32>() < self.config.aggregation.flow_aggregation_percentage_of_flows
+    }
+
+    /// Generate flow aggregation flows (identical 5-tuples) for a base flow
+    fn generate_flow_aggregation<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
     where
         R: Rng + ?Sized,
     {
         let mut flows = Vec::new();
+        let additional_flows = (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
+        
+        for _ in 0..additional_flows {
+            let mut aggregated_flow = *base_record;
+            self.apply_aggregation_variations(&mut aggregated_flow, base_uptime, rng);
+            flows.push(aggregated_flow);
+        }
+        
+        flows
+    }
 
-        // Check if this flow should get flow aggregation based on percentage
-        let should_aggregate: f32 = rng.random();
-        let flow_aggregation_applied = if should_aggregate < self.config.aggregation.flow_aggregation_percentage_of_flows
-            && self.config.aggregation.flow_aggregation_ratio > 1.0 {
-            // This flow is selected for aggregation - generate additional flows with identical 5-tuples
-            let additional_flows = (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
-            for _ in 0..additional_flows {
-                let mut aggregated_flow = *base_record;
-                self.apply_aggregation_variations(&mut aggregated_flow, base_uptime, rng);
-                flows.push(aggregated_flow);
-            }
-            true
-        } else {
-            false
-        };
-
-        // Generate port rollup flows (same src/dst IPs and dst port, different src ports)
-        // Only if flow aggregation was not applied
-        if !flow_aggregation_applied 
-            && self.config.aggregation.port_rollup_percentage_of_flows > 0.0 
+    /// Generate port rollup flows (same dst info, different src ports) for a base flow
+    fn generate_port_rollup<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
+    where
+        R: Rng + ?Sized,
+    {
+        let mut flows = Vec::new();
+        
+        // Only apply to TCP/UDP flows
+        if self.config.aggregation.port_rollup_percentage_of_flows > 0.0 
             && (base_record.prot == 6 || base_record.prot == 17) {
             
             // Check if this flow should get port rollup based on percentage
@@ -446,7 +455,7 @@ impl NetFlowV5 {
                 }
             }
         }
-
+        
         flows
     }
 
@@ -596,32 +605,34 @@ impl Serialize for NetFlowV5 {
             self.flow_pool.push(base_flow);
             //println!("NetFlow DEBUG: Added base flow, pool size now={}", self.flow_pool.len());
 
-            // Generate aggregated flows for this base flow
-            let aggregated_flows = self.generate_aggregated_flows(&base_flow, base_uptime, &mut rng);
-            //println!("NetFlow DEBUG: Generated {} aggregated flows", aggregated_flows.len());
+            // Make aggregation decision upfront for efficiency
+            let should_aggregate = self.should_apply_flow_aggregation(&mut rng);
             
-            // Check if this base flow was selected for flow aggregation (not port rollup)
-            // by checking if we have aggregated flows with the same 5-tuple as the base flow
-            let has_flow_aggregation = aggregated_flows.iter().any(|flow| {
-                flow.srcaddr == base_flow.srcaddr 
-                && flow.dstaddr == base_flow.dstaddr 
-                && flow.srcport == base_flow.srcport 
-                && flow.dstport == base_flow.dstport 
-                && flow.prot == base_flow.prot
-            });
-            
-            // If delay is enabled and this flow was selected for flow aggregation, create a pending group
-            if self.config.aggregation.additional_flows_delay_num_flows > 0 && has_flow_aggregation && !aggregated_flows.is_empty() {
-                let pending_group = PendingFlowGroup {
-                    additional_flows: aggregated_flows,
-                    flows_remaining_before_release: self.config.aggregation.additional_flows_delay_num_flows,
-                };
-                self.pending_flow_groups.push(pending_group);
-                //println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
+            if should_aggregate {
+                // Generate flow aggregation (identical 5-tuples)
+                let aggregated_flows = self.generate_flow_aggregation(&base_flow, base_uptime, &mut rng);
+                //println!("NetFlow DEBUG: Generated {} flow aggregation flows", aggregated_flows.len());
+                
+                // If delay is enabled, create a pending group for these flows
+                if self.config.aggregation.additional_flows_delay_num_flows > 0 && !aggregated_flows.is_empty() {
+                    let pending_group = PendingFlowGroup {
+                        additional_flows: aggregated_flows,
+                        flows_remaining_before_release: self.config.aggregation.additional_flows_delay_num_flows,
+                    };
+                    self.pending_flow_groups.push(pending_group);
+                    //println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
+                } else {
+                    // No delay - add directly to pool
+                    self.flow_pool.extend(aggregated_flows);
+                    //println!("NetFlow DEBUG: After flow aggregation, pool size now={}", self.flow_pool.len());
+                }
             } else {
-                // No delay, not flow aggregation, or no aggregated flows - add directly to pool
-                self.flow_pool.extend(aggregated_flows);
-                //println!("NetFlow DEBUG: After aggregation, pool size now={}", self.flow_pool.len());
+                // No flow aggregation - try port rollup instead
+                let port_rollup_flows = self.generate_port_rollup(&base_flow, base_uptime, &mut rng);
+                if !port_rollup_flows.is_empty() {
+                    self.flow_pool.extend(port_rollup_flows);
+                    //println!("NetFlow DEBUG: After port rollup, pool size now={}", self.flow_pool.len());
+                }
             }
         }
         
