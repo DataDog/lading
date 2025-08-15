@@ -105,15 +105,18 @@ impl Default for Contexts {
 pub struct MetricWeights {
     /// The relative probability of generating a gauge metric.
     pub gauge: u8,
-    /// The relative probability of generating a sum metric.
-    pub sum: u8,
+    /// The relative probability of generating a sum delta metric.
+    pub sum_delta: u8,
+    /// The relative probability of generating a sum cumulative metric.
+    pub sum_cumulative: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50, // 50%
-            sum: 50,   // 50%
+            gauge: 50,          // 50%
+            sum_delta: 25,      // 25%
+            sum_cumulative: 25, // 25%
         }
     }
 }
@@ -138,7 +141,10 @@ impl Config {
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
-        if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
+        if self.metric_weights.gauge == 0
+            || self.metric_weights.sum_delta == 0
+            || self.metric_weights.sum_cumulative == 0
+        {
             return Err("Metric weights cannot be 0".to_string());
         }
 
@@ -683,34 +689,43 @@ mod test {
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `budget`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        let config = Config {
-            contexts: Contexts {
-                total_contexts: ConfRange::Constant(10),
-                attributes_per_resource: ConfRange::Constant(5),
-                scopes_per_resource: ConfRange::Constant(2),
-                attributes_per_scope: ConfRange::Constant(3),
-                metrics_per_scope: ConfRange::Constant(4),
-                attributes_per_metric: ConfRange::Constant(2),
-            },
-            ..Default::default()
-        };
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+                .expect("failed to create metrics generator");
 
-        let max_bytes = 512;
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
-            .expect("failed to create metrics generator");
-
-        let mut bytes = Vec::new();
-        metrics
-            .to_bytes(&mut rng, max_bytes, &mut bytes)
-            .expect("failed to convert to bytes");
-        assert!(
-            bytes.len() <= max_bytes,
-            "max len: {max_bytes}, actual: {}",
-            bytes.len()
-        );
+            let mut bytes = Vec::new();
+            metrics
+                .to_bytes(&mut rng, budget, &mut bytes)
+                .expect("failed to convert to bytes");
+            assert!(
+                bytes.len() <= budget,
+                "max len: {budget}, actual: {}",
+                bytes.len()
+            );
+        }
     }
 
     // We want to know that every payload produced by this type actually
@@ -1046,7 +1061,8 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
@@ -1085,7 +1101,8 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
@@ -1330,19 +1347,31 @@ mod test {
 
         // Invalid: Zero metric weights
         let zero_gauge_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 50 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 25,
+                sum_cumulative: 25,
+            },
             ..valid_config
         };
         assert!(zero_gauge_weight.valid().is_err());
 
         let zero_sum_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 50, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 50,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
 
         let zero_weights = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_weights.valid().is_err());

@@ -9,7 +9,6 @@ use opentelemetry_proto::tonic::{
     resource,
 };
 use prost::Message;
-use rand::prelude::*;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
@@ -110,7 +109,8 @@ impl MetricTemplateGenerator {
         Ok(Self {
             kind_dist: WeightedIndex::new([
                 u16::from(config.metric_weights.gauge),
-                u16::from(config.metric_weights.sum),
+                u16::from(config.metric_weights.sum_delta),
+                u16::from(config.metric_weights.sum_cumulative),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -167,7 +167,11 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let kind = match self.kind_dist.sample(rng) {
             0 => Kind::Gauge,
             1 => Kind::Sum {
-                aggregation_temporality: *[1, 2].choose(rng).expect("cannot fail"),
+                aggregation_temporality: 1,
+                is_monotonic: rng.random_bool(0.5),
+            },
+            2 => Kind::Sum {
+                aggregation_temporality: 2,
                 is_monotonic: rng.random_bool(0.5),
             },
             _ => unreachable!(),
@@ -504,6 +508,61 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
                         continue;
                     }
                     return Err(Self::Error::SizeExhausted);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::SizedGenerator;
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
+
+    proptest! {
+        #[test]
+        fn metric_template_generator_generate(
+            seed: u64,
+            gauge in 0..2_u8,
+            sum_delta in 0..2_u8,
+            sum_cumulative in 0..2_u8,
+        ) {
+            if gauge == 0 && sum_delta == 0 && sum_cumulative == 0 {
+                return Ok(());
+            }
+
+            let mut config = Config::default();
+            config.metric_weights.gauge = gauge;
+            config.metric_weights.sum_delta = sum_delta;
+            config.metric_weights.sum_cumulative = sum_cumulative;
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let generator_result = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
+                &mut rng,
+            );
+            assert!(generator_result.is_ok());
+            let mut generator = generator_result.unwrap();
+
+            for _ in 0..100 {
+                let result = generator.generate(&mut rng, &mut 1024);
+                assert!(result.is_ok());
+                let metric = result.unwrap();
+                assert!(metric.data.is_some());
+                match metric.data.unwrap() {
+                    Data::Gauge(_) => assert!(gauge >= 1),
+                    Data::Sum(sum) => {
+                        match sum.aggregation_temporality {
+                            1 => assert!(sum_delta >= 1),
+                            2 => assert!(sum_cumulative >= 1),
+                            _ => panic!("invalid aggregation temporality"),
+                        }
+                    }
+                    _ => panic!("invalid metric data"),
                 }
             }
         }
