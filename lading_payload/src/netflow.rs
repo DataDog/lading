@@ -110,6 +110,11 @@ pub struct AggregationConfig {
     /// Set to 1.0 to disable flow aggregation
     pub flow_aggregation_ratio: f32,
 
+    /// Percentage of flows that should have flow aggregation applied (0.0-1.0)
+    /// 0.0 = no flows get flow aggregation, 1.0 = all flows get flow aggregation
+    /// Only flows selected by this percentage will use flow_aggregation_ratio and additional_flows_delay_num_flows
+    pub flow_aggregation_percentage_of_flows: f32,
+
     /// Percentage of flows that should have port rollup aggregation applied (0.0-1.0)
     /// 0.0 = no flows get port rollup, 1.0 = all eligible flows get port rollup
     pub port_rollup_percentage_of_flows: f32,
@@ -208,6 +213,10 @@ impl Config {
             return Err("flow_aggregation_ratio must be >= 1.0".to_string());
         }
 
+        if !(0.0..=1.0).contains(&self.aggregation.flow_aggregation_percentage_of_flows) {
+            return Err("flow_aggregation_percentage_of_flows must be between 0.0 and 1.0".to_string());
+        }
+
         if !(0.0..=1.0).contains(&self.aggregation.port_rollup_percentage_of_flows) {
             return Err("port_rollup_percentage_of_flows must be between 0.0 and 1.0".to_string());
         }
@@ -257,6 +266,7 @@ impl Default for AggregationConfig {
     fn default() -> Self {
         Self {
             flow_aggregation_ratio: 1.0,               // No aggregation by default
+            flow_aggregation_percentage_of_flows: 0.0, // No flows get flow aggregation by default
             port_rollup_percentage_of_flows: 0.0,      // No port rollup by default
             port_rollup_range: ConfRange::Inclusive { min: 1, max: 5 }, // 1-5 additional flows when enabled
             time_variance_ms: 1000,                    // 1 second variance
@@ -401,8 +411,11 @@ impl NetFlowV5 {
     {
         let mut flows = Vec::new();
 
-        // Generate flow aggregation (identical 5-tuples)
-        let flow_aggregation_applied = if self.config.aggregation.flow_aggregation_ratio > 1.0 {
+        // Check if this flow should get flow aggregation based on percentage
+        let should_aggregate: f32 = rng.random();
+        let flow_aggregation_applied = if should_aggregate < self.config.aggregation.flow_aggregation_percentage_of_flows
+            && self.config.aggregation.flow_aggregation_ratio > 1.0 {
+            // This flow is selected for aggregation - generate additional flows with identical 5-tuples
             let additional_flows = (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
             for _ in 0..additional_flows {
                 let mut aggregated_flow = *base_record;
@@ -587,8 +600,18 @@ impl Serialize for NetFlowV5 {
             let aggregated_flows = self.generate_aggregated_flows(&base_flow, base_uptime, &mut rng);
             //println!("NetFlow DEBUG: Generated {} aggregated flows", aggregated_flows.len());
             
-            // If delay is enabled, create a pending group for these additional flows
-            if self.config.aggregation.additional_flows_delay_num_flows > 0 && !aggregated_flows.is_empty() {
+            // Check if this base flow was selected for flow aggregation (not port rollup)
+            // by checking if we have aggregated flows with the same 5-tuple as the base flow
+            let has_flow_aggregation = aggregated_flows.iter().any(|flow| {
+                flow.srcaddr == base_flow.srcaddr 
+                && flow.dstaddr == base_flow.dstaddr 
+                && flow.srcport == base_flow.srcport 
+                && flow.dstport == base_flow.dstport 
+                && flow.prot == base_flow.prot
+            });
+            
+            // If delay is enabled and this flow was selected for flow aggregation, create a pending group
+            if self.config.aggregation.additional_flows_delay_num_flows > 0 && has_flow_aggregation && !aggregated_flows.is_empty() {
                 let pending_group = PendingFlowGroup {
                     additional_flows: aggregated_flows,
                     flows_remaining_before_release: self.config.aggregation.additional_flows_delay_num_flows,
@@ -596,7 +619,7 @@ impl Serialize for NetFlowV5 {
                 self.pending_flow_groups.push(pending_group);
                 //println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
             } else {
-                // No delay or no aggregated flows - add directly to pool
+                // No delay, not flow aggregation, or no aggregated flows - add directly to pool
                 self.flow_pool.extend(aggregated_flows);
                 //println!("NetFlow DEBUG: After aggregation, pool size now={}", self.flow_pool.len());
             }
@@ -682,6 +705,7 @@ mod test {
             
             // Set aggregation ratios
             config.aggregation.flow_aggregation_ratio = 2.0; // Double the flows
+            config.aggregation.flow_aggregation_percentage_of_flows = 1.0; // All flows get aggregation
             config.aggregation.port_rollup_percentage_of_flows = 0.0; // No port rollup
             config.flows_per_packet = ConfRange::Constant(10); // Allow enough flows for aggregation
             
@@ -705,6 +729,7 @@ mod test {
             
             // Enable flow aggregation with delay
             config.aggregation.flow_aggregation_ratio = 2.0; // Generate 1 additional flow per base flow
+            config.aggregation.flow_aggregation_percentage_of_flows = 1.0; // All flows get aggregation
             config.aggregation.additional_flows_delay_num_flows = 2; // Delay additional flows until 2 flows added after base
             config.flows_per_packet = ConfRange::Constant(1); // Allow 1 flow per packet to control timing precisely
             

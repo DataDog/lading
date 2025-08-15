@@ -110,6 +110,11 @@ generator:
             # 1.6 means for every base flow, generate 0.6 additional identical flows
             flow_aggregation_ratio: 1.6
 
+            # Percentage of flows that should have flow aggregation applied (0.0-1.0)
+            # 0.5 means 50% of flows will get flow aggregation based on flow_aggregation_ratio
+            # The remaining 50% will just be single base flows
+            flow_aggregation_percentage_of_flows: 0.5
+
             # Percentage of flows that should have port rollup applied (0.0-1.0)
             # 0.3 means 30% of eligible flows will get port rollup
             port_rollup_percentage_of_flows: 0.3
