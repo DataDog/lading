@@ -214,7 +214,9 @@ impl Config {
         }
 
         if !(0.0..=1.0).contains(&self.aggregation.flow_aggregation_percentage_of_flows) {
-            return Err("flow_aggregation_percentage_of_flows must be between 0.0 and 1.0".to_string());
+            return Err(
+                "flow_aggregation_percentage_of_flows must be between 0.0 and 1.0".to_string(),
+            );
         }
 
         if !(0.0..=1.0).contains(&self.aggregation.port_rollup_percentage_of_flows) {
@@ -226,7 +228,9 @@ impl Config {
             return Err(format!("port_rollup_range is invalid: {reason}"));
         }
 
-        if self.aggregation.count_variation_percent < 0.0 || self.aggregation.count_variation_percent > 1.0 {
+        if self.aggregation.count_variation_percent < 0.0
+            || self.aggregation.count_variation_percent > 1.0
+        {
             return Err("count_variation_percent must be between 0.0 and 1.0".to_string());
         }
 
@@ -269,10 +273,10 @@ impl Default for AggregationConfig {
             flow_aggregation_percentage_of_flows: 0.0, // No flows get flow aggregation by default
             port_rollup_percentage_of_flows: 0.0,      // No port rollup by default
             port_rollup_range: ConfRange::Inclusive { min: 1, max: 5 }, // 1-5 additional flows when enabled
-            time_variance_ms: 1000,                    // 1 second variance
-            vary_counts: true,                         // Apply small variations
-            count_variation_percent: 0.1,              // 10% variation
-            additional_flows_delay_num_flows: 0,       // Add additional flows immediately by default
+            time_variance_ms: 1000,                                     // 1 second variance
+            vary_counts: true,                                          // Apply small variations
+            count_variation_percent: 0.1,                               // 10% variation
+            additional_flows_delay_num_flows: 0, // Add additional flows immediately by default
         }
     }
 }
@@ -282,8 +286,8 @@ impl Default for AggregationConfig {
 struct PendingFlowGroup {
     /// The additional flows waiting to be added
     additional_flows: Vec<NetFlowV5Record>,
-    /// How many more flows need to be added to the cache before these are released
-    flows_remaining_before_release: u32,
+    /// The absolute flow number after which these flows should be released
+    ready_after_flow_number: u32,
 }
 
 /// NetFlow v5 payload generator
@@ -296,6 +300,8 @@ pub struct NetFlowV5 {
     flow_pool: Vec<NetFlowV5Record>,
     /// Groups of pending additional flows, each associated with a base flow
     pending_flow_groups: Vec<PendingFlowGroup>,
+    /// Running total of flows added to the block cache (for delay mechanism)
+    total_flows_added_to_cache: u32,
 }
 
 impl NetFlowV5 {
@@ -320,6 +326,7 @@ impl NetFlowV5 {
             sys_uptime_base: rng.random_range(0..86_400_000), // Random base uptime (0-24h)
             flow_pool: Vec::new(),
             pending_flow_groups: Vec::new(),
+            total_flows_added_to_cache: 0,
         })
     }
 
@@ -415,33 +422,44 @@ impl NetFlowV5 {
     }
 
     /// Generate flow aggregation flows (identical 5-tuples) for a base flow
-    fn generate_flow_aggregation<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
+    fn generate_flow_aggregation<R>(
+        &self,
+        base_record: &NetFlowV5Record,
+        base_uptime: u32,
+        rng: &mut R,
+    ) -> Vec<NetFlowV5Record>
     where
         R: Rng + ?Sized,
     {
         let mut flows = Vec::new();
-        let additional_flows = (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
-        
+        let additional_flows =
+            (self.config.aggregation.flow_aggregation_ratio - 1.0).round() as u32;
+
         for _ in 0..additional_flows {
             let mut aggregated_flow = *base_record;
             self.apply_aggregation_variations(&mut aggregated_flow, base_uptime, rng);
             flows.push(aggregated_flow);
         }
-        
+
         flows
     }
 
     /// Generate port rollup flows (same dst info, different src ports) for a base flow
-    fn generate_port_rollup<R>(&self, base_record: &NetFlowV5Record, base_uptime: u32, rng: &mut R) -> Vec<NetFlowV5Record>
+    fn generate_port_rollup<R>(
+        &self,
+        base_record: &NetFlowV5Record,
+        base_uptime: u32,
+        rng: &mut R,
+    ) -> Vec<NetFlowV5Record>
     where
         R: Rng + ?Sized,
     {
         let mut flows = Vec::new();
-        
+
         // Only apply to TCP/UDP flows
-        if self.config.aggregation.port_rollup_percentage_of_flows > 0.0 
-            && (base_record.prot == 6 || base_record.prot == 17) {
-            
+        if self.config.aggregation.port_rollup_percentage_of_flows > 0.0
+            && (base_record.prot == 6 || base_record.prot == 17)
+        {
             // Check if this flow should get port rollup based on percentage
             let should_rollup: f32 = rng.random();
             if should_rollup < self.config.aggregation.port_rollup_percentage_of_flows {
@@ -455,15 +473,17 @@ impl NetFlowV5 {
                 }
             }
         }
-        
+
         flows
     }
 
-
-
     /// Apply variations to aggregated flows (timing and count variations)
-    fn apply_aggregation_variations<R>(&self, flow: &mut NetFlowV5Record, base_uptime: u32, rng: &mut R)
-    where
+    fn apply_aggregation_variations<R>(
+        &self,
+        flow: &mut NetFlowV5Record,
+        base_uptime: u32,
+        rng: &mut R,
+    ) where
         R: Rng + ?Sized,
     {
         // Apply time variance
@@ -476,38 +496,38 @@ impl NetFlowV5 {
         // Apply count variations if enabled
         if self.config.aggregation.vary_counts {
             let variation = self.config.aggregation.count_variation_percent;
-            
+
             // Vary packet count
-            let pkt_variation = (flow.d_pkts as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
+            let pkt_variation =
+                (flow.d_pkts as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
             flow.d_pkts = (flow.d_pkts as i32 + pkt_variation).max(1) as u32;
-            
+
             // Vary byte count
-            let byte_variation = (flow.d_octets as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
+            let byte_variation =
+                (flow.d_octets as f32 * variation * (rng.random::<f32>() - 0.5) * 2.0) as i32;
             flow.d_octets = (flow.d_octets as i32 + byte_variation).max(64) as u32;
         }
     }
 
     /// Process pending flow groups and move ready flows to the active pool
+    /// Since pending groups are in order, we can exit early when we find the first non-ready group
     fn process_pending_flow_groups(&mut self) {
-        let mut groups_to_remove = Vec::new();
-        
-        for (index, group) in self.pending_flow_groups.iter().enumerate() {
-            if group.flows_remaining_before_release == 0 {
-                groups_to_remove.push(index);
+        let mut ready_count = 0;
+
+        // Count how many groups are ready from the front (they're in order)
+        for group in &self.pending_flow_groups {
+            if group.ready_after_flow_number <= self.total_flows_added_to_cache {
+                ready_count += 1;
+            } else {
+                // Since groups are in order, once we find a non-ready group, all subsequent ones are also not ready
+                break;
             }
         }
-        
-        // Remove groups that are ready (in reverse order to preserve indices)
-        for &index in groups_to_remove.iter().rev() {
-            let group = self.pending_flow_groups.remove(index);
-            self.flow_pool.extend(group.additional_flows);
-        }
-    }
 
-    /// Decrement the flow counters for all pending groups
-    fn decrement_pending_flow_counters(&mut self, flows_added: u32) {
-        for group in &mut self.pending_flow_groups {
-            group.flows_remaining_before_release = group.flows_remaining_before_release.saturating_sub(flows_added);
+        // Remove ready groups from the front and add their flows to the pool
+        for _ in 0..ready_count {
+            let group = self.pending_flow_groups.remove(0);
+            self.flow_pool.extend(group.additional_flows);
         }
     }
 
@@ -566,87 +586,101 @@ impl Serialize for NetFlowV5 {
         const HEADER_SIZE: usize = 24;
         const FLOW_RECORD_SIZE: usize = 48;
 
-        //println!("NetFlow DEBUG: max_bytes={}", max_bytes);
+        println!("NetFlow DEBUG: max_bytes={}", max_bytes);
 
         if max_bytes < HEADER_SIZE + FLOW_RECORD_SIZE {
-            //println!("NetFlow DEBUG: Not enough space for even one flow, returning early");
+            println!("NetFlow DEBUG: Not enough space for even one flow, returning early");
             return Ok(());
         }
 
         // Calculate maximum flows that fit in the byte budget
         let max_flows_by_budget = (max_bytes - HEADER_SIZE) / FLOW_RECORD_SIZE;
         let max_flows_per_packet = max_flows_by_budget.min(30); // NetFlow v5 max is 30
-        //println!("NetFlow DEBUG: max_flows_by_budget={}, max_flows_per_packet={}", max_flows_by_budget, max_flows_per_packet);
+        println!("NetFlow DEBUG: max_flows_by_budget={}, max_flows_per_packet={}", max_flows_by_budget, max_flows_per_packet);
 
         // Phase 1: Determine packet size
         let desired_flows_in_packet = self.config.flows_per_packet.sample(&mut rng) as usize;
         let desired_packet_bytes = HEADER_SIZE + (desired_flows_in_packet * FLOW_RECORD_SIZE);
-        
+
         // If max_bytes can't accommodate our desired packet size, return Ok(()) to let
         // construct_block_cache_inner() determine the appropriate floor size
         if max_bytes < desired_packet_bytes {
-            //println!("NetFlow DEBUG: max_bytes={} < desired_packet_bytes={}, returning Ok(()) for cache size determination", max_bytes, desired_packet_bytes);
+            println!("NetFlow DEBUG: max_bytes={} < desired_packet_bytes={}, returning Ok(()) for cache size determination", max_bytes, desired_packet_bytes);
             return Ok(());
         }
-        
+
         let target_flows_in_packet = desired_flows_in_packet.min(max_flows_per_packet);
-        //println!("NetFlow DEBUG: desired_flows_in_packet={}, target_flows_in_packet={}", desired_flows_in_packet, target_flows_in_packet);
-        //println!("NetFlow DEBUG: flows_per_packet config={:?}", self.config.flows_per_packet);
-        
+        println!("NetFlow DEBUG: desired_flows_in_packet={}, target_flows_in_packet={}", desired_flows_in_packet, target_flows_in_packet);
+        println!("NetFlow DEBUG: flows_per_packet config={:?}", self.config.flows_per_packet);
+
         // Phase 2: Check for any pending flow groups that are ready to be released
         self.process_pending_flow_groups();
 
         // Phase 3: Ensure flow pool has enough flows
-        //println!("NetFlow DEBUG: flow_pool.len() before generation={}", self.flow_pool.len());
+        println!("NetFlow DEBUG: flow_pool.len() before generation={}", self.flow_pool.len());
         while self.flow_pool.len() < target_flows_in_packet {
             // Generate a complete base flow
             let base_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000);
             let base_flow = self.generate_flow_record(base_uptime, &mut rng);
             self.flow_pool.push(base_flow);
-            //println!("NetFlow DEBUG: Added base flow, pool size now={}", self.flow_pool.len());
+            println!("NetFlow DEBUG: Added base flow, pool size now={}", self.flow_pool.len());
 
             // Make aggregation decision upfront for efficiency
             let should_aggregate = self.should_apply_flow_aggregation(&mut rng);
-            
+
             if should_aggregate {
                 // Generate flow aggregation (identical 5-tuples)
-                let aggregated_flows = self.generate_flow_aggregation(&base_flow, base_uptime, &mut rng);
-                //println!("NetFlow DEBUG: Generated {} flow aggregation flows", aggregated_flows.len());
-                
+                let aggregated_flows =
+                    self.generate_flow_aggregation(&base_flow, base_uptime, &mut rng);
+                println!("NetFlow DEBUG: Generated {} flow aggregation flows", aggregated_flows.len());
+
                 // If delay is enabled, create a pending group for these flows
-                if self.config.aggregation.additional_flows_delay_num_flows > 0 && !aggregated_flows.is_empty() {
+                if self.config.aggregation.additional_flows_delay_num_flows > 0
+                    && !aggregated_flows.is_empty()
+                {
                     let pending_group = PendingFlowGroup {
                         additional_flows: aggregated_flows,
-                        flows_remaining_before_release: self.config.aggregation.additional_flows_delay_num_flows,
+                        ready_after_flow_number: self.total_flows_added_to_cache
+                            + self.config.aggregation.additional_flows_delay_num_flows,
                     };
                     self.pending_flow_groups.push(pending_group);
-                    //println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
+                    println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
                 } else {
                     // No delay - add directly to pool
                     self.flow_pool.extend(aggregated_flows);
-                    //println!("NetFlow DEBUG: After flow aggregation, pool size now={}", self.flow_pool.len());
+                    println!("NetFlow DEBUG: After flow aggregation, pool size now={}", self.flow_pool.len());
                 }
             } else {
                 // No flow aggregation - try port rollup instead
-                let port_rollup_flows = self.generate_port_rollup(&base_flow, base_uptime, &mut rng);
+                let port_rollup_flows =
+                    self.generate_port_rollup(&base_flow, base_uptime, &mut rng);
                 if !port_rollup_flows.is_empty() {
                     self.flow_pool.extend(port_rollup_flows);
-                    //println!("NetFlow DEBUG: After port rollup, pool size now={}", self.flow_pool.len());
+                    println!("NetFlow DEBUG: After port rollup, pool size now={}", self.flow_pool.len());
                 }
             }
         }
-        
-        // Phase 4: Take exactly the flows needed for this packet
-        let packet_flows: Vec<NetFlowV5Record> = self.flow_pool.drain(0..target_flows_in_packet).collect();
-        //println!("NetFlow DEBUG: Taking {} flows for packet, remaining in pool={}", packet_flows.len(), self.flow_pool.len());
 
-        // Decrement the delay counters for all pending flow groups based on flows added to cache
-        if self.config.aggregation.additional_flows_delay_num_flows > 0 {
-            self.decrement_pending_flow_counters(packet_flows.len() as u32);
+        // Phase 4: Take exactly the flows needed for this packet
+        let packet_flows: Vec<NetFlowV5Record> =
+            self.flow_pool.drain(0..target_flows_in_packet).collect();
+        println!("NetFlow DEBUG: Taking {} flows for packet, remaining in pool={}", packet_flows.len(), self.flow_pool.len());
+
+        // Update the running total of flows added to cache
+        self.total_flows_added_to_cache += packet_flows.len() as u32;
+        if self.total_flows_added_to_cache % 1000000 == 0 {
+            println!(
+                "NetFlow DEBUG: total_flows_added_to_cache={}",
+                self.total_flows_added_to_cache
+            );
+            println!(
+                "NetFlow DEBUG: pending_flow_groups.len()={}",
+                self.pending_flow_groups.len()
+            );
         }
 
         if packet_flows.is_empty() {
-            //println!("NetFlow DEBUG: No flows to send, returning early");
+            println!("NetFlow DEBUG: No flows to send, returning early");
             return Ok(());
         }
 
@@ -661,8 +695,7 @@ impl Serialize for NetFlowV5 {
         }
 
         let _final_packet_size = HEADER_SIZE + (packet_flows.len() * FLOW_RECORD_SIZE);
-        //println!("NetFlow DEBUG: Final packet size={} bytes ({} header + {}*{} flows)", 
-        //        final_packet_size, HEADER_SIZE, packet_flows.len(), FLOW_RECORD_SIZE);
+        println!("NetFlow DEBUG: Final packet size={} bytes ({} header + {}*{} flows"), final_packet_size, HEADER_SIZE, packet_flows.len(), FLOW_RECORD_SIZE);
 
         // Update sequence number for next packet
         self.flow_sequence = self.flow_sequence.wrapping_add(packet_flows.len() as u32);
@@ -713,13 +746,13 @@ mod test {
         fn aggregation_generates_additional_flows(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut config = Config::default();
-            
+
             // Set aggregation ratios
             config.aggregation.flow_aggregation_ratio = 2.0; // Double the flows
             config.aggregation.flow_aggregation_percentage_of_flows = 1.0; // All flows get aggregation
             config.aggregation.port_rollup_percentage_of_flows = 0.0; // No port rollup
             config.flows_per_packet = ConfRange::Constant(10); // Allow enough flows for aggregation
-            
+
             let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
 
             let mut bytes = Vec::new();
@@ -737,13 +770,13 @@ mod test {
         fn additional_flows_delay_mechanism_works(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut config = Config::default();
-            
+
             // Enable flow aggregation with delay
             config.aggregation.flow_aggregation_ratio = 2.0; // Generate 1 additional flow per base flow
             config.aggregation.flow_aggregation_percentage_of_flows = 1.0; // All flows get aggregation
             config.aggregation.additional_flows_delay_num_flows = 2; // Delay additional flows until 2 flows added after base
             config.flows_per_packet = ConfRange::Constant(1); // Allow 1 flow per packet to control timing precisely
-            
+
             let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
 
             // Packet 1: First base flow - additional flows go to pending (waiting for 2 more flows)
@@ -752,14 +785,14 @@ mod test {
             prop_assert!(!bytes1.is_empty());
             let flow_count1 = (bytes1.len() - 24) / 48;
             prop_assert_eq!(flow_count1, 1); // Should have 1 base flow
-            
+
             // Packet 2: Second base flow - this counts as 1 flow after first base
             let mut bytes2 = Vec::new();
             netflow.to_bytes(&mut rng, 1500, &mut bytes2).unwrap();
             prop_assert!(!bytes2.is_empty());
             let flow_count2 = (bytes2.len() - 24) / 48;
             prop_assert_eq!(flow_count2, 1); // Should have 1 base flow
-            
+
             // Packet 3: Third base flow - this counts as 2 flows after first base, so first group's additional flows should be released
             let mut bytes3 = Vec::new();
             netflow.to_bytes(&mut rng, 1500, &mut bytes3).unwrap();
@@ -773,19 +806,19 @@ mod test {
         fn port_rollup_generates_different_source_ports(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut config = Config::default();
-            
+
             // Set port rollup settings
             config.aggregation.flow_aggregation_ratio = 1.0; // No flow aggregation
             config.aggregation.port_rollup_percentage_of_flows = 1.0; // 100% get port rollup
             config.aggregation.port_rollup_range = ConfRange::Constant(3); // Generate 3 additional flows
             config.flows_per_packet = ConfRange::Constant(6); // Allow enough flows for rollup
-            
+
             // Force TCP protocol to ensure port rollup applies
             config.protocol_weights.tcp = 100;
             config.protocol_weights.udp = 0;
             config.protocol_weights.icmp = 0;
             config.protocol_weights.other = 0;
-            
+
             let mut netflow = NetFlowV5::new(config, &mut rng).unwrap();
 
             let mut bytes = Vec::new();
