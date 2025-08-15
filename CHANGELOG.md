@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manner similar to OTel metrics.
 ## Changed
 - Lading toolchain is now 1.89.0
+## Fixed
+- Fixed a bug in OTel payload generation where templates would not be used if
+  context cap number of templates were not pre-generated. This had a knock-on
+  effect of requiring a potentially infinite loop in one of the payload
+  generators.
 
 ## [0.27.0]
 ## Added
