@@ -596,7 +596,10 @@ impl Serialize for NetFlowV5 {
         // Calculate maximum flows that fit in the byte budget
         let max_flows_by_budget = (max_bytes - HEADER_SIZE) / FLOW_RECORD_SIZE;
         let max_flows_per_packet = max_flows_by_budget.min(30); // NetFlow v5 max is 30
-        println!("NetFlow DEBUG: max_flows_by_budget={}, max_flows_per_packet={}", max_flows_by_budget, max_flows_per_packet);
+        println!(
+            "NetFlow DEBUG: max_flows_by_budget={}, max_flows_per_packet={}",
+            max_flows_by_budget, max_flows_per_packet
+        );
 
         // Phase 1: Determine packet size
         let desired_flows_in_packet = self.config.flows_per_packet.sample(&mut rng) as usize;
@@ -605,25 +608,40 @@ impl Serialize for NetFlowV5 {
         // If max_bytes can't accommodate our desired packet size, return Ok(()) to let
         // construct_block_cache_inner() determine the appropriate floor size
         if max_bytes < desired_packet_bytes {
-            println!("NetFlow DEBUG: max_bytes={} < desired_packet_bytes={}, returning Ok(()) for cache size determination", max_bytes, desired_packet_bytes);
+            println!(
+                "NetFlow DEBUG: max_bytes={} < desired_packet_bytes={}, returning Ok(()) for cache size determination",
+                max_bytes, desired_packet_bytes
+            );
             return Ok(());
         }
 
         let target_flows_in_packet = desired_flows_in_packet.min(max_flows_per_packet);
-        println!("NetFlow DEBUG: desired_flows_in_packet={}, target_flows_in_packet={}", desired_flows_in_packet, target_flows_in_packet);
-        println!("NetFlow DEBUG: flows_per_packet config={:?}", self.config.flows_per_packet);
+        println!(
+            "NetFlow DEBUG: desired_flows_in_packet={}, target_flows_in_packet={}",
+            desired_flows_in_packet, target_flows_in_packet
+        );
+        println!(
+            "NetFlow DEBUG: flows_per_packet config={:?}",
+            self.config.flows_per_packet
+        );
 
         // Phase 2: Check for any pending flow groups that are ready to be released
         self.process_pending_flow_groups();
 
         // Phase 3: Ensure flow pool has enough flows
-        println!("NetFlow DEBUG: flow_pool.len() before generation={}", self.flow_pool.len());
+        println!(
+            "NetFlow DEBUG: flow_pool.len() before generation={}",
+            self.flow_pool.len()
+        );
         while self.flow_pool.len() < target_flows_in_packet {
             // Generate a complete base flow
             let base_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000);
             let base_flow = self.generate_flow_record(base_uptime, &mut rng);
             self.flow_pool.push(base_flow);
-            println!("NetFlow DEBUG: Added base flow, pool size now={}", self.flow_pool.len());
+            println!(
+                "NetFlow DEBUG: Added base flow, pool size now={}",
+                self.flow_pool.len()
+            );
 
             // Make aggregation decision upfront for efficiency
             let should_aggregate = self.should_apply_flow_aggregation(&mut rng);
@@ -632,23 +650,34 @@ impl Serialize for NetFlowV5 {
                 // Generate flow aggregation (identical 5-tuples)
                 let aggregated_flows =
                     self.generate_flow_aggregation(&base_flow, base_uptime, &mut rng);
-                println!("NetFlow DEBUG: Generated {} flow aggregation flows", aggregated_flows.len());
+                println!(
+                    "NetFlow DEBUG: Generated {} flow aggregation flows",
+                    aggregated_flows.len()
+                );
 
                 // If delay is enabled, create a pending group for these flows
                 if self.config.aggregation.additional_flows_delay_num_flows > 0
                     && !aggregated_flows.is_empty()
                 {
+                    let flows_count = aggregated_flows.len();
                     let pending_group = PendingFlowGroup {
                         additional_flows: aggregated_flows,
                         ready_after_flow_number: self.total_flows_added_to_cache
                             + self.config.aggregation.additional_flows_delay_num_flows,
                     };
                     self.pending_flow_groups.push(pending_group);
-                    println!("NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}", aggregated_flows.len(), self.pending_flow_groups.len());
+                    println!(
+                        "NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}",
+                        flows_count,
+                        self.pending_flow_groups.len()
+                    );
                 } else {
                     // No delay - add directly to pool
                     self.flow_pool.extend(aggregated_flows);
-                    println!("NetFlow DEBUG: After flow aggregation, pool size now={}", self.flow_pool.len());
+                    println!(
+                        "NetFlow DEBUG: After flow aggregation, pool size now={}",
+                        self.flow_pool.len()
+                    );
                 }
             } else {
                 // No flow aggregation - try port rollup instead
@@ -656,7 +685,10 @@ impl Serialize for NetFlowV5 {
                     self.generate_port_rollup(&base_flow, base_uptime, &mut rng);
                 if !port_rollup_flows.is_empty() {
                     self.flow_pool.extend(port_rollup_flows);
-                    println!("NetFlow DEBUG: After port rollup, pool size now={}", self.flow_pool.len());
+                    println!(
+                        "NetFlow DEBUG: After port rollup, pool size now={}",
+                        self.flow_pool.len()
+                    );
                 }
             }
         }
@@ -664,7 +696,11 @@ impl Serialize for NetFlowV5 {
         // Phase 4: Take exactly the flows needed for this packet
         let packet_flows: Vec<NetFlowV5Record> =
             self.flow_pool.drain(0..target_flows_in_packet).collect();
-        println!("NetFlow DEBUG: Taking {} flows for packet, remaining in pool={}", packet_flows.len(), self.flow_pool.len());
+        println!(
+            "NetFlow DEBUG: Taking {} flows for packet, remaining in pool={}",
+            packet_flows.len(),
+            self.flow_pool.len()
+        );
 
         // Update the running total of flows added to cache
         self.total_flows_added_to_cache += packet_flows.len() as u32;
@@ -695,7 +731,7 @@ impl Serialize for NetFlowV5 {
         }
 
         let _final_packet_size = HEADER_SIZE + (packet_flows.len() * FLOW_RECORD_SIZE);
-        println!("NetFlow DEBUG: Final packet size={} bytes ({} header + {}*{} flows"), final_packet_size, HEADER_SIZE, packet_flows.len(), FLOW_RECORD_SIZE);
+        //println!("NetFlow DEBUG: Final packet size={} bytes ({} header + {}*{} flows", final_packet_size, HEADER_SIZE, packet_flows.len(), FLOW_RECORD_SIZE);
 
         // Update sequence number for next packet
         self.flow_sequence = self.flow_sequence.wrapping_add(packet_flows.len() as u32);
