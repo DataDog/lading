@@ -288,10 +288,9 @@ impl Config {
         }
         match self.sampling_range {
             ConfRange::Constant(v) => {
-                if !v.is_finite() || v < 0.0 || v > 1.0 {
+                if !v.is_finite() || !(0.0..=1.0).contains(&v) {
                     return Result::Err(format!(
-                        "Sampling range constant {} must be finite and in range [0.0, 1.0]",
-                        v
+                        "Sampling range constant {v} must be finite and in range [0.0, 1.0]"
                     ));
                 }
             }

@@ -213,7 +213,7 @@ pub enum Payload {
     OtelLogs(OpentelemetryLogs),
     /// OpenTelemetry metrics
     OtelMetrics(OpentelemetryMetrics),
-    /// DogStatsD metrics
+    /// `DogStatsD` metrics
     DogStatsdD(DogStatsD),
     /// Datadog Trace Agent format
     TraceAgent(TraceAgent),
