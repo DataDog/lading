@@ -1,6 +1,7 @@
 //! `NetFlow` v5 payload.
 
 use std::{
+    collections::VecDeque,
     io::Write,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -299,7 +300,7 @@ pub struct NetFlowV5 {
     sys_uptime_base: u32,
     flow_pool: Vec<NetFlowV5Record>,
     /// Groups of pending additional flows, each associated with a base flow
-    pending_flow_groups: Vec<PendingFlowGroup>,
+    pending_flow_groups: VecDeque<PendingFlowGroup>,
     /// Running total of flows added to the block cache (for delay mechanism)
     total_flows_added_to_cache: u32,
 }
@@ -325,7 +326,7 @@ impl NetFlowV5 {
             flow_sequence: rng.random(),
             sys_uptime_base: rng.random_range(0..86_400_000), // Random base uptime (0-24h)
             flow_pool: Vec::new(),
-            pending_flow_groups: Vec::new(),
+            pending_flow_groups: VecDeque::new(),
             total_flows_added_to_cache: 0,
         })
     }
@@ -521,7 +522,7 @@ impl NetFlowV5 {
             if group.ready_after_flow_number <= self.total_flows_added_to_cache {
                 flows_added += group.additional_flows.len();
                 groups_to_remove += 1;
-                
+
                 // Stop if we have enough flows
                 if flows_added >= flows_needed {
                     break;
@@ -534,10 +535,10 @@ impl NetFlowV5 {
 
         // Remove the selected groups from the front and add their flows to the pool
         for _ in 0..groups_to_remove {
-            let group = self.pending_flow_groups.remove(0);
+            let group = self.pending_flow_groups.pop_front().unwrap();
             self.flow_pool.extend(group.additional_flows);
         }
-        
+
         if groups_to_remove > 0 {
             println!(
                 "NetFlow DEBUG: Processed {} pending groups, added {} flows to pool",
@@ -646,13 +647,13 @@ impl Serialize for NetFlowV5 {
             self.flow_pool.len(),
             self.pending_flow_groups.len()
         );
-        
+
         // Only process pending flows if we need more flows in the pool
         if self.flow_pool.len() < target_flows_in_packet {
             let flows_needed = target_flows_in_packet - self.flow_pool.len();
             self.process_pending_flow_groups(flows_needed);
         }
-        
+
         while self.flow_pool.len() < target_flows_in_packet {
             // Generate a complete base flow
             let base_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000);
@@ -685,7 +686,7 @@ impl Serialize for NetFlowV5 {
                         ready_after_flow_number: self.total_flows_added_to_cache
                             + self.config.aggregation.additional_flows_delay_num_flows,
                     };
-                    self.pending_flow_groups.push(pending_group);
+                    self.pending_flow_groups.push_back(pending_group);
                     println!(
                         "NetFlow DEBUG: Added {} flows to pending group, pending groups count now={}",
                         flows_count,
@@ -724,12 +725,12 @@ impl Serialize for NetFlowV5 {
 
         // Update the running total of flows added to cache
         self.total_flows_added_to_cache += packet_flows.len() as u32;
-        //if self.total_flows_added_to_cache % 1000000 == 0 {
-        println!(
-            "NetFlow DEBUG: total_flows_added_to_cache={}",
-            self.total_flows_added_to_cache
-        );
-        //}
+        if self.total_flows_added_to_cache % 1000000 == 0 {
+            println!(
+                "NetFlow DEBUG: total_flows_added_to_cache={}",
+                self.total_flows_added_to_cache
+            );
+        }
 
         if packet_flows.is_empty() {
             println!("NetFlow DEBUG: No flows to send, returning early");
