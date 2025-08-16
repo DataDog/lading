@@ -510,24 +510,39 @@ impl NetFlowV5 {
     }
 
     /// Process pending flow groups and move ready flows to the active pool
+    /// Only processes enough groups to meet the needed flow count
     /// Since pending groups are in order, we can exit early when we find the first non-ready group
-    fn process_pending_flow_groups(&mut self) {
-        let mut ready_count = 0;
+    fn process_pending_flow_groups(&mut self, flows_needed: usize) {
+        let mut flows_added = 0;
+        let mut groups_to_remove = 0;
 
-        // Count how many groups are ready from the front (they're in order)
+        // Process groups from the front until we have enough flows or run out of ready groups
         for group in &self.pending_flow_groups {
             if group.ready_after_flow_number <= self.total_flows_added_to_cache {
-                ready_count += 1;
+                flows_added += group.additional_flows.len();
+                groups_to_remove += 1;
+                
+                // Stop if we have enough flows
+                if flows_added >= flows_needed {
+                    break;
+                }
             } else {
                 // Since groups are in order, once we find a non-ready group, all subsequent ones are also not ready
                 break;
             }
         }
 
-        // Remove ready groups from the front and add their flows to the pool
-        for _ in 0..ready_count {
+        // Remove the selected groups from the front and add their flows to the pool
+        for _ in 0..groups_to_remove {
             let group = self.pending_flow_groups.remove(0);
             self.flow_pool.extend(group.additional_flows);
+        }
+        
+        if groups_to_remove > 0 {
+            println!(
+                "NetFlow DEBUG: Processed {} pending groups, added {} flows to pool",
+                groups_to_remove, flows_added
+            );
         }
     }
 
@@ -625,14 +640,19 @@ impl Serialize for NetFlowV5 {
             self.config.flows_per_packet
         );
 
-        // Phase 2: Check for any pending flow groups that are ready to be released
-        self.process_pending_flow_groups();
-
-        // Phase 3: Ensure flow pool has enough flows
+        // Phase 2: Ensure flow pool has enough flows
         println!(
-            "NetFlow DEBUG: flow_pool.len() before generation={}",
-            self.flow_pool.len()
+            "NetFlow DEBUG: flow_pool.len() before generation={}, pending_flow_groups={}",
+            self.flow_pool.len(),
+            self.pending_flow_groups.len()
         );
+        
+        // Only process pending flows if we need more flows in the pool
+        if self.flow_pool.len() < target_flows_in_packet {
+            let flows_needed = target_flows_in_packet - self.flow_pool.len();
+            self.process_pending_flow_groups(flows_needed);
+        }
+        
         while self.flow_pool.len() < target_flows_in_packet {
             // Generate a complete base flow
             let base_uptime = self.sys_uptime_base + rng.random_range(0..3_600_000);
@@ -704,16 +724,12 @@ impl Serialize for NetFlowV5 {
 
         // Update the running total of flows added to cache
         self.total_flows_added_to_cache += packet_flows.len() as u32;
-        if self.total_flows_added_to_cache % 1000000 == 0 {
-            println!(
-                "NetFlow DEBUG: total_flows_added_to_cache={}",
-                self.total_flows_added_to_cache
-            );
-            println!(
-                "NetFlow DEBUG: pending_flow_groups.len()={}",
-                self.pending_flow_groups.len()
-            );
-        }
+        //if self.total_flows_added_to_cache % 1000000 == 0 {
+        println!(
+            "NetFlow DEBUG: total_flows_added_to_cache={}",
+            self.total_flows_added_to_cache
+        );
+        //}
 
         if packet_flows.is_empty() {
             println!("NetFlow DEBUG: No flows to send, returning early");
