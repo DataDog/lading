@@ -248,6 +248,9 @@ impl Config {
         if !service_check_names_valid {
             return Result::Err(format!("Service check names value is invalid: {reason}"));
         }
+        if self.service_check_names.start() == 0 {
+            return Result::Err("Service check names start value cannot be 0".to_string());
+        }
 
         let (tag_length_valid, reason) = self.tag_length.valid();
         if !tag_length_valid {
@@ -278,6 +281,55 @@ impl Config {
         if !value_valid {
             return Result::Err(format!("Value configuration is invalid: {reason}"));
         }
+
+        let (sampling_range_valid, reason) = self.sampling_range.valid();
+        if !sampling_range_valid {
+            return Result::Err(format!("Sampling range is invalid: {reason}"));
+        }
+        match self.sampling_range {
+            ConfRange::Constant(v) => {
+                if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+                    return Result::Err(format!(
+                        "Sampling range constant {v} must be finite and in range [0.0, 1.0]"
+                    ));
+                }
+            }
+            ConfRange::Inclusive { min, max } => {
+                if !min.is_finite() || !max.is_finite() {
+                    return Result::Err("Sampling range values must be finite".to_string());
+                }
+                if min < 0.0 || max > 1.0 {
+                    return Result::Err("Sampling range must be within [0.0, 1.0]".to_string());
+                }
+            }
+        }
+
+        if !self.sampling_probability.is_finite()
+            || self.sampling_probability < 0.0
+            || self.sampling_probability > 1.0
+        {
+            return Result::Err(format!(
+                "Sampling probability {} must be finite and in range [0.0, 1.0]",
+                self.sampling_probability
+            ));
+        }
+
+        if self.kind_weights.metric == 0
+            && self.kind_weights.event == 0
+            && self.kind_weights.service_check == 0
+        {
+            return Err("KindWeights cannot all be 0".to_string());
+        }
+
+        if self.metric_weights.gauge == 0
+            && self.metric_weights.count == 0
+            && self.metric_weights.histogram == 0
+            && self.metric_weights.set == 0
+            && self.metric_weights.distribution == 0
+        {
+            return Err("MetricWeights cannot all be 0".to_string());
+        }
+
         Ok(())
     }
 }
