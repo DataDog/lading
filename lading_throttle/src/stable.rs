@@ -179,9 +179,12 @@ impl Valve {
         // Convert to usize, capping at MAX_ROLLED_INTERVALS
         #[allow(clippy::cast_possible_truncation)]
         let intervals_to_store = (intervals_passed.min(u64::from(MAX_ROLLED_INTERVALS))) as usize;
-        if intervals_to_store == 0 {
-            return;
-        }
+        debug_assert!(
+            intervals_to_store > 0,
+            "intervals_to_store must be > 0 since record_unused_capacity is only called when current_interval ({}) > self.interval ({})",
+            current_interval,
+            self.interval
+        );
 
         // If we're storing MAX or more intervals, clear everything first
         if intervals_to_store >= MAX_ROLLED_INTERVALS as usize {
