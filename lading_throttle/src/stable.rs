@@ -190,7 +190,7 @@ impl Valve {
         }
 
         // Record unused capacity for each interval we're transitioning past.
-        // For fexample, if moving from interval 5 to interval 8
+        // For example, if moving from interval 5 to interval 8
         // (intervals_passed = 3):
         //
         // * i=0: Interval 5 (self.interval -> the current interval we're leaving)
