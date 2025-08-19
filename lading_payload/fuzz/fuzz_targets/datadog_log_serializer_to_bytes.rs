@@ -16,6 +16,12 @@ struct Input {
 const MAX_BUDGET: usize = 1 * 1024 * 1024; // 1 MiB
 
 fuzz_target!(|input: Input| {
+    if std::env::var("FUZZ_DEBUG").is_ok() {
+        eprintln!("=== FUZZ INPUT DEBUG ===");
+        eprintln!("{:#?}", input);
+        eprintln!("========================");
+    }
+    
     let budget = input.budget_bytes.get() as usize;
     if budget > MAX_BUDGET {
         return;
@@ -25,7 +31,7 @@ fuzz_target!(|input: Input| {
     let mut bytes = Vec::with_capacity(budget);
 
     let mut serializer = lading_payload::DatadogLog::new(&mut rng);
-    
+
     if serializer.to_bytes(&mut rng, budget, &mut bytes).is_ok() {
         assert!(bytes.len() <= budget);
     }

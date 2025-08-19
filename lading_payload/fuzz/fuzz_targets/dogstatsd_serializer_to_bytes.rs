@@ -18,6 +18,12 @@ const MAX_BUDGET: usize = 1 * 1024 * 1024; // 1 MiB
 const MAX_CONTEXTS: u32 = 5_000;
 
 fuzz_target!(|input: Input| {
+    if std::env::var("FUZZ_DEBUG").is_ok() {
+        eprintln!("=== FUZZ INPUT DEBUG ===");
+        eprintln!("{:#?}", input);
+        eprintln!("========================");
+    }
+    
     let budget = input.budget_bytes.get() as usize;
     if budget > MAX_BUDGET {
         return;
