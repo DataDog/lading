@@ -255,37 +255,38 @@ impl Valve {
         total
     }
 
-    /// Deduct capacity, taking from the current interval preferentially, then
-    /// backward through the remaining unused capacity.
+    /// Deduct capacity, taking from the soonest expiring unused capacity first,
+    /// then from the current interval's capacity. This maximizes utilization
+    /// before expiration.
     fn deduct_capacity(&mut self, mut capacity_request: u32, ticks_elapsed: u64) {
-        // Deduct from the current capacity, returning early if there's
-        // sufficient capacity to service the request.
-        if capacity_request <= self.capacity {
-            self.capacity -= capacity_request;
-            return;
-        }
-        capacity_request -= self.capacity;
-        self.capacity = 0;
-
-        // Bail out: when timeout is 0, there's no unused capacity to deduct
-        // from.
+        // When timeout is 0, there's no unused capacity - just use current capacity
         if self.timeout_ticks == 0 {
+            self.capacity = self.capacity.saturating_sub(capacity_request);
             return;
         }
 
-        // Deduct from any available unused capacity that hasn't expired. By
-        // definition any capacity in self.unused is 'in the past' and is fair
-        // play for consumption.
-        for i in 0..MAX_ROLLED_INTERVALS as usize {
-            if self.unused[i].amount > 0 && self.unused[i].expires_at > ticks_elapsed {
-                if capacity_request <= self.unused[i].amount {
-                    self.unused[i].amount -= capacity_request;
-                    return;
-                }
-                capacity_request -= self.unused[i].amount;
-                self.unused[i].amount = 0;
+        // Consume unused capacity in chronological order, oldest first. Rolled
+        // intervals are stored in order, unused_head pointing to where the next
+        // write will go to, making it the oldest entry.
+        for offset in 0..MAX_ROLLED_INTERVALS as usize {
+            if capacity_request == 0 {
+                return;
             }
+
+            let idx = (self.unused_head as usize + offset) % MAX_ROLLED_INTERVALS as usize;
+            if self.unused[idx].amount == 0 || self.unused[idx].expires_at <= ticks_elapsed {
+                continue;
+            }
+
+            if capacity_request <= self.unused[idx].amount {
+                self.unused[idx].amount -= capacity_request;
+                return;
+            }
+            capacity_request -= self.unused[idx].amount;
+            self.unused[idx].amount = 0;
         }
+
+        self.capacity = self.capacity.saturating_sub(capacity_request);
     }
 }
 
