@@ -64,14 +64,17 @@ def upload_fuzz(
         print("❌ Failed to get auth header")
         exit(1)
 
-    max_pkg_name_length = 50
-
+    # We let the API handle package name length validation
+    # It will be returned, truncated / reformated, if needed in the json response.
+    # We simply force the prefix to be `lading-` for ease of filtering (until we improve that part on the API side)
+    # As a note: more than 63 characters will be truncated by the API
     pkgname_prefix = "lading-"
     pkgname = (
         (pkgname_prefix + directory + "-" + fuzz_test)
         .replace("_", "-")
         .replace("/", "-")
-    )[:max_pkg_name_length]
+    )
+    pkgname = pkgname.strip("-.")  # Remove trailing dashes and dots.
     print(f"pkgname: {pkgname}")
 
     print(f"Getting presigned URL for {pkgname}...")
@@ -129,21 +132,21 @@ def upload_fuzz(
         "Authorization": f"Bearer {auth_header}",
         "Content-Type": "application/json",
     }
-    response = requests.post(
-        f"{api_url}/apps/{pkgname}/fuzzers",
-        headers=headers,
-        json=run_payload,
-        timeout=30,
-    )
 
-    if not response.ok:
-        print(f"❌ API request failed with status {response.status_code}")
-        try:
-            error_detail = response.json()
-            print(f"Error details: {error_detail}")
-        except Exception as e:
-            print(f"Raw error response: {response.text} {e}")
+    try:
+        response = requests.post(
+            f"{api_url}/apps/{pkgname}/fuzzers",
+            headers=headers,
+            json=run_payload,
+            timeout=30,
+        )
         response.raise_for_status()
+    except Exception as e:
+        error_detail = response.json()
+        print(f"❌ API request failed with status {response.status_code}")
+        print(f"Error details: {error_detail}")
+        print(f"Raw error response: {response.text} {e}")
+
     print(f"✅ Started fuzzer for {pkgname} ({fuzz_test})...")
     response_json = response.json()
     print(response_json)
