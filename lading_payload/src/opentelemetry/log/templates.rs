@@ -18,19 +18,55 @@ use crate::{Error, common::config::ConfRange, common::strings};
 
 pub(crate) type Pool = GenericPool<ResourceLogs, ResourceTemplateGenerator>;
 
+/// Shared pool of trace IDs
+#[derive(Debug, Clone)]
+pub(crate) struct TraceIdPool {
+    trace_ids: Vec<[u8; 16]>,
+}
+
+impl TraceIdPool {
+    /// Create a new pool of trace IDs
+    pub(crate) fn new<R>(trace_count: usize, rng: &mut R) -> Self
+    where
+        R: Rng + ?Sized,
+    {
+        let mut trace_ids = Vec::with_capacity(trace_count);
+        for _ in 0..trace_count {
+            let mut trace_id = [0u8; 16];
+            rng.fill_bytes(&mut trace_id);
+            trace_ids.push(trace_id);
+        }
+        Self { trace_ids }
+    }
+
+    /// Get a random trace ID from the pool
+    pub(crate) fn get_random<R>(&self, rng: &mut R) -> Vec<u8>
+    where
+        R: Rng + ?Sized,
+    {
+        if self.trace_ids.is_empty() {
+            Vec::new()
+        } else {
+            let idx = rng.random_range(0..self.trace_ids.len());
+            self.trace_ids[idx].to_vec()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LogTemplateGenerator {
     severity_dist: WeightedIndex<u16>,
     str_pool: Rc<strings::Pool>,
+    trace_pool: Rc<TraceIdPool>,
     tags: TagGenerator,
     body_size: ConfRange<u16>,
-    trace_ids: Vec<Vec<u8>>,
 }
 
 impl LogTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
         str_pool: &Rc<strings::Pool>,
+        trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -45,14 +81,6 @@ impl LogTemplateGenerator {
             UNIQUE_TAG_RATIO,
         )?;
 
-        let trace_count = config.trace_cardinality.sample(rng) as usize;
-        let mut trace_ids = Vec::with_capacity(trace_count);
-        for _ in 0..trace_count {
-            let mut trace_id = vec![0u8; 16];
-            rng.fill_bytes(&mut trace_id);
-            trace_ids.push(trace_id);
-        }
-
         Ok(Self {
             // NOTE if you change the ordering here update the code below that
             // sets `severity_number` to match. If indexes DO NOT match we will
@@ -66,9 +94,9 @@ impl LogTemplateGenerator {
                 u16::from(config.severity_weights.info),
             ])?,
             str_pool: Rc::clone(str_pool),
+            trace_pool: Rc::clone(trace_pool),
             tags,
             body_size: config.body_size,
-            trace_ids,
         })
     }
 }
@@ -140,12 +168,7 @@ impl<'a> crate::SizedGenerator<'a> for LogTemplateGenerator {
             .of_size(rng, body_size as usize)
             .ok_or(GeneratorError::StringGenerate)?;
 
-        let trace_id = if self.trace_ids.is_empty() {
-            Vec::new()
-        } else {
-            let idx = rng.random_range(0..self.trace_ids.len());
-            self.trace_ids[idx].clone()
-        };
+        let trace_id = self.trace_pool.get_random(rng);
 
         let log_record = LogRecord {
             time_unix_nano: 0,
@@ -185,6 +208,7 @@ impl ScopeTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
         str_pool: &Rc<strings::Pool>,
+        trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -200,7 +224,7 @@ impl ScopeTemplateGenerator {
         )?;
 
         Ok(Self {
-            log_gen: LogTemplateGenerator::new(config, str_pool, rng)?,
+            log_gen: LogTemplateGenerator::new(config, str_pool, trace_pool, rng)?,
             tags,
             str_pool: Rc::clone(str_pool),
             logs_per_scope: config.contexts.logs_per_scope,
@@ -295,6 +319,7 @@ impl ResourceTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
         str_pool: &Rc<strings::Pool>,
+        trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -312,7 +337,7 @@ impl ResourceTemplateGenerator {
         )?;
 
         Ok(Self {
-            scope_gen: ScopeTemplateGenerator::new(config, str_pool, rng)?,
+            scope_gen: ScopeTemplateGenerator::new(config, str_pool, trace_pool, rng)?,
             tags,
             scopes_per_resource: config.contexts.scopes_per_resource,
         })
