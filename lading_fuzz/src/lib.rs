@@ -3,7 +3,9 @@
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 #![deny(missing_docs)]
-#![deny(unused_crate_dependencies)]
+// Allow unused crate dependencies: cargo-fuzz --build-std adds std crates as
+// dependencies that we don't use, breaks the build.
+#![allow(unused_crate_dependencies)]
 #![deny(warnings)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_precision_loss)]

@@ -436,6 +436,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lading-fuzz"
+version = "0.1.0"
+
+[[package]]
 name = "lading-payload"
 version = "0.1.0"
 dependencies = [
@@ -461,6 +465,7 @@ name = "lading-payload-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
+ "lading-fuzz",
  "lading-payload",
  "libfuzzer-sys",
  "rand",
