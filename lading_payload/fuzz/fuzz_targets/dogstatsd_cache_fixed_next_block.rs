@@ -20,11 +20,7 @@ const MAX_BLOCK_SIZE: u32 = 1 * 1024 * 1024;    // 1 MiB
 const MAX_CONTEXTS: u32 = 1_000;
 
 fuzz_target!(|input: Input| {
-    if std::env::var("FUZZ_DEBUG").is_ok() {
-        eprintln!("=== FUZZ INPUT DEBUG ===");
-        eprintln!("{:#?}", input);
-        eprintln!("========================");
-    }
+    lading_fuzz::debug_input(&input);
     
     if input.total_bytes.get() > MAX_TOTAL_BYTES {
         return;
