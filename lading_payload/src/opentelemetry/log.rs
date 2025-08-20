@@ -254,7 +254,11 @@ impl OpentelemetryLogs {
 
         let context_cap = config.contexts.total_contexts.sample(rng);
         let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
-        let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
+
+        let trace_count = config.trace_cardinality.sample(rng) as usize;
+        let trace_pool = Rc::new(templates::TraceIdPool::new(trace_count, rng));
+
+        let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, &trace_pool, rng)?;
 
         Ok(Self {
             pool: Pool::new(context_cap, rt_gen),
