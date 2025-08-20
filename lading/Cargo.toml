@@ -96,7 +96,7 @@ procfs = { version = "0.17", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.20"
+tempfile = "3.21"
 warp = "0.3"
 proptest = { workspace = true }
 
