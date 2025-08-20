@@ -21,11 +21,7 @@ const MAX_CONTEXTS: u32 = 5_000;
 const MAX_TRACE_CARDINALITY: u32 = 10_000; // Limit trace IDs to prevent OOM
 
 fuzz_target!(|input: Input| {
-    if std::env::var("FUZZ_DEBUG").is_ok() {
-        eprintln!("=== FUZZ INPUT DEBUG ===");
-        eprintln!("{:#?}", input);
-        eprintln!("========================");
-    }
+    lading_fuzz::debug_input(&input);
     
     if input.total_bytes.get() > MAX_TOTAL_BYTES {
         return;

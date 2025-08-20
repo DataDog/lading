@@ -15,6 +15,7 @@ rand = { version = "0.9", default-features = false, features = [
   "std",
   "std_rng",
 ] }
+lading-fuzz = { path = "../../lading_fuzz" }
 
 [dependencies.lading-payload]
 path = ".."

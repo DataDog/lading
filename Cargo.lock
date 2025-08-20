@@ -1666,6 +1666,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lading-fuzz"
+version = "0.1.0"
+
+[[package]]
 name = "lading-payload"
 version = "0.1.0"
 dependencies = [

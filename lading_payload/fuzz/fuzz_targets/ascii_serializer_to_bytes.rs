@@ -16,11 +16,7 @@ struct Input {
 const MAX_BUDGET: usize = 1 * 1024 * 1024; // 1 MiB
 
 fuzz_target!(|input: Input| {
-    if std::env::var("FUZZ_DEBUG").is_ok() {
-        eprintln!("=== FUZZ INPUT DEBUG ===");
-        eprintln!("{:#?}", input);
-        eprintln!("========================");
-    }
+    lading_fuzz::debug_input(&input);
     
     let budget = input.budget_bytes.get() as usize;
     if budget > MAX_BUDGET {

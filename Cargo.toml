@@ -5,6 +5,7 @@ members = [
   "integration/ducks",
   "lading",
   "lading_capture",
+  "lading_fuzz",
   "lading_payload",
   "lading_throttle",
 ]
