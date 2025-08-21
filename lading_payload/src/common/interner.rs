@@ -135,11 +135,6 @@ impl StringInterner {
     }
 
     #[cfg(test)]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.strings.is_empty()
-    }
-
-    #[cfg(test)]
     pub(crate) fn byte_size(&self) -> usize {
         self.bytes.len()
     }
