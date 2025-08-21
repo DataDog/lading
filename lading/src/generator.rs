@@ -74,23 +74,13 @@ pub enum Error {
     Container(#[from] container::Error),
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-#[serde(deny_unknown_fields)]
-/// Configuration for [`Server`]
-pub struct Config {
-    /// Common generator configs
-    #[serde(flatten)]
-    pub general: General,
-    /// The generator config
-    #[serde(flatten)]
-    pub inner: Inner,
-}
+/// Configuration for [`Server`] - now a type alias to Inner
+pub type Config = Inner;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
-/// Configurations common to all [`Server`] variants
+/// Configurations common to all [`Server`] variants - deprecated, functionality moved to enum variants
 pub struct General {
     /// The ID assigned to this generator
     pub id: Option<String>,
@@ -102,31 +92,109 @@ pub struct General {
 /// Configuration for [`Server`]
 pub enum Inner {
     /// See [`crate::generator::tcp::Config`] for details.
-    Tcp(tcp::Config),
+    Tcp {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The tcp generator configuration
+        #[serde(flatten)]
+        config: tcp::Config,
+    },
     /// See [`crate::generator::udp::Config`] for details.
-    Udp(udp::Config),
+    Udp {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The udp generator configuration
+        #[serde(flatten)]
+        config: udp::Config,
+    },
     /// See [`crate::generator::http::Config`] for details.
-    Http(http::Config),
+    Http {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The http generator configuration
+        #[serde(flatten)]
+        config: http::Config,
+    },
     /// See [`crate::generator::splunk_hec::Config`] for details.
-    SplunkHec(splunk_hec::Config),
+    SplunkHec {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The splunk_hec generator configuration
+        #[serde(flatten)]
+        config: splunk_hec::Config,
+    },
     /// See [`crate::generator::file_gen::Config`] for details.
-    FileGen(file_gen::Config),
+    FileGen {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The file_gen generator configuration
+        #[serde(flatten)]
+        config: file_gen::Config,
+    },
     /// See [`crate::generator::file_tree::Config`] for details.
-    FileTree(file_tree::Config),
+    FileTree {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The file_tree generator configuration
+        #[serde(flatten)]
+        config: file_tree::Config,
+    },
     /// See [`crate::generator::grpc::Config`] for details.
-    Grpc(grpc::Config),
+    Grpc {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The grpc generator configuration
+        #[serde(flatten)]
+        config: grpc::Config,
+    },
     /// See [`crate::generator::unix_stream::Config`] for details.
-    UnixStream(unix_stream::Config),
+    UnixStream {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The unix_stream generator configuration
+        #[serde(flatten)]
+        config: unix_stream::Config,
+    },
     /// See [`crate::generator::unix_datagram::Config`] for details.
-    UnixDatagram(unix_datagram::Config),
+    UnixDatagram {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The unix_datagram generator configuration
+        #[serde(flatten)]
+        config: unix_datagram::Config,
+    },
     /// See [`crate::generator::passthru_file::Config`] for details.
-    PassthruFile(passthru_file::Config),
+    PassthruFile {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The passthru_file generator configuration
+        #[serde(flatten)]
+        config: passthru_file::Config,
+    },
     /// See [`crate::generator::process_tree::Config`] for details.
-    ProcessTree(process_tree::Config),
+    ProcessTree {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The process_tree generator configuration
+        #[serde(flatten)]
+        config: process_tree::Config,
+    },
     /// See [`crate::generator::procfs::Config`] for details.
-    ProcFs(procfs::Config),
+    ProcFs {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The procfs generator configuration
+        #[serde(flatten)]
+        config: procfs::Config,
+    },
     /// See [`crate::generator::container::Config`] for details.
-    Container(container::Config),
+    Container {
+        /// The ID assigned to this generator
+        id: Option<String>,
+        /// The container generator configuration
+        #[serde(flatten)]
+        config: container::Config,
+    },
 }
 
 #[derive(Debug)]
@@ -174,19 +242,35 @@ impl Server {
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
-        let srv = match config.inner {
-            Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
-            Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
-            Inner::Http(conf) => Self::Http(http::Http::new(config.general, conf, shutdown)?),
-            Inner::SplunkHec(conf) => {
-                Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, conf, shutdown)?)
+        let srv = match config {
+            Inner::Tcp { id, config: conf } => {
+                let general = General { id };
+                Self::Tcp(tcp::Tcp::new(general, &conf, shutdown)?)
             }
-            Inner::FileGen(conf) => {
-                Self::FileGen(file_gen::FileGen::new(config.general, conf, shutdown)?)
+            Inner::Udp { id, config: conf } => {
+                let general = General { id };
+                Self::Udp(udp::Udp::new(general, &conf, shutdown)?)
             }
-            Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
-            Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),
-            Inner::UnixStream(conf) => {
+            Inner::Http { id, config: conf } => {
+                let general = General { id };
+                Self::Http(http::Http::new(general, conf, shutdown)?)
+            }
+            Inner::SplunkHec { id, config: conf } => {
+                let general = General { id };
+                Self::SplunkHec(splunk_hec::SplunkHec::new(general, conf, shutdown)?)
+            }
+            Inner::FileGen { id, config: conf } => {
+                let general = General { id };
+                Self::FileGen(file_gen::FileGen::new(general, conf, shutdown)?)
+            }
+            Inner::FileTree { config: conf, .. } => {
+                Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?)
+            }
+            Inner::Grpc { id, config: conf } => {
+                let general = General { id };
+                Self::Grpc(grpc::Grpc::new(general, conf, shutdown)?)
+            }
+            Inner::UnixStream { id, config: conf } => {
                 if let lading_payload::Config::DogStatsD(variant) = conf.variant
                     && !variant.length_prefix_framed
                 {
@@ -195,28 +279,26 @@ impl Server {
                     );
                 }
 
-                Self::UnixStream(unix_stream::UnixStream::new(
-                    config.general,
-                    &conf,
-                    shutdown,
-                )?)
+                let general = General { id };
+                Self::UnixStream(unix_stream::UnixStream::new(general, &conf, shutdown)?)
             }
-            Inner::PassthruFile(conf) => Self::PassthruFile(passthru_file::PassthruFile::new(
-                config.general,
-                &conf,
-                shutdown,
-            )?),
-            Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
-                config.general,
-                &conf,
-                shutdown,
-            )?),
-            Inner::ProcessTree(conf) => {
+            Inner::PassthruFile { id, config: conf } => {
+                let general = General { id };
+                Self::PassthruFile(passthru_file::PassthruFile::new(general, &conf, shutdown)?)
+            }
+            Inner::UnixDatagram { id, config: conf } => {
+                let general = General { id };
+                Self::UnixDatagram(unix_datagram::UnixDatagram::new(general, &conf, shutdown)?)
+            }
+            Inner::ProcessTree { config: conf, .. } => {
                 Self::ProcessTree(process_tree::ProcessTree::new(&conf, shutdown)?)
             }
-            Inner::ProcFs(conf) => Self::ProcFs(procfs::ProcFs::new(&conf, shutdown)?),
-            Inner::Container(conf) => {
-                Self::Container(container::Container::new(config.general, &conf, shutdown)?)
+            Inner::ProcFs { config: conf, .. } => {
+                Self::ProcFs(procfs::ProcFs::new(&conf, shutdown)?)
+            }
+            Inner::Container { id, config: conf } => {
+                let general = General { id };
+                Self::Container(container::Container::new(general, &conf, shutdown)?)
             }
         };
         Ok(srv)
