@@ -28,7 +28,6 @@ members = ["."]
 [profile.release]
 debug = 1
 
-
 [[bin]]
 name = "dogstatsd_serializer_to_bytes"
 path = "fuzz_targets/dogstatsd_serializer_to_bytes.rs"
