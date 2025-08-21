@@ -273,7 +273,7 @@ fn parse_config(contents: &str) -> Result<Config, Error> {
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
         let path_info = err.path().to_string();
         let inner_message = err.inner().to_string();
-        
+
         // Clean up the message to avoid redundancy - remove the path info if it's already in the inner message
         let message = if inner_message.contains(&path_info) {
             inner_message
