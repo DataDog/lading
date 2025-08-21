@@ -1,5 +1,5 @@
 //! `DogStatsD` metric.
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use rand::{
     Rng,
@@ -8,11 +8,7 @@ use rand::{
     seq::IteratorRandom,
 };
 
-use crate::{
-    Error, Generator,
-    common::{interner::StringInterner, strings},
-    dogstatsd::metric::template::Template,
-};
+use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
 use tracing::debug;
 
 use self::strings::choose_or_not_ref;
@@ -33,7 +29,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) sampling: ConfRange<f32>,
     pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
-    pub(crate) interner: StringInterner,
+    pub(crate) str_pool: Rc<strings::Pool>,
     /// Tags for each template. Each position in this Vec corresponds to the same
     /// position in the templates Vec.
     pub(crate) tags: Vec<Vec<String>>,
@@ -51,16 +47,13 @@ impl MetricGenerator {
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
         tags_generator: &mut common::tags::Generator,
-        str_pool: &strings::Pool,
+        str_pool: &Rc<strings::Pool>,
         value_conf: ValueConf,
-        metric_name_prefix: &'static str,
         mut rng: &mut R,
     ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
-        let mut interner = StringInterner::new();
-
         let mut templates = Vec::with_capacity(num_contexts);
         let mut tags = Vec::with_capacity(num_contexts);
 
@@ -68,18 +61,9 @@ impl MetricGenerator {
         for _ in 0..num_contexts {
             let template_tags = tags_generator.generate(&mut rng)?;
             let name_sz = name_length.sample(&mut rng) as usize;
-            let strpool_name = String::from(
-                str_pool
-                    .of_size(&mut rng, name_sz)
-                    .ok_or(Error::StringGenerate)?,
-            );
-            let name = if metric_name_prefix.is_empty() {
-                strpool_name
-            } else {
-                format!("{metric_name_prefix}{strpool_name}")
-            };
-
-            let name_handle = interner.intern(&name).map_err(|_| Error::StringGenerate)?;
+            let (_, name_handle) = str_pool
+                .of_size_with_handle(&mut rng, name_sz)
+                .ok_or(Error::StringGenerate)?;
             tags.push(template_tags);
 
             let res = match metric_weights.sample(rng) {
@@ -102,7 +86,7 @@ impl MetricGenerator {
             sampling,
             sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
-            interner,
+            str_pool: Rc::clone(str_pool),
             tags,
         })
     }
@@ -152,8 +136,8 @@ impl<'a> Generator<'a> for MetricGenerator {
         match template {
             Template::Count(count) => {
                 let name = self
-                    .interner
-                    .resolve(count.name)
+                    .str_pool
+                    .using_handle(count.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Count(Count {
                     name,
@@ -165,8 +149,8 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Gauge(gauge) => {
                 let name = self
-                    .interner
-                    .resolve(gauge.name)
+                    .str_pool
+                    .using_handle(gauge.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Gauge(Gauge {
                     name,
@@ -177,8 +161,8 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Distribution(dist) => {
                 let name = self
-                    .interner
-                    .resolve(dist.name)
+                    .str_pool
+                    .using_handle(dist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Distribution(Dist {
                     name,
@@ -190,8 +174,8 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Histogram(hist) => {
                 let name = self
-                    .interner
-                    .resolve(hist.name)
+                    .str_pool
+                    .using_handle(hist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Histogram(Histogram {
                     name,
@@ -203,8 +187,8 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Timer(timer) => {
                 let name = self
-                    .interner
-                    .resolve(timer.name)
+                    .str_pool
+                    .using_handle(timer.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Timer(Timer {
                     name,
@@ -216,8 +200,8 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Set(set) => {
                 let name = self
-                    .interner
-                    .resolve(set.name)
+                    .str_pool
+                    .using_handle(set.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Set(Set {
                     name,

@@ -1,4 +1,4 @@
-use crate::common::interner::Handle;
+use crate::common::strings::Handle;
 
 #[derive(Clone, Debug)]
 /// A metric `Template` is a `super::Metric` that lacks values and has no

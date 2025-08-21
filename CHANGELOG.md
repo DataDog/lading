@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generators.
 - OTel metrics generation now skews data points, no longer using a normal
   distribution derived number of points.
+## Removed
+- Removed `prefix_metric_names` configuration from DogStatsD generator.
 
 ## [0.27.0]
 ## Added
