@@ -50,6 +50,8 @@ enum Error {
     LadingObserver(#[from] lading::observer::Error),
     #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
+    #[error("Configuration error at {path}: {message}")]
+    ConfigPath { path: String, message: String },
     #[error("Lading failed to sync servers {0}")]
     Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
     #[error("Parsing Prometheus address failed: {0}")]
@@ -267,9 +269,22 @@ fn load_config_contents(config_path: &str) -> Result<String, Error> {
 }
 
 fn parse_config(contents: &str) -> Result<Config, Error> {
-    serde_yaml::from_str(contents).map_err(|err| {
-        error!("Configuration validation failed: {}", err);
-        Error::SerdeYaml(err)
+    let deserializer = serde_yaml::Deserializer::from_str(contents);
+    serde_path_to_error::deserialize(deserializer).map_err(|err| {
+        let path_info = err.path().to_string();
+        let inner_message = err.inner().to_string();
+        
+        // Clean up the message to avoid redundancy - remove the path info if it's already in the inner message
+        let message = if inner_message.contains(&path_info) {
+            inner_message
+        } else {
+            format!("{} (at {})", inner_message, path_info)
+        };
+        error!("Configuration validation failed: {}", message);
+        Error::ConfigPath {
+            path: path_info,
+            message,
+        }
     })
 }
 
