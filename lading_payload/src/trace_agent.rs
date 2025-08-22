@@ -104,48 +104,32 @@ pub(crate) struct Span<'a> {
     meta_struct: FxHashMap<&'a str, Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-/// Encoding options for the trace-agent
-pub enum Encoding {
-    /// Encode `TraceAgent` payload in JSON format
-    Json,
-    /// Encode `TraceAgent` payload in `MsgPack` format
-    #[default]
-    MsgPack,
-}
-
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
 /// Trace Agent payload
 pub struct TraceAgent {
-    encoding: Encoding,
     str_pool: strings::Pool,
 }
 
 impl TraceAgent {
-    /// JSON encoding
+    /// Create a new `TraceAgent` with `MsgPack` encoding
     #[must_use]
-    pub fn json<R>(rng: &mut R) -> Self
+    pub fn new<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
     {
         Self {
-            encoding: Encoding::Json,
             str_pool: strings::Pool::with_size(rng, 1_000_000),
         }
     }
 
-    /// `MsgPack` encoding
+    /// `MsgPack` encoding (kept for backward compatibility)
     #[must_use]
     pub fn msg_pack<R>(rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
     {
-        Self {
-            encoding: Encoding::MsgPack,
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
-        }
+        Self::new(rng)
     }
 }
 
@@ -220,15 +204,9 @@ impl crate::Serialize for TraceAgent {
 
         // Search for too many Member instances.
         loop {
-            let encoding = match self.encoding {
-                Encoding::Json => serde_json::to_vec(&members[0..])?,
-                Encoding::MsgPack => {
-                    let mut buf = Vec::with_capacity(max_bytes);
-                    members[0..].serialize(&mut Serializer::new(&mut buf))?;
-                    buf
-                }
-            };
-            if encoding.len() > max_bytes {
+            let mut buf = Vec::with_capacity(max_bytes);
+            members[0..].serialize(&mut Serializer::new(&mut buf))?;
+            if buf.len() > max_bytes {
                 break;
             }
 
@@ -242,22 +220,16 @@ impl crate::Serialize for TraceAgent {
         // Search for an encoding that's just right.
         let mut high = members.len();
         loop {
-            let encoding = match self.encoding {
-                Encoding::Json => serde_json::to_vec(&members[0..high])?,
-                Encoding::MsgPack => {
-                    let mut buf = Vec::with_capacity(max_bytes);
-                    members[0..high].serialize(&mut Serializer::new(&mut buf))?;
-                    buf
-                }
-            };
+            let mut buf = Vec::with_capacity(max_bytes);
+            members[0..high].serialize(&mut Serializer::new(&mut buf))?;
             // NOTE because the type of Vec<Vec<Span>> this shrink isn't as
             // efficient as it could be. We want to shrink the tree present
             // here. This algorithm _does_ work perfectly if the tree is a
             // straight pipe.
-            if encoding.len() > max_bytes {
+            if buf.len() > max_bytes {
                 high /= 2;
             } else {
-                writer.write_all(&encoding)?;
+                writer.write_all(&buf)?;
                 break;
             }
         }
@@ -272,38 +244,17 @@ mod test {
 
     use crate::{Serialize, TraceAgent};
 
-    // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    proptest! {
-        #[test]
-        fn payload_not_exceed_max_bytes_json(seed: u64, max_bytes: u16) {
-            let max_bytes = max_bytes as usize;
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut trace_agent = TraceAgent::json(&mut rng);
-
-            let mut bytes = Vec::with_capacity(max_bytes);
-            trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
-            debug_assert!(
-                bytes.len() <= max_bytes,
-                "{:?}",
-                std::str::from_utf8(&bytes)?
-            );
-        }
-    }
-
     proptest! {
         #[test]
         fn payload_not_exceed_max_bytes_msg_pack(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut trace_agent = TraceAgent::json(&mut rng);
+            let mut trace_agent = TraceAgent::new(&mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             trace_agent.to_bytes(rng, max_bytes, &mut bytes)?;
             debug_assert!(
-                bytes.len() <= max_bytes,
-                "{:?}",
-                std::str::from_utf8(&bytes)?
+                bytes.len() <= max_bytes
             );
         }
     }

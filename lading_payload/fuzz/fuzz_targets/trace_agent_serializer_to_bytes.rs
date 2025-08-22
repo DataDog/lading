@@ -11,7 +11,6 @@ use lading_payload::Serialize;
 struct Input {
     seed: [u8; 32],
     budget_bytes: NonZeroU32,
-    encoding: lading_payload::Encoding,
 }
 
 const MAX_BUDGET: usize = 1 * 1024 * 1024; // 1 MiB
@@ -27,10 +26,7 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let mut bytes = Vec::with_capacity(budget);
 
-    let mut serializer = match input.encoding {
-        lading_payload::Encoding::Json => lading_payload::TraceAgent::json(&mut rng),
-        lading_payload::Encoding::MsgPack => lading_payload::TraceAgent::msg_pack(&mut rng),
-    };
+    let mut serializer = lading_payload::TraceAgent::new(&mut rng);
     
     if serializer.to_bytes(&mut rng, budget, &mut bytes).is_ok() {
         assert!(bytes.len() <= budget);
