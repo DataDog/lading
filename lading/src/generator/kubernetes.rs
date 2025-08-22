@@ -2,7 +2,8 @@
 //!
 //! This generator is meant to generate Kubernetes objects.
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope, Resource as KubeResource};
+use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
 use tracing::{debug, warn};
 
@@ -136,7 +137,7 @@ impl Kubernetes {
             tokio::select! {
                 // Delete and recreate resources
                 _ = if let Some(ref mut interval) = recreate_interval { interval.tick() } else { std::future::pending().await } => {
-                    delete_and_recreate_resource(client.clone(), &self.resource, self.number_of_instances.get(), i).await?;
+                    delete_and_recreate_resource(client.clone(), &self.resource, self.number_of_instances.get(), i);
                     i = (i + 1) % self.number_of_instances;
                 }
 
@@ -157,68 +158,214 @@ impl Kubernetes {
     }
 }
 
-fn set_object_name<T>(object: &mut T, number_of_instances: u32, instance_index: u32)
-where
-    T: kube::Resource + k8s_openapi::Resource,
-{
-    #[allow(clippy::unwrap_used)]
-    if number_of_instances > 1 {
-        // TODO implement a visitor to patch other fields
-        object.meta_mut().name = Some(object.meta().name.as_ref().map_or_else(
-            || format!("lading-{}-{instance_index:0>5}", T::KIND.to_lowercase()),
-            |name| format!("{name}-{instance_index:0>5}"),
-        ));
-    } else if object.meta().name.is_none() {
-        object.meta_mut().name = Some(format!("lading-{}", T::KIND.to_lowercase()));
+impl Resource {
+    fn kind(&self) -> &'static str {
+        match self {
+            Resource::Node(_) => k8s_openapi::api::core::v1::Node::KIND,
+            Resource::Namespace(_) => k8s_openapi::api::core::v1::Namespace::KIND,
+            Resource::Pod(_) => k8s_openapi::api::core::v1::Pod::KIND,
+            Resource::Deployment(_) => k8s_openapi::api::apps::v1::Deployment::KIND,
+            Resource::Service(_) => k8s_openapi::api::core::v1::Service::KIND,
+        }
+    }
+
+    fn meta(&self) -> &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        match self {
+            Resource::Node(node) => &node.metadata,
+            Resource::Namespace(ns) => &ns.metadata,
+            Resource::Pod(pod) => &pod.metadata,
+            Resource::Deployment(deploy) => &deploy.metadata,
+            Resource::Service(svc) => &svc.metadata,
+        }
+    }
+
+    fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        match self {
+            Resource::Node(node) => &mut node.metadata,
+            Resource::Namespace(ns) => &mut ns.metadata,
+            Resource::Pod(pod) => &mut pod.metadata,
+            Resource::Deployment(deploy) => &mut deploy.metadata,
+            Resource::Service(svc) => &mut svc.metadata,
+        }
+    }
+
+    fn set_name(&mut self, number_of_instances: u32, instance_index: u32) {
+        if number_of_instances > 1 {
+            // TODO implement a visitor to patch other fields
+            self.meta_mut().name = Some(self.meta().name.as_ref().map_or_else(
+                || format!("lading-{}-{instance_index:0>5}", self.kind().to_lowercase()),
+                |name| format!("{name}-{instance_index:0>5}"),
+            ));
+        } else if self.meta().name.is_none() {
+            self.meta_mut().name = Some(format!("lading-{}", self.kind().to_lowercase()));
+        }
+    }
+
+    fn get_name(&self) -> &str {
+        self.meta()
+            .name
+            .as_ref()
+            .expect("Do not forget to call `set_name`")
+    }
+
+    /// Create a cluster-scoped API for the given resource type
+    fn cluster_api<T>(client: kube::Client) -> kube::Api<T>
+    where
+        T: kube::Resource<Scope = ClusterResourceScope>,
+        <T as kube::Resource>::DynamicType: std::default::Default,
+    {
+        kube::Api::all(client)
+    }
+
+    /// Create a namespaced API for the given resource type
+    fn namespaced_api<T>(&self, client: kube::Client) -> kube::Api<T>
+    where
+        T: kube::Resource<Scope = NamespaceResourceScope>,
+        <T as kube::Resource>::DynamicType: std::default::Default,
+    {
+        let namespace = self
+            .meta()
+            .namespace
+            .clone()
+            .unwrap_or_else(|| client.default_namespace().to_string());
+        kube::Api::namespaced(client, &namespace)
+    }
+
+    async fn create(
+        &self,
+        client: kube::Client,
+        pp: &kube::api::PostParams,
+    ) -> Result<Self, kube::Error> {
+        match self {
+            Resource::Node(node) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
+                .create(pp, node)
+                .await
+                .map(Resource::Node),
+
+            Resource::Namespace(ns) => {
+                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
+                    .create(pp, ns)
+                    .await
+                    .map(Resource::Namespace)
+            }
+
+            Resource::Pod(pod) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
+                .create(pp, pod)
+                .await
+                .map(Resource::Pod),
+
+            Resource::Deployment(deploy) => self
+                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
+                .create(pp, deploy)
+                .await
+                .map(Resource::Deployment),
+
+            Resource::Service(svc) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
+                .create(pp, svc)
+                .await
+                .map(Resource::Service),
+        }
+    }
+
+    async fn delete(
+        &self,
+        client: kube::Client,
+        dp: &kube::api::DeleteParams,
+    ) -> Result<either::Either<Self, kube_core::response::Status>, kube::Error> {
+        match self {
+            Resource::Node(_) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
+                .delete(self.get_name(), dp)
+                .await
+                .map(|e| e.map_left(Resource::Node)),
+
+            Resource::Namespace(_) => {
+                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
+                    .delete(self.get_name(), dp)
+                    .await
+                    .map(|e| e.map_left(Resource::Namespace))
+            }
+
+            Resource::Pod(_) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
+                .delete(self.get_name(), dp)
+                .await
+                .map(|e| e.map_left(Resource::Pod)),
+
+            Resource::Deployment(_) => self
+                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
+                .delete(self.get_name(), dp)
+                .await
+                .map(|e| e.map_left(Resource::Deployment)),
+
+            Resource::Service(_) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
+                .delete(self.get_name(), dp)
+                .await
+                .map(|e| e.map_left(Resource::Service)),
+        }
+    }
+
+    async fn get_opt(&self, client: kube::Client) -> Result<Option<Self>, kube::Error> {
+        match self {
+            Resource::Node(_) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
+                .get_opt(self.get_name())
+                .await
+                .map(|o| o.map(Resource::Node)),
+
+            Resource::Namespace(_) => {
+                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
+                    .get_opt(self.get_name())
+                    .await
+                    .map(|o| o.map(Resource::Namespace))
+            }
+
+            Resource::Pod(_) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
+                .get_opt(self.get_name())
+                .await
+                .map(|o| o.map(Resource::Pod)),
+
+            Resource::Deployment(_) => self
+                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
+                .get_opt(self.get_name())
+                .await
+                .map(|o| o.map(Resource::Deployment)),
+
+            Resource::Service(_) => self
+                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
+                .get_opt(self.get_name())
+                .await
+                .map(|o| o.map(Resource::Service)),
+        }
     }
 }
 
-fn get_object_name<T>(object: &T) -> &str
-where
-    T: kube::Resource,
-{
-    object
-        .meta()
-        .name
-        .as_ref()
-        .expect("Do not forget to call `set_object_name`")
-}
-
-async fn create_resources_for<T>(
-    api: kube::Api<T>,
-    resource: &T,
+async fn create_resources(
+    client: kube::Client,
+    resource: &Resource,
     number_of_instances: u32,
-) -> Result<Vec<T>, Error>
-where
-    T: kube::Resource
-        + k8s_openapi::Resource
-        + Serialize
-        + DeserializeOwned
-        + Clone
-        + std::fmt::Debug
-        + Send
-        + Sync
-        + 'static,
-    <T as kube::Resource>::DynamicType: std::default::Default,
-{
+) -> Result<Vec<Resource>, Error> {
     let mut set = JoinSet::new();
 
     for instance_index in 0..number_of_instances {
-        let api = api.clone();
+        let client = client.clone();
         let mut object = resource.clone();
-        set_object_name(&mut object, number_of_instances, instance_index);
+        object.set_name(number_of_instances, instance_index);
 
         set.spawn(async move {
-            api.create(&kube::api::PostParams::default(), &object)
+            object
+                .create(client, &kube::api::PostParams::default())
                 .await
                 .inspect(|o| {
-                    debug!("Created {} {}", T::KIND.to_lowercase(), get_object_name(o));
+                    debug!("Created {} {}", object.kind().to_lowercase(), o.get_name());
                 })
                 .inspect_err(|e| {
                     warn!(
                         "Failed to create {} {}: {e}",
-                        T::KIND.to_lowercase(),
-                        get_object_name(&object)
+                        object.kind().to_lowercase(),
+                        object.get_name()
                     );
                 })
         });
@@ -228,162 +375,121 @@ where
         .join_all()
         .await
         .into_iter()
-        .collect::<Result<Vec<T>, kube::Error>>()?)
+        .collect::<Result<Vec<Resource>, kube::Error>>()?)
 }
 
-async fn delete_and_recreate_resource_for<T>(
-    api: kube::Api<T>,
-    resource: &T,
+fn delete_and_recreate_resource(
+    client: kube::Client,
+    resource: &Resource,
     number_of_instances: u32,
     instance_index: u32,
-) -> Result<(), Error>
-where
-    T: kube::Resource
-        + k8s_openapi::Resource
-        + Clone
-        + Serialize
-        + DeserializeOwned
-        + std::fmt::Debug
-        + Send
-        + Sync
-        + 'static,
-{
+) {
     let mut object = resource.clone();
-    set_object_name(&mut object, number_of_instances, instance_index);
+    object.set_name(number_of_instances, instance_index);
 
     tokio::spawn(async move {
         let mut deletion_in_progress = false;
 
-        api.delete(
-            get_object_name(&object),
-            &kube::api::DeleteParams::default().grace_period(5),
-        )
-        .await
-        .inspect_err(|e| {
-            warn!(
-                "Failed to delete {} {}: {e}",
-                T::KIND.to_lowercase(),
-                get_object_name(&object)
-            );
-        })?
-        .map_left(|o| {
-            debug!(
-                "Deleting {} {}",
-                T::KIND.to_lowercase(),
-                get_object_name(&o)
-            );
-            deletion_in_progress = true;
-        })
-        .map_right(|_| {
-            debug!(
-                "Deleted {} {}",
-                T::KIND.to_lowercase(),
-                get_object_name(&object)
-            );
-        });
-
-        while deletion_in_progress {
-            if let Some(o) = api
-                .get_opt(get_object_name(&object))
-                .await
-                .inspect_err(|e| {
-                    warn!(
-                        "Failed to delete {} {}: {e}",
-                        T::KIND.to_lowercase(),
-                        get_object_name(&object)
-                    );
-                })?
-            {
-                debug!(
-                    "Still deleting {} {}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&o)
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            } else {
-                debug!(
-                    "Deleted {} {}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&object)
-                );
-                deletion_in_progress = false;
-            }
-        }
-
-        api.create(&kube::api::PostParams::default(), &object)
-            .await
-            .inspect(|o| {
-                debug!(
-                    "Recreated {} {}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(o)
-                );
-            })
-            .inspect_err(|e| {
-                warn!(
-                    "Failed to recreate {} {}: {e}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&object)
-                );
-            })?;
-
-        Ok::<(), Error>(())
-    });
-
-    Ok(())
-}
-
-async fn delete_resources_for<T>(
-    api: kube::Api<T>,
-    resource: &T,
-    number_of_instances: u32,
-) -> Result<(), Error>
-where
-    T: kube::Resource
-        + k8s_openapi::Resource
-        + Serialize
-        + DeserializeOwned
-        + Clone
-        + std::fmt::Debug
-        + Send
-        + Sync
-        + 'static,
-    <T as kube::Resource>::DynamicType: std::default::Default,
-{
-    let mut set = JoinSet::new();
-
-    for instance_index in 0..number_of_instances {
-        let api = api.clone();
-        let mut object = resource.clone();
-        set_object_name(&mut object, number_of_instances, instance_index);
-
-        set.spawn(async move {
-            api.delete(
-                get_object_name(&object),
+        object
+            .delete(
+                client.clone(),
                 &kube::api::DeleteParams::default().grace_period(5),
             )
             .await
             .inspect_err(|e| {
                 warn!(
                     "Failed to delete {} {}: {e}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&object)
+                    object.kind().to_lowercase(),
+                    object.get_name()
                 );
             })?
             .map_left(|o| {
-                debug!(
-                    "Deleting {} {}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&o)
-                );
+                debug!("Deleting {} {}", o.kind().to_lowercase(), o.get_name());
+                deletion_in_progress = true;
             })
             .map_right(|_| {
                 debug!(
                     "Deleted {} {}",
-                    T::KIND.to_lowercase(),
-                    get_object_name(&object)
+                    object.kind().to_lowercase(),
+                    object.get_name()
                 );
             });
+
+        while deletion_in_progress {
+            if let Some(o) = object.get_opt(client.clone()).await.inspect_err(|e| {
+                warn!(
+                    "Failed to delete {} {}: {e}",
+                    object.kind().to_lowercase(),
+                    object.get_name()
+                );
+            })? {
+                debug!(
+                    "Still deleting {} {}",
+                    o.kind().to_lowercase(),
+                    o.get_name()
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            } else {
+                debug!(
+                    "Deleted {} {}",
+                    object.kind().to_lowercase(),
+                    object.get_name()
+                );
+                deletion_in_progress = false;
+            }
+        }
+
+        object
+            .create(client, &kube::api::PostParams::default())
+            .await
+            .inspect(|o| {
+                debug!("Recreated {} {}", o.kind().to_lowercase(), o.get_name());
+            })
+            .inspect_err(|e| {
+                warn!(
+                    "Failed to recreate {} {}: {e}",
+                    object.kind().to_lowercase(),
+                    object.get_name()
+                );
+            })?;
+
+        Ok::<(), Error>(())
+    });
+}
+
+async fn delete_resources(
+    client: kube::Client,
+    resource: &Resource,
+    number_of_instances: u32,
+) -> Result<(), Error> {
+    let mut set = JoinSet::new();
+
+    for instance_index in 0..number_of_instances {
+        let client = client.clone();
+        let mut object = resource.clone();
+        object.set_name(number_of_instances, instance_index);
+
+        set.spawn(async move {
+            object
+                .delete(client, &kube::api::DeleteParams::default().grace_period(5))
+                .await
+                .inspect_err(|e| {
+                    warn!(
+                        "Failed to delete {} {}: {e}",
+                        object.kind().to_lowercase(),
+                        object.get_name()
+                    );
+                })?
+                .map_left(|o| {
+                    debug!("Deleting {} {}", o.kind().to_lowercase(), o.get_name());
+                })
+                .map_right(|_| {
+                    debug!(
+                        "Deleted {} {}",
+                        object.kind().to_lowercase(),
+                        object.get_name()
+                    );
+                });
 
             Ok(())
         });
@@ -396,79 +502,12 @@ where
         .collect::<Result<(), kube::Error>>()?)
 }
 
-macro_rules! create_api {
-    (namespaced, $client:expr, $type:ty, $object:expr) => {{
-        let namespace = $object
-            .metadata
-            .namespace
-            .clone()
-            .unwrap_or_else(|| $client.default_namespace().to_string());
-        kube::Api::namespaced($client, &namespace)
-    }};
-    (cluster_level, $client:expr, $type:ty, $object:expr) => {{ kube::Api::all($client) }};
-}
-
-macro_rules! manage_resources {
-    ($func_name:ident, $generic_func_name:ident, $($param_name:ident: $param_type:ty),*) => {
-        async fn $func_name(
-            client: kube::Client,
-            resource: &Resource,
-            $($param_name: $param_type),*
-        ) -> Result<(), Error> {
-            match &resource {
-                Resource::Node(node) => {
-                    let api = create_api!(
-                        cluster_level,
-                        client,
-                        k8s_openapi::api::core::v1::Node,
-                        node
-                    );
-                    $generic_func_name(api, node, $($param_name),*).await?;
-                }
-                Resource::Namespace(ns) => {
-                    let api = create_api!(
-                        cluster_level,
-                        client,
-                        k8s_openapi::api::core::v1::Namespace,
-                        ns
-                    );
-                    $generic_func_name(api, ns, $($param_name),*).await?;
-                }
-                Resource::Pod(pod) => {
-                    let api = create_api!(namespaced, client, k8s_openapi::api::core::v1::Pod, pod);
-                    $generic_func_name(api, pod, $($param_name),*).await?;
-                }
-                Resource::Deployment(deploy) => {
-                    let api = create_api!(
-                        namespaced,
-                        client,
-                        k8s_openapi::api::apps::v1::Deployment,
-                        deploy
-                    );
-                    $generic_func_name(api, deploy, $($param_name),*).await?;
-                }
-                Resource::Service(svc) => {
-                    let api =
-                        create_api!(namespaced, client, k8s_openapi::api::core::v1::Service, svc);
-                    $generic_func_name(api, svc, $($param_name),*).await?;
-                }
-            };
-
-            Ok(())
-        }
-    };
-}
-
-manage_resources!(create_resources, create_resources_for, number_of_instances: u32);
-manage_resources!(delete_and_recreate_resource, delete_and_recreate_resource_for, number_of_instances: u32, instance_index: u32);
-manage_resources!(delete_resources, delete_resources_for, number_of_instances: u32);
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn set_get_object_name() {
+    fn set_get_name() {
         let test_cases = vec![
             // Case 1: Pod without a name, single instance
             (None, 1, 0, "lading-pod"),
@@ -483,9 +522,10 @@ mod tests {
         for (name, num_instances, index, expected_name) in test_cases {
             let mut pod = k8s_openapi::api::core::v1::Pod::default();
             pod.metadata.name = name;
+            let mut object = Resource::Pod(pod);
 
-            set_object_name(&mut pod, num_instances, index);
-            assert_eq!(get_object_name(&pod), expected_name);
+            object.set_name(num_instances, index);
+            assert_eq!(object.get_name(), expected_name);
         }
     }
 }

@@ -46,6 +46,7 @@ hyper-util = { workspace = true, features = ["default", "client", "client-legacy
 is_executable = "1.0.4"
 jemallocator = { version = "0.5" }
 kube = { version = "1.1.0", default-features = false, features = ["config", "client", "rustls-tls", "ring"] }
+kube-core = "1.1.0"
 k8s-openapi = { version = "0.25.0", default-features = false, features = ["latest"] }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }

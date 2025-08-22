@@ -1814,6 +1814,7 @@ dependencies = [
  "jemallocator",
  "k8s-openapi",
  "kube",
+ "kube-core",
  "lading-capture",
  "lading-payload",
  "lading-signal",
