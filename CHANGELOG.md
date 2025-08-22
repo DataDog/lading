@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distribution derived number of points.
 ## Removed
 - Removed `prefix_metric_names` configuration from DogStatsD generator.
+- Removed JSON support from trace-agent payload 
 
 ## [0.27.0]
 ## Added
