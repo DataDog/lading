@@ -12,7 +12,6 @@ struct Input {
     seed: [u8; 32],
     total_bytes: NonZeroU32,
     max_block_size: NonZeroU32,
-    encoding: lading_payload::Encoding,
 }
 
 const MAX_TOTAL_BYTES: u32 = 10 * 1024 * 1024;  // 10 MiB
@@ -34,7 +33,7 @@ fuzz_target!(|input: Input| {
     }
 
     let mut rng = SmallRng::from_seed(input.seed);
-    let payload = lading_payload::Config::TraceAgent(input.encoding);
+    let payload = lading_payload::Config::TraceAgent;
     
     let mut cache = match Cache::fixed(
         &mut rng,

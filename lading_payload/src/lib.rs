@@ -132,19 +132,6 @@ pub trait Serialize {
     }
 }
 
-/// Sub-configuration for `TraceAgent` format
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Encoding {
-    /// Use JSON format
-    Json,
-    /// Use `MsgPack` binary format
-    #[serde(alias = "msgpack")]
-    MsgPack,
-}
-
 /// Configuration for `Payload`
 #[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -183,8 +170,8 @@ pub enum Config {
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
-    /// Generates `TraceAgent` payloads in JSON format
-    TraceAgent(Encoding),
+    /// Generates `TraceAgent` payloads in `MsgPack` format
+    TraceAgent,
 }
 
 /// Unified payload type for all serializers
