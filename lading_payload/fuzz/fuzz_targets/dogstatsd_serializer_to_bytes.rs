@@ -15,7 +15,7 @@ struct Input {
 }
 
 const MAX_BUDGET: usize = 1 * 1024 * 1024; // 1 MiB
-const MAX_CONTEXTS: u32 = 5_000;
+const MAX_CONTEXTS: u32 = 4_100_000;
 const MAX_TAG_LENGTH: u16 = 200;
 const MAX_TAGS_PER_MSG: u8 = 50;
 const MAX_SERVICE_CHECK_NAMES: u16 = 1_000;

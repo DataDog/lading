@@ -27,7 +27,7 @@ pub mod event;
 pub mod metric;
 pub mod service_check;
 
-const MAX_CONTEXTS: u32 = 1_000_000;
+const MAX_CONTEXTS: u32 = 10_000_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
 const LENGTH_PREFIX_SIZE: usize = std::mem::size_of::<u32>();
 
@@ -192,9 +192,6 @@ pub struct Config {
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
-    /// If true, a fixed `smp.` (4 bytes) prefix will be prepended
-    /// to each metric name.
-    pub prefix_metric_names: bool,
 }
 
 impl Default for Config {
@@ -222,7 +219,6 @@ impl Default for Config {
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
-            prefix_metric_names: false,
         }
     }
 }
@@ -238,6 +234,9 @@ impl Config {
         }
         if self.contexts.start() == 0 {
             return Result::Err("Contexts start value cannot be 0".to_string());
+        }
+        if let ConfRange::Constant(0) = self.contexts {
+            return Result::Err("Contexts cannot be 0".to_string());
         }
         if self.contexts.end() > MAX_CONTEXTS {
             return Result::Err(format!(
@@ -358,7 +357,6 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
-        metric_name_prefix: &'static str,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -433,9 +431,8 @@ impl MemberGenerator {
             &WeightedIndex::new(metric_choices)?,
             small_strings,
             &mut tags_generator,
-            pool.as_ref(),
+            &pool,
             value_conf,
-            metric_name_prefix,
             &mut rng,
         );
 
@@ -543,11 +540,6 @@ impl DogStatsD {
     where
         R: rand::Rng + ?Sized,
     {
-        let prefix = if config.prefix_metric_names {
-            "smp."
-        } else {
-            ""
-        };
         let member_generator = MemberGenerator::new(
             config.contexts,
             config.service_check_names,
@@ -562,7 +554,6 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
-            prefix,
             rng,
         )?;
 
@@ -694,11 +685,30 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod test {
-    use super::Config;
+    use super::{ConfRange, Config};
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{DogStatsD, Serialize};
+
+    #[test]
+    fn zero_contexts_should_be_rejected() {
+        let config = Config {
+            contexts: ConfRange::Constant(0),
+            ..Default::default()
+        };
+
+        // Validation should reject 0 contexts
+        let validation_result = config.valid();
+        assert!(validation_result.is_err());
+        // The error message could be either one, both indicate 0 contexts is invalid
+        let err = validation_result.unwrap_err();
+        assert!(
+            err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
+            "Expected error about 0 contexts, got: {}",
+            err
+        );
+    }
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -709,7 +719,13 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config::default();
-            let mut dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng)?;
+            let mut dogstatsd = match DogStatsD::new(dogstatsd_config, &mut rng) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Failed to create DogStatsD with error: {e:?}");
+                    return Err(TestCaseError::fail(format!("Failed to create DogStatsD: {e:?}")));
+                }
+            };
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes)?;

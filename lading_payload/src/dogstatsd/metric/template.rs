@@ -1,4 +1,4 @@
-use crate::dogstatsd::common;
+use crate::common::strings::Handle;
 
 #[derive(Clone, Debug)]
 /// A metric `Template` is a `super::Metric` that lacks values and has no
@@ -15,41 +15,35 @@ pub(crate) enum Template {
 #[derive(Clone, Debug)]
 /// The count type in `DogStatsD` metric format. Monotonically increasing value.
 pub(crate) struct Count {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
 
 #[derive(Clone, Debug)]
 /// The gauge type in `DogStatsD` format.
 pub(crate) struct Gauge {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
 
 #[derive(Clone, Debug)]
 /// The timer type in `DogStatsD` format.
 pub(crate) struct Timer {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
 
 #[derive(Clone, Debug)]
 /// The distribution type in `DogStatsD` format.
 pub(crate) struct Dist {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
 
 #[derive(Clone, Debug)]
 /// The set type in `DogStatsD` format.
 pub(crate) struct Set {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
 
 #[derive(Clone, Debug)]
 /// The histogram type in `DogStatsD` format.
 pub(crate) struct Histogram {
-    pub(crate) name: String,
-    pub(crate) tags: common::tags::Tagset,
+    pub(crate) name: Handle,
 }
