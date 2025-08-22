@@ -15,6 +15,9 @@ pub enum BytesThrottleConfig {
     Stable {
         /// The bytes per second rate limit (e.g., "1MB", "512KiB")
         bytes_per_second: Byte,
+        /// The timeout in milliseconds for IO operations. Default is 0.
+        #[serde(default)]
+        timeout_millis: u64,
     },
     /// A throttle that linearly increases load over time
     Linear {
@@ -45,7 +48,10 @@ impl TryFrom<BytesThrottleConfig> for lading_throttle::Config {
     fn try_from(config: BytesThrottleConfig) -> Result<Self, Self::Error> {
         match config {
             BytesThrottleConfig::AllOut => Ok(lading_throttle::Config::AllOut),
-            BytesThrottleConfig::Stable { bytes_per_second } => {
+            BytesThrottleConfig::Stable {
+                bytes_per_second,
+                timeout_millis,
+            } => {
                 let value = bytes_per_second.as_u128();
                 if value > u128::from(u32::MAX) {
                     return Err(ThrottleConversionError::ValueTooLarge(bytes_per_second));
@@ -54,6 +60,7 @@ impl TryFrom<BytesThrottleConfig> for lading_throttle::Config {
                 let value = NonZeroU32::new(value).ok_or(ThrottleConversionError::Zero)?;
                 Ok(lading_throttle::Config::Stable {
                     maximum_capacity: value,
+                    timeout_micros: timeout_millis.saturating_mul(1000),
                 })
             }
             BytesThrottleConfig::Linear {
