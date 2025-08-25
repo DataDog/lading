@@ -74,7 +74,7 @@ jobs:
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
       - name: Install nextest
-        uses: taiki-e/install-action@3839ec485e8ef50e4a86e9cd116260b68a412c07 # v2.58.10
+        uses: taiki-e/install-action@f63c33fd96cc1e69a29bafd06541cf28588b43a4 # v2.58.21
         with:
           tool: nextest@0.9
       - run: ci/test
