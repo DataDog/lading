@@ -2,12 +2,24 @@
 //!
 //! This generator is meant to generate Kubernetes objects.
 
-use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope, Resource as KubeResource};
+use std::num::{NonZeroU32, NonZeroU64};
+
+#[allow(unused_imports)] // Used for Resource enum constructors
+use k8s_openapi::api::{
+    apps::v1::Deployment,
+    core::v1::{Namespace, Node, Pod, Service},
+};
+use kube::api::{DeleteParams, PostParams};
+use lading_throttle::Throttle;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinSet;
 use tracing::{debug, warn};
 
-use super::General;
+use crate::generator::General;
+
+mod resource;
+mod state_machine;
+
+use self::resource::Resource;
 
 /// Configuration of the Kubernetes generator.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -16,9 +28,9 @@ pub struct Config {
     /// Kubernetes manifest of the resource to create
     pub manifest: Manifest,
     /// Maximum lifetime of the resource before being replaced
-    pub max_lifetime_seconds: Option<std::num::NonZeroU64>,
+    pub max_instance_lifetime_seconds: Option<NonZeroU64>,
     /// Number of resource instances to create (defaults to 1)
-    pub number_of_instances: Option<std::num::NonZeroU32>,
+    pub concurrent_instances: Option<NonZeroU32>,
 }
 
 /// Manifest of the Kubernetes resource to create
@@ -49,31 +61,18 @@ pub enum Error {
     /// Error produced by the YAML parser.
     #[error("YAML parsing error: {0}")]
     Yaml(#[from] serde_yaml::Error),
+    /// State machine error
+    #[error(transparent)]
+    StateMachine(#[from] state_machine::Error),
 }
 
 /// Represents a Kubernetes resource
 #[derive(Debug)]
 pub struct Kubernetes {
     resource: Resource,
-    max_lifetime_seconds: Option<std::num::NonZeroU64>,
-    number_of_instances: std::num::NonZeroU32,
+    concurrent_instances: NonZeroU32,
+    throttle: Option<Throttle>,
     shutdown: lading_signal::Watcher,
-}
-
-/// Represents a Kubernetes resource type
-#[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
-pub enum Resource {
-    /// Kubernetes Node resource
-    Node(k8s_openapi::api::core::v1::Node),
-    /// Kubernetes Namespace resource
-    Namespace(k8s_openapi::api::core::v1::Namespace),
-    /// Kubernetes Pod resource
-    Pod(k8s_openapi::api::core::v1::Pod),
-    /// Kubernetes Deployment resource
-    Deployment(k8s_openapi::api::apps::v1::Deployment),
-    /// Kubernetes Service resource
-    Service(k8s_openapi::api::core::v1::Service),
 }
 
 impl Kubernetes {
@@ -90,6 +89,32 @@ impl Kubernetes {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
+        let concurrent_instances = config.concurrent_instances.unwrap_or(NonZeroU32::MIN);
+
+        // Configure throttle if max_instance_lifetime_seconds is set
+        // The throttle controls how often we recreate instances
+        let throttle = config.max_instance_lifetime_seconds.map(|lifetime_secs| {
+            // We want to recreate all instances over the lifetime period
+            // So we need concurrent_instances operations over lifetime_seconds
+            // This gives us operations_per_second = concurrent_instances / lifetime_seconds
+            // Calculate operations per second, handling u64 to u32 conversion safely
+            let ops_per_sec = if lifetime_secs.get() > u64::from(u32::MAX) {
+                // If lifetime is huge, just do 1 op/sec
+                NonZeroU32::MIN
+            } else {
+                #[allow(clippy::cast_possible_truncation)]
+                let lifetime_secs_u32 = lifetime_secs.get() as u32;
+                let ops = concurrent_instances.get().saturating_div(lifetime_secs_u32);
+                // Ensure at least 1 operation per second
+                NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN)
+            };
+
+            let throttle_config = lading_throttle::Config::Stable {
+                maximum_capacity: ops_per_sec,
+            };
+            Throttle::new_with_config(throttle_config)
+        });
+
         Ok(Self {
             resource: match &config.manifest {
                 Manifest::Node(s) => Resource::Node(serde_yaml::from_str(s)?),
@@ -98,13 +123,38 @@ impl Kubernetes {
                 Manifest::Deployment(s) => Resource::Deployment(serde_yaml::from_str(s)?),
                 Manifest::Service(s) => Resource::Service(serde_yaml::from_str(s)?),
             },
-            max_lifetime_seconds: config.max_lifetime_seconds,
-            #[allow(clippy::unwrap_used)]
-            number_of_instances: config
-                .number_of_instances
-                .unwrap_or(std::num::NonZeroU32::new(1).unwrap()),
+            concurrent_instances,
+            throttle,
             shutdown,
         })
+    }
+
+    async fn handle_wait(&mut self) -> state_machine::Event {
+        // Handle throttle or just wait for shutdown
+        if let Some(ref mut throttle) = self.throttle {
+            let shutdown_wait = self.shutdown.clone().recv();
+            tokio::select! {
+                result = throttle.wait() => {
+                    match result {
+                        Ok(()) => state_machine::Event::RecreateNext,
+                        Err(e) => {
+                            warn!("Throttle error: {e}");
+                            // Return RecreateNext anyway to continue
+                            state_machine::Event::RecreateNext
+                        }
+                    }
+                }
+                () = shutdown_wait => {
+                    debug!("Shutdown signal received");
+                    state_machine::Event::ShutdownSignaled
+                }
+            }
+        } else {
+            // No throttle, just wait for shutdown
+            self.shutdown.clone().recv().await;
+            debug!("Shutdown signal received");
+            state_machine::Event::ShutdownSignaled
+        }
     }
 
     /// Run the Kubernetes generator
@@ -112,420 +162,445 @@ impl Kubernetes {
     /// # Errors
     ///
     /// Will return an error if Kubernetes connection fails or if resource creation fails.
-    pub async fn spin(self) -> Result<(), Error> {
+    #[allow(clippy::too_many_lines)]
+    pub async fn spin(mut self) -> Result<(), Error> {
+        use state_machine::{Event, Operation, StateMachine};
+
         let client = kube::Client::try_default().await?;
+        let mut machine = StateMachine::new(self.concurrent_instances.get());
 
-        create_resources(
-            client.clone(),
-            &self.resource,
-            self.number_of_instances.get(),
-        )
-        .await?;
+        let mut event = Event::Started;
 
-        // Wait for the shutdown signal
-        let shutdown_wait = self.shutdown.clone().recv();
-        tokio::pin!(shutdown_wait);
-        let mut recreate_interval = self.max_lifetime_seconds.map(|max_lifetime_seconds| {
-            tokio::time::interval(
-                tokio::time::Duration::from_secs(max_lifetime_seconds.into())
-                    / self.number_of_instances.get(),
-            )
-        });
-
-        let mut i = 0_u32;
+        // See `StateMachine::next` for details on transitions
         loop {
-            tokio::select! {
-                // Delete and recreate resources
-                _ = if let Some(ref mut interval) = recreate_interval { interval.tick() } else { std::future::pending().await } => {
-                    delete_and_recreate_resource(client.clone(), &self.resource, self.number_of_instances.get(), i);
-                    i = (i + 1) % self.number_of_instances;
-                }
+            let operation = machine.next(event)?;
+            debug!("State machine: {:?} -> {:?}", machine.state(), operation);
 
-                // Shutdown
-                () = &mut shutdown_wait => {
-                    debug!("shutdown signal received");
-
-                    delete_resources(
+            event = match operation {
+                Operation::CreateAllInstances => {
+                    debug!("Creating all {} instances", self.concurrent_instances);
+                    let result = create_resources(
                         client.clone(),
                         &self.resource,
-                        self.number_of_instances.get(),
-                    ).await?;
+                        self.concurrent_instances.get(),
+                    )
+                    .await;
 
-                    return Ok(())
+                    match result {
+                        Ok(_) => {
+                            debug!("Successfully created all instances");
+                            Event::AllInstancesCreated { success: true }
+                        }
+                        Err(e) => {
+                            warn!("Failed to create all instances: {e}");
+                            Event::AllInstancesCreated { success: false }
+                        }
+                    }
                 }
-            }
+                Operation::CreateInstance { index } => {
+                    debug!("Creating instance {index}");
+                    let result = create_single_resource(
+                        client.clone(),
+                        &self.resource,
+                        self.concurrent_instances.get(),
+                        index,
+                    )
+                    .await;
+
+                    match result {
+                        Ok(_) => {
+                            debug!("Successfully created instance {index}");
+                            Event::InstanceCreated {
+                                index,
+                                success: true,
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to create instance {index}: {e}");
+                            Event::InstanceCreated {
+                                index,
+                                success: false,
+                            }
+                        }
+                    }
+                }
+                Operation::DeleteInstance { index } => {
+                    debug!("Deleting instance {index}");
+                    let result = delete_single_resource(
+                        client.clone(),
+                        &self.resource,
+                        self.concurrent_instances.get(),
+                        index,
+                    )
+                    .await;
+
+                    match result {
+                        Ok(()) => {
+                            debug!("Successfully deleted instance {index}");
+                            Event::InstanceDeleted {
+                                index,
+                                success: true,
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to delete instance {index}: {e}");
+                            Event::InstanceDeleted {
+                                index,
+                                success: false,
+                            }
+                        }
+                    }
+                }
+                Operation::Wait => self.handle_wait().await,
+                Operation::DeleteAllInstances => {
+                    debug!("Deleting all instances for shutdown");
+                    let result = delete_resources(
+                        client.clone(),
+                        &self.resource,
+                        self.concurrent_instances.get(),
+                    )
+                    .await;
+
+                    match result {
+                        Ok(()) => {
+                            debug!("Successfully deleted all instances");
+                            Event::AllInstancesDeleted { success: true }
+                        }
+                        Err(e) => {
+                            warn!("Failed to delete all instances: {e}");
+                            Event::AllInstancesDeleted { success: false }
+                        }
+                    }
+                }
+                Operation::Exit => {
+                    debug!("Exiting generator");
+                    return Ok(());
+                }
+            };
         }
     }
 }
 
-impl Resource {
-    fn kind(&self) -> &'static str {
-        match self {
-            Resource::Node(_) => k8s_openapi::api::core::v1::Node::KIND,
-            Resource::Namespace(_) => k8s_openapi::api::core::v1::Namespace::KIND,
-            Resource::Pod(_) => k8s_openapi::api::core::v1::Pod::KIND,
-            Resource::Deployment(_) => k8s_openapi::api::apps::v1::Deployment::KIND,
-            Resource::Service(_) => k8s_openapi::api::core::v1::Service::KIND,
-        }
-    }
+async fn create_single_resource(
+    client: kube::Client,
+    resource: &Resource,
+    concurrent_instances: u32,
+    index: u32,
+) -> Result<Resource, Error> {
+    let mut object = resource.clone();
+    object.set_name(concurrent_instances, index);
 
-    fn meta(&self) -> &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-        match self {
-            Resource::Node(node) => &node.metadata,
-            Resource::Namespace(ns) => &ns.metadata,
-            Resource::Pod(pod) => &pod.metadata,
-            Resource::Deployment(deploy) => &deploy.metadata,
-            Resource::Service(svc) => &svc.metadata,
-        }
-    }
-
-    fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-        match self {
-            Resource::Node(node) => &mut node.metadata,
-            Resource::Namespace(ns) => &mut ns.metadata,
-            Resource::Pod(pod) => &mut pod.metadata,
-            Resource::Deployment(deploy) => &mut deploy.metadata,
-            Resource::Service(svc) => &mut svc.metadata,
-        }
-    }
-
-    fn set_name(&mut self, number_of_instances: u32, instance_index: u32) {
-        if number_of_instances > 1 {
-            // TODO implement a visitor to patch other fields
-            self.meta_mut().name = Some(self.meta().name.as_ref().map_or_else(
-                || format!("lading-{}-{instance_index:0>5}", self.kind().to_lowercase()),
-                |name| format!("{name}-{instance_index:0>5}"),
-            ));
-        } else if self.meta().name.is_none() {
-            self.meta_mut().name = Some(format!("lading-{}", self.kind().to_lowercase()));
-        }
-    }
-
-    fn get_name(&self) -> &str {
-        self.meta()
-            .name
-            .as_ref()
-            .expect("Do not forget to call `set_name`")
-    }
-
-    /// Create a cluster-scoped API for the given resource type
-    fn cluster_api<T>(client: kube::Client) -> kube::Api<T>
-    where
-        T: kube::Resource<Scope = ClusterResourceScope>,
-        <T as kube::Resource>::DynamicType: std::default::Default,
-    {
-        kube::Api::all(client)
-    }
-
-    /// Create a namespaced API for the given resource type
-    fn namespaced_api<T>(&self, client: kube::Client) -> kube::Api<T>
-    where
-        T: kube::Resource<Scope = NamespaceResourceScope>,
-        <T as kube::Resource>::DynamicType: std::default::Default,
-    {
-        let namespace = self
-            .meta()
-            .namespace
-            .clone()
-            .unwrap_or_else(|| client.default_namespace().to_string());
-        kube::Api::namespaced(client, &namespace)
-    }
-
-    async fn create(
-        &self,
-        client: kube::Client,
-        pp: &kube::api::PostParams,
-    ) -> Result<Self, kube::Error> {
-        match self {
-            Resource::Node(node) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
-                .create(pp, node)
-                .await
-                .map(Resource::Node),
-
-            Resource::Namespace(ns) => {
-                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
-                    .create(pp, ns)
-                    .await
-                    .map(Resource::Namespace)
-            }
-
-            Resource::Pod(pod) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
-                .create(pp, pod)
-                .await
-                .map(Resource::Pod),
-
-            Resource::Deployment(deploy) => self
-                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
-                .create(pp, deploy)
-                .await
-                .map(Resource::Deployment),
-
-            Resource::Service(svc) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
-                .create(pp, svc)
-                .await
-                .map(Resource::Service),
-        }
-    }
-
-    async fn delete(
-        &self,
-        client: kube::Client,
-        dp: &kube::api::DeleteParams,
-    ) -> Result<either::Either<Self, kube_core::response::Status>, kube::Error> {
-        match self {
-            Resource::Node(_) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
-                .delete(self.get_name(), dp)
-                .await
-                .map(|e| e.map_left(Resource::Node)),
-
-            Resource::Namespace(_) => {
-                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
-                    .delete(self.get_name(), dp)
-                    .await
-                    .map(|e| e.map_left(Resource::Namespace))
-            }
-
-            Resource::Pod(_) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
-                .delete(self.get_name(), dp)
-                .await
-                .map(|e| e.map_left(Resource::Pod)),
-
-            Resource::Deployment(_) => self
-                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
-                .delete(self.get_name(), dp)
-                .await
-                .map(|e| e.map_left(Resource::Deployment)),
-
-            Resource::Service(_) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
-                .delete(self.get_name(), dp)
-                .await
-                .map(|e| e.map_left(Resource::Service)),
-        }
-    }
-
-    async fn get_opt(&self, client: kube::Client) -> Result<Option<Self>, kube::Error> {
-        match self {
-            Resource::Node(_) => Self::cluster_api::<k8s_openapi::api::core::v1::Node>(client)
-                .get_opt(self.get_name())
-                .await
-                .map(|o| o.map(Resource::Node)),
-
-            Resource::Namespace(_) => {
-                Self::cluster_api::<k8s_openapi::api::core::v1::Namespace>(client)
-                    .get_opt(self.get_name())
-                    .await
-                    .map(|o| o.map(Resource::Namespace))
-            }
-
-            Resource::Pod(_) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Pod>(client)
-                .get_opt(self.get_name())
-                .await
-                .map(|o| o.map(Resource::Pod)),
-
-            Resource::Deployment(_) => self
-                .namespaced_api::<k8s_openapi::api::apps::v1::Deployment>(client)
-                .get_opt(self.get_name())
-                .await
-                .map(|o| o.map(Resource::Deployment)),
-
-            Resource::Service(_) => self
-                .namespaced_api::<k8s_openapi::api::core::v1::Service>(client)
-                .get_opt(self.get_name())
-                .await
-                .map(|o| o.map(Resource::Service)),
-        }
-    }
+    object
+        .create(client, &PostParams::default())
+        .await
+        .inspect(|o| {
+            debug!(
+                "Created {kind} {name}",
+                kind = object.kind().to_lowercase(),
+                name = o.get_name()
+            );
+        })
+        .inspect_err(|e| {
+            warn!(
+                "Failed to create {kind} {name}: {e}",
+                kind = object.kind().to_lowercase(),
+                name = object.get_name()
+            );
+        })
+        .map_err(Error::from)
 }
 
 async fn create_resources(
     client: kube::Client,
     resource: &Resource,
-    number_of_instances: u32,
+    concurrent_instances: u32,
 ) -> Result<Vec<Resource>, Error> {
-    let mut set = JoinSet::new();
+    let mut resources = Vec::new();
 
-    for instance_index in 0..number_of_instances {
-        let client = client.clone();
-        let mut object = resource.clone();
-        object.set_name(number_of_instances, instance_index);
-
-        set.spawn(async move {
-            object
-                .create(client, &kube::api::PostParams::default())
-                .await
-                .inspect(|o| {
-                    debug!("Created {} {}", object.kind().to_lowercase(), o.get_name());
-                })
-                .inspect_err(|e| {
-                    warn!(
-                        "Failed to create {} {}: {e}",
-                        object.kind().to_lowercase(),
-                        object.get_name()
-                    );
-                })
-        });
+    for instance_index in 0..concurrent_instances {
+        let created = create_single_resource(
+            client.clone(),
+            resource,
+            concurrent_instances,
+            instance_index,
+        )
+        .await?;
+        resources.push(created);
     }
 
-    Ok(set
-        .join_all()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<Resource>, kube::Error>>()?)
+    Ok(resources)
 }
 
-fn delete_and_recreate_resource(
+async fn delete_single_resource(
     client: kube::Client,
     resource: &Resource,
-    number_of_instances: u32,
-    instance_index: u32,
-) {
+    concurrent_instances: u32,
+    index: u32,
+) -> Result<(), Error> {
     let mut object = resource.clone();
-    object.set_name(number_of_instances, instance_index);
+    object.set_name(concurrent_instances, index);
 
-    tokio::spawn(async move {
-        let mut deletion_in_progress = false;
+    object
+        .delete(client, &DeleteParams::default().grace_period(5))
+        .await
+        .inspect_err(|e| {
+            warn!(
+                "Failed to delete {kind} {name}: {e}",
+                kind = object.kind().to_lowercase(),
+                name = object.get_name()
+            );
+        })?
+        .map_left(|o| {
+            debug!(
+                "Deleting {kind} {name}",
+                kind = o.kind().to_lowercase(),
+                name = o.get_name()
+            );
+        })
+        .map_right(|_| {
+            debug!(
+                "Deleted {kind} {name}",
+                kind = object.kind().to_lowercase(),
+                name = object.get_name()
+            );
+        });
 
-        object
-            .delete(
-                client.clone(),
-                &kube::api::DeleteParams::default().grace_period(5),
-            )
-            .await
-            .inspect_err(|e| {
-                warn!(
-                    "Failed to delete {} {}: {e}",
-                    object.kind().to_lowercase(),
-                    object.get_name()
-                );
-            })?
-            .map_left(|o| {
-                debug!("Deleting {} {}", o.kind().to_lowercase(), o.get_name());
-                deletion_in_progress = true;
-            })
-            .map_right(|_| {
-                debug!(
-                    "Deleted {} {}",
-                    object.kind().to_lowercase(),
-                    object.get_name()
-                );
-            });
-
-        while deletion_in_progress {
-            if let Some(o) = object.get_opt(client.clone()).await.inspect_err(|e| {
-                warn!(
-                    "Failed to delete {} {}: {e}",
-                    object.kind().to_lowercase(),
-                    object.get_name()
-                );
-            })? {
-                debug!(
-                    "Still deleting {} {}",
-                    o.kind().to_lowercase(),
-                    o.get_name()
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            } else {
-                debug!(
-                    "Deleted {} {}",
-                    object.kind().to_lowercase(),
-                    object.get_name()
-                );
-                deletion_in_progress = false;
-            }
-        }
-
-        object
-            .create(client, &kube::api::PostParams::default())
-            .await
-            .inspect(|o| {
-                debug!("Recreated {} {}", o.kind().to_lowercase(), o.get_name());
-            })
-            .inspect_err(|e| {
-                warn!(
-                    "Failed to recreate {} {}: {e}",
-                    object.kind().to_lowercase(),
-                    object.get_name()
-                );
-            })?;
-
-        Ok::<(), Error>(())
-    });
+    Ok(())
 }
 
 async fn delete_resources(
     client: kube::Client,
     resource: &Resource,
-    number_of_instances: u32,
+    concurrent_instances: u32,
 ) -> Result<(), Error> {
-    let mut set = JoinSet::new();
-
-    for instance_index in 0..number_of_instances {
-        let client = client.clone();
-        let mut object = resource.clone();
-        object.set_name(number_of_instances, instance_index);
-
-        set.spawn(async move {
-            object
-                .delete(client, &kube::api::DeleteParams::default().grace_period(5))
-                .await
-                .inspect_err(|e| {
-                    warn!(
-                        "Failed to delete {} {}: {e}",
-                        object.kind().to_lowercase(),
-                        object.get_name()
-                    );
-                })?
-                .map_left(|o| {
-                    debug!("Deleting {} {}", o.kind().to_lowercase(), o.get_name());
-                })
-                .map_right(|_| {
-                    debug!(
-                        "Deleted {} {}",
-                        object.kind().to_lowercase(),
-                        object.get_name()
-                    );
-                });
-
-            Ok(())
-        });
+    for instance_index in 0..concurrent_instances {
+        delete_single_resource(
+            client.clone(),
+            resource,
+            concurrent_instances,
+            instance_index,
+        )
+        .await?;
     }
 
-    Ok(set
-        .join_all()
-        .await
-        .into_iter()
-        .collect::<Result<(), kube::Error>>()?)
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::generator::kubernetes::Resource;
+    use http::{Method, Request, Response, StatusCode};
+    use http_body_util::BodyExt;
+    use k8s_openapi::api::core::v1::{Node, Pod};
+    use kube::api::PostParams;
+    use kube::{Api, Client, client::Body};
+    use rustc_hash::FxHashMap;
+    use std::sync::{Arc, Mutex};
+    use tower_test::mock;
 
-    #[test]
-    fn set_get_name() {
-        let test_cases = vec![
-            // Case 1: Pod without a name, single instance
-            (None, 1, 0, "lading-pod"),
-            // Case 2: Pod with a name, single instance
-            (Some("test-pod".to_string()), 1, 0, "test-pod"),
-            // Case 3: Pod without a name, multiple instances
-            (None, 3, 1, "lading-pod-00001"),
-            // Case 4: Pod with a name, multiple instances
-            (Some("test-pod".to_string()), 3, 2, "test-pod-00002"),
-        ];
+    /// Kubernetes API server for testing IO behavior
+    ///
+    /// We avoid testing the state machine as those tests are handled in
+    /// state_machine.rs.
+    struct ApiMock {
+        handle: mock::Handle<Request<Body>, Response<Body>>,
+        resources: Arc<Mutex<FxHashMap<String, Resource>>>,
+    }
 
-        for (name, num_instances, index, expected_name) in test_cases {
-            let mut pod = k8s_openapi::api::core::v1::Pod::default();
-            pod.metadata.name = name;
-            let mut object = Resource::Pod(pod);
-
-            object.set_name(num_instances, index);
-            assert_eq!(object.get_name(), expected_name);
+    impl ApiMock {
+        fn new() -> (Client, Self) {
+            let (mock_service, handle) = mock::pair::<Request<Body>, Response<Body>>();
+            let client = Client::new(mock_service, "default");
+            let resources = Arc::new(Mutex::new(FxHashMap::default()));
+            (client, ApiMock { handle, resources })
         }
+
+        async fn run(mut self) {
+            while let Some((request, send)) = self.handle.next_request().await {
+                let response = self.handle_request(request).await;
+                send.send_response(response);
+            }
+        }
+
+        async fn handle_request(&self, request: Request<Body>) -> Response<Body> {
+            let path = request.uri().path();
+            let method = request.method();
+
+            match method {
+                &Method::POST => self.handle_create(request).await,
+                &Method::DELETE => self.handle_delete(path).await,
+                _ => Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::empty())
+                    .unwrap(),
+            }
+        }
+
+        async fn handle_create(&self, request: Request<Body>) -> Response<Body> {
+            let body_bytes = request
+                .into_body()
+                .collect()
+                .await
+                .map(|collected| collected.to_bytes())
+                .unwrap_or_default();
+
+            // Try to deserialize as any supported resource type
+            if let Ok(pod) = serde_json::from_slice::<Pod>(&body_bytes) {
+                self.create_resource(
+                    pod.metadata.name.as_deref().unwrap_or("unknown"),
+                    Resource::Pod(pod.clone()),
+                )
+                .await
+            } else if let Ok(node) = serde_json::from_slice::<Node>(&body_bytes) {
+                self.create_resource(
+                    node.metadata.name.as_deref().unwrap_or("unknown"),
+                    Resource::Node(node.clone()),
+                )
+                .await
+            } else {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::empty())
+                    .unwrap()
+            }
+        }
+
+        async fn create_resource(&self, name: &str, resource: Resource) -> Response<Body> {
+            let mut resources = self.resources.lock().unwrap();
+
+            if resources.contains_key(name) {
+                return Response::builder()
+                    .status(StatusCode::CONFLICT)
+                    .body(Body::from(
+                        format!(r#"{{"kind":"Status","message":"{} already exists"}}"#, name)
+                            .into_bytes(),
+                    ))
+                    .unwrap();
+            }
+
+            resources.insert(name.to_string(), resource.clone());
+
+            let json_bytes = match &resource {
+                Resource::Pod(pod) => serde_json::to_vec(pod).unwrap(),
+                Resource::Node(node) => serde_json::to_vec(node).unwrap(),
+                Resource::Namespace(ns) => serde_json::to_vec(ns).unwrap(),
+                Resource::Deployment(deploy) => serde_json::to_vec(deploy).unwrap(),
+                Resource::Service(svc) => serde_json::to_vec(svc).unwrap(),
+            };
+
+            Response::builder()
+                .status(StatusCode::CREATED)
+                .body(Body::from(json_bytes))
+                .unwrap()
+        }
+
+        async fn handle_delete(&self, path: &str) -> Response<Body> {
+            let name = path.split('/').last().unwrap_or("");
+            let mut resources = self.resources.lock().unwrap();
+
+            if resources.remove(name).is_some() {
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(
+                        r#"{"kind":"Status","status":"Success"}"#.as_bytes().to_vec(),
+                    ))
+                    .unwrap()
+            } else {
+                Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from(
+                        r#"{"kind":"Status","message":"not found"}"#.as_bytes().to_vec(),
+                    ))
+                    .unwrap()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn create_multiple_instances() {
+        use crate::generator::kubernetes::create_resources;
+
+        let (client, mock) = ApiMock::new();
+        let resources = mock.resources.clone();
+
+        tokio::spawn(async move { mock.run().await });
+
+        let mut pod = Pod::default();
+        pod.metadata.name = Some("test-pod".to_string());
+        let resource = Resource::Pod(pod);
+
+        let created = create_resources(client, &resource, 3).await.unwrap();
+        assert_eq!(created.len(), 3);
+
+        let state = resources.lock().unwrap();
+        assert!(state.contains_key("test-pod-00000"));
+        assert!(state.contains_key("test-pod-00001"));
+        assert!(state.contains_key("test-pod-00002"));
+    }
+
+    #[tokio::test]
+    async fn delete_multiple_instances() {
+        use crate::generator::kubernetes::{create_resources, delete_resources};
+
+        let (client, mock) = ApiMock::new();
+        let resources = mock.resources.clone();
+
+        tokio::spawn(async move { mock.run().await });
+
+        let mut pod = Pod::default();
+        pod.metadata.name = Some("delete-test".to_string());
+        let resource = Resource::Pod(pod);
+
+        create_resources(client.clone(), &resource, 3)
+            .await
+            .unwrap();
+        assert_eq!(resources.lock().unwrap().len(), 3);
+
+        delete_resources(client, &resource, 3).await.unwrap();
+        assert_eq!(resources.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn create_duplicate_fails() {
+        let (client, mock) = ApiMock::new();
+        tokio::spawn(async move { mock.run().await });
+
+        let api: Api<Pod> = Api::default_namespaced(client);
+        let mut pod = Pod::default();
+        pod.metadata.name = Some("duplicate-pod".to_string());
+
+        api.create(&PostParams::default(), &pod).await.unwrap();
+        let result = api.create(&PostParams::default(), &pod).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_with_error_recovery() {
+        use crate::generator::kubernetes::create_resources;
+
+        let (client, mock) = ApiMock::new();
+        let resources = mock.resources.clone();
+
+        tokio::spawn(async move { mock.run().await });
+
+        // Pre-create a conflicting resource
+        let api: Api<Pod> = Api::default_namespaced(client.clone());
+        let mut existing_pod = Pod::default();
+        existing_pod.metadata.name = Some("test-pod-00001".to_string());
+        api.create(&PostParams::default(), &existing_pod)
+            .await
+            .unwrap();
+
+        // Try to create multiple instances - should fail on conflict
+        let mut pod = Pod::default();
+        pod.metadata.name = Some("test-pod".to_string());
+        let resource = Resource::Pod(pod);
+
+        let result = create_resources(client, &resource, 3).await;
+        assert!(result.is_err());
+
+        // Should have the pre-existing resource
+        let state = resources.lock().unwrap();
+        assert!(state.contains_key("test-pod-00001"));
     }
 }
