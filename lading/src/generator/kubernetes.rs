@@ -349,21 +349,7 @@ async fn delete_single_resource(
                 kind = object.kind().to_lowercase(),
                 name = object.get_name()
             );
-        })?
-        .map_left(|o| {
-            debug!(
-                "Deleting {kind} {name}",
-                kind = o.kind().to_lowercase(),
-                name = o.get_name()
-            );
-        })
-        .map_right(|_| {
-            debug!(
-                "Deleted {kind} {name}",
-                kind = object.kind().to_lowercase(),
-                name = object.get_name()
-            );
-        });
+        })?;
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 //! Kubernetes resource abstractions
 
+use either::Either;
 use k8s_openapi::{
     ClusterResourceScope, NamespaceResourceScope, Resource as KubeResource,
     api::{
@@ -9,7 +10,8 @@ use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
 use kube::api::{DeleteParams, PostParams};
-use kube_core::response::Status;
+use kube_core::Status;
+use tracing::debug;
 
 /// A Kubernetes resource that can be created, deleted, and managed
 #[derive(Debug, Clone)]
@@ -140,32 +142,93 @@ impl Resource {
         &self,
         client: kube::Client,
         dp: &DeleteParams,
-    ) -> Result<either::Either<Self, Status>, kube::Error> {
+    ) -> Result<(), kube::Error> {
         let name = self.get_name();
+        let kind = self.kind().to_lowercase();
+
+        let handle_status = |status: Status| -> Result<(), kube::Error> {
+            if status.is_failure() {
+                let message = if status.message.is_empty() {
+                    "unknown error"
+                } else {
+                    &status.message
+                };
+                let reason = if status.reason.is_empty() {
+                    "unknown reason"
+                } else {
+                    &status.reason
+                };
+                return Err(kube::Error::Api(kube::core::ErrorResponse {
+                    status: "Failure".to_string(),
+                    message: format!("Failed to delete {kind} {name}: {message} ({reason})"),
+                    reason: reason.to_string(),
+                    code: status.code,
+                }));
+            }
+
+            debug!("Confirmed deletion of {kind} {name}");
+            Ok(())
+        };
+
         match self {
-            Resource::Node(_) => Self::cluster_api::<Node>(client)
-                .delete(name, dp)
-                .await
-                .map(|e| e.map_left(Resource::Node)),
-            Resource::Namespace(_) => Self::cluster_api::<Namespace>(client)
-                .delete(name, dp)
-                .await
-                .map(|e| e.map_left(Resource::Namespace)),
-            Resource::Pod(_) => self
-                .namespaced_api::<Pod>(client)
-                .delete(name, dp)
-                .await
-                .map(|e| e.map_left(Resource::Pod)),
-            Resource::Deployment(_) => self
-                .namespaced_api::<Deployment>(client)
-                .delete(name, dp)
-                .await
-                .map(|e| e.map_left(Resource::Deployment)),
-            Resource::Service(_) => self
-                .namespaced_api::<Service>(client)
-                .delete(name, dp)
-                .await
-                .map(|e| e.map_left(Resource::Service)),
+            Resource::Node(_) => {
+                let result = Self::cluster_api::<Node>(client).delete(name, dp).await?;
+                match result {
+                    Either::Left(_) => {
+                        debug!("Initiated deletion of {kind} {name}");
+                        Ok(())
+                    }
+                    Either::Right(status) => handle_status(status),
+                }
+            }
+            Resource::Namespace(_) => {
+                let result = Self::cluster_api::<Namespace>(client)
+                    .delete(name, dp)
+                    .await?;
+                match result {
+                    Either::Left(_) => {
+                        debug!("Initiated deletion of {kind} {name}");
+                        Ok(())
+                    }
+                    Either::Right(status) => handle_status(status),
+                }
+            }
+            Resource::Pod(_) => {
+                let result = self.namespaced_api::<Pod>(client).delete(name, dp).await?;
+                match result {
+                    Either::Left(_) => {
+                        debug!("Initiated deletion of {kind} {name}");
+                        Ok(())
+                    }
+                    Either::Right(status) => handle_status(status),
+                }
+            }
+            Resource::Deployment(_) => {
+                let result = self
+                    .namespaced_api::<Deployment>(client)
+                    .delete(name, dp)
+                    .await?;
+                match result {
+                    Either::Left(_) => {
+                        debug!("Initiated deletion of {kind} {name}");
+                        Ok(())
+                    }
+                    Either::Right(status) => handle_status(status),
+                }
+            }
+            Resource::Service(_) => {
+                let result = self
+                    .namespaced_api::<Service>(client)
+                    .delete(name, dp)
+                    .await?;
+                match result {
+                    Either::Left(_) => {
+                        debug!("Initiated deletion of {kind} {name}");
+                        Ok(())
+                    }
+                    Either::Right(status) => handle_status(status),
+                }
+            }
         }
     }
 }
