@@ -10,7 +10,6 @@
 //! configured [throttle].
 //!
 
-use is_executable::IsExecutable;
 use lading_throttle::Throttle;
 use nix::{
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
@@ -28,6 +27,7 @@ use std::{
     env, error, fmt,
     iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Stdio, exit},
     str, thread,
@@ -247,7 +247,11 @@ impl Config {
     pub fn validate(&self) -> Result<(), Error> {
         let iter = self.executables.iter();
         for exec in iter {
-            if !exec.executable.is_executable() {
+            if !exec
+                .executable
+                .metadata()
+                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+            {
                 return Err(Error::from(NotExecutable {
                     executable: exec.executable.clone(),
                 }));
