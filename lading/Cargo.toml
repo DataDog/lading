@@ -103,6 +103,7 @@ async-pidfd = "0.1"
 tempfile = "3.21"
 warp = "0.3"
 proptest = { workspace = true }
+tower-test = "0.4"
 
 [features]
 default = []

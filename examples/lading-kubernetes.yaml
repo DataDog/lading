@@ -44,7 +44,7 @@ generator:
               osImage: ""
               systemUUID: ""
             phase: Running
-      number_of_instances: 10
+      concurrent_instances: 10
   - kubernetes:
       manifest:
         namespace: |
@@ -66,8 +66,8 @@ generator:
                 command:
                   - sleep
                   - infinity
-      max_lifetime_seconds: 20
-      number_of_instances: 2
+      max_instance_lifetime_seconds: 20
+      concurrent_instances: 2
   - kubernetes:
       manifest:
         deployment: |
@@ -98,8 +98,8 @@ generator:
                         done
                     ports:
                       - containerPort: 5000
-      max_lifetime_seconds: 20
-      number_of_instances: 2
+      max_instance_lifetime_seconds: 20
+      concurrent_instances: 2
   - kubernetes:
       manifest:
         service: |
@@ -113,8 +113,8 @@ generator:
               app: foo
             ports:
               - port: 5000
-      max_lifetime_seconds: 20
-      number_of_instances: 2
+      max_instance_lifetime_seconds: 20
+      concurrent_instances: 2
   - kubernetes:
       manifest:
         deployment: |
@@ -161,8 +161,8 @@ generator:
                         done
                     ports:
                       - containerPort: 5000
-      max_lifetime_seconds: 20
-      number_of_instances: 2
+      max_instance_lifetime_seconds: 20
+      concurrent_instances: 2
   - kubernetes:
       manifest:
         service: |
@@ -176,5 +176,5 @@ generator:
               app: bar
             ports:
               - port: 5000
-      max_lifetime_seconds: 20
-      number_of_instances: 2
+      max_instance_lifetime_seconds: 20
+      concurrent_instances: 2
