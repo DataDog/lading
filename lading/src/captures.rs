@@ -7,13 +7,14 @@
 //! their [`metrics`] integration while [`CaptureManager`] need only hook into
 //! that same crate.
 
-use std::ffi::OsStr;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH, SystemTimeError};
+use std::{
+    ffi::OsStr,
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+    time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH},
+};
 
 use lading_capture::json;
 use parquet::arrow::ArrowWriter;

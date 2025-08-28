@@ -14,13 +14,15 @@ use metrics::counter;
 use nix::libc::{self, ENOENT};
 use rand::{SeedableRng, rngs::SmallRng};
 use serde::{Deserialize, Serialize};
-use std::ffi::OsStr;
-use std::collections::HashMap;
-use std::fs;
-use std::num::NonZeroU32;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs,
+    num::NonZeroU32,
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
 
