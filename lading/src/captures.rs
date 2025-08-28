@@ -141,12 +141,17 @@ impl JsonSink {
     }
 }
 
+/// Parquet-backed sink; schema is fixed at construction for the lifetime of the file.
+/// If the schema ever needs to change, a new sink/file must be created.
 struct ParquetSink {
     writer: ArrowWriter<File>,
     schema: Arc<Schema>,
 }
 
 impl ParquetSink {
+    /// Build a sink with a fixed schema; callers do not pass a schema to write_lines
+    /// because Parquet files are single-schema. This avoids per-call overhead and
+    /// prevents accidental schema drift within one file.
     fn new(fp: File) -> Result<Self, Error> {
         let schema = Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
@@ -164,6 +169,7 @@ impl ParquetSink {
         Ok(Self { writer, schema })
     }
 
+    /// Append rows using the fixed schema captured at construction (self.schema).
     fn write_lines(&mut self, lines: &[json::Line]) -> Result<(), Error> {
         let cap = lines.len();
         let mut run_id_builder = StringBuilder::with_capacity(cap, 0);
