@@ -165,7 +165,6 @@ impl ParquetSink {
     }
 
     fn write_lines(&mut self, lines: &[json::Line]) -> Result<(), Error> {
-        // Builders
         let cap = lines.len();
         let mut run_id_builder = StringBuilder::with_capacity(cap, 0);
         let mut time_builder = Int64Builder::with_capacity(cap);
@@ -269,16 +268,13 @@ impl CaptureManager {
             ),
         };
 
-        // Choose sink based on extension
         let sink = if capture_path
             .extension()
             .is_some_and(|ext| ext == OsStr::new("parquet"))
         {
-            // Safety: Any error from parquet creation is turned into io::Error here to satisfy signature
             match ParquetSink::new(fp) {
                 Ok(p) => CaptureSink::Parquet(p),
                 Err(e) => {
-                    // convert to io::Error with context
                     return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
                 }
             }
@@ -420,7 +416,6 @@ impl CaptureManager {
                 loop {
                     if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
-                        // Finish sink before returning
                         if let Err(e) = self.sink.finish() {
                             warn!("failed to finish capture sink: {e}");
                         }
