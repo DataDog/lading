@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use lading_capture::json;
+use lading_capture::{json, parquet as parquet_format};
 use metrics::Key;
 use metrics_util::{
     MetricKindMask,
@@ -24,6 +24,8 @@ use metrics_util::{
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+use crate::config::CaptureFormat;
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -50,6 +52,226 @@ pub enum Error {
     CapturePath,
 }
 
+/// Metric data for capture writers
+#[derive(Debug, Clone)]
+pub struct MetricData {
+    /// Unique identifier for this metric collection run
+    pub run_id: Uuid,
+    /// Timestamp in milliseconds since Unix epoch
+    pub time: u128,
+    /// Index of the metrics collection fetch/flush cycle
+    pub fetch_index: u64,
+    /// Name of the metric being recorded
+    pub metric_name: String,
+    /// Type of metric (counter or gauge)
+    pub metric_kind: MetricKind,
+    /// Numeric value of the metric
+    pub value: MetricValue,
+    /// Key-value pairs of labels associated with this metric
+    pub labels: FxHashMap<String, String>,
+}
+
+/// The kind of metric being recorded
+#[derive(Debug, Clone, Copy)]
+pub enum MetricKind {
+    /// A monotonically increasing value
+    Counter,
+    /// A point-in-time value that can increase or decrease
+    Gauge,
+}
+
+/// The numeric value of a metric
+#[derive(Debug, Clone, Copy)]
+pub enum MetricValue {
+    /// An unsigned 64-bit integer value
+    Int(u64),
+    /// A 64-bit floating point value
+    Float(f64),
+}
+
+impl MetricValue {
+    /// Convert this value to a 64-bit float for storage
+    #[must_use]
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            MetricValue::Int(i) => *i as f64,
+            MetricValue::Float(f) => *f,
+        }
+    }
+}
+
+/// Trait for different capture file writers
+#[async_trait::async_trait]
+trait CaptureWriter: Send {
+    /// Write a single metric to the capture file
+    async fn write_metric(&mut self, metric: &MetricData) -> Result<(), Error>;
+    /// Flush any buffered data to disk
+    async fn flush(&mut self) -> Result<(), Error>;
+}
+
+/// JSON capture writer - writes one JSON object per line
+struct JsonCaptureWriter {
+    capture_fp: BufWriter<std::fs::File>,
+}
+
+impl JsonCaptureWriter {
+    fn new(capture_path: PathBuf) -> Result<Self, Error> {
+        let fp = std::fs::File::create(capture_path).map_err(|err| Error::Io {
+            context: "file creation",
+            err,
+        })?;
+        Ok(Self {
+            capture_fp: BufWriter::new(fp),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl CaptureWriter for JsonCaptureWriter {
+    async fn write_metric(&mut self, metric: &MetricData) -> Result<(), Error> {
+        let line = json::Line {
+            run_id: metric.run_id,
+            time: metric.time,
+            fetch_index: metric.fetch_index,
+            metric_name: metric.metric_name.clone(),
+            metric_kind: match metric.metric_kind {
+                MetricKind::Counter => json::MetricKind::Counter,
+                MetricKind::Gauge => json::MetricKind::Gauge,
+            },
+            value: match metric.value {
+                MetricValue::Int(i) => json::LineValue::Int(i),
+                MetricValue::Float(f) => json::LineValue::Float(f),
+            },
+            labels: metric.labels.clone(),
+        };
+
+        let pyld = serde_json::to_string(&line)?;
+        self.capture_fp
+            .write_all(pyld.as_bytes())
+            .map_err(|err| Error::Io {
+                context: "payload write",
+                err,
+            })?;
+        self.capture_fp.write_all(b"\n").map_err(|err| Error::Io {
+            context: "newline write",
+            err,
+        })?;
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<(), Error> {
+        self.capture_fp.flush().map_err(|err| Error::Io {
+            context: "flush",
+            err,
+        })
+    }
+}
+
+/// Parquet capture writer - batches metrics and writes in columnar format
+struct ParquetCaptureWriter {
+    batch_buffer: Vec<MetricData>,
+    batch_size: usize,
+    writer: Option<parquet::arrow::async_writer::AsyncArrowWriter<tokio::fs::File>>,
+}
+
+impl ParquetCaptureWriter {
+    async fn new(capture_path: PathBuf) -> Result<Self, Error> {
+        let schema = parquet_format::capture_schema();
+        let file = tokio::fs::File::create(capture_path)
+            .await
+            .map_err(|err| Error::Io {
+                context: "parquet file creation",
+                err,
+            })?;
+
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::SNAPPY)
+            .build();
+
+        let writer = parquet::arrow::async_writer::AsyncArrowWriter::try_new(
+            file,
+            schema.clone(),
+            Some(props),
+        )
+        .map_err(|err| Error::Io {
+            context: "parquet writer creation",
+            err: std::io::Error::other(err),
+        })?;
+
+        Ok(Self {
+            batch_buffer: Vec::with_capacity(1000),
+            batch_size: 1000,
+            writer: Some(writer),
+        })
+    }
+
+    async fn flush_batch(&mut self) -> Result<(), Error> {
+        if self.batch_buffer.is_empty() {
+            return Ok(());
+        }
+
+        // Convert MetricData to RawMetricData
+        let raw_metrics: Vec<parquet_format::RawMetricData> = self
+            .batch_buffer
+            .iter()
+            .map(|m| parquet_format::RawMetricData {
+                run_id: m.run_id,
+                time: m.time,
+                fetch_index: m.fetch_index,
+                metric_name: m.metric_name.clone(),
+                metric_kind: match m.metric_kind {
+                    MetricKind::Counter => parquet_format::RawMetricKind::Counter,
+                    MetricKind::Gauge => parquet_format::RawMetricKind::Gauge,
+                },
+                value: match m.value {
+                    MetricValue::Int(i) => parquet_format::RawMetricValue::Int(i),
+                    MetricValue::Float(f) => parquet_format::RawMetricValue::Float(f),
+                },
+                labels: m.labels.clone(),
+            })
+            .collect();
+
+        let batch =
+            parquet_format::raw_metrics_to_record_batch(&raw_metrics).map_err(|err| Error::Io {
+                context: "arrow record batch creation",
+                err: std::io::Error::other(err),
+            })?;
+
+        if let Some(writer) = &mut self.writer {
+            writer.write(&batch).await.map_err(|err| Error::Io {
+                context: "parquet batch write",
+                err: std::io::Error::other(err),
+            })?;
+        }
+
+        self.batch_buffer.clear();
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl CaptureWriter for ParquetCaptureWriter {
+    async fn write_metric(&mut self, metric: &MetricData) -> Result<(), Error> {
+        self.batch_buffer.push(metric.clone());
+
+        if self.batch_buffer.len() >= self.batch_size {
+            self.flush_batch().await?;
+        }
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<(), Error> {
+        self.flush_batch().await?;
+        if let Some(writer) = self.writer.take() {
+            writer.close().await.map_err(|err| Error::Io {
+                context: "parquet writer close",
+                err: std::io::Error::other(err),
+            })?;
+        }
+        Ok(())
+    }
+}
+
 struct Inner {
     registry: Registry<Key, GenerationalAtomicStorage>,
     recency: Recency<Key>,
@@ -64,7 +286,7 @@ struct Inner {
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,
-    capture_fp: BufWriter<std::fs::File>,
+    writer: Box<dyn CaptureWriter + Send>,
     capture_path: PathBuf,
     shutdown: lading_signal::Watcher,
     _experiment_started: lading_signal::Watcher,
@@ -81,13 +303,28 @@ impl CaptureManager {
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new(
         capture_path: PathBuf,
+        format: CaptureFormat,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
         expiration: Duration,
     ) -> Result<Self, io::Error> {
-        let fp = tokio::fs::File::create(&capture_path).await?;
-        let fp = fp.into_std().await;
+        let writer: Box<dyn CaptureWriter + Send> = match format {
+            CaptureFormat::Json => Box::new(JsonCaptureWriter::new(capture_path.clone()).map_err(
+                |e| match e {
+                    Error::Io { err, .. } => err,
+                    _ => io::Error::other(e),
+                },
+            )?),
+            CaptureFormat::Parquet => Box::new(
+                ParquetCaptureWriter::new(capture_path.clone())
+                    .await
+                    .map_err(|e| match e {
+                        Error::Io { err, .. } => err,
+                        _ => io::Error::other(e),
+                    })?,
+            ),
+        };
 
         let inner = Inner {
             registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
@@ -101,7 +338,7 @@ impl CaptureManager {
         Ok(Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
-            capture_fp: BufWriter::new(fp),
+            writer,
             capture_path,
             shutdown,
             _experiment_started: experiment_started,
@@ -133,9 +370,9 @@ impl CaptureManager {
         self.global_labels.insert(key.into(), value.into());
     }
 
-    fn record_captures(&mut self) -> Result<(), Error> {
+    async fn record_captures(&mut self) -> Result<(), Error> {
         let now_ms: u128 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let mut lines = Vec::new();
+        let mut metrics = Vec::new();
 
         let counter_handles = self.inner.registry.get_counter_handles();
         for (key, counter) in counter_handles {
@@ -154,16 +391,16 @@ impl CaptureManager {
                 labels.insert(lbl.key().into(), lbl.value().into());
             }
             let value: u64 = counter.get_inner().load(Ordering::Relaxed);
-            let line = json::Line {
+            let metric = MetricData {
                 run_id: self.run_id,
                 time: now_ms,
                 fetch_index: self.fetch_index,
                 metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Counter,
-                value: json::LineValue::Int(value),
+                metric_kind: MetricKind::Counter,
+                value: MetricValue::Int(value),
                 labels,
             };
-            lines.push(line);
+            metrics.push(metric);
         }
 
         let gauge_handles = self.inner.registry.get_gauge_handles();
@@ -183,43 +420,30 @@ impl CaptureManager {
                 labels.insert(lbl.key().into(), lbl.value().into());
             }
             let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
-            let line = json::Line {
+            let metric = MetricData {
                 run_id: self.run_id,
                 time: now_ms,
                 fetch_index: self.fetch_index,
                 metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Gauge,
-                value: json::LineValue::Float(value),
+                metric_kind: MetricKind::Gauge,
+                value: MetricValue::Float(value),
                 labels,
             };
-            lines.push(line);
+            metrics.push(metric);
         }
 
         debug!(
             "Recording {} captures to {}",
-            lines.len(),
+            metrics.len(),
             self.capture_path
                 .file_name()
                 .and_then(OsStr::to_str)
                 .ok_or(Error::CapturePath)?
         );
-        for line in lines.drain(..) {
-            let pyld = serde_json::to_string(&line)?;
-            self.capture_fp
-                .write_all(pyld.as_bytes())
-                .map_err(|err| Error::Io {
-                    context: "payload write",
-                    err,
-                })?;
-            self.capture_fp.write_all(b"\n").map_err(|err| Error::Io {
-                context: "newline write",
-                err,
-            })?;
-            self.capture_fp.flush().map_err(|err| Error::Io {
-                context: "flush",
-                err,
-            })?;
+        for metric in metrics.drain(..) {
+            self.writer.write_metric(&metric).await?;
         }
+        self.writer.flush().await?;
 
         Ok(())
     }
@@ -239,39 +463,33 @@ impl CaptureManager {
         self.install()?;
         info!("Capture manager installed, recording to capture file.");
 
-        std::thread::Builder::new()
-            .name("capture-manager".into())
-            .spawn(move || {
-                while let Ok(false) = self.target_running.try_recv() {
-                    std::thread::sleep(Duration::from_millis(100));
+        tokio::spawn(async move {
+            while let Ok(false) = self.target_running.try_recv() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            loop {
+                if self.shutdown.try_recv().expect("polled after signal") {
+                    info!("shutdown signal received");
+                    return;
                 }
-                loop {
-                    if self.shutdown.try_recv().expect("polled after signal") {
-                        info!("shutdown signal received");
-                        return;
-                    }
-                    let now = Instant::now();
-                    if let Err(e) = self.record_captures() {
-                        warn!(
-                            "failed to record captures for idx {idx}: {e}",
-                            idx = self.fetch_index
-                        );
-                    }
-                    self.fetch_index += 1;
-                    // Sleep for 1 second minus however long we just spent recording captures
-                    // assumption here is that the time spent recording captures is consistent
-                    let delta = now.elapsed();
-                    if delta > Duration::from_secs(1) {
-                        warn!("Recording capture took more than 1s (took {delta:?})");
-                        continue;
-                    }
-                    std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
+                let now = Instant::now();
+                if let Err(e) = self.record_captures().await {
+                    warn!(
+                        "failed to record captures for idx {idx}: {e}",
+                        idx = self.fetch_index
+                    );
                 }
-            })
-            .map_err(|err| Error::Io {
-                context: "thread building",
-                err,
-            })?;
+                self.fetch_index += 1;
+                // Sleep for 1 second minus however long we just spent recording captures
+                // assumption here is that the time spent recording captures is consistent
+                let delta = now.elapsed();
+                if delta > Duration::from_secs(1) {
+                    warn!("Recording capture took more than 1s (took {delta:?})");
+                    continue;
+                }
+                tokio::time::sleep(Duration::from_secs(1).saturating_sub(delta)).await;
+            }
+        });
         Ok(())
     }
 }

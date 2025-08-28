@@ -8,7 +8,10 @@ use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
 use jemallocator::Jemalloc;
-use lading_capture::json::{Line, MetricKind};
+use lading_capture::{
+    json::{Line, MetricKind},
+    parquet as parquet_format,
+};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::LinesStream;
@@ -37,6 +40,21 @@ struct Args {
     capture_path: String,
 }
 
+#[derive(Debug)]
+enum DetectedFormat {
+    Json,
+    JsonZstd,
+    Parquet,
+}
+
+fn detect_format(path: &std::path::Path) -> DetectedFormat {
+    match path.extension().and_then(OsStr::to_str) {
+        Some("parquet") => DetectedFormat::Parquet,
+        Some("zstd") => DetectedFormat::JsonZstd,
+        _ => DetectedFormat::Json,
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Invalid arguments specified")]
@@ -45,6 +63,10 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error(transparent)]
     Deserialize(#[from] serde_json::Error),
+    #[error(transparent)]
+    Arrow(#[from] arrow::error::ArrowError),
+    #[error(transparent)]
+    Parquet(#[from] parquet::errors::ParquetError),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -64,32 +86,60 @@ async fn main() -> Result<(), Error> {
         return Err(Error::InvalidArgs);
     }
 
-    let is_zstd = capture_path
-        .extension()
-        .is_some_and(|ext| ext == OsStr::new("zstd"));
+    let format = detect_format(capture_path);
 
-    let file = tokio::fs::File::open(capture_path).await?;
+    let lines: Vec<Line> = match format {
+        DetectedFormat::Json => {
+            let file = tokio::fs::File::open(capture_path).await?;
+            let reader = BufReader::new(file);
+            let lines_stream = LinesStream::new(reader.lines());
+            lines_stream
+                .map(|l| {
+                    let line_str = l.expect("failed to read line");
+                    let line: Line =
+                        serde_json::from_str(&line_str).expect("failed to deserialize line");
+                    line
+                })
+                .collect()
+                .await
+        }
+        DetectedFormat::JsonZstd => {
+            let file = tokio::fs::File::open(capture_path).await?;
+            let reader = BufReader::new(file);
+            let decoder = ZstdDecoder::new(reader);
+            let reader = BufReader::new(decoder);
+            let lines_stream = LinesStream::new(reader.lines());
+            lines_stream
+                .map(|l| {
+                    let line_str = l.expect("failed to read line");
+                    let line: Line =
+                        serde_json::from_str(&line_str).expect("failed to deserialize line");
+                    line
+                })
+                .collect()
+                .await
+        }
+        DetectedFormat::Parquet => {
+            let file = std::fs::File::open(capture_path)?;
+            let reader =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?
+                    .build()?;
 
-    let lines = if !is_zstd {
-        let reader = BufReader::new(file);
-        tokio_util::either::Either::Left(LinesStream::new(reader.lines()))
-    } else {
-        let reader = BufReader::new(file);
-        let decoder = ZstdDecoder::new(reader);
-        let reader = BufReader::new(decoder);
-        tokio_util::either::Either::Right(LinesStream::new(reader.lines()))
+            let mut all_lines = Vec::new();
+            for batch_result in reader {
+                let batch = batch_result?;
+                let lines = parquet_format::record_batch_to_lines(&batch)?;
+                all_lines.extend(lines);
+            }
+            all_lines
+        }
     };
-
-    let lines = lines.map(|l| {
-        let line_str = l.expect("failed to read line");
-        let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
-        line
-    });
 
     // Print out available metrics if user asked for it
     // or if they didn't specify a specific metric
     if args.list_metrics || args.metric.is_none() {
         let mut names: Vec<(String, String)> = lines
+            .iter()
             .map(|line| {
                 (
                     line.metric_name.clone(),
@@ -99,8 +149,7 @@ async fn main() -> Result<(), Error> {
                     },
                 )
             })
-            .collect()
-            .await;
+            .collect();
         names.sort();
         names.dedup();
         for (name, kind) in names {
@@ -120,9 +169,9 @@ async fn main() -> Result<(), Error> {
 
         // Use a BTreeSet to ensure that the tags are sorted
         let filtered: Vec<_> = lines
+            .iter()
             .filter(|line| &line.metric_name == metric)
-            .collect()
-            .await;
+            .collect();
 
         if let Some(point) = filtered.first() {
             info!("Metric kind: {:?}", point.metric_kind);

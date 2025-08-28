@@ -12,7 +12,7 @@ use jemallocator::Jemalloc;
 use lading::{
     blackhole,
     captures::CaptureManager,
-    config::{Config, Telemetry},
+    config::{CaptureFormat, Config, Telemetry},
     generator, inspector, observer,
     target::{self, Behavior, Output},
     target_metrics,
@@ -60,6 +60,16 @@ enum Error {
     PrometheusPath,
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
+}
+
+fn detect_capture_format(path: &str) -> CaptureFormat {
+    match std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+    {
+        Some("parquet") => CaptureFormat::Parquet,
+        _ => CaptureFormat::Json, // Default to JSON for all other extensions
+    }
 }
 
 fn default_config_path() -> String {
@@ -335,6 +345,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
             expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
+            format: detect_capture_format(capture_path),
         };
     } else {
         match config.telemetry {
@@ -415,9 +426,11 @@ async fn inner_main(
             path,
             global_labels,
             expiration,
+            format,
         } => {
             let mut capture_manager = CaptureManager::new(
                 path,
+                format,
                 shutdown_watcher.register()?,
                 experiment_started_watcher.clone(),
                 target_running_watcher.clone(),

@@ -16,6 +16,9 @@ description = "A tool for load testing daemons."
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
+arrow = { workspace = true }
+parquet = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
 
 [lib]
 doctest = false

@@ -2,6 +2,7 @@
 
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
 #![deny(clippy::pedantic)]
 #![deny(clippy::perf)]
 #![deny(clippy::suspicious)]
@@ -26,3 +27,4 @@
 #![deny(missing_docs)]
 
 pub mod json;
+pub mod parquet;

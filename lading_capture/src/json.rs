@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 /// The kinds of metrics that are recorded in [`Line`].
 pub enum MetricKind {
@@ -46,7 +46,7 @@ impl std::fmt::Display for LineValue {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 /// The structure of a capture file line.
 pub struct Line {
     /// An id that is mostly unique to this run, allowing us to distinguish

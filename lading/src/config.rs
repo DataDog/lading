@@ -61,6 +61,22 @@ pub fn default_expiration() -> Duration {
     Duration::MAX
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Format for capture files
+pub enum CaptureFormat {
+    /// JSON format - line-delimited JSON records (default for backward compatibility)
+    Json,
+    /// Parquet format - columnar format for better compression and performance
+    Parquet,
+}
+
+impl Default for CaptureFormat {
+    fn default() -> Self {
+        Self::Json
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -93,6 +109,9 @@ pub enum Telemetry {
         /// The time metrics that have not been written to will take to expire.
         #[serde(default = "default_expiration")]
         expiration: Duration,
+        /// Format for capture files
+        #[serde(default)]
+        format: CaptureFormat,
     },
 }
 

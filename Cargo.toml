@@ -39,6 +39,10 @@ once_cell = { version = "1.21" }
 proptest = { version = "1.7" }
 proptest-derive = { version = "0.6" }
 
+arrow = { version = "54", default-features = false, features = ["csv", "json"] }
+parquet = { version = "54", default-features = false, features = ["arrow", "async", "object_store"] }
+async-trait = { version = "0.1" }
+
 http = { version = "1.3" }
 http-body-util = { version = "0.1" }
 http-serde = { version = "2.1" }
