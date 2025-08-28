@@ -94,6 +94,11 @@ uuid = { workspace = true }
 quanta = { version = "0.12", default-features = false, features = [] }
 zstd = "0.13.3"
 
+# Parquet/Arrow for parquet capture sink
+parquet = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.17", default-features = false, features = [] }
 async-pidfd = "0.1"

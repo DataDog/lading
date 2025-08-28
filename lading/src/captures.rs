@@ -11,11 +11,14 @@ use std::{
     ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
+    sync::{atomic::Ordering, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use lading_capture::json;
+use parquet::arrow::ArrowWriter;
+use arrow_array::{ArrayRef, RecordBatch, StringBuilder, Int64Builder, UInt64Builder, Float64Builder};
+use arrow_schema::{Schema, Field, DataType};
 use metrics::Key;
 use metrics_util::{
     MetricKindMask,
@@ -45,6 +48,9 @@ pub enum Error {
     /// Wrapper around [`serde_json::Error`].
     #[error("Json serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    /// Error when writing parquet captures
+    #[error("Parquet write error: {0}")]
+    ParquetWrite(String),
     /// Error used for invalid capture path
     #[error("Invalid capture path")]
     CapturePath,
@@ -64,13 +70,178 @@ struct Inner {
 pub struct CaptureManager {
     fetch_index: u64,
     run_id: Uuid,
-    capture_fp: BufWriter<std::fs::File>,
+    sink: CaptureSink,
     capture_path: PathBuf,
     shutdown: lading_signal::Watcher,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
     inner: Arc<Inner>,
     global_labels: FxHashMap<String, String>,
+}
+
+enum CaptureSink {
+    Json(JsonSink),
+    Parquet(ParquetSink),
+}
+
+impl CaptureSink {
+    fn write_lines(&mut self, lines: &[json::Line]) -> Result<(), Error> {
+        match self {
+            CaptureSink::Json(s) => s.write_lines(lines),
+            CaptureSink::Parquet(s) => s.write_lines(lines),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), Error> {
+        match self {
+            CaptureSink::Json(s) => s.finish(),
+            CaptureSink::Parquet(s) => s.finish(),
+        }
+    }
+}
+
+struct JsonSink {
+    fp: BufWriter<std::fs::File>,
+}
+
+impl JsonSink {
+    fn new(fp: std::fs::File) -> Self {
+        Self {
+            fp: BufWriter::new(fp),
+        }
+    }
+
+    fn write_lines(&mut self, lines: &[json::Line]) -> Result<(), Error> {
+        for line in lines {
+            let pyld = serde_json::to_string(line)?;
+            self.fp
+                .write_all(pyld.as_bytes())
+                .map_err(|err| Error::Io {
+                    context: "payload write",
+                    err,
+                })?;
+            self.fp.write_all(b"\n").map_err(|err| Error::Io {
+                context: "newline write",
+                err,
+            })?;
+        }
+        self.fp.flush().map_err(|err| Error::Io {
+            context: "flush",
+            err,
+        })?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), Error> {
+        self.fp.flush().map_err(|err| Error::Io {
+            context: "flush",
+            err,
+        })?;
+        Ok(())
+    }
+}
+
+struct ParquetSink {
+    writer: ArrowWriter<std::fs::File>,
+    schema: Arc<Schema>,
+}
+
+impl ParquetSink {
+    fn new(fp: std::fs::File) -> Result<Self, Error> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("time_ms", DataType::Int64, false),
+            Field::new("fetch_index", DataType::Int64, false),
+            Field::new("metric_name", DataType::Utf8, false),
+            Field::new("metric_kind", DataType::Utf8, false),
+            Field::new("value_int", DataType::UInt64, true),
+            Field::new("value_float", DataType::Float64, true),
+            Field::new("labels_json", DataType::Utf8, false),
+        ]));
+
+        let writer = ArrowWriter::try_new(fp, schema.clone(), None)
+            .map_err(|e| Error::ParquetWrite(e.to_string()))?;
+        Ok(Self { writer, schema })
+    }
+
+    fn write_lines(&mut self, lines: &[json::Line]) -> Result<(), Error> {
+        // Builders
+        let cap = lines.len();
+        let mut run_id_builder = StringBuilder::with_capacity(cap, 0);
+        let mut time_builder = Int64Builder::with_capacity(cap);
+        let mut fetch_index_builder = Int64Builder::with_capacity(cap);
+        let mut metric_name_builder = StringBuilder::with_capacity(cap, 0);
+        let mut metric_kind_builder = StringBuilder::with_capacity(cap, 0);
+        let mut value_int_builder = UInt64Builder::with_capacity(cap);
+        let mut value_float_builder = Float64Builder::with_capacity(cap);
+        let mut labels_builder = StringBuilder::with_capacity(cap, 0);
+
+        for line in lines {
+            run_id_builder.append_value(line.run_id.to_string());
+            time_builder.append_value(u128_to_i64_saturating(line.time));
+            fetch_index_builder.append_value(u64_to_i64_saturating(line.fetch_index));
+            metric_name_builder.append_value(&line.metric_name);
+            let kind = match line.metric_kind {
+                json::MetricKind::Counter => "counter",
+                json::MetricKind::Gauge => "gauge",
+            };
+            metric_kind_builder.append_value(kind);
+            match line.value {
+                json::LineValue::Int(v) => {
+                    value_int_builder.append_value(v);
+                    value_float_builder.append_null();
+                }
+                json::LineValue::Float(v) => {
+                    value_int_builder.append_null();
+                    value_float_builder.append_value(v);
+                }
+            }
+            let labels_json = serde_json::to_string(&line.labels)?;
+            labels_builder.append_value(labels_json);
+        }
+
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(run_id_builder.finish()) as ArrayRef,
+            Arc::new(time_builder.finish()) as ArrayRef,
+            Arc::new(fetch_index_builder.finish()) as ArrayRef,
+            Arc::new(metric_name_builder.finish()) as ArrayRef,
+            Arc::new(metric_kind_builder.finish()) as ArrayRef,
+            Arc::new(value_int_builder.finish()) as ArrayRef,
+            Arc::new(value_float_builder.finish()) as ArrayRef,
+            Arc::new(labels_builder.finish()) as ArrayRef,
+        ];
+
+        let batch = RecordBatch::try_new(self.schema.clone(), columns)
+            .map_err(|e| Error::ParquetWrite(e.to_string()))?;
+        self.writer
+            .write(&batch)
+            .map_err(|e| Error::ParquetWrite(e.to_string()))?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), Error> {
+        let _sz = self
+            .writer
+            .close()
+            .map_err(|e| Error::ParquetWrite(e.to_string()))?;
+        Ok(())
+    }
+}
+
+fn u128_to_i64_saturating(v: u128) -> i64 {
+    if v > i64::MAX as u128 {
+        i64::MAX
+    } else {
+        v as i64
+    }
+}
+
+fn u64_to_i64_saturating(v: u64) -> i64 {
+    if v > i64::MAX as u64 {
+        i64::MAX
+    } else {
+        v as i64
+    }
 }
 
 impl CaptureManager {
@@ -98,10 +269,27 @@ impl CaptureManager {
             ),
         };
 
+        // Choose sink based on extension
+        let sink = if capture_path
+            .extension()
+            .is_some_and(|ext| ext == OsStr::new("parquet"))
+        {
+            // Safety: Any error from parquet creation is turned into io::Error here to satisfy signature
+            match ParquetSink::new(fp) {
+                Ok(p) => CaptureSink::Parquet(p),
+                Err(e) => {
+                    // convert to io::Error with context
+                    return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
+                }
+            }
+        } else {
+            CaptureSink::Json(JsonSink::new(fp))
+        };
+
         Ok(Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
-            capture_fp: BufWriter::new(fp),
+            sink,
             capture_path,
             shutdown,
             _experiment_started: experiment_started,
@@ -203,23 +391,7 @@ impl CaptureManager {
                 .and_then(OsStr::to_str)
                 .ok_or(Error::CapturePath)?
         );
-        for line in lines.drain(..) {
-            let pyld = serde_json::to_string(&line)?;
-            self.capture_fp
-                .write_all(pyld.as_bytes())
-                .map_err(|err| Error::Io {
-                    context: "payload write",
-                    err,
-                })?;
-            self.capture_fp.write_all(b"\n").map_err(|err| Error::Io {
-                context: "newline write",
-                err,
-            })?;
-            self.capture_fp.flush().map_err(|err| Error::Io {
-                context: "flush",
-                err,
-            })?;
-        }
+        self.sink.write_lines(&lines)?;
 
         Ok(())
     }
@@ -248,6 +420,10 @@ impl CaptureManager {
                 loop {
                     if self.shutdown.try_recv().expect("polled after signal") {
                         info!("shutdown signal received");
+                        // Finish sink before returning
+                        if let Err(e) = self.sink.finish() {
+                            warn!("failed to finish capture sink: {e}");
+                        }
                         return;
                     }
                     let now = Instant::now();
