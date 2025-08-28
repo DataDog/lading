@@ -7,13 +7,13 @@
 //! their [`metrics`] integration while [`CaptureManager`] need only hook into
 //! that same crate.
 
-use std::{
-    ffi::OsStr,
-    io::{self, BufWriter, Write},
-    path::PathBuf,
-    sync::{atomic::Ordering, Arc},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH, SystemTimeError};
 
 use lading_capture::json;
 use parquet::arrow::ArrowWriter;
@@ -44,7 +44,7 @@ pub enum Error {
     },
     #[error("Time provided is later than right now : {0}")]
     /// Wrapper around [`std::time::SystemTimeError`].
-    SystemTime(#[from] std::time::SystemTimeError),
+    SystemTime(#[from] SystemTimeError),
     /// Wrapper around [`serde_json::Error`].
     #[error("Json serialization error: {0}")]
     Json(#[from] serde_json::Error),
@@ -101,11 +101,11 @@ impl CaptureSink {
 }
 
 struct JsonSink {
-    fp: BufWriter<std::fs::File>,
+    fp: BufWriter<File>,
 }
 
 impl JsonSink {
-    fn new(fp: std::fs::File) -> Self {
+    fn new(fp: File) -> Self {
         Self {
             fp: BufWriter::new(fp),
         }
@@ -142,12 +142,12 @@ impl JsonSink {
 }
 
 struct ParquetSink {
-    writer: ArrowWriter<std::fs::File>,
+    writer: ArrowWriter<File>,
     schema: Arc<Schema>,
 }
 
 impl ParquetSink {
-    fn new(fp: std::fs::File) -> Result<Self, Error> {
+    fn new(fp: File) -> Result<Self, Error> {
         let schema = Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
             Field::new("time_ms", DataType::Int64, false),
