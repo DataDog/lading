@@ -45,12 +45,16 @@ http-serde = { version = "2.1" }
 hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 
+
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optimization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
-debug = false
+debug = 2                       # keep symbols in release too
+split-debuginfo = "unpacked"
 
 [profile.dev]
 panic = "abort"
+debug = 2
+split-debuginfo = "unpacked"   # generates a .dSYM bundle Instruments can use
