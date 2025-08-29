@@ -1037,6 +1037,7 @@ mod test {
                             NonZeroU32::new(1_000_000).expect("zero value"),
                             10_000,
                             &lading_payload::Config::Ascii,
+                            10_000,
                         )
                         .expect("block construction");
 
