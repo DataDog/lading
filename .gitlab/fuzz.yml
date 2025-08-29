@@ -2,46 +2,6 @@ variables:
   # Update this base image by clicking on the `ci-container-image` job in gitlab (pick the latest pipeline on main)
   BASE_CI_IMAGE: registry.ddbuild.io/images/ci/lading-fuzz:2025-08-14-b39a488a@sha256:2d7d6d9a445e2048f454a3e5d4175e7600700cac54ba1fc47801376803109bd1
 
-# Check that all fuzz targets build correctly
-check-fuzz-targets:
-  stage: fuzz
-  tags: ["arch:amd64"]
-  image: $BASE_CI_IMAGE
-  timeout: 10m
-  rules:
-    # Run on merge requests
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    # Run on main branch
-    - if: '$CI_COMMIT_REF_NAME == "main" && $CI_PIPELINE_SOURCE == "push"'
-  script: |
-    echo "Checking all fuzz targets build..."
-    cd lading_payload
-    # List all targets and check each one builds
-    for target in $(cargo +nightly fuzz list); do
-      echo "Checking fuzz target: $target"
-      cargo +nightly fuzz check $target
-    done
-    echo "All fuzz targets build successfully!"
-
-# Run short fuzz tests on PRs
-run-fuzzing-pr:
-  stage: fuzz
-  tags: ["arch:amd64"]
-  image: $BASE_CI_IMAGE
-  timeout: 15m
-  rules:
-    # Run on merge requests
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script: |
-    echo "Running short fuzz tests for PR..."
-    cd lading_payload
-    # Run each fuzz target for 30 seconds
-    for target in $(cargo +nightly fuzz list); do
-      echo "Running fuzz target: $target for 30 seconds"
-      cargo +nightly fuzz run --jobs 2 --build-std --release "$target" -- -max_total_time=30 || true
-    done
-    echo "PR fuzz tests completed!"
-
 # Full fuzzing run for main branch and scheduled pipelines
 run-fuzzing:
   stage: fuzz

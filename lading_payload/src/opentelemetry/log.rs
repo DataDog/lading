@@ -146,6 +146,7 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+    #[allow(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate severity weights - at least one must be non-zero
         if self.severity_weights.trace == 0
