@@ -47,6 +47,9 @@ pub mod observer;
 pub mod target;
 pub mod target_metrics;
 
+use byte_unit::Byte;
+use sysinfo::System;
+
 #[inline]
 pub(crate) fn full<T: Into<bytes::Bytes>>(
     chunk: T,
@@ -54,4 +57,23 @@ pub(crate) fn full<T: Into<bytes::Bytes>>(
     http_body_util::Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()
+}
+
+/// Get available memory for the process, checking cgroup v2 limits first,
+/// then falling back to system memory.
+#[must_use]
+pub fn get_available_memory() -> Byte {
+    if let Ok(content) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+        let content = content.trim();
+        if content == "max" {
+            return Byte::from_u64(u64::MAX);
+        }
+        let ignore_case = true;
+        if let Ok(limit) = Byte::parse_str(content.trim(), ignore_case) {
+            return limit;
+        }
+    }
+
+    let sys = System::new_all();
+    Byte::from_u64(sys.total_memory())
 }
