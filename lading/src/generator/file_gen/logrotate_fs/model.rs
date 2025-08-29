@@ -1032,7 +1032,7 @@ mod test {
                         load_profile,
                     )| {
                         let mut rng = StdRng::seed_from_u64(seed);
-                        let block_cache = block::Cache::fixed(
+                        let block_cache = block::Cache::fixed_with_max_overhead(
                             &mut rng,
                             NonZeroU32::new(1_000_000).expect("zero value"),
                             10_000,
