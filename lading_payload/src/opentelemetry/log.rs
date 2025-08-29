@@ -202,6 +202,55 @@ impl Config {
             }
         }
 
+        // Validate attributes_per_resource
+        match self.contexts.attributes_per_resource {
+            ConfRange::Constant(_) => (),
+            ConfRange::Inclusive { min, max } => {
+                if min > max {
+                    return Err(
+                        "attributes_per_resource minimum cannot be greater than maximum"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        // Validate attributes_per_scope
+        match self.contexts.attributes_per_scope {
+            ConfRange::Constant(_) => (),
+            ConfRange::Inclusive { min, max } => {
+                if min > max {
+                    return Err(
+                        "attributes_per_scope minimum cannot be greater than maximum".to_string(),
+                    );
+                }
+            }
+        }
+
+        // Validate attributes_per_log
+        match self.contexts.attributes_per_log {
+            ConfRange::Constant(_) => (),
+            ConfRange::Inclusive { min, max } => {
+                if min > max {
+                    return Err(
+                        "attributes_per_log minimum cannot be greater than maximum".to_string()
+                    );
+                }
+            }
+        }
+
+        // Validate trace_cardinality
+        match self.trace_cardinality {
+            ConfRange::Constant(_) => (),
+            ConfRange::Inclusive { min, max } => {
+                if min > max {
+                    return Err(
+                        "trace_cardinality minimum cannot be greater than maximum".to_string()
+                    );
+                }
+            }
+        }
+
         // Validate body_size
         match self.body_size {
             ConfRange::Constant(0) => return Err("body_size cannot be zero".to_string()),
@@ -246,7 +295,7 @@ impl OpentelemetryLogs {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    pub fn new<R>(config: Config, max_overhead_bytes: usize, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -261,7 +310,7 @@ impl OpentelemetryLogs {
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, &trace_pool, rng)?;
 
         Ok(Self {
-            pool: Pool::new(context_cap, rt_gen),
+            pool: Pool::new(context_cap, max_overhead_bytes, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
             tick: 0,
             log_records_per_resource: 0,
@@ -369,7 +418,7 @@ mod test {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
             let config = Config::default();
-            let mut logs = OpentelemetryLogs::new(config, &mut rng)?;
+            let mut logs = OpentelemetryLogs::new(config, max_bytes, &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -385,7 +434,7 @@ mod test {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
             let config = Config::default();
-            let mut logs = OpentelemetryLogs::new(config, &mut rng)?;
+            let mut logs = OpentelemetryLogs::new(config, max_bytes, &mut rng)?;
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -413,10 +462,10 @@ mod test {
 
             let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
-            let mut logs1 = OpentelemetryLogs::new(config, &mut rng1)?;
+            let mut logs1 = OpentelemetryLogs::new(config, budget, &mut rng1)?;
             let mut b2 = budget;
             let mut rng2 = SmallRng::seed_from_u64(seed);
-            let mut logs2 = OpentelemetryLogs::new(config, &mut rng2)?;
+            let mut logs2 = OpentelemetryLogs::new(config, budget, &mut rng2)?;
 
             for _ in 0..steps {
                 if let Ok(gen_1) = logs1.generate(&mut rng1, &mut b1) {
@@ -496,7 +545,7 @@ mod test {
 
             let mut budget = 10_000_000;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut logs = OpentelemetryLogs::new(config, &mut rng)?;
+            let mut logs = OpentelemetryLogs::new(config, budget, &mut rng)?;
 
             for _ in 0..steps {
                 let prev = budget;
@@ -525,7 +574,7 @@ mod test {
         ) {
             let config = Config::default();
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut logs = OpentelemetryLogs::new(config, &mut rng)?;
+            let mut logs = OpentelemetryLogs::new(config, budget, &mut rng)?;
 
             let mut timestamps = Vec::new();
 
