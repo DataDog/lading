@@ -171,6 +171,17 @@ pub enum Cache {
     },
 }
 
+/// An opaque handle for iterating through blocks in a Cache.
+///
+/// Each independent consumer should create its own Handle by calling
+/// `Cache::handle()`. Handles maintain their own position in the cache
+/// and advance independently.
+#[derive(Debug)]
+#[allow(missing_copy_implementations)] // intentionally not Copy to force callers to call `handle`.
+pub struct Handle {
+    idx: usize,
+}
+
 impl Cache {
     /// Construct a `Cache` of fixed size.
     ///
@@ -372,6 +383,42 @@ impl Cache {
             blocks,
             total_cycle_size,
         })
+    }
+
+    /// Create a new handle for iterating through blocks.
+    #[must_use]
+    pub fn handle(&self) -> Handle {
+        Handle { idx: 0 }
+    }
+
+    /// Get the total bytes of the next block without advancing.
+    #[must_use]
+    pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
+        match self {
+            Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
+        }
+    }
+
+    /// Get metadata of the next block without advancing.
+    #[must_use]
+    pub fn peek_next_metadata(&self, handle: &Handle) -> BlockMetadata {
+        match self {
+            Self::Fixed { blocks, .. } => blocks[handle.idx].metadata,
+        }
+    }
+
+    /// Advance the handle and return a reference to the current block.
+    ///
+    /// This advances the handle to the next block in the cache and returns a
+    /// reference to the block corresponding to `Handle` internal position.
+    pub fn advance<'a>(&'a self, handle: &mut Handle) -> &'a Block {
+        match self {
+            Self::Fixed { blocks, .. } => {
+                let block = &blocks[handle.idx];
+                handle.idx = (handle.idx + 1) % blocks.len();
+                block
+            }
+        }
     }
 
     /// Run `Cache` forward on the user-provided mpsc sender.

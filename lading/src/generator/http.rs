@@ -12,7 +12,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{num::NonZeroU32, thread};
+use std::{num::NonZeroU32, sync::Arc};
 
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -21,11 +21,10 @@ use metrics::counter;
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 use tracing::{error, info};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
 
@@ -116,7 +115,7 @@ pub struct Http {
     headers: hyper::HeaderMap,
     parallel_connections: u16,
     throttle: Throttle,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
@@ -197,7 +196,7 @@ impl Http {
                     uri: config.target_uri,
                     method: hyper::Method::POST,
                     headers: config.headers,
-                    block_cache,
+                    block_cache: Arc::new(block_cache),
                     throttle,
                     metric_labels: labels,
                     shutdown,
@@ -223,44 +222,39 @@ impl Http {
             .build_http();
         let method = self.method;
         let uri = self.uri;
-
         let labels = self.metric_labels;
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
 
+        let mut handle = self.block_cache.handle();
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.next().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
-
-            let body = crate::full(blk.bytes.clone());
-            let block_length = blk.bytes.len();
-
-            let mut request = Request::builder()
-                .method(method.clone())
-                .uri(&uri)
-                .header(CONTENT_LENGTH, block_length)
-                .body(body)?;
-            let headers = request.headers_mut();
-            for (k, v) in self.headers.clone().drain() {
-                if let Some(k) = k {
-                    headers.insert(k, v);
-                }
-            }
-
+            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
+                            let block = self.block_cache.advance(&mut handle);
+                            let bytes = block.bytes.clone();
+                            let metadata = block.metadata;
+                            let block_length = bytes.len();
+
+                            let body = crate::full(bytes);
+
+                            let mut request = Request::builder()
+                                .method(method.clone())
+                                .uri(&uri)
+                                .header(CONTENT_LENGTH, block_length)
+                                .body(body)?;
+                            let headers = request.headers_mut();
+                            for (k, v) in self.headers.clone().drain() {
+                                if let Some(k) = k {
+                                    headers.insert(k, v);
+                                }
+                            }
                             let client = client.clone();
                             let labels = labels.clone();
+                            let data_points = metadata.data_points;
 
-                            let data_points = blk.metadata.data_points;
                             let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);
