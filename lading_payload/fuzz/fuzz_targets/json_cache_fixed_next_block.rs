@@ -35,7 +35,7 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let payload = lading_payload::Config::Json;
     
-    let mut cache = match Cache::fixed_with_max_overhead(
+    let cache = match Cache::fixed_with_max_overhead(
         &mut rng,
         input.total_bytes,
         u128::from(input.max_block_size.get()),
@@ -46,8 +46,9 @@ fuzz_target!(|input: Input| {
         Err(_) => return,
     };
     
-    // Call next_block 10 times to exercise the cache rotation
+    // Call advance 10 times to exercise the cache rotation
+    let mut handle = cache.handle();
     for _ in 0..10 {
-        let _block = cache.next_block();
+        let _block = cache.advance(&mut handle);
     }
 });
