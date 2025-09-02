@@ -54,7 +54,7 @@ use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
 use serde::{Deserialize, Serialize as SerdeSerialize};
 use templates::{Pool, ResourceTemplateGenerator};
-use tracing::{debug, error};
+use tracing::debug;
 use unit::UnitGenerator;
 
 /// Smallest useful protobuf, determined by experimentation and enforced in
@@ -354,7 +354,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
-                error!("Pool was unable to satify request for {budget} size");
+                debug!("Pool was unable to satify request for {budget} size");
                 Err(PoolError::EmptyChoice)?
             }
             Err(e) => Err(e)?,
