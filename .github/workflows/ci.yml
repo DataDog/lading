@@ -110,6 +110,24 @@ jobs:
       - run: ci/kani ${{ matrix.crate }}
         timeout-minutes: 30
 
+  fuzz-check:
+    name: Check Fuzz Targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+        with:
+          toolchain: nightly
+          components: rust-src
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install FUSE
+        uses: ./.github/actions/install-fuse
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - run: ci/fuzz --check lading_payload
+        timeout-minutes: 10
+
   buf:
     runs-on: ubuntu-latest
     steps:

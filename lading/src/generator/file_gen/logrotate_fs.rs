@@ -139,11 +139,20 @@ impl Server {
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
-        let block_cache = block::Cache::fixed(
+        let block_cache = block::Cache::fixed_with_max_overhead(
             &mut rng,
             total_bytes,
             config.maximum_block_size.as_u128(),
             &config.variant,
+            // NOTE we bound payload generation to have overhead only
+            // equivalent to the prebuild cache size,
+            // `total_bytes`. This means on systems with plentiful
+            // memory we're under generating entropy, on systems with
+            // minimal memory we're over-generating.
+            //
+            // `lading::get_available_memory` suggests we can learn to
+            // divvy this up in the future.
+            total_bytes.get() as usize,
         )?;
 
         let start_time = std::time::Instant::now();

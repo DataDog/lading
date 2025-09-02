@@ -35,11 +35,12 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let payload = lading_payload::Config::DatadogLog;
     
-    let mut cache = match Cache::fixed(
+    let mut cache = match Cache::fixed_with_max_overhead(
         &mut rng,
         input.total_bytes,
         u128::from(input.max_block_size.get()),
         &payload,
+        input.total_bytes.get() as usize,
     ) {
         Ok(c) => c,
         Err(_) => return,

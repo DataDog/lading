@@ -45,6 +45,7 @@ use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
 use crate::SizedGenerator;
+use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -309,7 +310,7 @@ impl OpentelemetryMetrics {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    pub fn new<R>(config: Config, max_overhead_bytes: usize, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -320,7 +321,7 @@ impl OpentelemetryMetrics {
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {
-            pool: Pool::new(context_cap, rt_gen),
+            pool: Pool::new(context_cap, max_overhead_bytes, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
             tick: 0,
             incr_f: 0.0,
@@ -352,9 +353,9 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
 
         let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
-            Err(crate::opentelemetry::common::templates::PoolError::EmptyChoice) => {
+            Err(PoolError::EmptyChoice) => {
                 error!("Pool was unable to satify request for {budget} size");
-                Err(crate::opentelemetry::common::templates::PoolError::EmptyChoice)?
+                Err(PoolError::EmptyChoice)?
             }
             Err(e) => Err(e)?,
         };
@@ -578,7 +579,7 @@ mod test {
 
             let mut budget = 10_000_000;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             for _ in 0..steps {
                 let prev = budget;
@@ -622,10 +623,10 @@ mod test {
 
             let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
+            let mut otel_metrics1 = OpentelemetryMetrics::new(config, budget, &mut rng1)?;
             let mut b2 = budget;
             let mut rng2 = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
+            let mut otel_metrics2 = OpentelemetryMetrics::new(config, budget, &mut rng2)?;
 
             for _ in 0..steps {
                 if let Ok(gen_1) = otel_metrics1.generate(&mut rng1, &mut b1) {
@@ -670,7 +671,7 @@ mod test {
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut b = budget;
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
@@ -713,7 +714,8 @@ mod test {
                 ..Default::default()
             };
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+            let max_bytes = 10_000;
+            let mut metrics = OpentelemetryMetrics::new(config, max_bytes, &mut rng)
                 .expect("failed to create metrics generator");
 
             let mut bytes = Vec::new();
@@ -746,7 +748,7 @@ mod test {
 
         let max_bytes = 256;
         let mut rng = SmallRng::seed_from_u64(42);
-        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+        let mut metrics = OpentelemetryMetrics::new(config, max_bytes, &mut rng)
             .expect("failed to create metrics generator");
 
         let mut bytes: Vec<u8> = Vec::new();
@@ -791,7 +793,7 @@ mod test {
 
             let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             for _ in 0..steps {
                 if let Ok(metric) = otel_metrics.generate(&mut rng, &mut b) {
@@ -935,13 +937,13 @@ mod test {
 
             let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let metric1 = otel_metrics.generate(&mut rng, &mut b1);
 
             // Generate two identical metrics
             let mut b2 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let metric2 = otel_metrics.generate(&mut rng, &mut b2);
 
             // Ensure that the metrics are equal and that their contexts, when
@@ -982,7 +984,7 @@ mod test {
 
             let mut budget = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let mut timestamps_by_metric: HashMap<u64, Vec<u64>> = HashMap::new();
 
@@ -1068,7 +1070,7 @@ mod test {
 
             let mut budget = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let prev = otel_metrics.tick;
             let _ = otel_metrics.generate(&mut rng, &mut budget);
             let cur = otel_metrics.tick;
@@ -1107,7 +1109,7 @@ mod test {
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let mut values: HashMap<u64, f64> = HashMap::new();
 

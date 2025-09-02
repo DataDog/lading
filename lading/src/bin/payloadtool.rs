@@ -46,8 +46,21 @@ fn generate_and_check(
 ) -> Result<(), Error> {
     let mut rng = StdRng::from_seed(seed);
     let start = Instant::now();
-    let blocks = match block::Cache::fixed(&mut rng, total_bytes, max_block_size.as_u128(), config)?
-    {
+    let blocks = match block::Cache::fixed_with_max_overhead(
+        &mut rng,
+        total_bytes,
+        max_block_size.as_u128(),
+        config,
+        // NOTE we bound payload generation to have overhead only
+        // equivalent to the prebuild cache size,
+        // `total_bytes`. This means on systems with plentiful
+        // memory we're under generating entropy, on systems with
+        // minimal memory we're over-generating.
+        //
+        // `lading::get_available_memory` suggests we can learn to
+        // divvy this up in the future.
+        total_bytes.get() as usize,
+    )? {
         block::Cache::Fixed { blocks, .. } => blocks,
     };
     info!("Payload generation took {:?}", start.elapsed());

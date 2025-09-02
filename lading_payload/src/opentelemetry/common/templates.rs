@@ -23,6 +23,8 @@ pub(crate) struct Pool<T, G> {
     by_size: BTreeMap<usize, Vec<T>>,
     generator: G,
     len: u32,
+    consumed_bytes: usize,
+    max_available_bytes: usize,
 }
 
 impl<T, G> Pool<T, G>
@@ -30,12 +32,14 @@ where
     T: Message,
 {
     /// Build an empty pool that can hold at most `context_cap` templates.
-    pub(crate) fn new(context_cap: u32, generator: G) -> Self {
+    pub(crate) fn new(context_cap: u32, max_available_bytes: usize, generator: G) -> Self {
         Self {
             context_cap,
             by_size: BTreeMap::new(),
             generator,
             len: 0,
+            consumed_bytes: 0,
+            max_available_bytes,
         }
     }
 
@@ -65,12 +69,13 @@ where
 
         // Generate new instances until either context_cap is hit or the
         // remaining space drops below our lookup interval.
-        if self.len < self.context_cap {
+        if self.len < self.context_cap && self.consumed_bytes < self.max_available_bytes {
             let mut limit = *budget;
             if let Ok(item) = self.generator.generate(rng, &mut limit) {
                 let sz = item.encoded_len();
                 self.by_size.entry(sz).or_default().push(item);
                 self.len += 1;
+                self.consumed_bytes = self.consumed_bytes.saturating_add(sz);
             } else {
                 // Generation failed. It's possible there's an existing
                 // template that fits the budget.
@@ -181,14 +186,14 @@ mod tests {
 
     #[test]
     fn pool_should_return_existing_template_when_generation_fails() {
-        use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
 
         // Generator that will create:
         // 1. First call: 100-byte item (succeeds)
         // 2. Second call: 500-byte item (fails with 200 budget)
         let generator = TestGenerator::new(vec![100, 500]);
-        let mut pool = Pool::new(10, generator);
+        let max_available_bytes = 1024;
+        let mut pool = Pool::new(10, max_available_bytes, generator);
 
         // First fetch with 300 budget - should generate and store 100-byte item
         let mut budget = 300;
@@ -218,12 +223,12 @@ mod tests {
 
     #[test]
     fn pool_with_no_templates_should_fail_when_generation_fails() {
-        use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
 
         // Generator that can only create 500-byte items
         let generator = TestGenerator::new(vec![500]);
-        let mut pool = Pool::new(10, generator);
+        let max_available_bytes = 1024;
+        let mut pool = Pool::new(10, max_available_bytes, generator);
 
         // Pool starts empty (verify nothing fits yet)
         assert!(!pool.template_fits(100));

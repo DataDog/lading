@@ -2,6 +2,7 @@ variables:
   # Update this base image by clicking on the `ci-container-image` job in gitlab (pick the latest pipeline on main)
   BASE_CI_IMAGE: registry.ddbuild.io/images/ci/lading-fuzz:2025-08-14-b39a488a@sha256:2d7d6d9a445e2048f454a3e5d4175e7600700cac54ba1fc47801376803109bd1
 
+# Full fuzzing run for main branch and scheduled pipelines
 run-fuzzing:
   stage: fuzz
   tags: ["arch:amd64"]

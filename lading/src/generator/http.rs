@@ -171,11 +171,20 @@ impl Http {
                         .ok_or(Error::Zero)?;
                 let maximum_block_size = config.maximum_block_size.as_u128();
                 let block_cache = match block_cache_method {
-                    block::CacheMethod::Fixed => block::Cache::fixed(
+                    block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
                         &mut rng,
                         maximum_prebuild_cache_size_bytes,
                         maximum_block_size,
                         &variant,
+                        // NOTE we bound payload generation to have overhead only
+                        // equivalent to the prebuild cache size,
+                        // `maximum_prebuild_cache_size_bytes`. This means on systems with plentiful
+                        // memory we're under generating entropy, on systems with
+                        // minimal memory we're over-generating.
+                        //
+                        // `lading::get_available_memory` suggests we can learn to
+                        // divvy this up in the future.
+                        maximum_prebuild_cache_size_bytes.get() as usize,
                     )?,
                 };
 

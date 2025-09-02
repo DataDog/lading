@@ -175,7 +175,9 @@ impl Cache {
     /// Construct a `Cache` of fixed size.
     ///
     /// This constructor makes an internal pool of `Block` instances up to
-    /// `total_bytes`, each of which are no larger than `maximum_block_bytes`.
+    /// `total_bytes`, each of which are no larger than
+    /// `maximum_block_bytes`. The `payload` may or may not have internal
+    /// overhead, capped at `payload_overhead_allowance_bytes`.
     ///
     /// # Errors
     ///
@@ -183,11 +185,12 @@ impl Cache {
     /// `u32::MAX` or if it is larger than `total_bytes`.
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn fixed<R>(
+    pub fn fixed_with_max_overhead<R>(
         mut rng: &mut R,
         total_bytes: NonZeroU32,
         maximum_block_bytes: u128,
         payload: &crate::Config,
+        payload_overhead_allowance_bytes: usize,
     ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
@@ -337,13 +340,21 @@ impl Cache {
                         return Err(Error::InvalidConfig(e));
                     }
                 }
-                let mut pyld = crate::OpentelemetryLogs::new(*config, &mut rng)?;
+                let mut pyld = crate::OpentelemetryLogs::new(
+                    *config,
+                    payload_overhead_allowance_bytes,
+                    &mut rng,
+                )?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-logs");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
             crate::Config::OpentelemetryMetrics(config) => {
-                let mut pyld = crate::OpentelemetryMetrics::new(*config, &mut rng)?;
+                let mut pyld = crate::OpentelemetryMetrics::new(
+                    *config,
+                    payload_overhead_allowance_bytes,
+                    &mut rng,
+                )?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-metrics");
                 let _guard = span.enter();
 
