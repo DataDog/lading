@@ -14,18 +14,16 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::NonZeroU32,
-    thread,
 };
 
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::{error, info, trace};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
 
@@ -171,13 +169,7 @@ impl Tcp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-
+        let mut handle = self.block_cache.handle();
         let mut current_connection = None;
 
         let shutdown_wait = self.shutdown.recv();
@@ -200,17 +192,15 @@ impl Tcp {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
-
+            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
-                            let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
-                            match connection.write_all(&blk.bytes).await {
+                            let block = self.block_cache.advance(&mut handle);
+                            match connection.write_all(&block.bytes).await {
                                 Ok(()) => {
-                                    counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
+                                    counter!("bytes_written", &self.metric_labels).increment(u64::from(block.total_bytes.get()));
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                 }
                                 Err(err) => {
