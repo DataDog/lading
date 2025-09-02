@@ -11,18 +11,12 @@ use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    sync::mpsc::{Sender, error::SendError},
-    time::Instant,
-};
+use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};
 
-/// Error for `Cache::spin`
+/// Error for block construction
 #[derive(Debug, thiserror::Error)]
 pub enum SpinError {
-    /// See [`SendError`]
-    #[error(transparent)]
-    Send(#[from] SendError<Block>),
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid: {0}")]
     InvalidConfig(String),
@@ -416,54 +410,6 @@ impl Cache {
             Self::Fixed { blocks, .. } => {
                 let block = &blocks[handle.idx];
                 handle.idx = (handle.idx + 1) % blocks.len();
-                block
-            }
-        }
-    }
-
-    /// Run `Cache` forward on the user-provided mpsc sender.
-    ///
-    /// This is a blocking function that pushes `Block` instances into the
-    /// user-provided mpsc `Sender<Block>`. The user is required to set an
-    /// appropriate size on the channel. This function will never exit.
-    ///
-    /// # Errors
-    ///
-    /// Function will return an error if the user-provided mpsc `Sender<Block>`
-    /// is closed.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
-        match self {
-            Self::Fixed {
-                mut idx, blocks, ..
-            } => loop {
-                snd.blocking_send(blocks[idx].clone())?;
-                idx = (idx + 1) % blocks.len();
-            },
-        }
-    }
-
-    /// Peek at the next `Block` from the `Cache`.
-    ///
-    /// This is a block function that returns a reference to the next `Block`
-    /// instance although the cache is not advanced by this call. Callers must
-    /// call [`Self::next_block`] or this cache will not advance.
-    #[must_use]
-    pub fn peek_next(&self) -> &Block {
-        match self {
-            Self::Fixed { idx, blocks, .. } => &blocks[*idx],
-        }
-    }
-
-    /// Return a `Block` from the `Cache`
-    ///
-    /// This is a blocking function that returns a single `Block` instance as
-    /// soon as one is ready, blocking the caller until one is available.
-    pub fn next_block(&mut self) -> &Block {
-        match self {
-            Self::Fixed { idx, blocks, .. } => {
-                let block = &blocks[*idx];
-                *idx = (*idx + 1) % blocks.len();
                 block
             }
         }

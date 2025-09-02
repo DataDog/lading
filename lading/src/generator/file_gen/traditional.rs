@@ -20,7 +20,6 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
-    thread,
 };
 
 use byte_unit::Byte;
@@ -32,16 +31,11 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
-    sync::mpsc,
     task::{JoinError, JoinHandle},
 };
 use tracing::{error, info};
 
-use crate::common::PeekableReceiver;
-use lading_payload::{
-    self,
-    block::{self, Block},
-};
+use lading_payload::{self, block};
 
 use super::General;
 
@@ -210,7 +204,7 @@ impl Server {
                 maximum_bytes_per_file,
                 throttle,
                 throttle_config,
-                block_cache,
+                block_cache: Arc::new(block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
@@ -253,7 +247,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     throttle: Throttle,
     throttle_config: lading_throttle::Config,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
@@ -284,28 +278,22 @@ impl Child {
                 .await?,
         );
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            let block = self.block_cache.advance(&mut handle);
                             let total_bytes = u64::from(total_bytes.get());
 
                             {
-                                fp.write_all(&blk.bytes).await?;
+                                fp.write_all(&block.bytes).await?;
                                 counter!("bytes_written").increment(total_bytes);
                                 total_bytes_written += total_bytes;
                             }

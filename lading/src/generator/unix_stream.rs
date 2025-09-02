@@ -11,16 +11,15 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU32, path::PathBuf, thread};
+use std::{num::NonZeroU32, path::PathBuf};
 use tokio::{
     net,
-    sync::{broadcast::Receiver, mpsc},
+    sync::broadcast::Receiver,
     task::{JoinError, JoinSet},
 };
 use tracing::{debug, error, info, warn};
@@ -229,13 +228,7 @@ impl Child {
         startup_receiver.recv().await?;
         debug!("UnixStream generator running");
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-
+        let mut handle = self.block_cache.handle();
         let mut current_connection = None;
 
         let shutdown_wait = self.shutdown.recv();
@@ -263,8 +256,7 @@ impl Child {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -274,9 +266,9 @@ impl Child {
                             // some of the written bytes make it through in which case we
                             // must cycle back around and try to write the remainder of the
                             // buffer.
-                            let blk_max: usize = total_bytes.get() as usize;
+                            let block = self.block_cache.advance(&mut handle);
+                            let blk_max = block.bytes.len();
                             let mut blk_offset = 0;
-                            let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
                             while blk_offset < blk_max {
                                 let stream = &socket;
 
@@ -287,7 +279,7 @@ impl Child {
                                 if ready.is_writable() {
                                     // Try to write data, this may still fail with `WouldBlock`
                                     // if the readiness event is a false positive.
-                                    match stream.try_write(&blk.bytes[blk_offset..]) {
+                                    match stream.try_write(&block.bytes[blk_offset..]) {
                                         Ok(bytes) => {
                                             counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
                                             counter!("packets_sent", &self.metric_labels).increment(1);
