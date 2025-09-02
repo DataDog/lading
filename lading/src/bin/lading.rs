@@ -8,7 +8,6 @@ use std::{
 };
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
-use jemallocator::Jemalloc;
 use lading::{
     blackhole,
     captures::CaptureManager,
@@ -30,9 +29,6 @@ use tokio::{
 };
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
-
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
