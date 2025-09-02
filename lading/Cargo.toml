@@ -72,6 +72,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_qs = { version = "0.15", default-features = false }
 serde_yaml = { version = "0.9" }
+sysinfo = { workspace = true, features = ["system"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
   "rt",

@@ -621,6 +621,12 @@ fn main() -> Result<(), Error> {
 
     let version = env!("CARGO_PKG_VERSION");
     info!("Starting lading {version} run.");
+    let memory_limit =
+        lading::get_available_memory().get_appropriate_unit(byte_unit::UnitType::Binary);
+    info!(
+        "Lading running with {limit} amount of memory.",
+        limit = memory_limit.to_string()
+    );
 
     // Two-parser fallback logic until CliFlatLegacy is removed
     let args = match CliWithSubcommands::try_parse() {
