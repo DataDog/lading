@@ -10,7 +10,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{num::NonZeroU32, path::PathBuf, thread, time::Duration};
+use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 use tokio::io::AsyncWriteExt;
 
 use byte_unit::Byte;
@@ -18,11 +18,9 @@ use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
 
@@ -170,10 +168,7 @@ impl PassthruFile {
     pub async fn spin(mut self) -> Result<(), Error> {
         info!("PassthruFile generator running");
 
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
@@ -203,14 +198,13 @@ impl PassthruFile {
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
-                    match current_file.write_all(&blk.bytes).await {
+                    let block = self.block_cache.advance(&mut handle);
+                    match current_file.write_all(&block.bytes).await {
                         Ok(()) => {
-                            counter!("bytes_written", &self.metric_labels).increment(u64::from(blk.total_bytes.get()));
+                            counter!("bytes_written", &self.metric_labels).increment(u64::from(block.total_bytes.get()));
                         }
                         Err(err) => {
                             warn!("write failed: {}", err);

@@ -16,7 +16,7 @@
 
 mod acknowledgements;
 
-use std::{future::ready, num::NonZeroU32, thread, time::Duration};
+use std::{future::ready, num::NonZeroU32, sync::Arc, time::Duration};
 
 use acknowledgements::Channels;
 use http::{
@@ -35,13 +35,13 @@ use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{Semaphore, SemaphorePermit, mpsc},
+    sync::{Semaphore, SemaphorePermit},
     time::timeout,
 };
 use tracing::{error, info};
 
-use crate::{common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel};
-use lading_payload::block::{self, Block};
+use crate::generator::splunk_hec::acknowledgements::Channel;
+use lading_payload::block;
 
 use super::General;
 
@@ -145,7 +145,7 @@ pub struct SplunkHec {
     token: String,
     parallel_connections: u16,
     throttle: Throttle,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
     shutdown: lading_signal::Watcher,
@@ -259,7 +259,7 @@ impl SplunkHec {
             parallel_connections: config.parallel_connections,
             uri,
             token: config.token,
-            block_cache,
+            block_cache: Arc::new(block_cache),
             throttle,
             metric_labels: labels,
             shutdown,
@@ -287,12 +287,7 @@ impl SplunkHec {
         let labels = self.metric_labels;
 
         gauge!("maximum_requests", &labels).set(f64::from(self.parallel_connections));
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
         let mut channels = self.channels.iter().cycle();
 
         let request_shutdown = self.shutdown.clone();
@@ -303,8 +298,7 @@ impl SplunkHec {
                 .next()
                 .expect("channel should never be empty")
                 .clone();
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -314,9 +308,9 @@ impl SplunkHec {
                             let labels = labels.clone();
                             let uri = uri.clone();
 
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                            let body = crate::full(blk.bytes.clone());
-                            let block_length = blk.bytes.len();
+                            let block = self.block_cache.advance(&mut handle);
+                            let body = crate::full(block.bytes.clone());
+                            let block_length = block.bytes.len();
 
                             let request = Request::builder()
                                 .method(Method::POST)

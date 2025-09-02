@@ -13,7 +13,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{convert::TryFrom, num::NonZeroU32, thread, time::Duration};
+use std::{convert::TryFrom, num::NonZeroU32, time::Duration};
 
 use byte_unit::Byte;
 use bytes::{Buf, BufMut, Bytes};
@@ -23,15 +23,13 @@ use metrics::counter;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
 use tonic::{
     Request, Response, Status,
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
 };
 use tracing::{debug, info};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
 
@@ -294,36 +292,30 @@ impl Grpc {
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
         let rpc_path = self.rpc_path;
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 _ = self.throttle.wait_for(total_bytes) => {
-                    let block_length = blk.bytes.len();
+                    let block = self.block_cache.advance(&mut handle);
+                    let block_length = block.bytes.len();
                     counter!("requests_sent", &self.metric_labels).increment(1);
-                    let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
                     let res = Self::req(
                         &mut client,
                         rpc_path.clone(),
-                        Bytes::copy_from_slice(&blk.bytes),
+                        Bytes::copy_from_slice(&block.bytes),
                     )
                     .await;
 
                     match res {
                         Ok(res) => {
                             counter!("bytes_written", &self.metric_labels).increment(block_length as u64);
-                            if let Some(data_points) = blk.metadata.data_points {
+                            if let Some(data_points) = block.metadata.data_points {
                                 counter!("data_points_transmitted", &self.metric_labels).increment(data_points);
                             }
                             counter!("request_ok", &self.metric_labels).increment(1);

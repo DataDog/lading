@@ -11,18 +11,17 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::common::PeekableReceiver;
 use byte_unit::{Byte, Unit};
 use futures::future::join_all;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU32, path::PathBuf, thread};
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::{
     net,
-    sync::{broadcast::Receiver, mpsc},
+    sync::broadcast::Receiver,
     task::{JoinError, JoinHandle},
 };
 use tracing::{debug, error, info};
@@ -143,6 +142,28 @@ impl UnixDatagram {
             labels.push(("id".to_string(), id));
         }
 
+        let total_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
+                &mut rng,
+                total_bytes,
+                config.maximum_block_size.as_u128(),
+                &config.variant,
+                // NOTE we bound payload generation to have overhead only
+                // equivalent to the prebuild cache size,
+                // `total_bytes`. This means on systems with plentiful
+                // memory we're under generating entropy, on systems with
+                // minimal memory we're over-generating.
+                //
+                // `lading::get_available_memory` suggests we can learn to
+                // divvy this up in the future.
+                total_bytes.get() as usize,
+            )?,
+        };
+        let block_cache = Arc::new(block_cache);
+
         let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
 
         let mut handles = Vec::new();
@@ -161,30 +182,9 @@ impl UnixDatagram {
             };
             let throttle = Throttle::new_with_config(throttle_config);
 
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                    .ok_or(Error::Zero)?;
-            let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
-                    &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.as_u128(),
-                    &config.variant,
-                    // NOTE we bound payload generation to have overhead only
-                    // equivalent to the prebuild cache size,
-                    // `total_bytes`. This means on systems with plentiful
-                    // memory we're under generating entropy, on systems with
-                    // minimal memory we're over-generating.
-                    //
-                    // `lading::get_available_memory` suggests we can learn to
-                    // divvy this up in the future.
-                    total_bytes.get() as usize,
-                )?,
-            };
-
             let child = Child {
                 path: config.path.clone(),
-                block_cache,
+                block_cache: Arc::clone(&block_cache),
                 throttle,
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
@@ -228,7 +228,7 @@ impl UnixDatagram {
 struct Child {
     path: PathBuf,
     throttle: Throttle,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
@@ -258,18 +258,12 @@ impl Child {
             }
         }
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -282,8 +276,8 @@ impl Child {
                             // block across multiple datagrams which we cannot do
                             // without cooperation of the client, which we are not
                             // guaranteed.
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                            match socket.send(&blk.bytes).await {
+                            let block = self.block_cache.advance(&mut handle);
+                            match socket.send(&block.bytes).await {
                                 Ok(bytes) => {
                                     counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
                                     counter!("packets_sent", &self.metric_labels).increment(1);

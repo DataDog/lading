@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of Kubernetes resources.
 ## Changed
 - Lading toolchain is now 1.89.0
+- Generators now use a handle based mechanism to address their block cache,
+  reducing memory consumption for generators with parallel connection support.
 ## Fixed
 - Fixed a bug in OTel payload generation where templates would not be used if
   context cap number of templates were not pre-generated. This had a knock-on
@@ -23,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distribution derived number of points.
 ## Removed
 - Removed `prefix_metric_names` configuration from DogStatsD generator.
-- Removed JSON support from trace-agent payload 
+- Removed JSON support from trace-agent payload
 
 ## [0.27.0]
 ## Added

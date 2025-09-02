@@ -17,7 +17,7 @@
 use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
-    thread,
+    sync::Arc,
 };
 
 use byte_unit::Byte;
@@ -29,13 +29,11 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
-    sync::mpsc,
     task::{JoinError, JoinHandle},
 };
 use tracing::{error, info};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
 
@@ -214,28 +212,29 @@ impl Server {
         let maximum_block_size =
             NonZeroU32::new(config.maximum_block_size.as_u128() as u32).ok_or(Error::Zero)?;
 
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
+                &mut rng,
+                maximum_prebuild_cache_size_bytes,
+                u128::from(maximum_block_size.get()),
+                &config.variant,
+                // NOTE we bound payload generation to have overhead only
+                // equivalent to the prebuild cache size,
+                // `maximum_prebuild_cache_size_bytes`. This means on systems with plentiful
+                // memory we're under generating entropy, on systems with
+                // minimal memory we're over-generating.
+                //
+                // `lading::get_available_memory` suggests we can learn to
+                // divvy this up in the future.
+                maximum_prebuild_cache_size_bytes.get() as usize,
+            )?,
+        };
+        let block_cache = Arc::new(block_cache);
+
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
             let throttle = Throttle::new_with_config(throttle_config);
-
-            let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
-                    &mut rng,
-                    maximum_prebuild_cache_size_bytes,
-                    u128::from(maximum_block_size.get()),
-                    &config.variant,
-                    // NOTE we bound payload generation to have overhead only
-                    // equivalent to the prebuild cache size,
-                    // `maximum_prebuild_cache_size_bytes`. This means on systems with plentiful
-                    // memory we're under generating entropy, on systems with
-                    // minimal memory we're over-generating.
-                    //
-                    // `lading::get_available_memory` suggests we can learn to
-                    // divvy this up in the future.
-                    maximum_prebuild_cache_size_bytes.get() as usize,
-                )?,
-            };
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);
@@ -254,7 +253,7 @@ impl Server {
                 &basename,
                 config.total_rotations,
                 maximum_bytes_per_log,
-                block_cache,
+                Arc::clone(&block_cache),
                 throttle,
                 throttle_config,
                 shutdown.clone(),
@@ -304,7 +303,7 @@ struct Child {
     names: Vec<PathBuf>,
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     throttle: Throttle,
     throttle_config: lading_throttle::Config,
     shutdown: lading_signal::Watcher,
@@ -317,7 +316,7 @@ impl Child {
         basename: &Path,
         total_rotations: u8,
         maximum_bytes_per_log: NonZeroU32,
-        block_cache: block::Cache,
+        block_cache: Arc<block::Cache>,
         throttle: Throttle,
         throttle_config: lading_throttle::Config,
         shutdown: lading_signal::Watcher,
@@ -387,28 +386,21 @@ impl Child {
                 })?,
         );
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new()
-            .spawn(|| block_cache.spin(snd))
-            .map_err(|err| Error::IoThreadSpawn { err })?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
-            let blk = rcv.peek().await.expect("block cache should never be empty");
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
-                result = self.throttle.wait_for(blk.total_bytes) => {
+                result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
-                            let blk = rcv.next().await.expect("failed to advance through the blocks");
-                            write_bytes(&blk,
+                            let block = self.block_cache.advance(&mut handle);
+                            write_bytes(block,
                                     &mut fp,
                                     &mut total_bytes_written,
                                     buffer_capacity,
@@ -419,7 +411,7 @@ impl Child {
                                     &self.labels).await?;
                         }
                         Err(err) => {
-                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", blk.total_bytes, err);
+                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", total_bytes, err);
                         }
                     }
                 }
@@ -437,7 +429,7 @@ impl Child {
 
 #[allow(clippy::too_many_arguments)]
 async fn write_bytes(
-    blk: &Block,
+    blk: &block::Block,
     fp: &mut BufWriter<fs::File>,
     total_bytes_written: &mut u64,
     buffer_capacity: usize,
