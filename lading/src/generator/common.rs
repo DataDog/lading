@@ -237,7 +237,7 @@ pub enum ThrottleBuilderError {
 /// Concurrency management strategies for generators
 ///
 /// This enum represents the two main concurrency patterns used across generators:
-/// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk HEC pattern)  
+/// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk HEC pattern)
 /// - Workers: Multiple persistent worker tasks (TCP/UDP/Unix pattern)
 #[derive(Debug)]
 pub(super) enum ConcurrencyStrategy {
@@ -260,7 +260,7 @@ impl ConcurrencyStrategy {
     /// * `connections` - Number of parallel connections (defaults to 1 if None)
     /// * `use_workers` - If true, use Workers strategy; otherwise use Pooled
     pub(super) fn new(connections: Option<NonZeroU16>, use_workers: bool) -> Self {
-        let connections = connections.unwrap_or(NonZeroU16::new(1).unwrap());
+        let connections = connections.unwrap_or(NonZeroU16::MIN);
         if use_workers {
             Self::Workers { count: connections }
         } else {
