@@ -170,6 +170,7 @@ impl<'a> ThrottleBuilder<'a> {
                     NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
+                    timeout_micros: 0,
                 }
             }
             (None, Some(throttle_config)) => {
@@ -178,10 +179,14 @@ impl<'a> ThrottleBuilder<'a> {
                 } else {
                     match *throttle_config {
                         BytesThrottleConfig::AllOut => BytesThrottleConfig::AllOut,
-                        BytesThrottleConfig::Stable { bytes_per_second } => {
+                        BytesThrottleConfig::Stable {
+                            bytes_per_second,
+                            timeout_millis,
+                        } => {
                             let total = bytes_per_second.as_u128() as u32;
                             BytesThrottleConfig::Stable {
                                 bytes_per_second: Byte::from_u64(u64::from(total / divisor)),
+                                timeout_millis,
                             }
                         }
                         BytesThrottleConfig::Linear {
@@ -335,11 +340,13 @@ mod tests {
 
         #[test]
         fn throttle_builder_rejects_dual_config(
-            bytes in 1_u32..=1_000_000_u32
+            bytes in 1_u32..=1_000_000_u32,
+            timeout_millis in 1..=10_000_u64,
         ) {
             let bytes = Byte::from_u64(u64::from(bytes));
             let throttle_config = BytesThrottleConfig::Stable {
                 bytes_per_second: bytes,
+                timeout_millis,
             };
 
             let result = ThrottleBuilder::new()
@@ -373,15 +380,6 @@ mod tests {
         }
 
         #[test]
-        fn concurrency_strategy_defaults_to_one() {
-            let workers = ConcurrencyStrategy::new(None, true);
-            assert_eq!(workers.connection_count(), 1);
-
-            let pooled = ConcurrencyStrategy::new(None, false);
-            assert_eq!(pooled.connection_count(), 1);
-        }
-
-        #[test]
         fn metrics_builder_always_has_base_labels(
             component_name in "[a-z]{3,10}"
         ) {
@@ -408,6 +406,15 @@ mod tests {
                 assert_eq!(labels.len(), 2);
             }
         }
+    }
+
+    #[test]
+    fn concurrency_strategy_defaults_to_one() {
+        let workers = ConcurrencyStrategy::new(None, true);
+        assert_eq!(workers.connection_count(), 1);
+
+        let pooled = ConcurrencyStrategy::new(None, false);
+        assert_eq!(pooled.connection_count(), 1);
     }
 
     #[test]
