@@ -111,6 +111,7 @@ impl Kubernetes {
 
             let throttle_config = lading_throttle::Config::Stable {
                 maximum_capacity: ops_per_sec,
+                timeout_micros: 0,
             };
             Throttle::new_with_config(throttle_config)
         });
