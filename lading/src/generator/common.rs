@@ -3,7 +3,10 @@
 use byte_unit::Byte;
 use lading_throttle::Throttle;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, num::NonZeroU32};
+use std::{
+    convert::TryFrom,
+    num::{NonZeroU16, NonZeroU32},
+};
 
 /// Generator-specific throttle configuration with clearer field names
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -110,6 +113,7 @@ impl TryFrom<BytesThrottleConfig> for lading_throttle::Config {
 pub(super) struct ThrottleBuilder<'a> {
     bytes_per_second: Option<&'a Byte>,
     throttle_config: Option<&'a BytesThrottleConfig>,
+    parallel_connections: Option<NonZeroU16>,
 }
 
 impl<'a> ThrottleBuilder<'a> {
@@ -118,6 +122,7 @@ impl<'a> ThrottleBuilder<'a> {
         Self {
             bytes_per_second: None,
             throttle_config: None,
+            parallel_connections: None,
         }
     }
 
@@ -133,7 +138,16 @@ impl<'a> ThrottleBuilder<'a> {
         self
     }
 
+    /// Set the number of parallel connections that will share this throttle
+    pub(super) fn parallel_connections(mut self, connections: Option<NonZeroU16>) -> Self {
+        self.parallel_connections = connections;
+        self
+    }
+
     /// Build the throttle
+    ///
+    /// If `parallel_connections` > 1, the throttle capacity will be divided evenly
+    /// among the connections.
     ///
     /// # Errors
     ///
@@ -143,17 +157,58 @@ impl<'a> ThrottleBuilder<'a> {
     /// - The configuration values are invalid (zero or too large)
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn build(self) -> Result<Throttle, ThrottleBuilderError> {
+        let divisor = match self.parallel_connections {
+            Some(n) => u32::from(n.get()),
+            None => 1,
+        };
+
         let config = match (self.bytes_per_second, self.throttle_config) {
             (Some(bps), None) => {
+                let total_bps = bps.as_u128() as u32;
+                let divided_bps = total_bps / divisor;
                 let bytes_per_second =
-                    NonZeroU32::new(bps.as_u128() as u32).ok_or(ThrottleBuilderError::Zero)?;
+                    NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
                 }
             }
-            (None, Some(throttle_config)) => (*throttle_config)
-                .try_into()
-                .map_err(ThrottleBuilderError::Conversion)?,
+            (None, Some(throttle_config)) => {
+                let divided_config = if divisor == 1 {
+                    *throttle_config
+                } else {
+                    match *throttle_config {
+                        BytesThrottleConfig::AllOut => BytesThrottleConfig::AllOut,
+                        BytesThrottleConfig::Stable { bytes_per_second } => {
+                            let total = bytes_per_second.as_u128() as u32;
+                            BytesThrottleConfig::Stable {
+                                bytes_per_second: Byte::from_u64(u64::from(total / divisor)),
+                            }
+                        }
+                        BytesThrottleConfig::Linear {
+                            initial_bytes_per_second,
+                            maximum_bytes_per_second,
+                            rate_of_change,
+                        } => {
+                            let initial_total = initial_bytes_per_second.as_u128() as u32;
+                            let max_total = maximum_bytes_per_second.as_u128() as u32;
+                            let rate_total = rate_of_change.as_u128() as u32;
+
+                            BytesThrottleConfig::Linear {
+                                initial_bytes_per_second: Byte::from_u64(u64::from(
+                                    initial_total / divisor,
+                                )),
+                                maximum_bytes_per_second: Byte::from_u64(u64::from(
+                                    max_total / divisor,
+                                )),
+                                rate_of_change: Byte::from_u64(u64::from(rate_total / divisor)),
+                            }
+                        }
+                    }
+                };
+                divided_config
+                    .try_into()
+                    .map_err(ThrottleBuilderError::Conversion)?
+            }
             (Some(_), Some(_)) => return Err(ThrottleBuilderError::ConflictingConfig),
             (None, None) => return Err(ThrottleBuilderError::NoConfig),
         };
@@ -181,48 +236,45 @@ pub enum ThrottleBuilderError {
 
 /// Concurrency management strategies for generators
 ///
-/// This enum represents the three main concurrency patterns used across generators:
-/// - Single: One connection with reconnect on failure (original TCP/UDP pattern)
+/// This enum represents the two main concurrency patterns used across generators:
 /// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk HEC pattern)  
-/// - Workers: Multiple persistent worker tasks (Unix stream/datagram pattern)
+/// - Workers: Multiple persistent worker tasks (TCP/UDP/Unix pattern)
 #[derive(Debug)]
 pub(super) enum ConcurrencyStrategy {
-    /// Single connection with automatic reconnection on failure
-    Single,
     /// Pool of connections with semaphore limiting concurrent requests
     Pooled {
-        /// Maximum number of concurrent connections
-        max_connections: u16,
+        /// Number of concurrent connections
+        max_connections: NonZeroU16,
     },
     /// Multiple worker tasks that run independently
     Workers {
         /// Number of worker tasks
-        count: u16,
+        count: NonZeroU16,
     },
 }
 
 impl ConcurrencyStrategy {
-    /// Create a new concurrency strategy based on the connection count
+    /// Create a new concurrency strategy
     ///
     /// # Arguments
-    /// * `connections` - Number of parallel connections (1 = Single, >1 = strategy-specific)
-    /// * `use_workers` - If true and connections > 1, use Workers strategy; otherwise use Pooled
-    pub(super) fn new(connections: u16, use_workers: bool) -> Self {
-        match connections {
-            0 | 1 => Self::Single,
-            n if use_workers => Self::Workers { count: n },
-            n => Self::Pooled { max_connections: n },
+    /// * `connections` - Number of parallel connections (defaults to 1 if None)
+    /// * `use_workers` - If true, use Workers strategy; otherwise use Pooled
+    pub(super) fn new(connections: Option<NonZeroU16>, use_workers: bool) -> Self {
+        let connections = connections.unwrap_or(NonZeroU16::new(1).unwrap());
+        if use_workers {
+            Self::Workers { count: connections }
+        } else {
+            Self::Pooled {
+                max_connections: connections,
+            }
         }
     }
 
     /// Get the number of parallel connections for this strategy
     pub(super) fn connection_count(&self) -> u16 {
         match self {
-            Self::Single => 1,
-            Self::Pooled {
-                max_connections, ..
-            } => *max_connections,
-            Self::Workers { count } => *count,
+            Self::Pooled { max_connections } => max_connections.get(),
+            Self::Workers { count } => count.get(),
         }
     }
 }
@@ -251,15 +303,116 @@ impl MetricsBuilder {
         self
     }
 
-    /// Add a custom label
-    #[allow(dead_code)]
-    pub(super) fn with_label(mut self, key: String, value: String) -> Self {
-        self.labels.push((key, value));
-        self
-    }
-
     /// Build the final label vector
     pub(super) fn build(self) -> Vec<(String, String)> {
         self.labels
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, NonZeroU16, ThrottleBuilder,
+        ThrottleBuilderError,
+    };
+    use byte_unit::Byte;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn throttle_builder_division_works(
+            bytes in 1_u32..=1_000_000_u32,
+            worker_count in 1_u16..=100_u16
+        ) {
+            let bytes = Byte::from_u64(u64::from(bytes));
+            let result = ThrottleBuilder::new()
+                .bytes_per_second(Some(&bytes))
+                .parallel_connections(NonZeroU16::new(worker_count))
+                .build();
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn throttle_builder_rejects_dual_config(
+            bytes in 1_u32..=1_000_000_u32
+        ) {
+            let bytes = Byte::from_u64(u64::from(bytes));
+            let throttle_config = BytesThrottleConfig::Stable {
+                bytes_per_second: bytes,
+            };
+
+            let result = ThrottleBuilder::new()
+                .bytes_per_second(Some(&bytes))
+                .throttle_config(Some(&throttle_config))
+                .build();
+
+            assert!(matches!(result, Err(ThrottleBuilderError::ConflictingConfig)));
+        }
+
+        #[test]
+        fn concurrency_strategy_connection_count(
+            connections in 1_u16..=100_u16,
+            use_workers in any::<bool>()
+        ) {
+            let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), use_workers);
+            let count = strategy.connection_count();
+            assert_eq!(count, connections);
+        }
+
+        #[test]
+        fn concurrency_strategy_workers_when_requested(connections in 1_u16..=100_u16) {
+            let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), true);
+            assert!(matches!(strategy, ConcurrencyStrategy::Workers { count } if count.get() == connections));
+        }
+
+        #[test]
+        fn concurrency_strategy_pooled_when_not_workers(connections in 1_u16..=100_u16) {
+            let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), false);
+            assert!(matches!(strategy, ConcurrencyStrategy::Pooled { max_connections } if max_connections.get() == connections));
+        }
+
+        #[test]
+        fn concurrency_strategy_defaults_to_one() {
+            let workers = ConcurrencyStrategy::new(None, true);
+            assert_eq!(workers.connection_count(), 1);
+
+            let pooled = ConcurrencyStrategy::new(None, false);
+            assert_eq!(pooled.connection_count(), 1);
+        }
+
+        #[test]
+        fn metrics_builder_always_has_base_labels(
+            component_name in "[a-z]{3,10}"
+        ) {
+            let labels = MetricsBuilder::new(&component_name).build();
+
+            assert!(labels.len() >= 2);
+            assert!(labels.contains(&("component".to_string(), "generator".to_string())));
+            assert!(labels.contains(&("component_name".to_string(), component_name)));
+        }
+
+        #[test]
+        fn metrics_builder_id_label_optional(
+            component_name in "[a-z]{3,10}",
+            id in prop::option::of("[a-z0-9]{5,15}")
+        ) {
+            let labels = MetricsBuilder::new(&component_name)
+                .with_id(id.clone())
+                .build();
+
+            if let Some(id_val) = id {
+                assert!(labels.contains(&("id".to_string(), id_val)));
+                assert_eq!(labels.len(), 3);
+            } else {
+                assert_eq!(labels.len(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn throttle_builder_requires_config() {
+        let result = ThrottleBuilder::new().build();
+        assert!(matches!(result, Err(ThrottleBuilderError::NoConfig)));
     }
 }

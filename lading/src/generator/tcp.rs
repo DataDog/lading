@@ -13,7 +13,7 @@
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    num::NonZeroU32,
+    num::{NonZeroU16, NonZeroU32},
     sync::Arc,
 };
 
@@ -113,25 +113,17 @@ impl Tcp {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-
         let labels = MetricsBuilder::new("tcp").with_id(general.id).build();
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
+
         let block_cache = Arc::new(block::Cache::fixed_with_max_overhead(
             &mut rng,
             total_bytes,
             config.maximum_block_size.as_u128(),
             &config.variant,
-            // NOTE we bound payload generation to have overhead only
-            // equivalent to the prebuild cache size,
-            // `total_bytes`. This means on systems with plentiful
-            // memory we're under generating entropy, on systems with
-            // minimal memory we're over-generating.
-            //
-            // `lading::get_available_memory` suggests we can learn to
-            // divvy this up in the future.
             total_bytes.get() as usize,
         )?);
 
@@ -142,52 +134,33 @@ impl Tcp {
             .next()
             .expect("could not convert to socket addr");
 
-        let concurrency = ConcurrencyStrategy::new(config.parallel_connections, true);
+        let concurrency = ConcurrencyStrategy::new(
+            NonZeroU16::new(config.parallel_connections),
+            true, // Use Workers for TCP
+        );
+        let worker_count = concurrency.connection_count();
         let mut handles = JoinSet::new();
 
-        // Create worker tasks based on concurrency strategy
-        match &concurrency {
-            ConcurrencyStrategy::Single => {
-                // Single connection - create one worker
-                let throttle = ThrottleBuilder::new()
-                    .bytes_per_second(config.bytes_per_second.as_ref())
-                    .throttle_config(config.throttle.as_ref())
-                    .build()?;
+        for i in 0..worker_count {
+            let throttle = ThrottleBuilder::new()
+                .bytes_per_second(config.bytes_per_second.as_ref())
+                .throttle_config(config.throttle.as_ref())
+                .parallel_connections(NonZeroU16::new(worker_count))
+                .build()?;
 
-                let worker = TcpWorker {
-                    addr,
-                    throttle,
-                    block_cache: Arc::clone(&block_cache),
-                    metric_labels: labels.clone(),
-                    shutdown: shutdown.clone(),
-                };
-                handles.spawn(worker.spin());
+            let mut worker_labels = labels.clone();
+            if worker_count > 1 {
+                worker_labels.push(("worker".to_string(), i.to_string()));
             }
-            ConcurrencyStrategy::Workers { count } => {
-                // Multiple workers - divide throttle among them
-                for i in 0..*count {
-                    let throttle = ThrottleBuilder::new()
-                        .bytes_per_second(config.bytes_per_second.as_ref())
-                        .throttle_config(config.throttle.as_ref())
-                        .build()?;
 
-                    let mut worker_labels = labels.clone();
-                    worker_labels.push(("worker".to_string(), i.to_string()));
-
-                    let worker = TcpWorker {
-                        addr,
-                        throttle,
-                        block_cache: Arc::clone(&block_cache),
-                        metric_labels: worker_labels,
-                        shutdown: shutdown.clone(),
-                    };
-                    handles.spawn(worker.spin());
-                }
-            }
-            _ => {
-                // For TCP, we don't use Pooled strategy, default to Workers
-                unreachable!("TCP should use Single or Workers strategy")
-            }
+            let worker = TcpWorker {
+                addr,
+                throttle,
+                block_cache: Arc::clone(&block_cache),
+                metric_labels: worker_labels,
+                shutdown: shutdown.clone(),
+            };
+            handles.spawn(worker.spin());
         }
 
         Ok(Self { handles, shutdown })
@@ -206,7 +179,6 @@ impl Tcp {
         self.shutdown.recv().await;
         info!("shutdown signal received");
 
-        // Wait for all workers to complete
         while let Some(res) = self.handles.join_next().await {
             match res {
                 Ok(Ok(())) => {}
@@ -218,7 +190,6 @@ impl Tcp {
     }
 }
 
-#[derive(Debug)]
 struct TcpWorker {
     addr: SocketAddr,
     throttle: Throttle,

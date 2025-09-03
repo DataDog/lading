@@ -13,7 +13,8 @@
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    num::NonZeroU32,
+    num::{NonZeroU16, NonZeroU32},
+    sync::Arc,
     time::Duration,
 };
 
@@ -22,13 +23,18 @@ use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::net::UdpSocket;
+use tokio::{
+    net::UdpSocket,
+    task::{JoinError, JoinSet},
+};
 use tracing::{debug, error, info, trace};
 
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{MetricsBuilder, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{
+    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
+};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -81,6 +87,9 @@ pub enum Error {
     /// Throttle builder error
     #[error("Throttle configuration error: {0}")]
     ThrottleBuilder(#[from] ThrottleBuilderError),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
 }
 
 #[derive(Debug)]
@@ -88,10 +97,7 @@ pub enum Error {
 ///
 /// This generator is responsible for sending data to the target via UDP
 pub struct Udp {
-    addr: SocketAddr,
-    throttle: Throttle,
-    block_cache: block::Cache,
-    metric_labels: Vec<(String, String)>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
 }
 
@@ -113,47 +119,57 @@ impl Udp {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-
         let labels = MetricsBuilder::new("udp").with_id(general.id).build();
-
-        let throttle = ThrottleBuilder::new()
-            .bytes_per_second(config.bytes_per_second.as_ref())
-            .throttle_config(config.throttle.as_ref())
-            .build()?;
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
-        let block_cache = block::Cache::fixed_with_max_overhead(
+
+        let block_cache = Arc::new(block::Cache::fixed_with_max_overhead(
             &mut rng,
             total_bytes,
             config.maximum_block_size.as_u128(),
             &config.variant,
-            // NOTE we bound payload generation to have overhead only
-            // equivalent to the prebuild cache size,
-            // `total_bytes`. This means on systems with plentiful
-            // memory we're under generating entropy, on systems with
-            // minimal memory we're over-generating.
-            //
-            // `lading::get_available_memory` suggests we can learn to
-            // divvy this up in the future.
             total_bytes.get() as usize,
-        )?;
+        )?);
 
         let addr = config
             .addr
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("block cache has no next block");
+            .expect("could not convert to socket addr");
 
-        Ok(Self {
-            addr,
-            block_cache,
-            throttle,
-            metric_labels: labels,
-            shutdown,
-        })
+        let concurrency = ConcurrencyStrategy::new(
+            NonZeroU16::new(config.parallel_connections),
+            true, // Use Workers for UDP
+        );
+        let worker_count = concurrency.connection_count();
+        let mut handles = JoinSet::new();
+
+        for i in 0..worker_count {
+            let throttle = ThrottleBuilder::new()
+                .bytes_per_second(config.bytes_per_second.as_ref())
+                .throttle_config(config.throttle.as_ref())
+                .parallel_connections(NonZeroU16::new(worker_count))
+                .build()?;
+
+            let mut worker_labels = labels.clone();
+            if worker_count > 1 {
+                worker_labels.push(("worker".to_string(), i.to_string()));
+            }
+
+            let worker = UdpWorker {
+                addr,
+                throttle,
+                block_cache: Arc::clone(&block_cache),
+                metric_labels: worker_labels,
+                shutdown: shutdown.clone(),
+            };
+            handles.spawn(worker.spin());
+        }
+
+        Ok(Self { handles, shutdown })
     }
 
     /// Run [`Udp`] to completion or until a shutdown signal is received.
@@ -166,7 +182,31 @@ impl Udp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        debug!("UDP generator running");
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
+
+        while let Some(res) = self.handles.join_next().await {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+struct UdpWorker {
+    addr: SocketAddr,
+    throttle: Throttle,
+    block_cache: Arc<block::Cache>,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+}
+
+impl UdpWorker {
+    async fn spin(mut self) -> Result<(), Error> {
+        debug!("UDP generator worker running");
         let mut connection = Option::<UdpSocket>::None;
         let mut handle = self.block_cache.handle();
 

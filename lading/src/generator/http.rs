@@ -12,7 +12,10 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use std::{num::NonZeroU32, sync::Arc};
+use std::{
+    num::{NonZeroU16, NonZeroU32},
+    sync::Arc,
+};
 
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -171,7 +174,8 @@ impl Http {
                     )?,
                 };
 
-                let concurrency = ConcurrencyStrategy::new(config.parallel_connections, false);
+                let concurrency =
+                    ConcurrencyStrategy::new(NonZeroU16::new(config.parallel_connections), false);
 
                 // Set the global semaphore based on the concurrency strategy
                 CONNECTION_SEMAPHORE
