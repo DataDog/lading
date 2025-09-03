@@ -14,18 +14,30 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     num::NonZeroU32,
+    sync::Arc,
 };
 
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
+    task::{JoinError, JoinSet},
+};
 use tracing::{error, info, trace};
 
 use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{
+    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
+};
+
+fn default_parallel_connections() -> u16 {
+    1
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -44,6 +56,9 @@ pub struct Config {
     pub maximum_block_size: byte_unit::Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The total number of parallel connections to maintain
+    #[serde(default = "default_parallel_connections")]
+    pub parallel_connections: u16,
     /// The load throttle configuration
     pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
 }
@@ -63,15 +78,12 @@ pub enum Error {
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle builder error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleBuilder(#[from] ThrottleBuilderError),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
 }
 
 #[derive(Debug)]
@@ -79,10 +91,7 @@ pub enum Error {
 ///
 /// This generator is responsible for connecting to the target via TCP
 pub struct Tcp {
-    addr: SocketAddr,
-    throttle: Throttle,
-    block_cache: block::Cache,
-    metric_labels: Vec<(String, String)>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
 }
 
@@ -104,32 +113,13 @@ impl Tcp {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "tcp".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
 
-        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-            (Some(bps), None) => {
-                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                    timeout_micros: 0,
-                }
-            }
-            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-        let throttle = Throttle::new_with_config(throttle_config);
+        let labels = MetricsBuilder::new("tcp").with_id(general.id).build();
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
-        let block_cache = block::Cache::fixed_with_max_overhead(
+        let block_cache = Arc::new(block::Cache::fixed_with_max_overhead(
             &mut rng,
             total_bytes,
             config.maximum_block_size.as_u128(),
@@ -143,7 +133,7 @@ impl Tcp {
             // `lading::get_available_memory` suggests we can learn to
             // divvy this up in the future.
             total_bytes.get() as usize,
-        )?;
+        )?);
 
         let addr = config
             .addr
@@ -151,13 +141,56 @@ impl Tcp {
             .expect("could not convert to socket")
             .next()
             .expect("could not convert to socket addr");
-        Ok(Self {
-            addr,
-            block_cache,
-            throttle,
-            metric_labels: labels,
-            shutdown,
-        })
+
+        let concurrency = ConcurrencyStrategy::new(config.parallel_connections, true);
+        let mut handles = JoinSet::new();
+
+        // Create worker tasks based on concurrency strategy
+        match &concurrency {
+            ConcurrencyStrategy::Single => {
+                // Single connection - create one worker
+                let throttle = ThrottleBuilder::new()
+                    .bytes_per_second(config.bytes_per_second.as_ref())
+                    .throttle_config(config.throttle.as_ref())
+                    .build()?;
+
+                let worker = TcpWorker {
+                    addr,
+                    throttle,
+                    block_cache: Arc::clone(&block_cache),
+                    metric_labels: labels.clone(),
+                    shutdown: shutdown.clone(),
+                };
+                handles.spawn(worker.spin());
+            }
+            ConcurrencyStrategy::Workers { count } => {
+                // Multiple workers - divide throttle among them
+                for i in 0..*count {
+                    let throttle = ThrottleBuilder::new()
+                        .bytes_per_second(config.bytes_per_second.as_ref())
+                        .throttle_config(config.throttle.as_ref())
+                        .build()?;
+
+                    let mut worker_labels = labels.clone();
+                    worker_labels.push(("worker".to_string(), i.to_string()));
+
+                    let worker = TcpWorker {
+                        addr,
+                        throttle,
+                        block_cache: Arc::clone(&block_cache),
+                        metric_labels: worker_labels,
+                        shutdown: shutdown.clone(),
+                    };
+                    handles.spawn(worker.spin());
+                }
+            }
+            _ => {
+                // For TCP, we don't use Pooled strategy, default to Workers
+                unreachable!("TCP should use Single or Workers strategy")
+            }
+        }
+
+        Ok(Self { handles, shutdown })
     }
 
     /// Run [`Tcp`] to completion or until a shutdown signal is received.
@@ -170,6 +203,32 @@ impl Tcp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
+
+        // Wait for all workers to complete
+        while let Some(res) = self.handles.join_next().await {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct TcpWorker {
+    addr: SocketAddr,
+    throttle: Throttle,
+    block_cache: Arc<block::Cache>,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+}
+
+impl TcpWorker {
+    async fn spin(mut self) -> Result<(), Error> {
         let mut handle = self.block_cache.handle();
         let mut current_connection = None;
 

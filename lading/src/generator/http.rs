@@ -27,6 +27,9 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{
+    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
+};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
@@ -93,15 +96,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle builder error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleBuilder(#[from] ThrottleBuilderError),
 }
 
 /// The HTTP generator.
@@ -113,7 +110,7 @@ pub struct Http {
     uri: Uri,
     method: hyper::Method,
     headers: hyper::HeaderMap,
-    parallel_connections: u16,
+    concurrency: ConcurrencyStrategy,
     throttle: Throttle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
@@ -138,27 +135,13 @@ impl Http {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "http".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
 
-        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-            (Some(bps), None) => {
-                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                    timeout_micros: 0,
-                }
-            }
-            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-        let throttle = Throttle::new_with_config(throttle_config);
+        let labels = MetricsBuilder::new("http").with_id(general.id).build();
+
+        let throttle = ThrottleBuilder::new()
+            .bytes_per_second(config.bytes_per_second.as_ref())
+            .throttle_config(config.throttle.as_ref())
+            .build()?;
 
         match config.method {
             Method::Post {
@@ -188,12 +171,15 @@ impl Http {
                     )?,
                 };
 
+                let concurrency = ConcurrencyStrategy::new(config.parallel_connections, false);
+
+                // Set the global semaphore based on the concurrency strategy
                 CONNECTION_SEMAPHORE
-                    .set(Semaphore::new(config.parallel_connections as usize))
+                    .set(Semaphore::new(concurrency.connection_count() as usize))
                     .expect("failed to set semaphore");
 
                 Ok(Self {
-                    parallel_connections: config.parallel_connections,
+                    concurrency,
                     uri: config.target_uri,
                     method: hyper::Method::POST,
                     headers: config.headers,
@@ -218,7 +204,7 @@ impl Http {
     /// target.
     pub async fn spin(mut self) -> Result<(), Error> {
         let client = Client::builder(TokioExecutor::new())
-            .pool_max_idle_per_host(self.parallel_connections as usize)
+            .pool_max_idle_per_host(self.concurrency.connection_count() as usize)
             .retry_canceled_requests(false)
             .build_http();
         let method = self.method;
@@ -292,7 +278,7 @@ impl Http {
                     info!("shutdown signal received");
                     // Acquire all available connections, meaning that we have
                     // no outstanding tasks in flight.
-                    let _semaphore = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire_many(u32::from(self.parallel_connections)).await.expect("Connection Semaphore has already closed");
+                    let _semaphore = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire_many(u32::from(self.concurrency.connection_count())).await.expect("Connection Semaphore has already closed");
                     return Ok(());
                 },
             }
