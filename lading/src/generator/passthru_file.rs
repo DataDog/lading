@@ -116,6 +116,7 @@ impl PassthruFile {
                 gauge!("bytes_per_second", &labels).set(f64::from(bytes_per_second.get()));
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
+                    timeout_micros: 0,
                 }
             }
             (None, Some(throttle)) => (*throttle).try_into()?,

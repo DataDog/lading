@@ -159,6 +159,7 @@ impl Server {
                     NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
+                    timeout_micros: 0,
                 }
             }
             (None, Some(throttle)) => throttle.try_into()?,
@@ -256,7 +257,9 @@ struct Child {
 impl Child {
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
         let buffer_capacity = match self.throttle_config {
-            lading_throttle::Config::Stable { maximum_capacity }
+            lading_throttle::Config::Stable {
+                maximum_capacity, ..
+            }
             | lading_throttle::Config::Linear {
                 maximum_capacity, ..
             } => maximum_capacity.get() as usize,

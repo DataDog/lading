@@ -58,6 +58,10 @@ pub enum Config {
         /// The maximum capacity of the throttle, beyond which no interval will
         /// grow greater.
         maximum_capacity: NonZeroU32,
+        /// The timeout in microseconds for rolled capacity. When 0 (default),
+        /// no capacity rolls over between intervals.
+        #[serde(default)]
+        timeout_micros: u64,
     },
     /// A throttle that linearly increases load from `initial_capacity` to
     /// `maximum_capacity` with an increase of `rate_of_change` per tick.
@@ -147,8 +151,12 @@ impl Throttle<RealClock> {
     #[must_use]
     pub fn new_with_config(config: Config) -> Self {
         match config {
-            Config::Stable { maximum_capacity } => Throttle::Stable(stable::Stable::with_clock(
+            Config::Stable {
                 maximum_capacity,
+                timeout_micros,
+            } => Throttle::Stable(stable::Stable::with_clock(
+                maximum_capacity,
+                timeout_micros,
                 RealClock::default(),
             )),
             Config::Linear {
