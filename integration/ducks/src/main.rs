@@ -35,10 +35,14 @@ use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Dura
 use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener},
+    net::{TcpListener, TcpStream, UdpSocket},
+    #[cfg(unix)]
+    net::UnixListener,
     sync::{Mutex, mpsc},
 };
-use tokio_stream::{Stream, wrappers::UnixListenerStream};
+use tokio_stream::Stream;
+#[cfg(unix)]
+use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
 use tracing::error;
 use tracing::{debug, trace, warn};
@@ -356,6 +360,7 @@ impl DucksTarget {
     }
 }
 
+#[cfg(unix)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
@@ -408,4 +413,12 @@ async fn main() -> Result<(), anyhow::Error> {
     debug!("shutting down");
 
     Ok(())
+}
+
+#[cfg(not(unix))]
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
+    eprintln!("ducks integration test is not supported on Windows (Unix sockets required)");
+    std::process::exit(0);
 }

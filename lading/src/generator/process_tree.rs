@@ -11,6 +11,7 @@
 //!
 
 use lading_throttle::Throttle;
+#[cfg(unix)]
 use nix::{
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
     unistd::{ForkResult, Pid, fork},
