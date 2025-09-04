@@ -18,7 +18,7 @@ use k8s_openapi::api::{
     core::v1::{Namespace, Node, Pod, Service},
 };
 use kube::api::{DeleteParams, PostParams};
-use lading_throttle::{Throttle, builder::Builder};
+use lading_throttle::{Config as ThrottleConfig, Throttle};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -114,7 +114,10 @@ impl Kubernetes {
                 .saturating_div(config.max_instance_lifetime_seconds.get());
             let ops_per_sec = NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN);
 
-            Some(Builder::stable(ops_per_sec).build())
+            Some(Throttle::new_with_config(ThrottleConfig::Stable {
+                maximum_capacity: ops_per_sec,
+                timeout_micros: 0,
+            }))
         };
 
         Ok(Self {
