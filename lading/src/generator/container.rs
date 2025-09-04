@@ -1,52 +1,70 @@
 //! The container generator
 //!
-//! This generator is meant to spin up a container from a configured image. For now,
-//! it does not actually do anything beyond logging that it's running and then waiting
-//! for a shutdown signal.
+//! This generator creates Docker containers, recycling them when they exceed
+//! their configured maximum lifetime.
 
 use bollard::Docker;
 use bollard::models::ContainerCreateBody;
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, InspectContainerOptionsBuilder,
-    RemoveContainerOptionsBuilder, StartContainerOptions, StopContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveContainerOptionsBuilder,
+    StartContainerOptions, StopContainerOptionsBuilder,
 };
 use bollard::secret::ContainerCreateResponse;
-use lading_throttle::Throttle;
+use lading_throttle::{Throttle, builder::Builder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::num::{NonZeroU16, NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 use tokio_stream::StreamExt;
 use tracing::{debug, info, warn};
 
-use super::{General, common::BytesThrottleConfig};
+use super::General;
 
 mod state_machine;
 use state_machine::{Event, Operation, StateMachine};
 
+fn default_number_of_containers() -> NonZeroU32 {
+    NonZeroU32::MIN
+}
+
+fn default_network_disabled() -> bool {
+    false
+}
+
+fn default_exposed_ports() -> Vec<String> {
+    Vec::new()
+}
+
+fn default_max_lifetime_seconds() -> NonZeroU32 {
+    NonZeroU32::MAX
+}
+
+/// Configuration of the container generator.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-/// Configuration of the container generator.
 pub struct Config {
-    /// The container repository (e.g. "library/nginx")
+    /// Repository in which the container is found, docker.io/datadog/foobar.
     pub repository: String,
-    /// The container image tag (e.g. "latest")
+    /// Container tag, :v1.0.0.
     pub tag: String,
-    /// Arguments to provide to the container
+    /// Arguments for the container entrypoint, maps to docker run CMD.
     pub args: Option<Vec<String>>,
-    /// Environment variables to set in the container
+    /// Environment variables for the container, maps to docker run --env.
     pub env: Option<Vec<String>>,
-    /// Labels to apply to the container
+    /// Labels to set on the container, maps to docker run --label.
     pub labels: Option<HashMap<String, String>>,
-    /// Network mode to use for the container
-    pub network_disabled: Option<bool>,
-    /// Ports to expose from the container
-    pub exposed_ports: Option<Vec<String>>,
-    /// Maximum lifetime of containers before being replaced
-    pub max_lifetime_seconds: Option<NonZeroU64>,
-    /// Number of containers to spin up (defaults to 1)
-    pub number_of_containers: Option<NonZeroU32>,
-    /// Advanced throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    /// Whether to disable the container network, maps to docker run --network
+    /// none.
+    #[serde(default = "default_network_disabled")]
+    pub network_disabled: bool,
+    /// Ports exposed on the container, maps to docker run --expose.
+    #[serde(default = "default_exposed_ports")]
+    pub exposed_ports: Vec<String>,
+    /// Maximum lifetime before recycling
+    #[serde(default = "default_max_lifetime_seconds")]
+    pub max_lifetime_seconds: NonZeroU32,
+    /// Number of containers to create
+    #[serde(default = "default_number_of_containers")]
+    pub number_of_containers: NonZeroU32,
 }
 
 /// Errors produced by the `Container` generator.
@@ -63,8 +81,8 @@ pub enum Error {
     StateMachine(#[from] state_machine::Error),
 }
 
-#[derive(Debug)]
 /// Represents a container that can be spun up from a configured image.
+#[derive(Debug)]
 pub struct Container {
     config: Config,
     concurrent_containers: NonZeroU32,
@@ -77,6 +95,8 @@ impl Container {
     ///
     /// # Errors
     ///
+    /// # Panics
+    ///
     /// Will return an error if config parsing fails or runtime setup fails
     /// in the future. For now, always succeeds.
     #[allow(clippy::needless_pass_by_value)]
@@ -85,33 +105,23 @@ impl Container {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let concurrent_containers = config.number_of_containers.unwrap_or(NonZeroU32::MIN);
+        let concurrent_containers = config.number_of_containers;
 
-        // Configure throttle if max_lifetime_seconds is set
-        // The throttle controls how often we recycle containers
-        let throttle = config.max_lifetime_seconds.map(|lifetime_secs| {
-            // We want to recycle all containers over the lifetime period
-            // So we need concurrent_containers operations over lifetime_seconds
-            // This gives us operations_per_second = concurrent_containers / lifetime_seconds
-            let ops_per_sec = if lifetime_secs.get() > u64::from(u32::MAX) {
-                // If lifetime is huge, just do 1 op/sec
-                NonZeroU32::MIN
-            } else {
-                #[allow(clippy::cast_possible_truncation)]
-                let lifetime_secs_u32 = lifetime_secs.get() as u32;
-                let ops = concurrent_containers
-                    .get()
-                    .saturating_div(lifetime_secs_u32);
-                // Ensure at least 1 operation per second
-                NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN)
-            };
+        // Configure throttle for recycling. The throttle controls how often we recycle containers.
+        let throttle = if config.max_lifetime_seconds == NonZeroU32::MAX {
+            // MAX means no recycling
+            None
+        } else {
+            // We want to recycle all containers over the lifetime period, so we need
+            // concurrent_containers operations over lifetime_seconds. This gives us
+            // operations_per_second = concurrent_containers / lifetime_seconds.
+            let ops = concurrent_containers
+                .get()
+                .saturating_div(config.max_lifetime_seconds.get());
+            let ops_per_sec = NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN);
 
-            let throttle_config = lading_throttle::Config::Stable {
-                maximum_capacity: ops_per_sec,
-                timeout_micros: 0,
-            };
-            Throttle::new_with_config(throttle_config)
-        });
+            Some(Builder::stable(ops_per_sec).build())
+        };
 
         Ok(Self {
             config: config.clone(),
@@ -127,290 +137,31 @@ impl Container {
     ///
     /// Will return an error if Docker connection fails, image pulling fails,
     /// container creation fails, container start fails, or container removal fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if container index cannot be converted to u32.
     #[allow(clippy::too_many_lines)]
     pub async fn spin(mut self) -> Result<(), Error> {
         info!(
-            "Container generator running: {}:{}",
-            self.config.repository, self.config.tag
+            "Container generator running: {repository}:{tag}",
+            repository = self.config.repository,
+            tag = self.config.tag
         );
 
         let docker = Docker::connect_with_local_defaults()?;
-        let full_image = format!("{}:{}", self.config.repository, self.config.tag);
+        let full_image = format!(
+            "{repository}:{tag}",
+            repository = self.config.repository,
+            tag = self.config.tag
+        );
 
         debug!("Ensuring image is available: {full_image}");
-        Self::pull_image(&docker, &full_image).await?;
-
-        let mut machine = StateMachine::new(self.concurrent_containers.get());
-        let mut event = Event::Started;
-
-        // Track containers by index
-        let mut containers: HashMap<u32, ContainerCreateResponse> = HashMap::new();
-
-        loop {
-            let operation = machine.next(event)?;
-            debug!("State machine: {:?} -> {:?}", machine.state(), operation);
-
-            event = match operation {
-                Operation::CreateAllContainers => {
-                    debug!("Creating all {} containers", self.concurrent_containers);
-                    let result = self.create_all_containers(&docker, &full_image).await;
-
-                    match result {
-                        Ok(created) => {
-                            for (idx, container) in created.into_iter().enumerate() {
-                                #[allow(clippy::cast_possible_truncation)]
-                                let idx_u32 = idx as u32;
-                                containers.insert(idx_u32, container);
-                            }
-                            debug!("Successfully created all containers");
-                            Event::AllContainersCreated { success: true }
-                        }
-                        Err(e) => {
-                            warn!("Failed to create all containers: {e}");
-                            Event::AllContainersCreated { success: false }
-                        }
-                    }
-                }
-                Operation::CreateContainer { index } => {
-                    debug!("Creating container {index}");
-                    let result = self
-                        .create_single_container(&docker, &full_image, index)
-                        .await;
-
-                    match result {
-                        Ok(container) => {
-                            containers.insert(index, container);
-                            debug!("Successfully created container {index}");
-                            Event::ContainerCreated {
-                                index,
-                                success: true,
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to create container {index}: {e}");
-                            Event::ContainerCreated {
-                                index,
-                                success: false,
-                            }
-                        }
-                    }
-                }
-                Operation::StopContainer { index } => {
-                    debug!("Stopping container {index}");
-                    let container = containers.get(&index);
-
-                    let result = if let Some(container) = container {
-                        Self::stop_and_remove_container(&docker, container).await
-                    } else {
-                        Err(Error::Generic(format!("Container {index} not found")))
-                    };
-
-                    match result {
-                        Ok(()) => {
-                            containers.remove(&index);
-                            debug!("Successfully stopped container {index}");
-                            Event::ContainerStopped {
-                                index,
-                                success: true,
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to stop container {index}: {e}");
-                            Event::ContainerStopped {
-                                index,
-                                success: false,
-                            }
-                        }
-                    }
-                }
-                Operation::Wait => self.handle_wait(&docker, &containers).await,
-                Operation::StopAllContainers => {
-                    debug!("Stopping all containers for shutdown");
-                    let result = self.stop_all_containers(&docker, containers.values()).await;
-
-                    match result {
-                        Ok(()) => {
-                            debug!("Successfully stopped all containers");
-                            Event::AllContainersStopped { success: true }
-                        }
-                        Err(e) => {
-                            warn!("Failed to stop all containers: {e}");
-                            Event::AllContainersStopped { success: false }
-                        }
-                    }
-                }
-                Operation::Exit => {
-                    debug!("Exiting generator");
-                    return Ok(());
-                }
-            };
-        }
-    }
-
-    async fn handle_wait(
-        &mut self,
-        docker: &Docker,
-        containers: &HashMap<u32, ContainerCreateResponse>,
-    ) -> state_machine::Event {
-        // Handle throttle or just wait for shutdown
-        if let Some(ref mut throttle) = self.throttle {
-            let shutdown_wait = self.shutdown.clone().recv();
-            let liveness_check = Self::check_container_liveness(docker, containers);
-
-            tokio::select! {
-                result = throttle.wait() => {
-                    match result {
-                        Ok(()) => state_machine::Event::RecycleNext,
-                        Err(e) => {
-                            warn!("Throttle error: {e}");
-                            // Return RecycleNext anyway to continue
-                            state_machine::Event::RecycleNext
-                        }
-                    }
-                }
-                result = liveness_check => {
-                    if let Err(e) = result {
-                        warn!("Container liveness check failed: {e}");
-                        state_machine::Event::ShutdownSignaled
-                    } else {
-                        // Continue waiting
-                        Box::pin(async { self.handle_wait(docker, containers).await }).await
-                    }
-                }
-                () = shutdown_wait => {
-                    debug!("Shutdown signal received");
-                    state_machine::Event::ShutdownSignaled
-                }
-            }
-        } else {
-            // No throttle, just wait for shutdown
-            self.shutdown.clone().recv().await;
-            debug!("Shutdown signal received");
-            state_machine::Event::ShutdownSignaled
-        }
-    }
-
-    async fn check_container_liveness(
-        docker: &Docker,
-        containers: &HashMap<u32, ContainerCreateResponse>,
-    ) -> Result<(), Error> {
-        // Check container liveness every 10 seconds
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
-        for (idx, container) in containers {
-            let inspect_options = InspectContainerOptionsBuilder::default().build();
-            if let Some(state) = docker
-                .inspect_container(&container.id, Some(inspect_options))
-                .await?
-                .state
-                && !state.running.unwrap_or(false)
-            {
-                return Err(Error::Generic(format!(
-                    "Container {} (index {}) is not running anymore",
-                    container.id, idx
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    async fn create_all_containers(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-    ) -> Result<Vec<ContainerCreateResponse>, Error> {
-        let mut set = JoinSet::new();
-
-        for idx in 0..self.concurrent_containers.get() {
-            let permit = self
-                .operation_semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|e| Error::Generic(format!("Semaphore error: {e}")))?;
-            let docker = docker.clone();
-            let config = self.config.clone();
-            let full_image = full_image.to_string();
-
-            set.spawn(async move {
-                let result = config
-                    .create_and_start_container(&docker, &full_image, idx)
-                    .await;
-                drop(permit);
-                result
-            });
-        }
-
-        set.join_all()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-    }
-
-    async fn create_single_container(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-        index: u32,
-    ) -> Result<ContainerCreateResponse, Error> {
-        let _permit = self
-            .operation_semaphore
-            .acquire()
-            .await
-            .map_err(|e| Error::Generic(format!("Semaphore error: {e}")))?;
-
-        self.config
-            .create_and_start_container(docker, full_image, index)
-            .await
-    }
-
-    async fn stop_all_containers<'a, I>(&self, docker: &Docker, containers: I) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = &'a ContainerCreateResponse>,
-    {
-        let mut set = JoinSet::new();
-
-        for container in containers {
-            let permit = self
-                .operation_semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|e| Error::Generic(format!("Semaphore error: {e}")))?;
-            let docker = docker.clone();
-            let container = container.clone();
-
-            set.spawn(async move {
-                let result = Container::stop_and_remove_container(&docker, &container).await;
-                drop(permit);
-                result
-            });
-        }
-
-        // Collect all results and check for errors
-        let results = set.join_all().await;
-        let mut had_error = false;
-        for result in results {
-            if let Err(e) = result {
-                warn!("Failed to stop container: {e}");
-                had_error = true;
-            }
-        }
-        
-        if had_error {
-            Err(Error::Generic("One or more containers failed to stop".to_string()))
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
         let create_image_options = CreateImageOptionsBuilder::default()
-            .from_image(full_image)
+            .from_image(&full_image)
             .build();
 
         let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
-
         while let Some(item) = pull_stream.next().await {
             match item {
                 Ok(status) => {
@@ -425,57 +176,178 @@ impl Container {
             }
         }
 
-        Ok(())
+        let mut machine = StateMachine::new(self.concurrent_containers.get());
+        let mut event = Event::Started;
+
+        let mut containers: HashMap<u32, ContainerCreateResponse> = HashMap::new();
+
+        loop {
+            let operation = machine.next(event)?;
+            debug!("State machine: {:?} -> {:?}", machine.state(), operation);
+
+            event = match operation {
+                Operation::CreateAllContainers => {
+                    let result = self.create_all_containers(&docker, &full_image).await;
+
+                    if let Ok(created) = result {
+                        for (idx, container) in created.into_iter().enumerate() {
+                            let idx_u32 = u32::try_from(idx).expect("container index overflow");
+                            containers.insert(idx_u32, container);
+                        }
+                        debug_assert_eq!(
+                            containers.len(),
+                            self.concurrent_containers.get() as usize,
+                            "containers HashMap size mismatch"
+                        );
+                        Event::AllContainersReady
+                    } else {
+                        warn!("Failed to create all containers");
+                        Event::ShutdownSignaled
+                    }
+                }
+                Operation::RecycleContainer { index } => {
+                    debug!("Recycling container {index}");
+
+                    if let Some(old_container) = containers.remove(&index)
+                        && let Err(e) = stop_and_remove_container(&docker, &old_container).await
+                    {
+                        warn!("Failed to stop old container {index}: {e}");
+                    }
+
+                    let result = self
+                        .create_single_container(&docker, &full_image, index)
+                        .await;
+
+                    if let Ok(new_container) = result {
+                        containers.insert(index, new_container);
+                    } else {
+                        warn!("Failed to create new container {index}");
+                    }
+
+                    debug_assert!(
+                        containers.len() <= self.concurrent_containers.get() as usize,
+                        "containers HashMap exceeded expected size"
+                    );
+
+                    Event::ContainerRecycled { index }
+                }
+                Operation::Wait => {
+                    if let Some(ref mut throttle) = self.throttle {
+                        let shutdown_wait = self.shutdown.clone().recv();
+                        tokio::select! {
+                            result = throttle.wait() => {
+                                match result {
+                                    Ok(()) => state_machine::Event::RecycleNext,
+                                    Err(e) => {
+                                        warn!("Throttle error: {e}");
+                                        state_machine::Event::RecycleNext
+                                    }
+                                }
+                            }
+                            () = shutdown_wait => state_machine::Event::ShutdownSignaled
+                        }
+                    } else {
+                        self.shutdown.clone().recv().await;
+                        state_machine::Event::ShutdownSignaled
+                    }
+                }
+                Operation::StopAllContainers => {
+                    let _ = self.stop_all_containers(&docker, containers.values()).await;
+                    Event::AllContainersStopped
+                }
+                Operation::Exit => return Ok(()),
+            };
+        }
     }
 
-    async fn stop_and_remove_container(
+    async fn create_all_containers(
+        &self,
         docker: &Docker,
-        container: &ContainerCreateResponse,
-    ) -> Result<(), Error> {
-        info!("Stopping container: {id}", id = container.id);
-        let stop_options = StopContainerOptionsBuilder::default().t(5).build();
-        if let Err(e) = docker
-            .stop_container(&container.id, Some(stop_options))
-            .await
-        {
-            warn!("Error stopping container {id}: {e}", id = container.id);
+        full_image: &str,
+    ) -> Result<Vec<ContainerCreateResponse>, Error> {
+        let mut containers = Vec::new();
+
+        for idx in 0..self.concurrent_containers.get() {
+            let container = self
+                .config
+                .create_and_start_container(docker, full_image, idx)
+                .await?;
+            containers.push(container);
         }
 
-        debug!("Removing container: {id}", id = container.id);
-        let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
-        docker
-            .remove_container(&container.id, Some(remove_options))
-            .await?;
+        Ok(containers)
+    }
 
-        debug!("Removed container: {id}", id = container.id);
+    async fn create_single_container(
+        &self,
+        docker: &Docker,
+        full_image: &str,
+        index: u32,
+    ) -> Result<ContainerCreateResponse, Error> {
+        self.config
+            .create_and_start_container(docker, full_image, index)
+            .await
+    }
 
+    async fn stop_all_containers<'a, I>(&self, docker: &Docker, containers: I) -> Result<(), Error>
+    where
+        I: IntoIterator<Item = &'a ContainerCreateResponse>,
+    {
+        for container in containers {
+            stop_and_remove_container(docker, container).await?;
+        }
         Ok(())
     }
+}
+
+async fn stop_and_remove_container(
+    docker: &Docker,
+    container: &ContainerCreateResponse,
+) -> Result<(), Error> {
+    info!("Stopping container: {id}", id = container.id);
+    let stop_options = StopContainerOptionsBuilder::default().t(5).build();
+    if let Err(e) = docker
+        .stop_container(&container.id, Some(stop_options))
+        .await
+    {
+        warn!("Error stopping container {id}: {e}", id = container.id);
+    }
+
+    debug!("Removing container: {id}", id = container.id);
+    let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
+    docker
+        .remove_container(&container.id, Some(remove_options))
+        .await?;
+
+    debug!("Removed container: {id}", id = container.id);
+
+    Ok(())
 }
 
 impl Config {
     /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
     #[must_use]
     fn to_container_config(&self, full_image: &str) -> ContainerCreateBody {
-        // The Docker API requires exposed ports in the format {"<port>/<protocol>": {}}.
-        // For example: {"80/tcp": {}, "443/tcp": {}}
-        // The port specification is in the key, and the value must be an empty object.
-        // Bollard represents the empty object as HashMap<(), ()>, which is required by their API.
+        // Docker API requires exposed ports as {"<port>/<protocol>": {}}
+        // Bollard represents the empty object as HashMap<(), ()>
         #[allow(clippy::zero_sized_map_values)]
-        let exposed_ports = self.exposed_ports.as_ref().map(|ports| {
-            ports
-                .iter()
-                .map(|port| {
-                    // Ensure port includes protocol (default to tcp if not specified)
-                    let port_with_protocol = if port.contains('/') {
-                        port.clone()
-                    } else {
-                        format!("{port}/tcp")
-                    };
-                    (port_with_protocol, HashMap::<(), ()>::new())
-                })
-                .collect()
-        });
+        let exposed_ports = if self.exposed_ports.is_empty() {
+            None
+        } else {
+            Some(
+                self.exposed_ports
+                    .iter()
+                    .map(|port| {
+                        let port_with_protocol = if port.contains('/') {
+                            port.clone()
+                        } else {
+                            format!("{port}/tcp")
+                        };
+                        (port_with_protocol, HashMap::<(), ()>::new())
+                    })
+                    .collect(),
+            )
+        };
 
         ContainerCreateBody {
             image: Some(full_image.to_string()),
@@ -483,7 +355,7 @@ impl Config {
             cmd: self.args.clone(),
             env: self.env.clone(),
             labels: self.labels.clone(),
-            network_disabled: self.network_disabled,
+            network_disabled: Some(self.network_disabled),
             exposed_ports,
             ..Default::default()
         }
