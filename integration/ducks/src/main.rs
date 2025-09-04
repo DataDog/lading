@@ -24,19 +24,20 @@ use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto;
 use once_cell::sync::OnceCell;
+use shared::integration_api::integration_target_server::{
+    IntegrationTarget, IntegrationTargetServer,
+};
 use shared::{
     DucksConfig,
     integration_api::{
         self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
     },
 };
-#[cfg(unix)]
-use shared::integration_api::integration_target_server::{IntegrationTarget, IntegrationTargetServer};
 use sketches_ddsketch::DDSketch;
-#[cfg(unix)]
-use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 #[cfg(not(unix))]
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc};
+#[cfg(unix)]
+use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
@@ -50,10 +51,10 @@ use tokio_stream::Stream;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
 use tracing::error;
-#[cfg(unix)]
-use tracing::{debug, trace, warn};
 #[cfg(not(unix))]
 use tracing::{debug, trace};
+#[cfg(unix)]
+use tracing::{debug, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
 static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
@@ -180,6 +181,7 @@ pub struct DucksTarget {
     shutdown_tx: mpsc::Sender<()>,
 }
 
+#[cfg(unix)]
 #[tonic::async_trait]
 impl IntegrationTarget for DucksTarget {
     type GetLogsStream = Pin<Box<dyn Stream<Item = Result<LogMessage, Status>> + Send>>;

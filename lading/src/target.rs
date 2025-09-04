@@ -317,6 +317,7 @@ impl Server {
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
+        #[cfg(unix)]
         let raw_pid: i32 = config.pid.get();
 
         // Verify that the given PID is valid (Unix only)

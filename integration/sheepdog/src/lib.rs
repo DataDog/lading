@@ -19,15 +19,22 @@
 //! `RUST_LOG=trace cargo test -p sheepdog`
 //!
 
+#[cfg(not(unix))]
+use std::io::Read;
+#[cfg(unix)]
 use std::{
     io::{Read, Write},
-    path::PathBuf,
     process::Stdio,
-    time::Duration,
 };
+use std::{path::PathBuf, time::Duration};
 
+#[cfg(unix)]
 use anyhow::Context;
+#[cfg(unix)]
 use hyper_util::rt::TokioIo;
+#[cfg(not(unix))]
+use shared::{DucksConfig, integration_api};
+#[cfg(unix)]
 use shared::{
     DucksConfig,
     integration_api::{self, integration_target_client::IntegrationTargetClient},
@@ -35,8 +42,13 @@ use shared::{
 use tempfile::TempDir;
 #[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(unix)]
 use tokio::process::Command;
+#[cfg(unix)]
 use tonic::transport::Endpoint;
+#[cfg(not(unix))]
+use tracing::debug;
+#[cfg(unix)]
 use tracing::{debug, warn};
 
 #[derive(Debug)]
