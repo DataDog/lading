@@ -3,22 +3,19 @@
 /// The state of the generator
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    /// Initial state, creating containers
-    Initializing {
-        /// If Some, we're creating a specific container. If None, create all containers
-        index: Option<u32>,
-    },
-    /// Running state, waiting for recycle trigger
+    /// Initial state, need to create all containers
+    Starting,
+    /// Running state, all containers exist
     Running {
-        /// Current index in round-robin recycling
+        /// Next container index to recycle (round-robin)
+        next_recycle_index: u32,
+    },
+    /// Recycling a specific container
+    Recycling {
+        /// Index of container being recycled
         index: u32,
     },
-    /// Stopping a specific container before recycling
-    StoppingContainer {
-        /// Index of container being stopped
-        index: u32,
-    },
-    /// Shutting down, cleaning up containers
+    /// Shutting down
     ShuttingDown,
     /// Terminal state
     Terminated,
@@ -29,13 +26,11 @@ pub enum State {
 pub(super) enum Operation {
     /// Create all containers at startup
     CreateAllContainers,
-    /// Create a single container during recycling
-    CreateContainer { index: u32 },
-    /// Stop and remove a single container before recycling
-    StopContainer { index: u32 },
+    /// Replace a container (stop old, start new)
+    RecycleContainer { index: u32 },
     /// Wait for next action (throttle or idle)
     Wait,
-    /// Stop and remove all containers during shutdown
+    /// Stop all containers during shutdown
     StopAllContainers,
     /// Exit the generator
     Exit,
@@ -44,20 +39,18 @@ pub(super) enum Operation {
 /// Events that can drive the state machine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    /// Initial startup event
+    /// Initial startup
     Started,
-    /// Creation of all containers attempted
-    AllContainersCreated { success: bool },
-    /// Creation of a single container with given index
-    ContainerCreated { index: u32, success: bool },
-    /// Stopping of a single container with given index
-    ContainerStopped { index: u32, success: bool },
-    /// Caller is ready to recycle the next eligible container
+    /// All containers created
+    AllContainersReady,
+    /// Container recycled (old stopped, new started)
+    ContainerRecycled { index: u32 },
+    /// Time to recycle next container
     RecycleNext,
     /// Shutdown signal received
     ShutdownSignaled,
-    /// Attempt to stop all containers
-    AllContainersStopped { success: bool },
+    /// All containers stopped
+    AllContainersStopped,
 }
 
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,8 +62,11 @@ pub enum Error {
 
 /// State machine for container generator
 ///
-/// This component contains the logic for state transitions without IO encumbrance.
-/// The parent `Container` struct handles Docker API interactions and timing.
+/// The goal of this component is to contain the logic for state transitions
+/// within this generator _without_ IO encumbrance, neither timing information
+/// nor Docker API interactions. This leaves `super::Container` to deal with the clock
+/// and the Docker API. That is, that mechanism should follow the output of this
+/// mechanism's `next` without consideration.
 #[derive(Debug, Clone)]
 pub(super) struct StateMachine {
     state: State,
@@ -81,7 +77,7 @@ impl StateMachine {
     /// Create a new state machine
     pub(super) fn new(concurrent_containers: u32) -> Self {
         Self {
-            state: State::Initializing { index: None },
+            state: State::Starting,
             concurrent_containers,
         }
     }
@@ -95,82 +91,57 @@ impl StateMachine {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidTransition` if the event is not valid for the present state.
+    /// Function will error with `InvalidTransition` if the `event` is not valid
+    /// for the present state.
     pub(super) fn next(&mut self, event: Event) -> Result<Operation, Error> {
-        let (next_state, operation) = match self.state {
-            // Initial startup state: no containers exist yet
-            State::Initializing { index: None } => match event {
-                Event::Started => (self.state, Operation::CreateAllContainers),
-                Event::AllContainersCreated { success: true } => {
-                    (State::Running { index: 0 }, Operation::Wait)
-                }
-                Event::AllContainersCreated { success: false } => {
-                    (State::ShuttingDown, Operation::StopAllContainers)
-                }
-                Event::ShutdownSignaled => (State::ShuttingDown, Operation::StopAllContainers),
-                _ => {
-                    return Err(Error::InvalidTransition {
-                        from: self.state,
-                        via: event,
-                    });
-                }
-            },
-            // Recreation state: a specific container is being recreated
-            State::Initializing { index: Some(idx) } => match event {
-                Event::ContainerCreated { index, success: _ } if index == idx => {
-                    let next_index = (index + 1) % self.concurrent_containers;
-                    (State::Running { index: next_index }, Operation::Wait)
-                }
-                Event::ShutdownSignaled => (State::ShuttingDown, Operation::StopAllContainers),
-                _ => {
-                    return Err(Error::InvalidTransition {
-                        from: self.state,
-                        via: event,
-                    });
-                }
-            },
-            // Normal operation: all containers exist, waiting to recycle
-            State::Running { index } => match event {
-                Event::RecycleNext => (
-                    State::StoppingContainer { index },
-                    Operation::StopContainer { index },
-                ),
-                Event::ShutdownSignaled => (State::ShuttingDown, Operation::StopAllContainers),
-                _ => {
-                    return Err(Error::InvalidTransition {
-                        from: self.state,
-                        via: event,
-                    });
-                }
-            },
-            // Stopping container before recycling
-            State::StoppingContainer { index } => match event {
-                Event::ContainerStopped {
-                    index: stopped_idx, ..
-                } if stopped_idx == index => (
-                    State::Initializing { index: Some(index) },
-                    Operation::CreateContainer { index },
-                ),
-                Event::ShutdownSignaled => (State::ShuttingDown, Operation::StopAllContainers),
-                _ => {
-                    return Err(Error::InvalidTransition {
-                        from: self.state,
-                        via: event,
-                    });
-                }
-            },
-            // Shutting down
-            State::ShuttingDown => match event {
-                Event::AllContainersStopped { .. } => (State::Terminated, Operation::Exit),
-                _ => {
-                    return Err(Error::InvalidTransition {
-                        from: self.state,
-                        via: event,
-                    });
-                }
-            },
-            // Terminal state
-            State::Terminated => {
+        let (next_state, operation) = match (self.state, event) {
+            // Starting state transitions
+            (State::Starting, Event::Started) => (State::Starting, Operation::CreateAllContainers),
+            (State::Starting, Event::AllContainersReady) => (
+                State::Running {
+                    next_recycle_index: 0,
+                },
+                Operation::Wait,
+            ),
+            // Shutdown can happen from any non-terminal state
+            (
+                State::Starting | State::Running { .. } | State::Recycling { .. },
+                Event::ShutdownSignaled,
+            ) => (State::ShuttingDown, Operation::StopAllContainers),
+
+            // Running state transitions
+            (State::Running { next_recycle_index }, Event::RecycleNext) => (
+                State::Recycling {
+                    index: next_recycle_index,
+                },
+                Operation::RecycleContainer {
+                    index: next_recycle_index,
+                },
+            ),
+
+            // Recycling state transitions
+            (
+                State::Recycling { index },
+                Event::ContainerRecycled {
+                    index: recycled_idx,
+                },
+            ) if index == recycled_idx => {
+                let next_index = (index + 1) % self.concurrent_containers;
+                (
+                    State::Running {
+                        next_recycle_index: next_index,
+                    },
+                    Operation::Wait,
+                )
+            }
+
+            // Shutting down state transitions
+            (State::ShuttingDown, Event::AllContainersStopped) => {
+                (State::Terminated, Operation::Exit)
+            }
+
+            // Any other transition is invalid
+            _ => {
                 return Err(Error::InvalidTransition {
                     from: self.state,
                     via: event,
@@ -191,290 +162,207 @@ mod tests {
     #[test]
     fn initial_state() {
         let machine = StateMachine::new(3);
-        assert_eq!(machine.state(), &State::Initializing { index: None });
+        assert_eq!(machine.state(), &State::Starting);
+    }
+
+    #[test]
+    fn basic_lifecycle() {
+        let mut machine = StateMachine::new(3);
+
+        // Start -> create all containers
+        let op = machine.next(Event::Started).unwrap();
+        assert_eq!(op, Operation::CreateAllContainers);
+        assert_eq!(machine.state(), &State::Starting);
+
+        // Containers created -> running
+        let op = machine.next(Event::AllContainersReady).unwrap();
+        assert_eq!(op, Operation::Wait);
+        assert_eq!(
+            machine.state(),
+            &State::Running {
+                next_recycle_index: 0
+            }
+        );
+
+        // Recycle first container
+        let op = machine.next(Event::RecycleNext).unwrap();
+        assert_eq!(op, Operation::RecycleContainer { index: 0 });
+        assert_eq!(machine.state(), &State::Recycling { index: 0 });
+
+        let op = machine.next(Event::ContainerRecycled { index: 0 }).unwrap();
+        assert_eq!(op, Operation::Wait);
+        assert_eq!(
+            machine.state(),
+            &State::Running {
+                next_recycle_index: 1
+            }
+        );
+
+        // Recycle second container
+        let op = machine.next(Event::RecycleNext).unwrap();
+        assert_eq!(op, Operation::RecycleContainer { index: 1 });
+
+        let op = machine.next(Event::ContainerRecycled { index: 1 }).unwrap();
+        assert_eq!(op, Operation::Wait);
+        assert_eq!(
+            machine.state(),
+            &State::Running {
+                next_recycle_index: 2
+            }
+        );
+
+        // Shutdown
+        let op = machine.next(Event::ShutdownSignaled).unwrap();
+        assert_eq!(op, Operation::StopAllContainers);
+        assert_eq!(machine.state(), &State::ShuttingDown);
+
+        let op = machine.next(Event::AllContainersStopped).unwrap();
+        assert_eq!(op, Operation::Exit);
+        assert_eq!(machine.state(), &State::Terminated);
     }
 
     proptest! {
         #[test]
-        fn invalid_transitions_rejected(containers in 1u32..10u32) {
-            // Test Initializing { index: None }
-            let mut machine = StateMachine::new(containers);
-            assert!(machine.next(Event::Started).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            assert!(machine.next(Event::ShutdownSignaled).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            assert!(machine.next(Event::RecycleNext).is_err());
-            assert!(machine.next(Event::ContainerCreated { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::ContainerStopped { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::AllContainersStopped { success: true }).is_err());
-
-            // Test Running state
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-
-            assert!(machine.next(Event::RecycleNext).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-
-            assert!(machine.next(Event::ShutdownSignaled).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-
-            assert!(machine.next(Event::Started).is_err());
-            assert!(machine.next(Event::AllContainersCreated { success: true }).is_err());
-            assert!(machine.next(Event::ContainerCreated { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::ContainerStopped { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::AllContainersStopped { success: true }).is_err());
-
-            // Test StoppingContainer state
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::RecycleNext).unwrap();
-
-            assert!(machine.next(Event::ContainerStopped { index: 0, success: true }).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::RecycleNext).unwrap();
-
-            assert!(machine.next(Event::ShutdownSignaled).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::RecycleNext).unwrap();
-
-            assert!(machine.next(Event::Started).is_err());
-            assert!(machine.next(Event::RecycleNext).is_err());
-            assert!(machine.next(Event::AllContainersCreated { success: true }).is_err());
-            assert!(machine.next(Event::ContainerCreated { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::ContainerStopped { index: 1, success: true }).is_err()); // Wrong index
-            assert!(machine.next(Event::AllContainersStopped { success: true }).is_err());
-
-            // Test ShuttingDown state
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::ShutdownSignaled).unwrap();
-
-            assert!(machine.next(Event::AllContainersStopped { success: true }).is_ok());
-
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::ShutdownSignaled).unwrap();
-
-            assert!(machine.next(Event::Started).is_err());
-            assert!(machine.next(Event::RecycleNext).is_err());
-            assert!(machine.next(Event::ShutdownSignaled).is_err());
-            assert!(machine.next(Event::AllContainersCreated { success: true }).is_err());
-            assert!(machine.next(Event::ContainerCreated { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::ContainerStopped { index: 0, success: true }).is_err());
-
-            // Test Terminated state rejects everything
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            machine.next(Event::ShutdownSignaled).unwrap();
-            machine.next(Event::AllContainersStopped { success: true }).unwrap();
-
-            assert!(machine.next(Event::Started).is_err());
-            assert!(machine.next(Event::RecycleNext).is_err());
-            assert!(machine.next(Event::ShutdownSignaled).is_err());
-            assert!(machine.next(Event::AllContainersCreated { success: true }).is_err());
-            assert!(machine.next(Event::ContainerCreated { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::ContainerStopped { index: 0, success: true }).is_err());
-            assert!(machine.next(Event::AllContainersStopped { success: true }).is_err());
-        }
-
-        #[test]
-        fn recycling_follows_round_robin_order(containers in 2u32..20u32) {
+        fn round_robin_recycling(containers in 2u32..10u32) {
             let mut machine = StateMachine::new(containers);
 
             // Initialize to running state
             machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
+            machine.next(Event::AllContainersReady).unwrap();
 
-            // Perform multiple recycle cycles to test ordering
-            let mut expected_index = 0u32;
-            for _ in 0..(containers * 3) {
-                // Verify we're targeting the expected container
-                if let State::Running { index } = machine.state() {
-                    assert_eq!(*index, expected_index);
-                }
+            // Perform multiple recycle cycles to test round-robin ordering
+            for cycle in 0..3 {
+                for idx in 0..containers {
+                    let expected_idx = idx;
 
-                machine.next(Event::RecycleNext).unwrap();
+                    // Verify we're recycling the expected container
+                    if let State::Running { next_recycle_index } = machine.state() {
+                        assert_eq!(*next_recycle_index, expected_idx);
+                    }
 
-                // Verify stopping targets correct index
-                if let State::StoppingContainer { index } = machine.state() {
-                    assert_eq!(*index, expected_index);
-                }
+                    // Trigger recycle
+                    let op = machine.next(Event::RecycleNext).unwrap();
+                    assert_eq!(op, Operation::RecycleContainer { index: expected_idx });
 
-                machine.next(Event::ContainerStopped { index: expected_index, success: true }).unwrap();
+                    // Complete recycle
+                    machine.next(Event::ContainerRecycled { index: expected_idx }).unwrap();
 
-                // Verify recreation targets correct index
-                if let State::Initializing { index: Some(index) } = machine.state() {
-                    assert_eq!(*index, expected_index);
-                }
-
-                machine.next(Event::ContainerCreated { index: expected_index, success: true }).unwrap();
-
-                // Update expected index with wrap-around
-                expected_index = (expected_index + 1) % containers;
-
-                // Verify we're now running with next index
-                if let State::Running { index } = machine.state() {
-                    assert_eq!(*index, expected_index);
+                    // Verify next index wraps around correctly
+                    let next_expected = (expected_idx + 1) % containers;
+                    if let State::Running { next_recycle_index } = machine.state() {
+                        assert_eq!(*next_recycle_index, next_expected,
+                                   "After recycling container {expected_idx} in cycle {cycle}, expected next index {next_expected}");
+                    }
                 }
             }
         }
 
         #[test]
-        fn success_failure_equivalence(containers in 1u32..10u32, success: bool) {
-            // AllContainersCreated with success=false goes to ShuttingDown
+        fn indices_always_in_bounds(containers in 1u32..20u32) {
             let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success }).unwrap();
 
-            if success {
-                assert_eq!(machine.state(), &State::Running { index: 0 });
-            } else {
-                assert_eq!(machine.state(), &State::ShuttingDown);
+            machine.next(Event::Started).unwrap();
+            machine.next(Event::AllContainersReady).unwrap();
+
+            // Perform many cycles to test bounds
+            for _ in 0..(containers * 5) {
+                // Check running state index
+                if let State::Running { next_recycle_index } = machine.state() {
+                    assert!(*next_recycle_index < containers,
+                            "Running index {index} out of bounds for {count} containers",
+                            index = next_recycle_index, count = containers);
+                }
+
+                // Trigger recycle and check operation index
+                if let Operation::RecycleContainer { index } = machine.next(Event::RecycleNext).unwrap() {
+                    assert!(index < containers,
+                            "Recycle index {index} out of bounds for {count} containers",
+                            index = index, count = containers);
+
+                    // Complete the recycle
+                    machine.next(Event::ContainerRecycled { index }).unwrap();
+                }
             }
+        }
 
-            // ContainerStopped success/failure both progress to Initializing
+        #[test]
+        fn shutdown_from_any_state(containers in 1u32..5u32) {
+            // Test shutdown from Starting state
+            let mut machine = StateMachine::new(containers);
+            machine.next(Event::ShutdownSignaled).unwrap();
+            machine.next(Event::AllContainersStopped).unwrap();
+            assert_eq!(machine.state(), &State::Terminated);
+
+            // Test shutdown from Running state
             let mut machine = StateMachine::new(containers);
             machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
+            machine.next(Event::AllContainersReady).unwrap();
+            machine.next(Event::ShutdownSignaled).unwrap();
+            machine.next(Event::AllContainersStopped).unwrap();
+            assert_eq!(machine.state(), &State::Terminated);
+
+            // Test shutdown from Recycling state
+            let mut machine = StateMachine::new(containers);
+            machine.next(Event::Started).unwrap();
+            machine.next(Event::AllContainersReady).unwrap();
             machine.next(Event::RecycleNext).unwrap();
-            machine.next(Event::ContainerStopped { index: 0, success }).unwrap();
-            assert_eq!(machine.state(), &State::Initializing { index: Some(0) });
-
-            // ContainerCreated success/failure both progress to Running
-            machine.next(Event::ContainerCreated { index: 0, success }).unwrap();
-            assert_eq!(machine.state(), &State::Running { index: 1 % containers });
-
-            // AllContainersStopped success/failure both progress to Terminated
-            let mut machine = StateMachine::new(containers);
-            machine.next(Event::Started).unwrap();
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
             machine.next(Event::ShutdownSignaled).unwrap();
-            machine.next(Event::AllContainersStopped { success }).unwrap();
+            machine.next(Event::AllContainersStopped).unwrap();
             assert_eq!(machine.state(), &State::Terminated);
         }
 
         #[test]
-        fn indices_never_exceed_bounds(containers in 1u32..100u32) {
+        fn invalid_transitions_rejected(containers in 1u32..5u32) {
             let mut machine = StateMachine::new(containers);
 
-            // Initialize
-            let op = machine.next(Event::Started).unwrap();
-            assert_eq!(op, Operation::CreateAllContainers);
+            // Can't recycle before starting
+            assert!(machine.next(Event::RecycleNext).is_err());
+            assert!(machine.next(Event::ContainerRecycled { index: 0 }).is_err());
 
-            let op = machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            assert_eq!(op, Operation::Wait);
-
-            // Perform many recycle cycles
-            for _ in 0..(containers * 3) {
-                // Verify state indices are within bounds
-                if let State::Running { index } = machine.state() {
-                    assert!(*index < containers);
-                }
-
-                let op = machine.next(Event::RecycleNext).unwrap();
-
-                // Verify operation indices match state and are within bounds
-                let (state_idx, _op_idx) = if let (State::StoppingContainer { index: state_idx }, Operation::StopContainer { index: op_idx }) = (machine.state(), &op) {
-                    assert_eq!(*state_idx, *op_idx);
-                    assert!(*state_idx < containers);
-                    assert!(*op_idx < containers);
-                    (*state_idx, *op_idx)
-                } else {
-                    panic!("Expected StoppingContainer state and StopContainer operation");
-                };
-
-                let op = machine.next(Event::ContainerStopped { index: state_idx, success: true }).unwrap();
-
-                // Verify create operation index matches
-                if let Operation::CreateContainer { index: create_idx } = op {
-                    assert_eq!(create_idx, state_idx);
-                    assert!(create_idx < containers);
-                }
-
-                machine.next(Event::ContainerCreated { index: state_idx, success: true }).unwrap();
-            }
-        }
-
-        #[test]
-        fn shutdown_reachable_from_any_state(
-            containers in 1u32..10u32,
-            shutdown_at in 0usize..20usize
-        ) {
-            // Verify ShutdownSignaled can interrupt at any point
-            let mut machine = StateMachine::new(containers);
-            let mut event_count = 0;
-
-            // Initialize
+            // Start normally
             machine.next(Event::Started).unwrap();
-            event_count += 1;
 
-            if event_count == shutdown_at {
-                machine.next(Event::ShutdownSignaled).unwrap();
-                machine.next(Event::AllContainersStopped { success: true }).unwrap();
-                assert_eq!(machine.state(), &State::Terminated);
-                return Ok(());
-            }
+            // Can't recycle before containers ready
+            assert!(machine.next(Event::RecycleNext).is_err());
+            assert!(machine.next(Event::ContainerRecycled { index: 0 }).is_err());
 
-            machine.next(Event::AllContainersCreated { success: true }).unwrap();
-            event_count += 1;
+            // Move to running
+            machine.next(Event::AllContainersReady).unwrap();
 
-            // Perform recycle cycles until shutdown
-            for i in 0..10 {
-                if event_count == shutdown_at {
-                    machine.next(Event::ShutdownSignaled).unwrap();
-                    machine.next(Event::AllContainersStopped { success: true }).unwrap();
-                    assert_eq!(machine.state(), &State::Terminated);
-                    return Ok(());
-                }
+            // Can't send wrong events in running state
+            assert!(machine.next(Event::Started).is_err());
+            assert!(machine.next(Event::AllContainersReady).is_err());
+            assert!(machine.next(Event::ContainerRecycled { index: 0 }).is_err());
 
-                machine.next(Event::RecycleNext).unwrap();
-                event_count += 1;
+            // Move to recycling
+            machine.next(Event::RecycleNext).unwrap();
 
-                if event_count == shutdown_at {
-                    machine.next(Event::ShutdownSignaled).unwrap();
-                    machine.next(Event::AllContainersStopped { success: true }).unwrap();
-                    assert_eq!(machine.state(), &State::Terminated);
-                    return Ok(());
-                }
+            // Can't send wrong events in recycling state
+            assert!(machine.next(Event::Started).is_err());
+            assert!(machine.next(Event::AllContainersReady).is_err());
+            assert!(machine.next(Event::RecycleNext).is_err());
 
-                let index = i % containers;
-                machine.next(Event::ContainerStopped { index, success: true }).unwrap();
-                event_count += 1;
+            // Wrong index should be rejected
+            assert!(machine.next(Event::ContainerRecycled { index: 1 }).is_err());
 
-                if event_count == shutdown_at {
-                    machine.next(Event::ShutdownSignaled).unwrap();
-                    machine.next(Event::AllContainersStopped { success: true }).unwrap();
-                    assert_eq!(machine.state(), &State::Terminated);
-                    return Ok(());
-                }
+            // Correct index works
+            machine.next(Event::ContainerRecycled { index: 0 }).unwrap();
 
-                machine.next(Event::ContainerCreated { index, success: true }).unwrap();
-                event_count += 1;
-            }
-
-            // Final shutdown always works
+            // Move to shutdown
             machine.next(Event::ShutdownSignaled).unwrap();
-            machine.next(Event::AllContainersStopped { success: true }).unwrap();
-            assert_eq!(machine.state(), &State::Terminated);
+
+            // Can't do anything except complete shutdown
+            assert!(machine.next(Event::Started).is_err());
+            assert!(machine.next(Event::RecycleNext).is_err());
+            assert!(machine.next(Event::AllContainersReady).is_err());
+
+            // Complete shutdown
+            machine.next(Event::AllContainersStopped).unwrap();
+
+            // Terminal state rejects everything
+            assert!(machine.next(Event::Started).is_err());
+            assert!(machine.next(Event::ShutdownSignaled).is_err());
+            assert!(machine.next(Event::AllContainersStopped).is_err());
         }
     }
 }

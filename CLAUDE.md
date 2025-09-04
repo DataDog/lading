@@ -68,6 +68,10 @@ navigate and grep.
 the top of the file, after the module documentation and attributes. This keeps
 imports organized and makes dependencies clear.
 
+**String formatting**: When using format strings with `{}`, always include the
+variable name inside the braces for clarity (e.g., `"{index}"` instead of `"{}"`).
+This makes the code more readable and self-documenting.
+
 We do not allow for warnings: all warnings are errors. Deprecation warnings MUST
 be treated as errors. Lading is written in a "naive" style where abstraction is
 not preferred if a duplicated pattern will satisfy. Our reasoning for this is it
