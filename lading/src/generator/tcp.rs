@@ -31,9 +31,8 @@ use tracing::{error, info, trace};
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
-};
+use crate::generator::common::{ConcurrencyStrategy, MetricsBuilder};
+use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -60,7 +59,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -80,7 +79,7 @@ pub enum Error {
     Zero,
     /// Throttle builder error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] ThrottleBuilderError),
+    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(JoinError),

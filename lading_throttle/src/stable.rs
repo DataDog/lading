@@ -53,6 +53,11 @@ where
             clock,
         }
     }
+
+    /// Get the maximum capacity of this throttle
+    pub(super) fn maximum_capacity(&self) -> u32 {
+        self.valve.maximum_capacity
+    }
 }
 
 /// Represents unused capacity with its expiration time

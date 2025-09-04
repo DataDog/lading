@@ -14,9 +14,13 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 async-trait = { version = "0.1", default-features = false, features = [] }
+byte-unit = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
 
 [lib]
 doctest = false

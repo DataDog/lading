@@ -60,6 +60,11 @@ where
             clock,
         }
     }
+
+    /// Get the maximum capacity of this throttle
+    pub(super) fn maximum_capacity(&self) -> u32 {
+        self.valve.maximum_capacity
+    }
 }
 
 /// The non-async interior to Linear, about which we can make proof claims. The

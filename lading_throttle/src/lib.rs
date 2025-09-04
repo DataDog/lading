@@ -37,8 +37,11 @@ use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use tokio::time::{self, Duration, Instant};
 
+pub mod builder;
 pub mod linear;
 pub mod stable;
+
+pub use builder::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
 
 // An 'interval' is the period in which all counters reset. The throttle makes
 // no claims on units, but consider if a user intends to produce 1Mb/s the
@@ -48,7 +51,7 @@ const INTERVAL_TICKS: u64 = 1_000_000;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 #[serde(deny_unknown_fields)]
-/// Configuration of this generator.
+/// Configuration of the lading throttle mechanism.
 #[serde(rename_all = "snake_case")]
 pub enum Config {
     /// A throttle that allows the user to produce as fast as possible.
@@ -209,5 +212,15 @@ where
         }
 
         Ok(())
+    }
+
+    /// Get the maximum capacity of this throttle in bytes. For `AllOut`
+    /// throttles, returns 100MiB. This is a guess, big but not too big.
+    pub fn maximum_capacity(&self) -> u32 {
+        match self {
+            Throttle::Stable(inner) => inner.maximum_capacity(),
+            Throttle::Linear(inner) => inner.maximum_capacity(),
+            Throttle::AllOut => 100 * 1024 * 1024, // 100MiB, a guess, big but not too big
+        }
     }
 }

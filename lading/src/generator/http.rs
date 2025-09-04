@@ -30,9 +30,8 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
-};
+use crate::generator::common::{ConcurrencyStrategy, MetricsBuilder};
+use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
@@ -75,7 +74,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -101,7 +100,7 @@ pub enum Error {
     Zero,
     /// Throttle builder error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] ThrottleBuilderError),
+    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
 }
 
 /// The HTTP generator.
