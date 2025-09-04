@@ -33,9 +33,9 @@ use shared::{
     integration_api::{self, integration_target_client::IntegrationTargetClient},
 };
 use tempfile::TempDir;
-use tokio::process::Command;
 #[cfg(unix)]
 use tokio::net::UnixStream;
+use tokio::process::Command;
 use tonic::transport::Endpoint;
 use tracing::{debug, warn};
 
@@ -141,6 +141,7 @@ impl IntegrationTest {
         })
     }
 
+    #[cfg(unix)]
     async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
         // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
@@ -173,24 +174,22 @@ impl IntegrationTest {
             .context("launch ducks")?;
 
         // wait for ducks to bring up its RPC server and then connect
-        #[cfg(unix)]
-        {
-            while !std::path::Path::exists(&ducks_comm_file) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
-                .connect_with_connector(tower::service_fn(move |_| {
-                    let ducks_comm_file = ducks_comm_file.clone();
-                    async move {
-                        let sock = UnixStream::connect(ducks_comm_file).await?;
-                        // Wrap the raw UnixStream in a TokioIo wrapper
-                        Ok::<_, std::io::Error>(TokioIo::new(sock))
-                    }
-                }))
-                .await
-                .context("Failed to connect to `ducks` integration test target binary")?;
-            let mut ducks_rpc = IntegrationTargetClient::new(channel);
-            debug!("connected to ducks");
+        while !std::path::Path::exists(&ducks_comm_file) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
+            .connect_with_connector(tower::service_fn(move |_| {
+                let ducks_comm_file = ducks_comm_file.clone();
+                async move {
+                    let sock = UnixStream::connect(ducks_comm_file).await?;
+                    // Wrap the raw UnixStream in a TokioIo wrapper
+                    Ok::<_, std::io::Error>(TokioIo::new(sock))
+                }
+            }))
+            .await
+            .context("Failed to connect to `ducks` integration test target binary")?;
+        let mut ducks_rpc = IntegrationTargetClient::new(channel);
+        debug!("connected to ducks");
 
         // instruct ducks to start the test (this is currently hardcoded to a
         // http sink test but will be configurable in the future)
@@ -288,19 +287,17 @@ impl IntegrationTest {
         } else {
             warn!("ducks exited with an error: {:?}", ducks_output);
         }
-        #[cfg(not(unix))]
-        {
-            anyhow::bail!("Integration tests not supported on Windows (Unix sockets required)");
-        }
 
-        #[cfg(unix)]
-        {
-            IntegrationTest::print_stdio(&self.tempdir);
+        IntegrationTest::print_stdio(&self.tempdir);
 
-            // todo: report captures file & provide some utilities for asserting against it
-            println!("test result: {metrics:?}");
-            Ok(metrics)
-        }
+        // todo: report captures file & provide some utilities for asserting against it
+        println!("test result: {metrics:?}");
+        Ok(metrics)
+    }
+
+    #[cfg(not(unix))]
+    async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
+        anyhow::bail!("Integration tests not supported on Windows (Unix sockets required)");
     }
 
     fn print_stdio(tempdir: &TakeableTempDir) {

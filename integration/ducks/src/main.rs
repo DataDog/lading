@@ -32,12 +32,12 @@ use shared::{
 };
 use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket},
-    #[cfg(unix)]
-    net::UnixListener,
     sync::{Mutex, mpsc},
 };
 use tokio_stream::Stream;
