@@ -273,6 +273,14 @@ impl Server {
             Option::<ExitStatus>::None
         };
 
+        // Windows doesn't have PIDfd or Unix signals, so we can't efficiently watch external processes
+        #[cfg(not(unix))]
+        let target_wait = async move {
+            // On Windows, we can't efficiently watch an external PID
+            // This is a placeholder that never completes
+            std::future::pending::<Option<ExitStatus>>().await
+        };
+
         let mut interval = time::interval(Duration::from_millis(400));
         tokio::pin!(target_wait);
         let shutdown_wait = shutdown.recv();
@@ -350,6 +358,14 @@ impl Server {
                 sleep(Duration::from_secs(1)).await;
             }
             Option::<ExitStatus>::None
+        };
+
+        // Windows doesn't have PIDfd or Unix signals, so we can't efficiently watch external processes
+        #[cfg(not(unix))]
+        let target_wait = async move {
+            // On Windows, we can't efficiently watch an external PID
+            // This is a placeholder that never completes
+            std::future::pending::<Option<ExitStatus>>().await
         };
 
         let mut interval = time::interval(Duration::from_millis(400));

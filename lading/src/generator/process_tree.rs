@@ -441,6 +441,7 @@ impl Process {
 ///
 /// Function will panic if the process execution fails.
 ///
+#[cfg(unix)]
 pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error> {
     let mut iter = nodes.iter().peekable();
     let mut pids_to_wait: FxHashSet<Pid> = FxHashSet::default();
@@ -491,7 +492,13 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
     }
 }
 
+#[cfg(not(unix))]
+pub fn spawn_tree(_nodes: &VecDeque<Process>, _sleep_ns: u32) -> Result<(), Error> {
+    Err(Error::ToStr) // Process tree generation not supported on Windows
+}
+
 #[inline]
+#[cfg(unix)]
 fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
     let mut exited: Option<Pid> = None;
 
