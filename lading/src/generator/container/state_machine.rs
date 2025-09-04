@@ -89,6 +89,23 @@ impl StateMachine {
 
     /// Process an event and return the next operation
     ///
+    /// State transitions:
+    /// ```text
+    /// Format: CurrentState --[Event]--> NextState (Operation)
+    ///
+    /// Starting --[Started]--> Starting (CreateAllContainers)
+    /// Starting --[AllContainersReady]--> Running (Wait)
+    /// Starting --[ShutdownSignaled]--> ShuttingDown (StopAllContainers)
+    ///
+    /// Running --[RecycleNext]--> Recycling (RecycleContainer)
+    /// Running --[ShutdownSignaled]--> ShuttingDown (StopAllContainers)
+    ///
+    /// Recycling --[ContainerRecycled]--> Running (Wait)
+    /// Recycling --[ShutdownSignaled]--> ShuttingDown (StopAllContainers)
+    ///
+    /// ShuttingDown --[AllContainersStopped]--> Terminated (Exit)
+    /// ```
+    ///
     /// # Errors
     ///
     /// Function will error with `InvalidTransition` if the `event` is not valid

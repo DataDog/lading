@@ -187,9 +187,22 @@ impl Container {
 
             event = match operation {
                 Operation::CreateAllContainers => {
-                    let result = self.create_all_containers(&docker, &full_image).await;
+                    let mut created = Vec::new();
+                    let mut success = true;
 
-                    if let Ok(created) = result {
+                    for idx in 0..self.concurrent_containers.get() {
+                        match create_and_start_container(&docker, &self.config, &full_image, idx)
+                            .await
+                        {
+                            Ok(container) => created.push(container),
+                            Err(_) => {
+                                success = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if success {
                         for (idx, container) in created.into_iter().enumerate() {
                             let idx_u32 = u32::try_from(idx).expect("container index overflow");
                             containers.insert(idx_u32, container);
@@ -214,8 +227,7 @@ impl Container {
                         warn!("Failed to stop old container {index}: {e}");
                     }
 
-                    let result = self
-                        .create_single_container(&docker, &full_image, index)
+                    let result = create_and_start_container(&docker, &self.config, &full_image, index)
                         .await;
 
                     if let Ok(new_container) = result {
@@ -252,52 +264,46 @@ impl Container {
                     }
                 }
                 Operation::StopAllContainers => {
-                    let _ = self.stop_all_containers(&docker, containers.values()).await;
+                    for container in containers.values() {
+                        let _ = stop_and_remove_container(&docker, container).await;
+                    }
                     Event::AllContainersStopped
                 }
                 Operation::Exit => return Ok(()),
             };
         }
     }
+}
 
-    async fn create_all_containers(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-    ) -> Result<Vec<ContainerCreateResponse>, Error> {
-        let mut containers = Vec::new();
+async fn create_and_start_container(
+    docker: &Docker,
+    config: &Config,
+    full_image: &str,
+    index: u32,
+) -> Result<ContainerCreateResponse, Error> {
+    let container_name = format!("lading_container_{index:05}");
+    debug!("Creating container: {container_name}");
 
-        for idx in 0..self.concurrent_containers.get() {
-            let container = self
-                .config
-                .create_and_start_container(docker, full_image, idx)
-                .await?;
-            containers.push(container);
-        }
+    let create_options = CreateContainerOptionsBuilder::default()
+        .name(&container_name)
+        .build();
 
-        Ok(containers)
+    let container = docker
+        .create_container(Some(create_options), config.to_container_config(full_image))
+        .await?;
+
+    debug!("Created container with id: {id}", id = container.id);
+    for warning in &container.warnings {
+        warn!("Container warning: {warning}");
     }
 
-    async fn create_single_container(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-        index: u32,
-    ) -> Result<ContainerCreateResponse, Error> {
-        self.config
-            .create_and_start_container(docker, full_image, index)
-            .await
-    }
+    docker
+        .start_container(&container.id, None::<StartContainerOptions>)
+        .await?;
 
-    async fn stop_all_containers<'a, I>(&self, docker: &Docker, containers: I) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = &'a ContainerCreateResponse>,
-    {
-        for container in containers {
-            stop_and_remove_container(docker, container).await?;
-        }
-        Ok(())
-    }
+    debug!("Started container: {id}", id = container.id);
+
+    Ok(container)
 }
 
 async fn stop_and_remove_container(
@@ -361,34 +367,4 @@ impl Config {
         }
     }
 
-    async fn create_and_start_container(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-        index: u32,
-    ) -> Result<ContainerCreateResponse, Error> {
-        let container_name = format!("lading_container_{index:05}");
-        debug!("Creating container: {container_name}");
-
-        let create_options = CreateContainerOptionsBuilder::default()
-            .name(&container_name)
-            .build();
-
-        let container = docker
-            .create_container(Some(create_options), self.to_container_config(full_image))
-            .await?;
-
-        debug!("Created container with id: {id}", id = container.id);
-        for warning in &container.warnings {
-            warn!("Container warning: {warning}");
-        }
-
-        docker
-            .start_container(&container.id, None::<StartContainerOptions>)
-            .await?;
-
-        debug!("Started container: {id}", id = container.id);
-
-        Ok(container)
-    }
 }
