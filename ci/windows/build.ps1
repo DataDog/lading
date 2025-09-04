@@ -2,8 +2,8 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Building release binary for Windows..."
-# Build without Linux-specific features
-cargo build --locked --release --exclude-features logrotate_fs
+# Build with default features only (excludes Linux-specific features)
+cargo build --locked --release --features default
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed"

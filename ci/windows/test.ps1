@@ -12,8 +12,8 @@ if (-not (Get-Command cargo-nextest -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "Running cargo nextest..."
-# Exclude Linux-specific features and tests that may not work on Windows
-cargo nextest run --all-features --exclude-features logrotate_fs
+# Run tests without Linux-specific features
+cargo nextest run --features default
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
