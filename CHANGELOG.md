@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
+## Changed
+- Kubernetes generator maximum lifetime seconds now expressed in `u32`, not
+  `u64`.
+- Containers generator internals reworked to match the kubernetes generator's
+  approach: explicit state machine driven by a `lading_throttle`.
 ## Added
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
