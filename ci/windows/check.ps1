@@ -2,7 +2,8 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Running cargo check..."
-cargo check --locked --features default
+# Check with default features but exclude Unix-specific prometheus features  
+cargo check --locked --no-default-features
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE

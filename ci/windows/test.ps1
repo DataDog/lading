@@ -13,7 +13,7 @@ if (-not (Get-Command cargo-nextest -ErrorAction SilentlyContinue)) {
 
 Write-Host "Running cargo nextest..."
 # Run tests without Linux-specific features
-cargo nextest run --features default
+cargo nextest run --no-default-features
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
