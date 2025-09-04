@@ -22,7 +22,6 @@ use std::{
 
 use byte_unit::Byte;
 use futures::future::join_all;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{Rng, SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
@@ -36,7 +35,7 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{BytesThrottleConfig, create_throttle};
 
 /// An enum to allow us to determine what operation caused an IO errror as the
 /// default error message lacks detail.
@@ -108,9 +107,12 @@ pub enum Error {
     /// Name provided but no parent on the path
     #[error("Name provided but no parent on the path")]
     NameWithNoParent,
-    /// Throttle builder error
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
+    /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -216,10 +218,8 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throttle = ThrottleBuilder::new()
-                .bytes_per_second(config.bytes_per_second.as_ref())
-                .throttle_config(config.throttle.as_ref())
-                .build()?;
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);
@@ -288,7 +288,7 @@ struct Child {
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
     block_cache: Arc<block::Cache>,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
 }
@@ -300,7 +300,7 @@ impl Child {
         total_rotations: u8,
         maximum_bytes_per_log: NonZeroU32,
         block_cache: Arc<block::Cache>,
-        throttle: Throttle,
+        throttle: lading_throttle::Throttle,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
     ) -> Self {

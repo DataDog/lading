@@ -29,7 +29,6 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
@@ -44,7 +43,7 @@ use crate::generator::splunk_hec::acknowledgements::Channel;
 use lading_payload::block;
 
 use super::General;
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
@@ -127,9 +126,9 @@ pub enum Error {
     /// Wrapper around [`hyper::Error`].
     #[error("HTTP error: {0}")]
     Hyper(#[from] hyper::Error),
-    /// Throttle builder error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -139,7 +138,7 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
@@ -196,10 +195,7 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle = ThrottleBuilder::new()
-            .bytes_per_second(config.bytes_per_second.as_ref())
-            .throttle_config(config.throttle.as_ref())
-            .build()?;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 

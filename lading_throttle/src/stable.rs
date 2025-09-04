@@ -58,6 +58,11 @@ where
     pub(super) fn maximum_capacity(&self) -> u32 {
         self.valve.maximum_capacity
     }
+
+    /// Get the timeout in microseconds for this throttle
+    pub(super) fn timeout_micros(&self) -> u64 {
+        self.valve.timeout_ticks
+    }
 }
 
 /// Represents unused capacity with its expiration time

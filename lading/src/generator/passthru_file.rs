@@ -23,7 +23,7 @@ use tracing::{info, warn};
 use lading_payload::block;
 
 use super::General;
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -61,9 +61,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
-    /// Throttle builder error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 #[derive(Debug)]
@@ -104,10 +104,7 @@ impl PassthruFile {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle = ThrottleBuilder::new()
-            .bytes_per_second(config.bytes_per_second.as_ref())
-            .throttle_config(config.throttle.as_ref())
-            .build()?;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         if let Some(bytes_per_second) = config.bytes_per_second {
             gauge!("bytes_per_second", &labels).set(bytes_per_second.as_u128() as f64 / 1000.0);

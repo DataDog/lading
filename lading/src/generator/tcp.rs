@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
 };
 
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
@@ -31,8 +30,10 @@ use tracing::{error, info, trace};
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{ConcurrencyStrategy, MetricsBuilder};
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{
+    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
+    create_throttle,
+};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -77,9 +78,12 @@ pub enum Error {
     /// Zero value error
     #[error("Value cannot be zero")]
     Zero,
-    /// Throttle builder error
+    /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] ThrottleConversionError),
+    /// Throttle error  
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(JoinError),
@@ -141,11 +145,11 @@ impl Tcp {
         let mut handles = JoinSet::new();
 
         for i in 0..worker_count {
-            let throttle = ThrottleBuilder::new()
-                .bytes_per_second(config.bytes_per_second.as_ref())
-                .throttle_config(config.throttle.as_ref())
-                .parallel_connections(NonZeroU16::new(worker_count))
-                .build()?;
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?
+                    .divide(
+                        NonZeroU32::new(worker_count.into()).expect("worker_count is always >= 1"),
+                    )?;
 
             let mut worker_labels = labels.clone();
             if worker_count > 1 {
@@ -191,7 +195,7 @@ impl Tcp {
 
 struct TcpWorker {
     addr: SocketAddr,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,

@@ -24,7 +24,6 @@ use std::{
 
 use byte_unit::Byte;
 use futures::future::join_all;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
@@ -38,7 +37,7 @@ use tracing::{error, info};
 use lading_payload::{self, block};
 
 use super::General;
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{BytesThrottleConfig, create_throttle};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileGen`].
@@ -58,9 +57,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Throttle builder error
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
+    /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
 }
 
 fn default_rotation() -> bool {
@@ -161,10 +163,8 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throttle = ThrottleBuilder::new()
-                .bytes_per_second(config.bytes_per_second.as_ref())
-                .throttle_config(config.throttle.as_ref())
-                .build()?;
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
@@ -229,7 +229,7 @@ impl Server {
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,

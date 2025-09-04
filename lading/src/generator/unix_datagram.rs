@@ -27,7 +27,7 @@ use tokio::{
 use tracing::{debug, error, info};
 
 use super::General;
-use lading_throttle::{BytesThrottleConfig, ThrottleBuilder, ThrottleBuilderError};
+use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -95,9 +95,12 @@ pub enum Error {
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] byte_unit::ParseError),
-    /// Throttle builder error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] lading_throttle::ThrottleBuilderError),
+    ThrottleConversion(#[from] ThrottleConversionError),
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
 }
 
 #[derive(Debug)]
@@ -163,10 +166,8 @@ impl UnixDatagram {
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
-            let throttle = ThrottleBuilder::new()
-                .bytes_per_second(config.bytes_per_second.as_ref())
-                .throttle_config(config.throttle.as_ref())
-                .build()?;
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let child = Child {
                 path: config.path.clone(),

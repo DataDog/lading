@@ -1912,7 +1912,6 @@ name = "lading-throttle"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "byte-unit",
  "proptest",
  "serde",
  "thiserror 2.0.16",
