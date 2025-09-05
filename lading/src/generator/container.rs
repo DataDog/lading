@@ -490,7 +490,7 @@ impl Drop for Container {
         );
 
         // Clean up containers using synchronous docker command
-        for (_idx, container) in &self.containers {
+        for container in self.containers.values() {
             let output = std::process::Command::new("docker")
                 .arg("rm")
                 .arg("--force")
@@ -499,14 +499,14 @@ impl Drop for Container {
                 .output()
                 .expect("Failed to execute docker command");
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!("Error removing container {id}: {stderr}", id = container.id);
-            } else {
+            if output.status.success() {
                 debug!(
                     "Successfully removed container {id} on drop",
                     id = container.id
                 );
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!("Error removing container {id}: {stderr}", id = container.id);
             }
         }
     }
