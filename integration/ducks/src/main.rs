@@ -21,8 +21,6 @@ use bytes::{Bytes, BytesMut};
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 #[cfg(unix)]
 use hyper::{Method, Request, StatusCode, service::service_fn};
-#[cfg(not(unix))]
-use hyper::{Request, StatusCode, service::service_fn};
 #[cfg(unix)]
 use hyper_util::rt::{TokioExecutor, TokioIo};
 #[cfg(unix)]
@@ -45,6 +43,9 @@ use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 #[cfg(unix)]
 use tokio::net::UnixListener;
+#[cfg(not(unix))]
+use tokio::sync::mpsc;
+#[cfg(unix)]
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket},
@@ -57,9 +58,8 @@ use tokio_stream::Stream;
 use tokio_stream::wrappers::UnixListenerStream;
 #[cfg(unix)]
 use tonic::Status;
-use tracing::error;
 #[cfg(unix)]
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 #[cfg(unix)]
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
@@ -194,6 +194,7 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 /// Tracks state for a ducks instance
 pub struct DucksTarget {
     /// Shutdown channel. Send on this to exit the process immediately.
+    #[cfg_attr(not(unix), allow(dead_code))]
     shutdown_tx: mpsc::Sender<()>,
 }
 

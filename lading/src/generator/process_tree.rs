@@ -495,6 +495,10 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
 }
 
 /// Windows stub for process tree spawning - not supported
+///
+/// # Errors
+///
+/// Always returns an error as process tree spawning is not supported on Windows
 #[cfg(not(unix))]
 pub fn spawn_tree(_nodes: &VecDeque<Process>, _sleep_ns: u32) -> Result<(), Error> {
     Err(Error::ToStr) // Process tree generation not supported on Windows
@@ -518,6 +522,7 @@ fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
 }
 
 #[inline]
+#[cfg(unix)]
 fn goto_next_sibling(
     depth: u32,
     iter: &mut std::iter::Peekable<std::collections::vec_deque::Iter<'_, Process>>,
