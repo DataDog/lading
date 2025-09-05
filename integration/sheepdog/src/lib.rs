@@ -46,8 +46,6 @@ use tokio::net::UnixStream;
 use tokio::process::Command;
 #[cfg(unix)]
 use tonic::transport::Endpoint;
-#[cfg(not(unix))]
-use tracing::debug;
 #[cfg(unix)]
 use tracing::{debug, warn};
 
@@ -126,6 +124,7 @@ impl TakeableTempDir {
 }
 
 /// Defines an individual integration test
+#[allow(dead_code)]
 pub struct IntegrationTest {
     lading_config_template: String,
     experiment_duration: Duration,

@@ -31,7 +31,6 @@ use std::{
     env, error, fmt,
     iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
-    os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::Stdio,
     str,

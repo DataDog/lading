@@ -15,19 +15,27 @@
 
 #[cfg(unix)]
 use anyhow::Context;
+#[cfg(unix)]
 use bytes::Bytes;
+#[cfg(unix)]
 use bytes::BytesMut;
+#[cfg(unix)]
 use http_body_util::Full;
+#[cfg(unix)]
 use http_body_util::{BodyExt, combinators::BoxBody};
 #[cfg(unix)]
 use hyper::{Method, Request, StatusCode, service::service_fn};
 #[cfg(not(unix))]
 use hyper::{Request, StatusCode, service::service_fn};
+#[cfg(unix)]
 use hyper_util::rt::TokioExecutor;
+#[cfg(unix)]
 use hyper_util::rt::TokioIo;
+#[cfg(unix)]
 use hyper_util::server::conn::auto;
 #[cfg(unix)]
 use once_cell::sync::OnceCell;
+#[cfg(unix)]
 use shared::DucksConfig;
 #[cfg(unix)]
 use shared::integration_api::integration_target_server::{
