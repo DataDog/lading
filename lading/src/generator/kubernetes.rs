@@ -2,7 +2,15 @@
 //!
 //! This generator is meant to generate Kubernetes objects.
 
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
+
+fn default_concurrent_instances() -> NonZeroU32 {
+    NonZeroU32::MIN
+}
+
+fn default_max_instance_lifetime_seconds() -> NonZeroU32 {
+    NonZeroU32::MAX
+}
 
 #[allow(unused_imports)] // Used for Resource enum constructors
 use k8s_openapi::api::{
@@ -10,7 +18,7 @@ use k8s_openapi::api::{
     core::v1::{Namespace, Node, Pod, Service},
 };
 use kube::api::{DeleteParams, PostParams};
-use lading_throttle::Throttle;
+use lading_throttle::{Config as ThrottleConfig, Throttle};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -28,9 +36,11 @@ pub struct Config {
     /// Kubernetes manifest of the resource to create
     pub manifest: Manifest,
     /// Maximum lifetime of the resource before being replaced
-    pub max_instance_lifetime_seconds: Option<NonZeroU64>,
-    /// Number of resource instances to create (defaults to 1)
-    pub concurrent_instances: Option<NonZeroU32>,
+    #[serde(default = "default_max_instance_lifetime_seconds")]
+    pub max_instance_lifetime_seconds: NonZeroU32,
+    /// Number of resource instances to create
+    #[serde(default = "default_concurrent_instances")]
+    pub concurrent_instances: NonZeroU32,
 }
 
 /// Manifest of the Kubernetes resource to create
@@ -89,32 +99,26 @@ impl Kubernetes {
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let concurrent_instances = config.concurrent_instances.unwrap_or(NonZeroU32::MIN);
+        let concurrent_instances = config.concurrent_instances;
 
-        // Configure throttle if max_instance_lifetime_seconds is set
-        // The throttle controls how often we recreate instances
-        let throttle = config.max_instance_lifetime_seconds.map(|lifetime_secs| {
-            // We want to recreate all instances over the lifetime period
-            // So we need concurrent_instances operations over lifetime_seconds
-            // This gives us operations_per_second = concurrent_instances / lifetime_seconds
-            // Calculate operations per second, handling u64 to u32 conversion safely
-            let ops_per_sec = if lifetime_secs.get() > u64::from(u32::MAX) {
-                // If lifetime is huge, just do 1 op/sec
-                NonZeroU32::MIN
-            } else {
-                #[allow(clippy::cast_possible_truncation)]
-                let lifetime_secs_u32 = lifetime_secs.get() as u32;
-                let ops = concurrent_instances.get().saturating_div(lifetime_secs_u32);
-                // Ensure at least 1 operation per second
-                NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN)
-            };
+        // Configure throttle for recycling. The throttle controls how often we recreate instances.
+        let throttle = if config.max_instance_lifetime_seconds == NonZeroU32::MAX {
+            // MAX means no recycling
+            None
+        } else {
+            // We want to recreate all instances over the lifetime period, so we need
+            // concurrent_instances operations over lifetime_seconds. This gives us
+            // operations_per_second = concurrent_instances / lifetime_seconds.
+            let ops = concurrent_instances
+                .get()
+                .saturating_div(config.max_instance_lifetime_seconds.get());
+            let ops_per_sec = NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN);
 
-            let throttle_config = lading_throttle::Config::Stable {
+            Some(Throttle::new_with_config(ThrottleConfig::Stable {
                 maximum_capacity: ops_per_sec,
                 timeout_micros: 0,
-            };
-            Throttle::new_with_config(throttle_config)
-        });
+            }))
+        };
 
         Ok(Self {
             resource: match &config.manifest {
@@ -179,7 +183,10 @@ impl Kubernetes {
 
             event = match operation {
                 Operation::CreateAllInstances => {
-                    debug!("Creating all {} instances", self.concurrent_instances);
+                    debug!(
+                        "Creating all {count} instances",
+                        count = self.concurrent_instances
+                    );
                     let result = create_resources(
                         client.clone(),
                         &self.resource,
@@ -459,8 +466,11 @@ mod tests {
                 return Response::builder()
                     .status(StatusCode::CONFLICT)
                     .body(Body::from(
-                        format!(r#"{{"kind":"Status","message":"{} already exists"}}"#, name)
-                            .into_bytes(),
+                        format!(
+                            r#"{{"kind":"Status","message":"{name} already exists"}}"#,
+                            name = name
+                        )
+                        .into_bytes(),
                     ))
                     .unwrap();
             }

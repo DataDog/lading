@@ -64,6 +64,14 @@ check style compliance - it will run formatting and linting checks for you.
 (e.g., use `foo.rs` instead of `foo/mod.rs`). This makes the codebase easier to
 navigate and grep.
 
+**Imports**: NEVER place `use` statements inside functions. All imports must be at
+the top of the file, after the module documentation and attributes. This keeps
+imports organized and makes dependencies clear.
+
+**String formatting**: When using format strings with `{}`, always include the
+variable name inside the braces for clarity (e.g., `"{index}"` instead of `"{}"`).
+This makes the code more readable and self-documenting.
+
 We do not allow for warnings: all warnings are errors. Deprecation warnings MUST
 be treated as errors. Lading is written in a "naive" style where abstraction is
 not preferred if a duplicated pattern will satisfy. Our reasoning for this is it
@@ -77,9 +85,12 @@ Lading is written to be as easy to contribute to as possible. We ask that any
 dependency used in the project in more than one crate be present in the
 top-level Cargo.toml and be referenced from the workspace in sub-crates.
 
-Lading does not care about inward backward compatibility. Behavior observable to
-users must be preserved, but our internal APIs are not subject to backward
-compatibility concerns.
+Lading does not care about internal backward compatibility. ALL internal APIs can
+be changed freely - none of this project's APIs are used externally. The ONLY
+backward compatibility that matters is end-user configuration files. User configs
+must continue to work, but all internal code can be refactored without concern
+for compatibility. Do not add unnecessary Option types or fallback logic for
+internal API changes.
 
 Lading project uses comments strategically, documenting the "why" and not the
 "what". Do not add "what" comments that put into English the behavior of a line
@@ -188,3 +199,5 @@ When in doubt, implement rather than import.
 13. Pre-compute in initialization, not in hot paths
 14. Think about how your code affects the measurement of the target
 15. NEVER use mod.rs files - always name modules directly (e.g., foo.rs not foo/mod.rs)
+16. NEVER place `use` statements inside functions - all imports go at the top of the file
+17. NO internal backward compatibility - freely change ALL internal APIs. ONLY user configs need compatibility
