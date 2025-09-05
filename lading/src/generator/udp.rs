@@ -215,8 +215,16 @@ impl UdpWorker {
         loop {
             let total_bytes = self.block_cache.peek_next_size(&handle);
 
+            // TODO: Revisit this platform-specific binding. Windows has issues with
+            // localhost-to-localhost UDP when bound to 127.0.0.1. Consider using
+            // connect() pattern in the future for better cross-platform behavior.
             tokio::select! {
-                conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
+                conn = UdpSocket::bind({
+                    #[cfg(windows)]
+                    { "0.0.0.0:0" }
+                    #[cfg(not(windows))]
+                    { "127.0.0.1:0" }
+                }), if connection.is_none() => {
                     match conn {
                         Ok(sock) => {
                             debug!("UDP port bound");
