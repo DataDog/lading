@@ -1671,6 +1671,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_executable"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baabb8b4867b26294d818bf3f651a454b6901431711abb96e296245888d6e8c4"
+dependencies = [
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1825,6 +1834,7 @@ dependencies = [
  "http-serde",
  "hyper 1.7.0",
  "hyper-util",
+ "is_executable",
  "k8s-openapi",
  "kube",
  "kube-core",
