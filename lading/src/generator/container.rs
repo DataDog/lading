@@ -91,6 +91,7 @@ pub struct Container {
     throttle: Option<Throttle>,
     shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
+    containers: HashMap<u32, ContainerCreateResponse>,
 }
 
 impl Container {
@@ -136,6 +137,7 @@ impl Container {
             throttle,
             shutdown,
             metric_labels,
+            containers: HashMap::new(),
         })
     }
 
@@ -206,8 +208,6 @@ impl Container {
         let mut machine = StateMachine::new(self.concurrent_containers.get());
         let mut event = Event::Started;
 
-        let mut containers: HashMap<u32, ContainerCreateResponse> = HashMap::new();
-
         loop {
             let operation = machine.next(event)?;
             debug!("State machine: {:?} -> {:?}", machine.state(), operation);
@@ -237,10 +237,10 @@ impl Container {
                     if success {
                         for (idx, container) in created.into_iter().enumerate() {
                             let idx_u32 = u32::try_from(idx).expect("container index overflow");
-                            containers.insert(idx_u32, container);
+                            self.containers.insert(idx_u32, container);
                         }
                         debug_assert_eq!(
-                            containers.len(),
+                            self.containers.len(),
                             self.concurrent_containers.get() as usize,
                             "containers HashMap size mismatch"
                         );
@@ -253,7 +253,7 @@ impl Container {
                 Operation::RecycleContainer { index } => {
                     debug!("Recycling container {index}");
 
-                    if let Some(old_container) = containers.remove(&index)
+                    if let Some(old_container) = self.containers.remove(&index)
                         && let Err(e) =
                             stop_and_remove_container(&docker, &old_container, &self.metric_labels)
                                 .await
@@ -271,13 +271,13 @@ impl Container {
                     .await;
 
                     if let Ok(new_container) = result {
-                        containers.insert(index, new_container);
+                        self.containers.insert(index, new_container);
                     } else {
                         warn!("Failed to create new container {index}");
                     }
 
                     debug_assert!(
-                        containers.len() <= self.concurrent_containers.get() as usize,
+                        self.containers.len() <= self.concurrent_containers.get() as usize,
                         "containers HashMap exceeded expected size"
                     );
 
@@ -304,10 +304,11 @@ impl Container {
                     }
                 }
                 Operation::StopAllContainers => {
-                    for container in containers.values() {
+                    for container in self.containers.values() {
                         let _ = stop_and_remove_container(&docker, container, &self.metric_labels)
                             .await;
                     }
+                    self.containers.clear();
                     Event::AllContainersStopped
                 }
                 Operation::Exit => return Ok(()),
@@ -475,6 +476,40 @@ async fn stop_and_remove_container(
     }
 
     Ok(())
+}
+
+impl Drop for Container {
+    fn drop(&mut self) {
+        if self.containers.is_empty() {
+            return;
+        }
+
+        info!(
+            "Cleaning up {count} containers on drop",
+            count = self.containers.len()
+        );
+
+        // Clean up containers using synchronous docker command
+        for (_idx, container) in &self.containers {
+            let output = std::process::Command::new("docker")
+                .arg("rm")
+                .arg("--force")
+                .arg("--volumes")
+                .arg(&container.id)
+                .output()
+                .expect("Failed to execute docker command");
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!("Error removing container {id}: {stderr}", id = container.id);
+            } else {
+                debug!(
+                    "Successfully removed container {id} on drop",
+                    id = container.id
+                );
+            }
+        }
+    }
 }
 
 impl Config {
