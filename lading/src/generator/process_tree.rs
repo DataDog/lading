@@ -21,7 +21,9 @@ use rand::{
     rngs::StdRng,
     seq::IndexedRandom,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(unix)]
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{VecDeque, vec_deque},
@@ -30,10 +32,11 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    process::{Stdio, exit},
-    str, thread,
-    time::Duration,
+    process::Stdio,
+    str,
 };
+#[cfg(unix)]
+use std::{process::exit, thread, time::Duration};
 use tokio::process::Command;
 use tracing::{error, info};
 

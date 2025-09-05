@@ -19,14 +19,16 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use http_body_util::Full;
 use http_body_util::{BodyExt, combinators::BoxBody};
+#[cfg(unix)]
 use hyper::{Method, Request, StatusCode, service::service_fn};
+#[cfg(not(unix))]
+use hyper::{Request, StatusCode, service::service_fn};
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto;
+#[cfg(unix)]
 use once_cell::sync::OnceCell;
 use shared::DucksConfig;
-#[cfg(not(unix))]
-use shared::integration_api;
 #[cfg(unix)]
 use shared::integration_api::integration_target_server::{
     IntegrationTarget, IntegrationTargetServer,
@@ -35,6 +37,7 @@ use shared::integration_api::integration_target_server::{
 use shared::integration_api::{
     self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
 };
+#[cfg(unix)]
 use sketches_ddsketch::DDSketch;
 #[cfg(not(unix))]
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc};
@@ -151,6 +154,7 @@ impl From<&SocketCounters> for SocketMetrics {
     }
 }
 
+#[cfg(unix)]
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(
     req: Request<hyper::body::Incoming>,
@@ -182,6 +186,7 @@ async fn http_req_handler(
     Ok(resp)
 }
 
+#[cfg(unix)]
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
@@ -292,6 +297,7 @@ impl IntegrationTarget for DucksTarget {
 }
 
 impl DucksTarget {
+    #[cfg(unix)]
     async fn http_listen(
         _config: DucksConfig,
         listener: tokio::net::TcpListener,
@@ -326,6 +332,7 @@ impl DucksTarget {
         Ok(())
     }
 
+    #[cfg(unix)]
     async fn tcp_handler(mut socket: TcpStream) -> Result<(), anyhow::Error> {
         // 500KiB input buffer per connection (this can probably be smaller)
         let mut buffer = BytesMut::with_capacity(524_288);
@@ -350,6 +357,7 @@ impl DucksTarget {
         }
     }
 
+    #[cfg(unix)]
     async fn tcp_listen(_config: DucksConfig, incoming: TcpListener) -> Result<(), anyhow::Error> {
         debug!("TCP listener active on {}", incoming.local_addr()?);
         TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
@@ -360,6 +368,7 @@ impl DucksTarget {
         }
     }
 
+    #[cfg(unix)]
     async fn udp_listen(_config: DucksConfig, incoming: UdpSocket) -> Result<(), anyhow::Error> {
         debug!("UDP listener active on {}", incoming.local_addr()?);
         UDP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
