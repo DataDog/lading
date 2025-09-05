@@ -11,7 +11,9 @@
 //! experimental control.
 
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::error;
+#[cfg(unix)]
+use tracing::warn;
 
 use crate::target::TargetPidReceiver;
 
@@ -28,7 +30,9 @@ pub mod procfs;
 pub mod splunk_hec;
 pub mod tcp;
 pub mod udp;
+#[cfg(unix)]
 pub mod unix_datagram;
+#[cfg(unix)]
 pub mod unix_stream;
 
 #[derive(thiserror::Error, Debug)]
@@ -56,9 +60,11 @@ pub enum Error {
     #[error(transparent)]
     Grpc(#[from] grpc::Error),
     /// See [`crate::generator::unix_stream::Error`] for details.
+    #[cfg(unix)]
     #[error(transparent)]
     UnixStream(#[from] unix_stream::Error),
     /// See [`crate::generator::unix_datagram::Error`] for details.
+    #[cfg(unix)]
     #[error(transparent)]
     UnixDatagram(#[from] unix_datagram::Error),
     /// See [`crate::generator::passthru_file::Error`] for details.
@@ -120,8 +126,10 @@ pub enum Inner {
     /// See [`crate::generator::grpc::Config`] for details.
     Grpc(grpc::Config),
     /// See [`crate::generator::unix_stream::Config`] for details.
+    #[cfg(unix)]
     UnixStream(unix_stream::Config),
     /// See [`crate::generator::unix_datagram::Config`] for details.
+    #[cfg(unix)]
     UnixDatagram(unix_datagram::Config),
     /// See [`crate::generator::passthru_file::Config`] for details.
     PassthruFile(passthru_file::Config),
@@ -157,8 +165,10 @@ pub enum Server {
     /// See [`crate::generator::grpc::Grpc`] for details.
     Grpc(grpc::Grpc),
     /// See [`crate::generator::unix_stream::UnixStream`] for details.
+    #[cfg(unix)]
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::generator::unix_datagram::UnixDatagram`] for details.
+    #[cfg(unix)]
     UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::generator::passthru_file::PassthruFile`] for details.
     PassthruFile(passthru_file::PassthruFile),
@@ -195,6 +205,7 @@ impl Server {
             }
             Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
             Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),
+            #[cfg(unix)]
             Inner::UnixStream(conf) => {
                 if let lading_payload::Config::DogStatsD(variant) = conf.variant
                     && !variant.length_prefix_framed
@@ -215,6 +226,7 @@ impl Server {
                 &conf,
                 shutdown,
             )?),
+            #[cfg(unix)]
             Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
                 config.general,
                 &conf,
@@ -260,7 +272,9 @@ impl Server {
             Server::FileGen(inner) => inner.spin().await?,
             Server::FileTree(inner) => inner.spin().await?,
             Server::Grpc(inner) => inner.spin().await?,
+            #[cfg(unix)]
             Server::UnixStream(inner) => inner.spin().await?,
+            #[cfg(unix)]
             Server::UnixDatagram(inner) => inner.spin().await?,
             Server::PassthruFile(inner) => inner.spin().await?,
             Server::ProcessTree(inner) => inner.spin().await?,

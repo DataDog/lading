@@ -27,13 +27,12 @@ use std::{
 };
 
 use anyhow::Context;
-use hyper_util::rt::TokioIo;
 use shared::{
     DucksConfig,
     integration_api::{self, integration_target_client::IntegrationTargetClient},
 };
 use tempfile::TempDir;
-use tokio::{net::UnixStream, process::Command};
+use tokio::process::Command;
 use tonic::transport::Endpoint;
 use tracing::{debug, warn};
 
@@ -112,6 +111,7 @@ impl TakeableTempDir {
 }
 
 /// Defines an individual integration test
+#[allow(dead_code)]
 pub struct IntegrationTest {
     lading_config_template: String,
     experiment_duration: Duration,
@@ -146,8 +146,8 @@ impl IntegrationTest {
         let ducks_binary = build_ducks()?;
         let lading_binary = build_lading()?;
 
-        // Every ducks-sheepdog pair is connected by a unique socket file
-        let ducks_comm_file = self.tempdir.path().join("ducks_socket");
+        // Every ducks-sheepdog pair is connected by a unique port file
+        let ducks_port_file = self.tempdir.path().join("ducks_port");
 
         let ducks_timeout =
             self.experiment_warmup + self.experiment_duration + Duration::from_secs(60);
@@ -162,7 +162,7 @@ impl IntegrationTest {
             )?))
             .env("RUST_LOG", "ducks=debug,info")
             .arg(
-                ducks_comm_file
+                ducks_port_file
                     .to_str()
                     .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
             )
@@ -170,23 +170,24 @@ impl IntegrationTest {
             .spawn()
             .context("launch ducks")?;
 
-        // wait for ducks to bring up its RPC server and then connect
-        while !std::path::Path::exists(&ducks_comm_file) {
+        // wait for ducks to write its port file and then connect
+        while !ducks_port_file.exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
-            .connect_with_connector(tower::service_fn(move |_| {
-                let ducks_comm_file = ducks_comm_file.clone();
-                async move {
-                    let sock = UnixStream::connect(ducks_comm_file).await?;
-                    // Wrap the raw UnixStream in a TokioIo wrapper
-                    Ok::<_, std::io::Error>(TokioIo::new(sock))
-                }
-            }))
+        let port: u16 = tokio::fs::read_to_string(&ducks_port_file)
+            .await
+            .context("failed to read port file")?
+            .trim()
+            .parse()
+            .context("failed to parse port number")?;
+
+        let channel = Endpoint::try_from(format!("http://127.0.0.1:{}", port))
+            .context("failed to create endpoint")?
+            .connect()
             .await
             .context("Failed to connect to `ducks` integration test target binary")?;
         let mut ducks_rpc = IntegrationTargetClient::new(channel);
-        debug!("connected to ducks");
+        debug!("connected to ducks on port {}", port);
 
         // instruct ducks to start the test (this is currently hardcoded to a
         // http sink test but will be configurable in the future)

@@ -27,6 +27,7 @@ use bollard::Docker;
 use bollard::query_parameters::InspectContainerOptionsBuilder;
 use lading_signal::Broadcaster;
 use metrics::gauge;
+#[cfg(unix)]
 use nix::{
     errno::Errno,
     sys::signal::{SIGTERM, kill},
@@ -59,6 +60,7 @@ pub enum Error {
     #[error("unable to create PidFd: {0}")]
     PidConversion(io::Error),
     /// SIGTERM error
+    #[cfg(unix)]
     #[error("unable to terminate target process: {0}")]
     SigTerm(Errno),
     /// The target PID does not exist or is invalid
@@ -258,7 +260,7 @@ impl Server {
 
         // Watch the process by polling the PID. This works across unices but
         // does not give access to the exit code on early termination.
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(unix, not(target_os = "linux")))]
         let target_wait = async move {
             let pid = Pid::from_raw(pid.try_into().expect("cannot convert pid to 32 bit type"));
             loop {
@@ -269,6 +271,14 @@ impl Server {
                 time::sleep(Duration::from_secs(1)).await;
             }
             Option::<ExitStatus>::None
+        };
+
+        // Windows doesn't have PIDfd or Unix signals, so we can't efficiently watch external processes
+        #[cfg(not(unix))]
+        let target_wait = async move {
+            // On Windows, we can't efficiently watch an external PID
+            // This is a placeholder that never completes
+            std::future::pending::<Option<ExitStatus>>().await
         };
 
         let mut interval = time::interval(Duration::from_millis(400));
@@ -307,13 +317,17 @@ impl Server {
     ) -> Result<(), Error> {
         // Convert pid config value to a plain i32 (no truncation concerns;
         // PID_MAX_LIMIT is 2^22)
+        #[cfg(unix)]
         let raw_pid: i32 = config.pid.get();
-        let pid = Pid::from_raw(raw_pid);
 
-        // Verify that the given PID is valid
-        let ret = kill(pid, None);
-        if ret.is_err() {
-            return Err(Error::PidNotFound(config.pid.get()));
+        // Verify that the given PID is valid (Unix only)
+        #[cfg(unix)]
+        {
+            let pid = Pid::from_raw(raw_pid);
+            let ret = kill(pid, None);
+            if ret.is_err() {
+                return Err(Error::PidNotFound(config.pid.get()));
+            }
         }
 
         pid_snd.send(Some(config.pid.get()))?;
@@ -333,9 +347,10 @@ impl Server {
 
         // Watch the process by polling the PID. This works across unices but
         // does not give access to the exit code on early termination.
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(unix, not(target_os = "linux")))]
         let target_wait = async move {
             use tokio::time::sleep;
+            let pid = Pid::from_raw(raw_pid);
             loop {
                 let ret = kill(pid, None);
                 if ret.is_err() {
@@ -344,6 +359,14 @@ impl Server {
                 sleep(Duration::from_secs(1)).await;
             }
             Option::<ExitStatus>::None
+        };
+
+        // Windows doesn't have PIDfd or Unix signals, so we can't efficiently watch external processes
+        #[cfg(not(unix))]
+        let target_wait = async move {
+            // On Windows, we can't efficiently watch an external PID
+            // This is a placeholder that never completes
+            std::future::pending::<Option<ExitStatus>>().await
         };
 
         let mut interval = time::interval(Duration::from_millis(400));
@@ -427,8 +450,16 @@ impl Server {
                     // Note that `Child::kill` sends SIGKILL which is not what we
                     // want. We instead send SIGTERM so that the child has a chance
                     // to clean up.
-                    let pid: Pid = Pid::from_raw(target_id.try_into().expect("Failed to convert into valid PID"));
-                    kill(pid, SIGTERM).map_err(Error::SigTerm)?;
+                    #[cfg(unix)]
+                    {
+                        let pid: Pid = Pid::from_raw(target_id.try_into().expect("Failed to convert into valid PID"));
+                        kill(pid, SIGTERM).map_err(Error::SigTerm)?;
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // On Windows, use the standard kill mechanism
+                        target_child.kill().await.map_err(Error::TargetWait)?;
+                    }
                     let res = target_child.wait().await.map_err(Error::TargetWait)?;
                     break Ok(res)
                 }

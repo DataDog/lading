@@ -14,34 +14,30 @@
 //! - Receive data on other protocols & formats
 
 use anyhow::Context;
-use bytes::Bytes;
-use bytes::BytesMut;
-use http_body_util::Full;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use bytes::{Bytes, BytesMut};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{Method, Request, StatusCode, service::service_fn};
-use hyper_util::rt::TokioExecutor;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use once_cell::sync::OnceCell;
-use shared::{
-    DucksConfig,
-    integration_api::{
-        self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
-        integration_target_server::{IntegrationTarget, IntegrationTargetServer},
-    },
+use shared::DucksConfig;
+use shared::integration_api::integration_target_server::{
+    IntegrationTarget, IntegrationTargetServer,
+};
+use shared::integration_api::{
+    self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
 };
 use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener},
+    net::{TcpListener, TcpStream, UdpSocket},
     sync::{Mutex, mpsc},
+    task::JoinSet,
 };
-use tokio_stream::{Stream, wrappers::UnixListenerStream};
+use tokio_stream::{Stream, wrappers::TcpListenerStream};
 use tonic::Status;
-use tracing::error;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
 static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
@@ -361,13 +357,10 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     debug!("hello from ducks");
 
-    // Every ducks-sheepdog pair is connected by a unique socket file
-    let ducks_comm_file = std::env::args()
+    // Every ducks-sheepdog pair is connected by a unique port file
+    let port_file = std::env::args()
         .nth(1)
-        .ok_or(anyhow::anyhow!("ducks socket file argument missing"))?;
-    let ducks_comm =
-        UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
-    let ducks_comm = UnixListenerStream::new(ducks_comm);
+        .ok_or(anyhow::anyhow!("port file argument missing"))?;
 
     let timeout_seconds = std::env::args()
         .nth(2)
@@ -375,6 +368,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let timeout_seconds: u64 = timeout_seconds
         .parse()
         .context("ducks timeout argument must be a number")?;
+
+    // Bind to localhost with random port
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+
+    // Write port to file for sheepdog to read
+    std::fs::write(&port_file, port.to_string()).context("failed to write port to file")?;
+    debug!("RPC server listening on port {}", port);
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
     let (internal_shutdown_tx, mut internal_shutdown_rx) = mpsc::channel(1);
@@ -385,7 +386,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let rpc_server = tonic::transport::Server::builder()
         .add_service(IntegrationTargetServer::new(server))
-        .serve_with_incoming_shutdown(ducks_comm, async move {
+        .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
             internal_shutdown_rx.recv().await;
         });
 

@@ -10,7 +10,9 @@
 //! configured [throttle].
 //!
 
+use is_executable::IsExecutable;
 use lading_throttle::Throttle;
+#[cfg(unix)]
 use nix::{
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
     unistd::{ForkResult, Pid, fork},
@@ -20,19 +22,20 @@ use rand::{
     rngs::StdRng,
     seq::IndexedRandom,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(unix)]
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{VecDeque, vec_deque},
+    collections::VecDeque,
     env, error, fmt,
-    iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
-    os::unix::fs::PermissionsExt,
     path::PathBuf,
-    process::{Stdio, exit},
-    str, thread,
-    time::Duration,
+    process::Stdio,
+    str,
 };
+#[cfg(unix)]
+use std::{process::exit, thread, time::Duration};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -247,11 +250,7 @@ impl Config {
     pub fn validate(&self) -> Result<(), Error> {
         let iter = self.executables.iter();
         for exec in iter {
-            if !exec
-                .executable
-                .metadata()
-                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-            {
+            if !exec.executable.is_executable() {
                 return Err(Error::from(NotExecutable {
                     executable: exec.executable.clone(),
                 }));
@@ -390,8 +389,11 @@ fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> FxHashMap<String, Str
 /// Defines a execution of an executable with args and envs
 #[derive(Debug)]
 pub struct Exec {
+    #[allow(dead_code)]
     executable: String,
+    #[allow(dead_code)]
     args: Vec<String>,
+    #[allow(dead_code)]
     envs: FxHashMap<String, String>,
 }
 
@@ -421,6 +423,7 @@ impl Exec {
 #[derive(Debug)]
 pub struct Process {
     depth: u32,
+    #[allow(dead_code)]
     exec: Option<Exec>,
 }
 
@@ -440,6 +443,7 @@ impl Process {
 ///
 /// Function will panic if the process execution fails.
 ///
+#[cfg(unix)]
 pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error> {
     let mut iter = nodes.iter().peekable();
     let mut pids_to_wait: FxHashSet<Pid> = FxHashSet::default();
@@ -490,7 +494,18 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
     }
 }
 
+/// Windows stub for process tree spawning - not supported
+///
+/// # Errors
+///
+/// Always returns an error as process tree spawning is not supported on Windows
+#[cfg(not(unix))]
+pub fn spawn_tree(_nodes: &VecDeque<Process>, _sleep_ns: u32) -> Result<(), Error> {
+    Err(Error::ToStr) // Process tree generation not supported on Windows
+}
+
 #[inline]
+#[cfg(unix)]
 fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
     let mut exited: Option<Pid> = None;
 
@@ -507,7 +522,11 @@ fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
 }
 
 #[inline]
-fn goto_next_sibling(depth: u32, iter: &mut Peekable<vec_deque::Iter<'_, Process>>) {
+#[cfg(unix)]
+fn goto_next_sibling(
+    depth: u32,
+    iter: &mut std::iter::Peekable<std::collections::vec_deque::Iter<'_, Process>>,
+) {
     while let Some(child) = iter.peek() {
         if child.depth == depth {
             break;
