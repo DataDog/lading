@@ -331,6 +331,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
         }
         #[cfg(not(unix))]
         {
+            let _ = prom_path; // Suppress unused variable warning on non-Unix platforms
             return Err(Error::PrometheusPath);
         }
     } else if let Some(ref capture_path) = args.capture_path {
