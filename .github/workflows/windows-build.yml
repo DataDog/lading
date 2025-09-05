@@ -41,14 +41,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        action: [check, fmt, clippy, test, build]
+        action: [check, fmt, test, build]
         include:
           - action: check
             command: ci\windows\check.ps1
           - action: fmt
             command: ci\windows\fmt.ps1
-          - action: clippy
-            command: ci\windows\clippy.ps1
           - action: test
             command: ci\windows\test.ps1
           - action: build

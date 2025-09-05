@@ -322,10 +322,17 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref prom_path) = args.prometheus_path {
-        config.telemetry = Telemetry::PrometheusSocket {
-            path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
-            global_labels: options_global_labels.inner,
-        };
+        #[cfg(unix)]
+        {
+            config.telemetry = Telemetry::PrometheusSocket {
+                path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
+                global_labels: options_global_labels.inner,
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            return Err(Error::PrometheusPath);
+        }
     } else if let Some(ref capture_path) = args.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
@@ -342,6 +349,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
                     global_labels.insert(k, v);
                 }
             }
+            #[cfg(unix)]
             Telemetry::PrometheusSocket {
                 ref mut global_labels,
                 ..
