@@ -22,7 +22,6 @@ use std::{
 
 use byte_unit::Byte;
 use futures::future::join_all;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{Rng, SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
@@ -36,6 +35,7 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{BytesThrottleConfig, create_throttle};
 
 /// An enum to allow us to determine what operation caused an IO errror as the
 /// default error message lacks detail.
@@ -107,12 +107,9 @@ pub enum Error {
     /// Name provided but no parent on the path
     #[error("Name provided but no parent on the path")]
     NameWithNoParent,
-    /// Both `bytes_per_second` and throttle config were specified
-    #[error("Cannot specify both bytes_per_second and throttle configuration")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Must specify either bytes_per_second or throttle configuration")]
-    NoThrottleConfig,
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
@@ -149,7 +146,7 @@ pub struct Config {
     #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(Debug)]
@@ -189,20 +186,6 @@ impl Server {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle_config = match (config.bytes_per_second, &config.throttle) {
-            (Some(bytes_per_second), None) => {
-                let bytes_per_second = NonZeroU32::new(bytes_per_second.as_u128() as u32)
-                    .expect("bytes_per_second must be non-zero");
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                    timeout_micros: 0,
-                }
-            }
-            (None, Some(throttle)) => (*throttle).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-
         let maximum_bytes_per_log =
             NonZeroU32::new(config.maximum_bytes_per_log.as_u128() as u32).ok_or(Error::Zero)?;
 
@@ -235,7 +218,8 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throttle = Throttle::new_with_config(throttle_config);
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);
@@ -256,7 +240,6 @@ impl Server {
                 maximum_bytes_per_log,
                 Arc::clone(&block_cache),
                 throttle,
-                throttle_config,
                 shutdown.clone(),
                 child_labels,
             );
@@ -305,8 +288,7 @@ struct Child {
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
     block_cache: Arc<block::Cache>,
-    throttle: Throttle,
-    throttle_config: lading_throttle::Config,
+    throttle: lading_throttle::Throttle,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
 }
@@ -318,8 +300,7 @@ impl Child {
         total_rotations: u8,
         maximum_bytes_per_log: NonZeroU32,
         block_cache: Arc<block::Cache>,
-        throttle: Throttle,
-        throttle_config: lading_throttle::Config,
+        throttle: lading_throttle::Throttle,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
     ) -> Self {
@@ -341,22 +322,13 @@ impl Child {
             maximum_bytes_per_log,
             block_cache,
             throttle,
-            throttle_config,
             shutdown,
             labels,
         }
     }
 
     async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = match self.throttle_config {
-            lading_throttle::Config::Stable {
-                maximum_capacity, ..
-            }
-            | lading_throttle::Config::Linear {
-                maximum_capacity, ..
-            } => maximum_capacity.get() as usize,
-            lading_throttle::Config::AllOut => 1024 * 1024, // 1MiB buffer for all-out
-        };
+        let buffer_capacity = self.throttle.maximum_capacity() as usize;
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
 

@@ -60,6 +60,21 @@ where
             clock,
         }
     }
+
+    /// Get the maximum capacity of this throttle
+    pub(super) fn maximum_capacity(&self) -> u32 {
+        self.valve.maximum_capacity
+    }
+
+    /// Get the initial capacity for this throttle
+    pub(super) fn initial_capacity(&self) -> u32 {
+        self.valve.initial_capacity
+    }
+
+    /// Get the rate of change for this throttle
+    pub(super) fn rate_of_change(&self) -> u32 {
+        self.valve.rate_of_change
+    }
 }
 
 /// The non-async interior to Linear, about which we can make proof claims. The
@@ -67,6 +82,8 @@ where
 /// for the linear throttle.
 #[derive(Debug)]
 struct Valve {
+    /// The initial capacity when the throttle was created
+    initial_capacity: u32,
     /// The capacity to reset `capacity` to at each interval roll-over. Will
     /// never be less than `initial_capacity`.
     reset_capacity: u32,
@@ -88,6 +105,7 @@ impl Valve {
     fn new(initial_capacity: u32, maximum_capacity: NonZeroU32, rate_of_change: u32) -> Self {
         let maximum_capacity = maximum_capacity.get();
         Self {
+            initial_capacity,
             reset_capacity: initial_capacity,
             maximum_capacity,
             rate_of_change,

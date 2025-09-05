@@ -29,7 +29,6 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
@@ -44,6 +43,7 @@ use crate::generator::splunk_hec::acknowledgements::Channel;
 use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
@@ -90,7 +90,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -126,15 +126,9 @@ pub enum Error {
     /// Wrapper around [`hyper::Error`].
     #[error("HTTP error: {0}")]
     Hyper(#[from] hyper::Error),
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -144,7 +138,7 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
@@ -201,19 +195,7 @@ impl SplunkHec {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-            (Some(bps), None) => {
-                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                    timeout_micros: 0,
-                }
-            }
-            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-        let throttle = Throttle::new_with_config(throttle_config);
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 
