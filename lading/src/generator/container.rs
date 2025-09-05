@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{General, common::MetricsBuilder};
 
@@ -491,22 +491,27 @@ impl Drop for Container {
 
         // Clean up containers using synchronous docker command
         for container in self.containers.values() {
-            let output = std::process::Command::new("docker")
+            match std::process::Command::new("docker")
                 .arg("rm")
                 .arg("--force")
                 .arg("--volumes")
                 .arg(&container.id)
                 .output()
-                .expect("Failed to execute docker command");
-
-            if output.status.success() {
-                debug!(
-                    "Successfully removed container {id} on drop",
-                    id = container.id
-                );
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!("Error removing container {id}: {stderr}", id = container.id);
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        debug!(
+                            "Successfully removed container {id} on drop",
+                            id = container.id
+                        );
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        warn!("Error removing container {id}: {stderr}", id = container.id);
+                    }
+                }
+                Err(e) => {
+                    error!("Error removing container {id}: {e}", id = &container.id);
+                }
             }
         }
     }
