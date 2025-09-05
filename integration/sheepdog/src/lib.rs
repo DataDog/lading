@@ -355,6 +355,7 @@ impl IntegrationTest {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn http_apache_common() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -389,6 +390,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn http_ascii() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -423,6 +425,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_logs() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -459,6 +462,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_traces() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -494,6 +498,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_metrics() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -534,6 +539,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[ignore]
     #[tokio::test]
     async fn tcp_fluent() -> Result<(), anyhow::Error> {
@@ -564,6 +570,7 @@ generator:
         Ok(())
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn udp_ascii() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
