@@ -13,62 +13,36 @@
 //! - Send data to lading
 //! - Receive data on other protocols & formats
 
-#[cfg(unix)]
 use anyhow::Context;
-#[cfg(unix)]
 use bytes::{Bytes, BytesMut};
-#[cfg(unix)]
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
-#[cfg(unix)]
 use hyper::{Method, Request, StatusCode, service::service_fn};
-#[cfg(unix)]
 use hyper_util::rt::{TokioExecutor, TokioIo};
-#[cfg(unix)]
 use hyper_util::server::conn::auto;
-#[cfg(unix)]
 use once_cell::sync::OnceCell;
-#[cfg(unix)]
 use shared::DucksConfig;
-#[cfg(unix)]
 use shared::integration_api::integration_target_server::{
     IntegrationTarget, IntegrationTargetServer,
 };
-#[cfg(unix)]
 use shared::integration_api::{
     self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
 };
-#[cfg(unix)]
 use sketches_ddsketch::DDSketch;
-#[cfg(unix)]
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-#[cfg(unix)]
-use tokio::net::UnixListener;
-#[cfg(not(unix))]
-use tokio::sync::mpsc;
-#[cfg(unix)]
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{Mutex, mpsc},
     task::JoinSet,
 };
-#[cfg(unix)]
-use tokio_stream::Stream;
-#[cfg(unix)]
-use tokio_stream::wrappers::UnixListenerStream;
-#[cfg(unix)]
+use tokio_stream::{Stream, wrappers::TcpListenerStream};
 use tonic::Status;
-#[cfg(unix)]
 use tracing::{debug, error, trace, warn};
 
-#[cfg(unix)]
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
-#[cfg(unix)]
 static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
-#[cfg(unix)]
 static UDP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
 
-#[cfg(unix)]
 struct HttpCounters {
     body_size: DDSketch,
     entropy: DDSketch,
@@ -77,7 +51,6 @@ struct HttpCounters {
     methods: HashMap<Method, u64>,
 }
 
-#[cfg(unix)]
 impl Default for HttpCounters {
     fn default() -> Self {
         let config = sketches_ddsketch::Config::defaults();
@@ -96,7 +69,6 @@ impl Default for HttpCounters {
     }
 }
 
-#[cfg(unix)]
 impl From<&HttpCounters> for HttpMetrics {
     fn from(val: &HttpCounters) -> Self {
         HttpMetrics {
@@ -116,14 +88,12 @@ impl From<&HttpCounters> for HttpMetrics {
     }
 }
 
-#[cfg(unix)]
 struct SocketCounters {
     entropy: DDSketch,
     read_count: u64,
     total_bytes: u64,
 }
 
-#[cfg(unix)]
 impl Default for SocketCounters {
     fn default() -> Self {
         let config = sketches_ddsketch::Config::defaults();
@@ -137,7 +107,6 @@ impl Default for SocketCounters {
     }
 }
 
-#[cfg(unix)]
 impl From<&SocketCounters> for SocketMetrics {
     fn from(val: &SocketCounters) -> Self {
         SocketMetrics {
@@ -152,7 +121,6 @@ impl From<&SocketCounters> for SocketMetrics {
     }
 }
 
-#[cfg(unix)]
 #[tracing::instrument(level = "trace")]
 async fn http_req_handler(
     req: Request<hyper::body::Incoming>,
@@ -184,7 +152,6 @@ async fn http_req_handler(
     Ok(resp)
 }
 
-#[cfg(unix)]
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
@@ -194,11 +161,9 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 /// Tracks state for a ducks instance
 pub struct DucksTarget {
     /// Shutdown channel. Send on this to exit the process immediately.
-    #[cfg_attr(not(unix), allow(dead_code))]
     shutdown_tx: mpsc::Sender<()>,
 }
 
-#[cfg(unix)]
 #[tonic::async_trait]
 impl IntegrationTarget for DucksTarget {
     type GetLogsStream = Pin<Box<dyn Stream<Item = Result<LogMessage, Status>> + Send>>;
@@ -296,7 +261,6 @@ impl IntegrationTarget for DucksTarget {
 }
 
 impl DucksTarget {
-    #[cfg(unix)]
     async fn http_listen(
         _config: DucksConfig,
         listener: tokio::net::TcpListener,
@@ -331,7 +295,6 @@ impl DucksTarget {
         Ok(())
     }
 
-    #[cfg(unix)]
     async fn tcp_handler(mut socket: TcpStream) -> Result<(), anyhow::Error> {
         // 500KiB input buffer per connection (this can probably be smaller)
         let mut buffer = BytesMut::with_capacity(524_288);
@@ -356,7 +319,6 @@ impl DucksTarget {
         }
     }
 
-    #[cfg(unix)]
     async fn tcp_listen(_config: DucksConfig, incoming: TcpListener) -> Result<(), anyhow::Error> {
         debug!("TCP listener active on {}", incoming.local_addr()?);
         TCP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
@@ -367,7 +329,6 @@ impl DucksTarget {
         }
     }
 
-    #[cfg(unix)]
     async fn udp_listen(_config: DucksConfig, incoming: UdpSocket) -> Result<(), anyhow::Error> {
         debug!("UDP listener active on {}", incoming.local_addr()?);
         UDP_COUNTERS.get_or_init(|| Arc::new(Mutex::new(SocketCounters::default())));
@@ -391,19 +352,15 @@ impl DucksTarget {
     }
 }
 
-#[cfg(unix)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     debug!("hello from ducks");
 
-    // Every ducks-sheepdog pair is connected by a unique socket file
-    let ducks_comm_file = std::env::args()
+    // Every ducks-sheepdog pair is connected by a unique port file
+    let port_file = std::env::args()
         .nth(1)
-        .ok_or(anyhow::anyhow!("ducks socket file argument missing"))?;
-    let ducks_comm =
-        UnixListener::bind(&ducks_comm_file).context("ducks failed to bind to RPC socket")?;
-    let ducks_comm = UnixListenerStream::new(ducks_comm);
+        .ok_or(anyhow::anyhow!("port file argument missing"))?;
 
     let timeout_seconds = std::env::args()
         .nth(2)
@@ -411,6 +368,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let timeout_seconds: u64 = timeout_seconds
         .parse()
         .context("ducks timeout argument must be a number")?;
+
+    // Bind to localhost with random port
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+
+    // Write port to file for sheepdog to read
+    std::fs::write(&port_file, port.to_string()).context("failed to write port to file")?;
+    debug!("RPC server listening on port {}", port);
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
     let (internal_shutdown_tx, mut internal_shutdown_rx) = mpsc::channel(1);
@@ -421,7 +386,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let rpc_server = tonic::transport::Server::builder()
         .add_service(IntegrationTargetServer::new(server))
-        .serve_with_incoming_shutdown(ducks_comm, async move {
+        .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
             internal_shutdown_rx.recv().await;
         });
 
@@ -444,12 +409,4 @@ async fn main() -> Result<(), anyhow::Error> {
     debug!("shutting down");
 
     Ok(())
-}
-
-#[cfg(not(unix))]
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
-    eprintln!("ducks integration test is not supported on Windows (Unix sockets required)");
-    std::process::exit(0);
 }

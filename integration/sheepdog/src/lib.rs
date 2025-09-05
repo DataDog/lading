@@ -19,34 +19,21 @@
 //! `RUST_LOG=trace cargo test -p sheepdog`
 //!
 
-#[cfg(not(unix))]
-use std::io::Read;
-#[cfg(unix)]
 use std::{
     io::{Read, Write},
+    path::PathBuf,
     process::Stdio,
+    time::Duration,
 };
-use std::{path::PathBuf, time::Duration};
 
-#[cfg(unix)]
 use anyhow::Context;
-#[cfg(unix)]
-use hyper_util::rt::TokioIo;
-#[cfg(not(unix))]
-use shared::{DucksConfig, integration_api};
-#[cfg(unix)]
 use shared::{
     DucksConfig,
     integration_api::{self, integration_target_client::IntegrationTargetClient},
 };
 use tempfile::TempDir;
-#[cfg(unix)]
-use tokio::net::UnixStream;
-#[cfg(unix)]
 use tokio::process::Command;
-#[cfg(unix)]
 use tonic::transport::Endpoint;
-#[cfg(unix)]
 use tracing::{debug, warn};
 
 #[derive(Debug)]
@@ -152,7 +139,6 @@ impl IntegrationTest {
         })
     }
 
-    #[cfg(unix)]
     async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
         // Build ducks and lading. Cargo's locking is sufficient for this to
         // work correctly when called in parallel. It would be more efficient to
@@ -160,8 +146,8 @@ impl IntegrationTest {
         let ducks_binary = build_ducks()?;
         let lading_binary = build_lading()?;
 
-        // Every ducks-sheepdog pair is connected by a unique socket file
-        let ducks_comm_file = self.tempdir.path().join("ducks_socket");
+        // Every ducks-sheepdog pair is connected by a unique port file
+        let ducks_port_file = self.tempdir.path().join("ducks_port");
 
         let ducks_timeout =
             self.experiment_warmup + self.experiment_duration + Duration::from_secs(60);
@@ -176,7 +162,7 @@ impl IntegrationTest {
             )?))
             .env("RUST_LOG", "ducks=debug,info")
             .arg(
-                ducks_comm_file
+                ducks_port_file
                     .to_str()
                     .ok_or(anyhow::anyhow!("path is invalid unicode"))?,
             )
@@ -184,23 +170,24 @@ impl IntegrationTest {
             .spawn()
             .context("launch ducks")?;
 
-        // wait for ducks to bring up its RPC server and then connect
-        while !std::path::Path::exists(&ducks_comm_file) {
+        // wait for ducks to write its port file and then connect
+        while !ducks_port_file.exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
-            .connect_with_connector(tower::service_fn(move |_| {
-                let ducks_comm_file = ducks_comm_file.clone();
-                async move {
-                    let sock = UnixStream::connect(ducks_comm_file).await?;
-                    // Wrap the raw UnixStream in a TokioIo wrapper
-                    Ok::<_, std::io::Error>(TokioIo::new(sock))
-                }
-            }))
+        let port: u16 = tokio::fs::read_to_string(&ducks_port_file)
+            .await
+            .context("failed to read port file")?
+            .trim()
+            .parse()
+            .context("failed to parse port number")?;
+
+        let channel = Endpoint::try_from(format!("http://127.0.0.1:{}", port))
+            .context("failed to create endpoint")?
+            .connect()
             .await
             .context("Failed to connect to `ducks` integration test target binary")?;
         let mut ducks_rpc = IntegrationTargetClient::new(channel);
-        debug!("connected to ducks");
+        debug!("connected to ducks on port {}", port);
 
         // instruct ducks to start the test (this is currently hardcoded to a
         // http sink test but will be configurable in the future)
@@ -306,11 +293,6 @@ impl IntegrationTest {
         Ok(metrics)
     }
 
-    #[cfg(not(unix))]
-    async fn run_inner(self) -> Result<Metrics, anyhow::Error> {
-        anyhow::bail!("Integration tests not supported on Windows (Unix sockets required)");
-    }
-
     fn print_stdio(tempdir: &TakeableTempDir) {
         let logs = vec![
             ("ducks.stdout", tempdir.path().join("ducks.stdout")),
@@ -355,7 +337,6 @@ impl IntegrationTest {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn http_apache_common() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -390,7 +371,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn http_ascii() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -425,7 +405,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_logs() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -462,7 +441,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_traces() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -498,7 +476,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn http_otel_metrics() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
@@ -539,7 +516,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[ignore]
     #[tokio::test]
     async fn tcp_fluent() -> Result<(), anyhow::Error> {
@@ -570,7 +546,6 @@ generator:
         Ok(())
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn udp_ascii() -> Result<(), anyhow::Error> {
         let test = IntegrationTest::new(
