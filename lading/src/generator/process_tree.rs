@@ -27,9 +27,8 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{VecDeque, vec_deque},
+    collections::VecDeque,
     env, error, fmt,
-    iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
     process::Stdio,
@@ -390,8 +389,11 @@ fn gen_rnd_envs(rng: &mut StdRng, len: usize, max: u32) -> FxHashMap<String, Str
 /// Defines a execution of an executable with args and envs
 #[derive(Debug)]
 pub struct Exec {
+    #[allow(dead_code)]
     executable: String,
+    #[allow(dead_code)]
     args: Vec<String>,
+    #[allow(dead_code)]
     envs: FxHashMap<String, String>,
 }
 
@@ -421,6 +423,7 @@ impl Exec {
 #[derive(Debug)]
 pub struct Process {
     depth: u32,
+    #[allow(dead_code)]
     exec: Option<Exec>,
 }
 
@@ -491,6 +494,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
     }
 }
 
+/// Windows stub for process tree spawning - not supported
 #[cfg(not(unix))]
 pub fn spawn_tree(_nodes: &VecDeque<Process>, _sleep_ns: u32) -> Result<(), Error> {
     Err(Error::ToStr) // Process tree generation not supported on Windows
@@ -514,7 +518,10 @@ fn try_wait_pid(pids: &mut FxHashSet<Pid>) {
 }
 
 #[inline]
-fn goto_next_sibling(depth: u32, iter: &mut Peekable<vec_deque::Iter<'_, Process>>) {
+fn goto_next_sibling(
+    depth: u32,
+    iter: &mut std::iter::Peekable<std::collections::vec_deque::Iter<'_, Process>>,
+) {
     while let Some(child) = iter.peek() {
         if child.depth == depth {
             break;

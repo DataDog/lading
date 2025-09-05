@@ -16,21 +16,15 @@
 #[cfg(unix)]
 use anyhow::Context;
 #[cfg(unix)]
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 #[cfg(unix)]
-use bytes::BytesMut;
-#[cfg(unix)]
-use http_body_util::Full;
-#[cfg(unix)]
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 #[cfg(unix)]
 use hyper::{Method, Request, StatusCode, service::service_fn};
 #[cfg(not(unix))]
 use hyper::{Request, StatusCode, service::service_fn};
 #[cfg(unix)]
-use hyper_util::rt::TokioExecutor;
-#[cfg(unix)]
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 #[cfg(unix)]
 use hyper_util::server::conn::auto;
 #[cfg(unix)]
@@ -47,17 +41,15 @@ use shared::integration_api::{
 };
 #[cfg(unix)]
 use sketches_ddsketch::DDSketch;
-#[cfg(not(unix))]
-use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc};
 #[cfg(unix)]
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{Mutex, mpsc},
+    task::JoinSet,
 };
 #[cfg(unix)]
 use tokio_stream::Stream;
@@ -66,8 +58,6 @@ use tokio_stream::wrappers::UnixListenerStream;
 #[cfg(unix)]
 use tonic::Status;
 use tracing::error;
-#[cfg(not(unix))]
-use tracing::{debug, trace};
 #[cfg(unix)]
 use tracing::{debug, trace, warn};
 
