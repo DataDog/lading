@@ -94,6 +94,7 @@ fn generate_and_check(
 fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
     match &config.inner {
         lading::generator::Inner::FileGen(_) => unimplemented!("FileGen not supported"),
+        #[cfg(unix)]
         lading::generator::Inner::UnixDatagram(g) => {
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -130,6 +131,7 @@ fn check_generator(config: &lading::generator::Config) -> Result<(), Error> {
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size)?;
         }
+        #[cfg(unix)]
         lading::generator::Inner::UnixStream(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");

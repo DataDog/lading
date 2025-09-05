@@ -379,6 +379,7 @@ async fn inner_main(
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
     match config.telemetry {
+        #[cfg(unix)]
         Telemetry::PrometheusSocket {
             path,
             global_labels,
