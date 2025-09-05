@@ -24,14 +24,16 @@ use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto;
 use once_cell::sync::OnceCell;
+use shared::DucksConfig;
+#[cfg(not(unix))]
+use shared::integration_api;
+#[cfg(unix)]
 use shared::integration_api::integration_target_server::{
     IntegrationTarget, IntegrationTargetServer,
 };
-use shared::{
-    DucksConfig,
-    integration_api::{
-        self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
-    },
+#[cfg(unix)]
+use shared::integration_api::{
+    self, Empty, HttpMetrics, ListenInfo, LogMessage, Metrics, SocketMetrics, TestConfig,
 };
 use sketches_ddsketch::DDSketch;
 #[cfg(not(unix))]
@@ -46,9 +48,11 @@ use tokio::{
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{Mutex, mpsc},
 };
+#[cfg(unix)]
 use tokio_stream::Stream;
 #[cfg(unix)]
 use tokio_stream::wrappers::UnixListenerStream;
+#[cfg(unix)]
 use tonic::Status;
 use tracing::error;
 #[cfg(not(unix))]
@@ -56,10 +60,14 @@ use tracing::{debug, trace};
 #[cfg(unix)]
 use tracing::{debug, trace, warn};
 
+#[cfg(unix)]
 static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
+#[cfg(unix)]
 static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
+#[cfg(unix)]
 static UDP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
 
+#[cfg(unix)]
 struct HttpCounters {
     body_size: DDSketch,
     entropy: DDSketch,
@@ -68,6 +76,7 @@ struct HttpCounters {
     methods: HashMap<Method, u64>,
 }
 
+#[cfg(unix)]
 impl Default for HttpCounters {
     fn default() -> Self {
         let config = sketches_ddsketch::Config::defaults();
@@ -86,6 +95,7 @@ impl Default for HttpCounters {
     }
 }
 
+#[cfg(unix)]
 impl From<&HttpCounters> for HttpMetrics {
     fn from(val: &HttpCounters) -> Self {
         HttpMetrics {
@@ -105,12 +115,14 @@ impl From<&HttpCounters> for HttpMetrics {
     }
 }
 
+#[cfg(unix)]
 struct SocketCounters {
     entropy: DDSketch,
     read_count: u64,
     total_bytes: u64,
 }
 
+#[cfg(unix)]
 impl Default for SocketCounters {
     fn default() -> Self {
         let config = sketches_ddsketch::Config::defaults();
@@ -124,6 +136,7 @@ impl Default for SocketCounters {
     }
 }
 
+#[cfg(unix)]
 impl From<&SocketCounters> for SocketMetrics {
     fn from(val: &SocketCounters) -> Self {
         SocketMetrics {

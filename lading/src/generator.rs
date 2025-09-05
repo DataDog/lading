@@ -11,7 +11,9 @@
 //! experimental control.
 
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::error;
+#[cfg(unix)]
+use tracing::warn;
 
 use crate::target::TargetPidReceiver;
 
