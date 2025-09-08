@@ -19,7 +19,6 @@ use std::{
 
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use lading_throttle::Throttle;
 use metrics::counter;
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
@@ -31,7 +30,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleBuilder, ThrottleBuilderError,
+    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
+    create_throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -75,7 +75,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -99,9 +99,9 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Throttle builder error
+    /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleBuilder(#[from] ThrottleBuilderError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 /// The HTTP generator.
@@ -114,7 +114,7 @@ pub struct Http {
     method: hyper::Method,
     headers: hyper::HeaderMap,
     concurrency: ConcurrencyStrategy,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -141,10 +141,7 @@ impl Http {
 
         let labels = MetricsBuilder::new("http").with_id(general.id).build();
 
-        let throttle = ThrottleBuilder::new()
-            .bytes_per_second(config.bytes_per_second.as_ref())
-            .throttle_config(config.throttle.as_ref())
-            .build()?;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         match config.method {
             Method::Post {

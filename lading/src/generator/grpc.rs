@@ -18,7 +18,6 @@ use std::{convert::TryFrom, num::NonZeroU32, time::Duration};
 use byte_unit::Byte;
 use bytes::{Buf, BufMut, Bytes};
 use http::{Uri, uri::PathAndQuery};
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -32,6 +31,7 @@ use tracing::{debug, info};
 use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
 
 /// Errors produced by [`Grpc`]
 #[derive(thiserror::Error, Debug)]
@@ -54,15 +54,9 @@ pub enum Error {
     /// Zero value
     #[error("Value provided must not be zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle config were specified
-    #[error("Cannot specify both bytes_per_second and throttle configuration")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Must specify either bytes_per_second or throttle configuration")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 impl From<tonic::Status> for Error {
@@ -95,7 +89,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -155,7 +149,7 @@ pub struct Grpc {
     target_uri: Uri,
     rpc_path: PathAndQuery,
     shutdown: lading_signal::Watcher,
-    throttle: Throttle,
+    throttle: lading_throttle::Throttle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
 }
@@ -186,19 +180,7 @@ impl Grpc {
             labels.push(("id".to_string(), id));
         }
 
-        let throttle_config = match (config.bytes_per_second, &config.throttle) {
-            (Some(bytes_per_second), None) => {
-                let bytes_per_second =
-                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                    timeout_micros: 0,
-                }
-            }
-            (None, Some(throttle)) => (*throttle).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let maximum_prebuild_cache_size_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -227,8 +209,6 @@ impl Grpc {
             .path_and_query()
             .cloned()
             .expect("target_uri should have an RPC path");
-
-        let throttle = Throttle::new_with_config(throttle_config);
         Ok(Self {
             target_uri,
             rpc_path,
