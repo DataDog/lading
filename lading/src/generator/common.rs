@@ -147,8 +147,21 @@ impl<'a> ThrottleBuilder<'a> {
 
     /// Determine if the builder will produce a valid throttle
     ///
-    /// Returns 'true' if the builder configuration will produce a valid
-    /// throttle, false otherwise.
+    /// Returns `true` if the builder configuration will produce a valid
+    /// throttle, `false` otherwise.
+    ///
+    /// A configuration is invalid when:
+    /// - Both `bytes_per_second` and `throttle_config` are provided
+    ///   (conflicting configs).
+    /// - Neither `bytes_per_second` nor `throttle_config` is provided (no
+    ///   config).
+    /// - `bytes_per_second` is less than the number of parallel connections.
+    /// - For `Stable` throttle config: `bytes_per_second` is less than parallel
+    ///   connections.
+    /// - For `Linear` throttle config: `maximum_bytes_per_second` is less than
+    ///   parallel connections.
+    /// - Values exceed u32::MAX when throttle_config is provided (overflow).
+
     #[allow(clippy::cast_possible_truncation)]
     fn valid(&self) -> bool {
         let divisor = match self.parallel_connections {
@@ -207,9 +220,10 @@ impl<'a> ThrottleBuilder<'a> {
     /// If `parallel_connections` > 1, the throttle capacity will be divided evenly
     /// among the connections.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the builder configuration is invalid. Call `valid()` first to check.
+    /// Returns an error if the throttle configuration cannot be converted. See
+    /// documentation for `valid`.
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn build(self) -> Result<Throttle, ThrottleBuilderError> {
         assert!(self.valid());
@@ -224,7 +238,8 @@ impl<'a> ThrottleBuilder<'a> {
                 let total_bps = bps.as_u128() as u32;
                 let divided_bps = total_bps / divisor;
                 // valid() ensures divided_bps > 0
-                let bytes_per_second = NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
+                let bytes_per_second =
+                    NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
                     timeout_micros: 0,
