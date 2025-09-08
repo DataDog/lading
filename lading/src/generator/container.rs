@@ -1,48 +1,72 @@
 //! The container generator
 //!
-//! This generator is meant to spin up a container from a configured image. For now,
-//! it does not actually do anything beyond logging that it's running and then waiting
-//! for a shutdown signal.
+//! This generator creates Docker containers, recycling them when they exceed
+//! their configured maximum lifetime.
 
 use bollard::Docker;
 use bollard::models::ContainerCreateBody;
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, InspectContainerOptionsBuilder,
-    RemoveContainerOptionsBuilder, StartContainerOptions, StopContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveContainerOptionsBuilder,
+    StartContainerOptions, StopContainerOptionsBuilder,
 };
 use bollard::secret::ContainerCreateResponse;
+use lading_throttle::{Config as ThrottleConfig, Throttle};
+use metrics::counter;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use std::collections::HashMap;
+use std::num::NonZeroU32;
+use tokio::time::Instant;
 use tokio_stream::StreamExt;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use tracing::{debug, error, info, warn};
 
-use super::General;
+use super::{General, common::MetricsBuilder};
 
+mod state_machine;
+use state_machine::{Event, Operation, StateMachine};
+
+fn default_number_of_containers() -> NonZeroU32 {
+    NonZeroU32::MIN
+}
+
+fn default_network_disabled() -> bool {
+    false
+}
+
+fn default_exposed_ports() -> Vec<String> {
+    Vec::new()
+}
+
+fn default_max_lifetime_seconds() -> NonZeroU32 {
+    NonZeroU32::MAX
+}
+
+/// Configuration of the container generator.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-/// Configuration of the container generator.
 pub struct Config {
-    /// The container repository (e.g. "library/nginx")
+    /// Repository in which the container is found, docker.io/datadog/foobar.
     pub repository: String,
-    /// The container image tag (e.g. "latest")
+    /// Container tag, :v1.0.0.
     pub tag: String,
-    /// Arguments to provide to the container
+    /// Arguments for the container entrypoint, maps to docker run CMD.
     pub args: Option<Vec<String>>,
-    /// Environment variables to set in the container
+    /// Environment variables for the container, maps to docker run --env.
     pub env: Option<Vec<String>>,
-    /// Labels to apply to the container
+    /// Labels to set on the container, maps to docker run --label.
     pub labels: Option<HashMap<String, String>>,
-    /// Network mode to use for the container
-    pub network_disabled: Option<bool>,
-    /// Ports to expose from the container
-    pub exposed_ports: Option<Vec<String>>,
-    /// Maximum lifetime of containers before being replaced
-    pub max_lifetime_seconds: Option<std::num::NonZeroU64>,
-    /// Number of containers to spin up (defaults to 1)
-    pub number_of_containers: Option<std::num::NonZeroU32>,
+    /// Whether to disable the container network, maps to docker run --network
+    /// none.
+    #[serde(default = "default_network_disabled")]
+    pub network_disabled: bool,
+    /// Ports exposed on the container, maps to docker run --expose.
+    #[serde(default = "default_exposed_ports")]
+    pub exposed_ports: Vec<String>,
+    /// Maximum lifetime before recycling
+    #[serde(default = "default_max_lifetime_seconds")]
+    pub max_lifetime_seconds: NonZeroU32,
+    /// Number of containers to create
+    #[serde(default = "default_number_of_containers")]
+    pub number_of_containers: NonZeroU32,
 }
 
 /// Errors produced by the `Container` generator.
@@ -54,16 +78,20 @@ pub enum Error {
     /// Error produced by the Bollard Docker client.
     #[error("Bollard/Docker error: {0}")]
     Bollard(#[from] bollard::errors::Error),
-    /// Error produced by tokio
-    #[error("Tokio error: {0}")]
-    Tokio(#[from] mpsc::error::SendError<ContainerCreateResponse>),
+    /// State machine error
+    #[error(transparent)]
+    StateMachine(#[from] state_machine::Error),
 }
 
-#[derive(Debug)]
 /// Represents a container that can be spun up from a configured image.
+#[derive(Debug)]
 pub struct Container {
     config: Config,
+    concurrent_containers: NonZeroU32,
+    throttle: Option<Throttle>,
     shutdown: lading_signal::Watcher,
+    metric_labels: Vec<(String, String)>,
+    containers: HashMap<u32, ContainerCreateResponse>,
 }
 
 impl Container {
@@ -71,17 +99,45 @@ impl Container {
     ///
     /// # Errors
     ///
+    /// # Panics
+    ///
     /// Will return an error if config parsing fails or runtime setup fails
     /// in the future. For now, always succeeds.
     #[allow(clippy::needless_pass_by_value)]
     pub fn new(
-        _general: General,
+        general: General,
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
+        let concurrent_containers = config.number_of_containers;
+        let metric_labels = MetricsBuilder::new("container").with_id(general.id).build();
+
+        // Configure throttle for recycling. The throttle controls how often we recycle containers.
+        let throttle = if config.max_lifetime_seconds == NonZeroU32::MAX {
+            // MAX means no recycling
+            None
+        } else {
+            // We want to recycle all containers over the lifetime period, so we need
+            // concurrent_containers operations over lifetime_seconds. This gives us
+            // operations_per_second = concurrent_containers / lifetime_seconds.
+            let ops = concurrent_containers
+                .get()
+                .saturating_div(config.max_lifetime_seconds.get());
+            let ops_per_sec = NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN);
+
+            Some(Throttle::new_with_config(ThrottleConfig::Stable {
+                maximum_capacity: ops_per_sec,
+                timeout_micros: 0,
+            }))
+        };
+
         Ok(Self {
             config: config.clone(),
+            concurrent_containers,
+            throttle,
             shutdown,
+            metric_labels,
+            containers: HashMap::new(),
         })
     }
 
@@ -94,170 +150,397 @@ impl Container {
     ///
     /// # Panics
     ///
-    /// Steps:
-    /// 1. Connect to Docker.
-    /// 2. Pull the specified image (if not available).
-    /// 3. Create and start the container.
-    /// 4. Wait for shutdown signal.
-    /// 5. On shutdown, stop and remove the container.
-    pub async fn spin(self) -> Result<(), Error> {
+    /// Panics if container index cannot be converted to u32.
+    #[allow(clippy::too_many_lines)]
+    pub async fn spin(mut self) -> Result<(), Error> {
         info!(
-            "Container generator running: {}:{}",
-            self.config.repository, self.config.tag
+            "Container generator running: {repository}:{tag}",
+            repository = self.config.repository,
+            tag = self.config.tag
         );
 
         let docker = Docker::connect_with_local_defaults()?;
+        let full_image = format!(
+            "{repository}:{tag}",
+            repository = self.config.repository,
+            tag = self.config.tag
+        );
 
-        let full_image = format!("{}:{}", self.config.repository, self.config.tag);
         debug!("Ensuring image is available: {full_image}");
+        let pull_start = Instant::now();
+        let create_image_options = CreateImageOptionsBuilder::default()
+            .from_image(&full_image)
+            .build();
 
-        pull_image(&docker, &full_image).await?;
-
-        #[allow(clippy::unwrap_used)]
-        let number_of_containers = self
-            .config
-            .number_of_containers
-            .unwrap_or(std::num::NonZero::new(1).unwrap());
-
-        let mut set = JoinSet::new();
-        for _ in 0..number_of_containers.into() {
-            let docker = docker.clone();
-            let config = self.config.clone();
-            let full_image = full_image.clone();
-            set.spawn(async move {
-                config
-                    .create_and_start_container(&docker, &full_image)
-                    .await
-            });
-        }
-
-        let mut containers = set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<Result<VecDeque<ContainerCreateResponse>, Error>>()?;
-
-        // Wait for shutdown signal
-        let shutdown_wait = self.shutdown.recv();
-        tokio::pin!(shutdown_wait);
-        let (new_container_tx, mut new_container_rx) = mpsc::channel(32);
-        let mut recreate_interval = self
-            .config
-            .max_lifetime_seconds
-            .map(|max_lifetime_seconds| {
-                tokio::time::interval(
-                    tokio::time::Duration::from_secs(max_lifetime_seconds.into())
-                        / <std::num::NonZero<u32> as Into<u32>>::into(number_of_containers),
-                )
-            });
-        let mut liveness_interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
-        loop {
-            tokio::select! {
-                // Destroy and replace containers
-                _ = if let Some(ref mut interval) = recreate_interval { interval.tick() } else { std::future::pending().await } => {
-                    if let Some(container) = containers.pop_front() {
-                        let docker = docker.clone();
-                        let config = self.config.clone();
-                        let full_image = full_image.clone();
-                        let new_container_tx = new_container_tx.clone();
-                        tokio::spawn(async move {
-                            stop_and_remove_container(&docker, &container).await?;
-                            new_container_tx.send(config.create_and_start_container(&docker, &full_image).await?).await?;
-                            Ok::<(), Error>(())
-                        });
+        let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
+        let mut last_progress_log = Instant::now();
+        while let Some(item) = pull_stream.next().await {
+            match item {
+                Ok(status) => {
+                    // Only log progress every second to avoid spam
+                    if let Some(progress) = status.progress {
+                        let now = Instant::now();
+                        if now.duration_since(last_progress_log).as_secs() >= 1 {
+                            let elapsed = pull_start.elapsed();
+                            debug!("Pull progress ({elapsed:?}): {progress}");
+                            last_progress_log = now;
+                        }
                     }
                 }
-
-                // Handle new containers from recycling tasks
-                new_container = new_container_rx.recv() => {
-                    if let Some(container) = new_container {
-                        containers.push_back(container);
-                    }
-                }
-
-                // Check that containers are still running every 10 seconds
-                _ = liveness_interval.tick() => {
-                    for container in &containers {
-                        let inspect_options = InspectContainerOptionsBuilder::default().build();
-                        if let Some(state) = docker.inspect_container(&container.id, Some(inspect_options)).await?.state
-                            && !state.running.unwrap_or(false) {
-                                return Err(Error::Generic(format!(
-                                    "Container {id} is not running anymore",
-                                    id = container.id
-                                )));
-                            }
-                    }
-                }
-
-                // Shutdown
-                () = &mut shutdown_wait => {
-                    debug!("shutdown signal received");
-                    drop(new_container_tx);
-
-                    let mut set = JoinSet::new();
-                    for container in containers {
-                        let docker = docker.clone();
-                        set.spawn(async move {
-                            stop_and_remove_container(&docker, &container).await
-                        });
-                    }
-
-                    set.join_all().await;
-
-                    return Ok(())
+                Err(e) => {
+                    let elapsed = pull_start.elapsed();
+                    warn!("Pull failed after {elapsed:?}: {e}");
+                    let mut labels = self.metric_labels.clone();
+                    labels.push(("kind".to_string(), "pull".to_string()));
+                    labels.push(("result".to_string(), "failure".to_string()));
+                    counter!("operation", &labels).increment(1);
+                    return Err(e.into());
                 }
             }
+        }
+        let pull_elapsed = pull_start.elapsed();
+        debug!("Image {full_image} ready after {pull_elapsed:?}");
+        let mut labels = self.metric_labels.clone();
+        labels.push(("kind".to_string(), "pull".to_string()));
+        labels.push(("result".to_string(), "success".to_string()));
+        counter!("operation", &labels).increment(1);
+
+        let mut machine = StateMachine::new(self.concurrent_containers.get());
+        let mut event = Event::Started;
+
+        loop {
+            let operation = machine.next(event)?;
+            debug!("State machine: {:?} -> {:?}", machine.state(), operation);
+
+            event = match operation {
+                Operation::CreateAllContainers => {
+                    let mut created = Vec::new();
+                    let mut success = true;
+
+                    for idx in 0..self.concurrent_containers.get() {
+                        if let Ok(container) = create_and_start_container(
+                            &docker,
+                            &self.config,
+                            &full_image,
+                            idx,
+                            &self.metric_labels,
+                        )
+                        .await
+                        {
+                            created.push(container);
+                        } else {
+                            success = false;
+                            break;
+                        }
+                    }
+
+                    if success {
+                        for (idx, container) in created.into_iter().enumerate() {
+                            let idx_u32 = u32::try_from(idx).expect("container index overflow");
+                            self.containers.insert(idx_u32, container);
+                        }
+                        debug_assert_eq!(
+                            self.containers.len(),
+                            self.concurrent_containers.get() as usize,
+                            "containers HashMap size mismatch"
+                        );
+                        Event::AllContainersReady
+                    } else {
+                        warn!("Failed to create all containers");
+                        Event::ShutdownSignaled
+                    }
+                }
+                Operation::RecycleContainer { index } => {
+                    debug!("Recycling container {index}");
+
+                    if let Some(old_container) = self.containers.remove(&index)
+                        && let Err(e) =
+                            stop_and_remove_container(&docker, &old_container, &self.metric_labels)
+                                .await
+                    {
+                        warn!("Failed to stop old container {index}: {e}");
+                    }
+
+                    let result = create_and_start_container(
+                        &docker,
+                        &self.config,
+                        &full_image,
+                        index,
+                        &self.metric_labels,
+                    )
+                    .await;
+
+                    if let Ok(new_container) = result {
+                        self.containers.insert(index, new_container);
+                    } else {
+                        warn!("Failed to create new container {index}");
+                    }
+
+                    debug_assert!(
+                        self.containers.len() <= self.concurrent_containers.get() as usize,
+                        "containers HashMap exceeded expected size"
+                    );
+
+                    Event::ContainerRecycled { index }
+                }
+                Operation::Wait => {
+                    if let Some(ref mut throttle) = self.throttle {
+                        let shutdown_wait = self.shutdown.clone().recv();
+                        tokio::select! {
+                            result = throttle.wait() => {
+                                match result {
+                                    Ok(()) => state_machine::Event::RecycleNext,
+                                    Err(e) => {
+                                        warn!("Throttle error: {e}");
+                                        state_machine::Event::RecycleNext
+                                    }
+                                }
+                            }
+                            () = shutdown_wait => state_machine::Event::ShutdownSignaled
+                        }
+                    } else {
+                        self.shutdown.clone().recv().await;
+                        state_machine::Event::ShutdownSignaled
+                    }
+                }
+                Operation::StopAllContainers => {
+                    for container in self.containers.values() {
+                        let _ = stop_and_remove_container(&docker, container, &self.metric_labels)
+                            .await;
+                    }
+                    self.containers.clear();
+                    Event::AllContainersStopped
+                }
+                Operation::Exit => return Ok(()),
+            };
         }
     }
 }
 
-async fn pull_image(docker: &Docker, full_image: &str) -> Result<(), Error> {
-    let create_image_options = CreateImageOptionsBuilder::default()
-        .from_image(full_image)
+async fn create_and_start_container(
+    docker: &Docker,
+    config: &Config,
+    full_image: &str,
+    index: u32,
+    metric_labels: &[(String, String)],
+) -> Result<ContainerCreateResponse, Error> {
+    let container_name = format!("lading_container_{index:05}");
+    debug!("Creating container: {container_name}");
+
+    let create_options = CreateContainerOptionsBuilder::default()
+        .name(&container_name)
         .build();
 
-    let mut pull_stream = docker.create_image(Some(create_image_options), None, None);
+    let create_start = Instant::now();
+    let container = match docker
+        .create_container(Some(create_options), config.to_container_config(full_image))
+        .await
+    {
+        Ok(c) => {
+            let elapsed = create_start.elapsed();
+            debug!(
+                "Created container {container_name} with id {id} in {elapsed:?}",
+                id = c.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "create".to_string()));
+            labels.push(("result".to_string(), "success".to_string()));
+            counter!("operation", &labels).increment(1);
+            c
+        }
+        Err(e) => {
+            let elapsed = create_start.elapsed();
+            warn!("Failed to create container {container_name} after {elapsed:?}: {e}");
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "create".to_string()));
+            labels.push(("result".to_string(), "failure".to_string()));
+            counter!("operation", &labels).increment(1);
+            return Err(e.into());
+        }
+    };
 
-    while let Some(item) = pull_stream.next().await {
-        match item {
-            Ok(status) => {
-                if let Some(progress) = status.progress {
-                    info!("Pull progress: {progress}");
-                }
-            }
-            Err(e) => {
-                warn!("Pull error: {e}");
-                return Err(e.into());
-            }
+    for warning in &container.warnings {
+        warn!("Container {container_name} warning: {warning}");
+    }
+
+    let start_start = Instant::now();
+    match docker
+        .start_container(&container.id, None::<StartContainerOptions>)
+        .await
+    {
+        Ok(()) => {
+            let elapsed = start_start.elapsed();
+            debug!(
+                "Started container {container_name} (id: {id}) in {elapsed:?}",
+                id = container.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "start".to_string()));
+            labels.push(("result".to_string(), "success".to_string()));
+            counter!("operation", &labels).increment(1);
+        }
+        Err(e) => {
+            let elapsed = start_start.elapsed();
+            warn!(
+                "Failed to start container {container_name} (id: {id}) after {elapsed:?}: {e}",
+                id = container.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "start".to_string()));
+            labels.push(("result".to_string(), "failure".to_string()));
+            counter!("operation", &labels).increment(1);
+            // Try to clean up the created but not started container
+            let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
+            let _ = docker
+                .remove_container(&container.id, Some(remove_options))
+                .await;
+            return Err(e.into());
+        }
+    }
+
+    let total_elapsed = create_start.elapsed();
+    debug!("Container {container_name} fully operational in {total_elapsed:?}");
+
+    Ok(container)
+}
+
+async fn stop_and_remove_container(
+    docker: &Docker,
+    container: &ContainerCreateResponse,
+    metric_labels: &[(String, String)],
+) -> Result<(), Error> {
+    let total_start = Instant::now();
+    debug!("Stopping container: {id}", id = container.id);
+
+    // Stop with 5 second timeout
+    let stop_options = StopContainerOptionsBuilder::default().t(5).build();
+    let stop_start = Instant::now();
+    match docker
+        .stop_container(&container.id, Some(stop_options))
+        .await
+    {
+        Ok(()) => {
+            let elapsed = stop_start.elapsed();
+            debug!("Stopped container {id} in {elapsed:?}", id = container.id);
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "stop".to_string()));
+            labels.push(("result".to_string(), "success".to_string()));
+            counter!("operation", &labels).increment(1);
+        }
+        Err(e) => {
+            let elapsed = stop_start.elapsed();
+            warn!(
+                "Failed to stop container {id} after {elapsed:?}: {e} (will force remove)",
+                id = container.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "stop".to_string()));
+            labels.push(("result".to_string(), "failure".to_string()));
+            counter!("operation", &labels).increment(1);
+            // Continue to removal even if stop failed - force flag will handle it
+        }
+    }
+
+    debug!("Removing container: {id}", id = container.id);
+    let remove_start = Instant::now();
+    let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
+    match docker
+        .remove_container(&container.id, Some(remove_options))
+        .await
+    {
+        Ok(()) => {
+            let elapsed = remove_start.elapsed();
+            let total_elapsed = total_start.elapsed();
+            debug!(
+                "Removed container {id} in {elapsed:?} (total teardown: {total_elapsed:?})",
+                id = container.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "remove".to_string()));
+            labels.push(("result".to_string(), "success".to_string()));
+            counter!("operation", &labels).increment(1);
+        }
+        Err(e) => {
+            let elapsed = remove_start.elapsed();
+            let total_elapsed = total_start.elapsed();
+            warn!(
+                "Failed to remove container {id} after {elapsed:?} (total: {total_elapsed:?}): {e}",
+                id = container.id
+            );
+            let mut labels = metric_labels.to_vec();
+            labels.push(("kind".to_string(), "remove".to_string()));
+            labels.push(("result".to_string(), "failure".to_string()));
+            counter!("operation", &labels).increment(1);
+            return Err(e.into());
         }
     }
 
     Ok(())
 }
 
+impl Drop for Container {
+    fn drop(&mut self) {
+        if self.containers.is_empty() {
+            return;
+        }
+
+        info!(
+            "Cleaning up {count} containers on drop",
+            count = self.containers.len()
+        );
+
+        // Clean up containers using synchronous docker command
+        for container in self.containers.values() {
+            match std::process::Command::new("docker")
+                .arg("rm")
+                .arg("--force")
+                .arg("--volumes")
+                .arg(&container.id)
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        debug!(
+                            "Successfully removed container {id} on drop",
+                            id = container.id
+                        );
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        warn!("Error removing container {id}: {stderr}", id = container.id);
+                    }
+                }
+                Err(e) => {
+                    error!("Error removing container {id}: {e}", id = &container.id);
+                }
+            }
+        }
+    }
+}
+
 impl Config {
     /// Convert the `Container` instance to a `ContainerConfig` for the Docker API.
     #[must_use]
     fn to_container_config(&self, full_image: &str) -> ContainerCreateBody {
-        // The Docker API requires exposed ports in the format {"<port>/<protocol>": {}}.
-        // For example: {"80/tcp": {}, "443/tcp": {}}
-        // The port specification is in the key, and the value must be an empty object.
-        // Bollard represents the empty object as HashMap<(), ()>, which is required by their API.
+        // Docker API requires exposed ports as {"<port>/<protocol>": {}}
+        // Bollard represents the empty object as HashMap<(), ()>
         #[allow(clippy::zero_sized_map_values)]
-        let exposed_ports = self.exposed_ports.as_ref().map(|ports| {
-            ports
-                .iter()
-                .map(|port| {
-                    // Ensure port includes protocol (default to tcp if not specified)
-                    let port_with_protocol = if port.contains('/') {
-                        port.clone()
-                    } else {
-                        format!("{port}/tcp")
-                    };
-                    (port_with_protocol, HashMap::<(), ()>::new())
-                })
-                .collect()
-        });
+        let exposed_ports = if self.exposed_ports.is_empty() {
+            None
+        } else {
+            Some(
+                self.exposed_ports
+                    .iter()
+                    .map(|port| {
+                        let port_with_protocol = if port.contains('/') {
+                            port.clone()
+                        } else {
+                            format!("{port}/tcp")
+                        };
+                        (port_with_protocol, HashMap::<(), ()>::new())
+                    })
+                    .collect(),
+            )
+        };
 
         ContainerCreateBody {
             image: Some(full_image.to_string()),
@@ -265,63 +548,9 @@ impl Config {
             cmd: self.args.clone(),
             env: self.env.clone(),
             labels: self.labels.clone(),
-            network_disabled: self.network_disabled,
+            network_disabled: Some(self.network_disabled),
             exposed_ports,
             ..Default::default()
         }
     }
-
-    async fn create_and_start_container(
-        &self,
-        docker: &Docker,
-        full_image: &str,
-    ) -> Result<ContainerCreateResponse, Error> {
-        let container_name = format!("lading_container_{}", Uuid::new_v4());
-        debug!("Creating container: {container_name}");
-
-        let create_options = CreateContainerOptionsBuilder::default()
-            .name(&container_name)
-            .build();
-
-        let container = docker
-            .create_container(Some(create_options), self.to_container_config(full_image))
-            .await?;
-
-        debug!("Created container with id: {id}", id = container.id);
-        for warning in &container.warnings {
-            warn!("Container warning: {warning}");
-        }
-
-        docker
-            .start_container(&container.id, None::<StartContainerOptions>)
-            .await?;
-
-        debug!("Started container: {id}", id = container.id);
-
-        Ok(container)
-    }
-}
-
-async fn stop_and_remove_container(
-    docker: &Docker,
-    container: &ContainerCreateResponse,
-) -> Result<(), Error> {
-    info!("Stopping container: {id}", id = container.id);
-    let stop_options = StopContainerOptionsBuilder::default().t(5).build();
-    if let Err(e) = docker
-        .stop_container(&container.id, Some(stop_options))
-        .await
-    {
-        warn!("Error stopping container {id}: {e}", id = container.id);
-    }
-
-    debug!("Removing container: {id}", id = container.id);
-    let remove_options = RemoveContainerOptionsBuilder::default().force(true).build();
-    docker
-        .remove_container(&container.id, Some(remove_options))
-        .await?;
-
-    debug!("Removed container: {id}", id = container.id);
-
-    Ok(())
 }
