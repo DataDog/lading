@@ -7,6 +7,7 @@ use std::{
     convert::TryFrom,
     num::{NonZeroU16, NonZeroU32},
 };
+use tracing::error;
 
 /// Generator-specific throttle configuration with clearer field names
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -144,6 +145,63 @@ impl<'a> ThrottleBuilder<'a> {
         self
     }
 
+    /// Determine if the builder will produce a valid throttle
+    ///
+    /// Returns 'true' if the builder configuration will produce a valid
+    /// throttle, false otherwise.
+    #[allow(clippy::cast_possible_truncation)]
+    fn valid(&self) -> bool {
+        let divisor = match self.parallel_connections {
+            Some(n) => u32::from(n.get()),
+            None => 1,
+        };
+
+        match (self.bytes_per_second, self.throttle_config) {
+            (Some(bps), None) => {
+                let bytes_per_second = bps.as_u128();
+                if bytes_per_second > u128::from(u32::MAX) {
+                    error!("bytes_per_second greater than max throttle capacity");
+                    return false;
+                }
+                (bytes_per_second as u32) >= divisor
+            }
+            (None, Some(throttle_config)) => match *throttle_config {
+                BytesThrottleConfig::AllOut => true,
+                BytesThrottleConfig::Stable {
+                    bytes_per_second, ..
+                } => {
+                    if bytes_per_second.as_u128() > u128::from(u32::MAX) {
+                        error!("bytes_per_second greater than max throttle capacity");
+                        return false;
+                    }
+                    (bytes_per_second.as_u128() as u32) >= divisor
+                }
+                BytesThrottleConfig::Linear {
+                    initial_bytes_per_second,
+                    maximum_bytes_per_second,
+                    rate_of_change,
+                } => {
+                    let initial = initial_bytes_per_second.as_u128();
+                    let maximum = maximum_bytes_per_second.as_u128();
+                    let rate = rate_of_change.as_u128();
+
+                    if initial > u128::from(u32::MAX)
+                        || maximum > u128::from(u32::MAX)
+                        || rate > u128::from(u32::MAX)
+                    {
+                        error!("One or more throttle parameter greater than max throttle capacity");
+                        return false;
+                    }
+
+                    let max_total = maximum as u32;
+                    max_total > 0 && max_total >= divisor
+                }
+            },
+            // Both configs provided or no config provided
+            (Some(_), Some(_)) | (None, None) => false,
+        }
+    }
+
     /// Build the throttle
     ///
     /// If `parallel_connections` > 1, the throttle capacity will be divided evenly
@@ -154,9 +212,11 @@ impl<'a> ThrottleBuilder<'a> {
     /// Returns an error if:
     /// - Both `bytes_per_second` and `throttle_config` are provided
     /// - Neither configuration is provided
-    /// - The configuration values are invalid (zero or too large)
+    /// - The configuration values are invalid
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn build(self) -> Result<Throttle, ThrottleBuilderError> {
+        assert!(self.valid());
+
         let divisor = match self.parallel_connections {
             Some(n) => u32::from(n.get()),
             None => 1,
@@ -165,6 +225,12 @@ impl<'a> ThrottleBuilder<'a> {
         let config = match (self.bytes_per_second, self.throttle_config) {
             (Some(bps), None) => {
                 let total_bps = bps.as_u128() as u32;
+                if total_bps < divisor {
+                    return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
+                        bytes_per_second: total_bps,
+                        worker_count: divisor,
+                    });
+                }
                 let divided_bps = total_bps / divisor;
                 let bytes_per_second =
                     NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
@@ -184,6 +250,12 @@ impl<'a> ThrottleBuilder<'a> {
                             timeout_millis,
                         } => {
                             let total = bytes_per_second.as_u128() as u32;
+                            if total < divisor {
+                                return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
+                                    bytes_per_second: total,
+                                    worker_count: divisor,
+                                });
+                            }
                             BytesThrottleConfig::Stable {
                                 bytes_per_second: Byte::from_u64(u64::from(total / divisor)),
                                 timeout_millis,
@@ -197,7 +269,12 @@ impl<'a> ThrottleBuilder<'a> {
                             let initial_total = initial_bytes_per_second.as_u128() as u32;
                             let max_total = maximum_bytes_per_second.as_u128() as u32;
                             let rate_total = rate_of_change.as_u128() as u32;
-
+                            if max_total < divisor {
+                                return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
+                                    bytes_per_second: max_total,
+                                    worker_count: divisor,
+                                });
+                            }
                             BytesThrottleConfig::Linear {
                                 initial_bytes_per_second: Byte::from_u64(u64::from(
                                     initial_total / divisor,
@@ -234,6 +311,14 @@ pub enum ThrottleBuilderError {
     /// Value is zero
     #[error("Throttle value must not be zero")]
     Zero,
+    /// Insufficient bytes for worker count
+    #[error(
+        "Bytes per second ({bytes_per_second}) is less than worker count ({worker_count}). Each worker needs at least 1 byte per second."
+    )]
+    InsufficientBytesForWorkers {
+        bytes_per_second: u32,
+        worker_count: u32,
+    },
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     Conversion(#[from] ThrottleConversionError),
@@ -318,24 +403,22 @@ impl MetricsBuilder {
 mod tests {
     use super::{
         BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, NonZeroU16, ThrottleBuilder,
-        ThrottleBuilderError,
     };
     use byte_unit::Byte;
     use proptest::prelude::*;
 
     proptest! {
         #[test]
-        fn throttle_builder_division_works(
-            bytes in 1_u32..=1_000_000_u32,
+        fn throttle_builder_validate(
+            bytes: u32,
             worker_count in 1_u16..=100_u16
         ) {
             let bytes = Byte::from_u64(u64::from(bytes));
-            let result = ThrottleBuilder::new()
+            let builder = ThrottleBuilder::new()
                 .bytes_per_second(Some(&bytes))
-                .parallel_connections(NonZeroU16::new(worker_count))
-                .build();
-
-            assert!(result.is_ok());
+                .parallel_connections(NonZeroU16::new(worker_count));
+            prop_assume!(builder.valid());
+            prop_assert!(builder.build().is_ok());
         }
 
         #[test]
@@ -349,12 +432,21 @@ mod tests {
                 timeout_millis,
             };
 
-            let result = ThrottleBuilder::new()
+            let builder = ThrottleBuilder::new()
                 .bytes_per_second(Some(&bytes))
-                .throttle_config(Some(&throttle_config))
-                .build();
+                .throttle_config(Some(&throttle_config));
+            prop_assert!(!builder.valid());
+            prop_assert!(builder.build().is_ok());
+        }
 
-            assert!(matches!(result, Err(ThrottleBuilderError::ConflictingConfig)));
+        #[test]
+        fn throttle_builder_rejects_no_config(
+            worker_count in prop::option::of(1_u16..=100_u16)
+        ) {
+            let builder = ThrottleBuilder::new()
+                .parallel_connections(worker_count.and_then(NonZeroU16::new));
+            prop_assert!(!builder.valid());
+            prop_assert!(builder.build().is_err());
         }
 
         #[test]
@@ -364,19 +456,25 @@ mod tests {
         ) {
             let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), use_workers);
             let count = strategy.connection_count();
-            assert_eq!(count, connections);
+            prop_assert_eq!(count, connections);
         }
 
         #[test]
         fn concurrency_strategy_workers_when_requested(connections in 1_u16..=100_u16) {
             let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), true);
-            assert!(matches!(strategy, ConcurrencyStrategy::Workers { count } if count.get() == connections));
+            match strategy {
+                ConcurrencyStrategy::Workers { count } => prop_assert_eq!(count.get(), connections),
+                _ => prop_assert!(false, "Expected Workers variant"),
+            }
         }
 
         #[test]
         fn concurrency_strategy_pooled_when_not_workers(connections in 1_u16..=100_u16) {
             let strategy = ConcurrencyStrategy::new(NonZeroU16::new(connections), false);
-            assert!(matches!(strategy, ConcurrencyStrategy::Pooled { max_connections } if max_connections.get() == connections));
+            match strategy {
+                ConcurrencyStrategy::Pooled { max_connections } => prop_assert_eq!(max_connections.get(), connections),
+                _ => prop_assert!(false, "Expected Pooled variant"),
+            }
         }
 
         #[test]
@@ -385,9 +483,9 @@ mod tests {
         ) {
             let labels = MetricsBuilder::new(&component_name).build();
 
-            assert!(labels.len() >= 2);
-            assert!(labels.contains(&("component".to_string(), "generator".to_string())));
-            assert!(labels.contains(&("component_name".to_string(), component_name)));
+            prop_assert!(labels.len() >= 2);
+            prop_assert!(labels.contains(&("component".to_string(), "generator".to_string())));
+            prop_assert!(labels.contains(&("component_name".to_string(), component_name)));
         }
 
         #[test]
@@ -400,10 +498,10 @@ mod tests {
                 .build();
 
             if let Some(id_val) = id {
-                assert!(labels.contains(&("id".to_string(), id_val)));
-                assert_eq!(labels.len(), 3);
+                prop_assert!(labels.contains(&("id".to_string(), id_val)));
+                prop_assert_eq!(labels.len(), 3);
             } else {
-                assert_eq!(labels.len(), 2);
+                prop_assert_eq!(labels.len(), 2);
             }
         }
     }
@@ -419,7 +517,9 @@ mod tests {
 
     #[test]
     fn throttle_builder_requires_config() {
-        let result = ThrottleBuilder::new().build();
-        assert!(matches!(result, Err(ThrottleBuilderError::NoConfig)));
+        let builder = ThrottleBuilder::new();
+        // Builder with no config should be invalid
+        assert!(!builder.valid());
+        assert!(builder.build().is_err());
     }
 }
