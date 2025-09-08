@@ -422,6 +422,23 @@ mod tests {
         }
 
         #[test]
+        fn throttle_builder_valid_and_builds(
+            bytes: u32,
+            worker_count in 1_u16..=u16::MAX
+        ) {
+            let bytes = Byte::from_u64(u64::from(bytes));
+            let worker_count = NonZeroU16::new(worker_count);
+            let builder = ThrottleBuilder::new()
+                .bytes_per_second(Some(&bytes))
+                .parallel_connections(worker_count);
+            if builder.valid() {
+                prop_assert!(builder.build().is_ok());
+            } else {
+                prop_assert!(builder.build().is_err());
+            }
+        }
+
+        #[test]
         fn throttle_builder_rejects_dual_config(
             bytes in 1_u32..=1_000_000_u32,
             timeout_millis in 1..=10_000_u64,
@@ -435,8 +452,9 @@ mod tests {
             let builder = ThrottleBuilder::new()
                 .bytes_per_second(Some(&bytes))
                 .throttle_config(Some(&throttle_config));
+
+            // This configuration should be invalid (dual config)
             prop_assert!(!builder.valid());
-            prop_assert!(builder.build().is_ok());
         }
 
         #[test]
@@ -445,8 +463,9 @@ mod tests {
         ) {
             let builder = ThrottleBuilder::new()
                 .parallel_connections(worker_count.and_then(NonZeroU16::new));
+
+            // No configuration provided should be invalid
             prop_assert!(!builder.valid());
-            prop_assert!(builder.build().is_err());
         }
 
         #[test]
@@ -513,13 +532,5 @@ mod tests {
 
         let pooled = ConcurrencyStrategy::new(None, false);
         assert_eq!(pooled.connection_count(), 1);
-    }
-
-    #[test]
-    fn throttle_builder_requires_config() {
-        let builder = ThrottleBuilder::new();
-        // Builder with no config should be invalid
-        assert!(!builder.valid());
-        assert!(builder.build().is_err());
     }
 }
