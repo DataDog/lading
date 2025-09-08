@@ -45,7 +45,7 @@ hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
 kube = { version = "1.1.0", default-features = false, features = ["config", "client", "rustls-tls", "ring"] }
 kube-core = "1.1.0"
-k8s-openapi = { version = "0.25.0", default-features = false, features = ["latest"] }
+k8s-openapi = { version = "0.26.0", default-features = false, features = ["latest"] }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
