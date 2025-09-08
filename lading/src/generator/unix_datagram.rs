@@ -27,7 +27,9 @@ use tokio::{
 use tracing::{debug, error, info};
 
 use super::General;
-use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -132,13 +134,9 @@ impl UnixDatagram {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "unix_datagram".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("unix_datagram")
+            .with_id(general.id)
+            .build();
 
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)

@@ -35,7 +35,7 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{BytesThrottleConfig, create_throttle};
+use crate::generator::common::{BytesThrottleConfig, MetricsBuilder, create_throttle};
 
 /// An enum to allow us to determine what operation caused an IO errror as the
 /// default error message lacks detail.
@@ -178,13 +178,7 @@ impl Server {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "logrotate".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("logrotate").with_id(general.id).build();
 
         let maximum_bytes_per_log =
             NonZeroU32::new(config.maximum_bytes_per_log.as_u128() as u32).ok_or(Error::Zero)?;
