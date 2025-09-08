@@ -160,8 +160,7 @@ impl<'a> ThrottleBuilder<'a> {
     ///   connections.
     /// - For `Linear` throttle config: `maximum_bytes_per_second` is less than
     ///   parallel connections.
-    /// - Values exceed u32::MAX when throttle_config is provided (overflow).
-
+    /// - Values exceed `u32::MAX` when `throttle_config` is provided (overflow).
     #[allow(clippy::cast_possible_truncation)]
     fn valid(&self) -> bool {
         let divisor = match self.parallel_connections {
