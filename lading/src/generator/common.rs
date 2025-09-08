@@ -207,12 +207,9 @@ impl<'a> ThrottleBuilder<'a> {
     /// If `parallel_connections` > 1, the throttle capacity will be divided evenly
     /// among the connections.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns an error if:
-    /// - Both `bytes_per_second` and `throttle_config` are provided
-    /// - Neither configuration is provided
-    /// - The configuration values are invalid
+    /// Panics if the builder configuration is invalid. Call `valid()` first to check.
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn build(self) -> Result<Throttle, ThrottleBuilderError> {
         assert!(self.valid());
@@ -225,15 +222,9 @@ impl<'a> ThrottleBuilder<'a> {
         let config = match (self.bytes_per_second, self.throttle_config) {
             (Some(bps), None) => {
                 let total_bps = bps.as_u128() as u32;
-                if total_bps < divisor {
-                    return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
-                        bytes_per_second: total_bps,
-                        worker_count: divisor,
-                    });
-                }
                 let divided_bps = total_bps / divisor;
-                let bytes_per_second =
-                    NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
+                // valid() ensures divided_bps > 0
+                let bytes_per_second = NonZeroU32::new(divided_bps).ok_or(ThrottleBuilderError::Zero)?;
                 lading_throttle::Config::Stable {
                     maximum_capacity: bytes_per_second,
                     timeout_micros: 0,
@@ -250,12 +241,6 @@ impl<'a> ThrottleBuilder<'a> {
                             timeout_millis,
                         } => {
                             let total = bytes_per_second.as_u128() as u32;
-                            if total < divisor {
-                                return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
-                                    bytes_per_second: total,
-                                    worker_count: divisor,
-                                });
-                            }
                             BytesThrottleConfig::Stable {
                                 bytes_per_second: Byte::from_u64(u64::from(total / divisor)),
                                 timeout_millis,
@@ -269,12 +254,6 @@ impl<'a> ThrottleBuilder<'a> {
                             let initial_total = initial_bytes_per_second.as_u128() as u32;
                             let max_total = maximum_bytes_per_second.as_u128() as u32;
                             let rate_total = rate_of_change.as_u128() as u32;
-                            if max_total < divisor {
-                                return Err(ThrottleBuilderError::InsufficientBytesForWorkers {
-                                    bytes_per_second: max_total,
-                                    worker_count: divisor,
-                                });
-                            }
                             BytesThrottleConfig::Linear {
                                 initial_bytes_per_second: Byte::from_u64(u64::from(
                                     initial_total / divisor,
@@ -291,8 +270,7 @@ impl<'a> ThrottleBuilder<'a> {
                     .try_into()
                     .map_err(ThrottleBuilderError::Conversion)?
             }
-            (Some(_), Some(_)) => return Err(ThrottleBuilderError::ConflictingConfig),
-            (None, None) => return Err(ThrottleBuilderError::NoConfig),
+            _ => unreachable!("valid() ensures exactly one config is provided"),
         };
 
         Ok(Throttle::new_with_config(config))
