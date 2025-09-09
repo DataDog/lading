@@ -347,12 +347,17 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use bytes::Bytes;
+    use http_body_util::Full;
+    use hyper::server::conn::http1;
+    use hyper::service::service_fn;
+    use hyper::{Request, Response, StatusCode};
+    use hyper_util::rt::TokioIo;
     use metrics::{Key, Label};
     use metrics_util::{CompositeKey, MetricKind};
     use rustc_hash::FxHasher;
     use std::hash::BuildHasherDefault;
-    use warp;
-    use warp::Filter;
+    use tokio::sync::oneshot;
 
     fn parse_and_get_metrics(
         s: &str,
@@ -387,14 +392,50 @@ mod tests {
         ),
     > {
         let s = s.to_string();
-        let server = warp::serve(
-            warp::path("metrics")
-                .map(move || warp::reply::with_status(s.clone(), warp::http::StatusCode::OK)),
-        );
 
-        let (addr, serve_fut) = server.bind_ephemeral(([127, 0, 0, 1], 0));
-        let _server_handle = tokio::spawn(serve_fut);
+        // Avoid a race with the underlying server by signaling with this
+        // oneshot, underlying server will serve as a test /metrics endpoint.
+        let (tx, rx) = oneshot::channel();
 
+        let _server_handle = tokio::spawn(async move {
+            // Bind an ephemeral port
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            let _ = tx.send(addr);
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let io = TokioIo::new(stream);
+                let s = s.clone();
+
+                tokio::spawn(async move {
+                    let service = service_fn(move |req: Request<hyper::body::Incoming>| {
+                        let s = s.clone();
+                        async move {
+                            if req.uri().path() == "/metrics" {
+                                Ok::<_, hyper::Error>(
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .body(Full::new(Bytes::from(s)))
+                                        .unwrap(),
+                                )
+                            } else {
+                                Ok(Response::builder()
+                                    .status(StatusCode::NOT_FOUND)
+                                    .body(Full::new(Bytes::new()))
+                                    .unwrap())
+                            }
+                        }
+                    });
+
+                    let _ = http1::Builder::new().serve_connection(io, service).await;
+                });
+            }
+        });
+
+        let addr = rx.await.unwrap();
         let server_uri = format!("http://{addr}/metrics");
 
         let (shutdown_watcher, _) = lading_signal::signal();
