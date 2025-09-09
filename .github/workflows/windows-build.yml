@@ -1,0 +1,78 @@
+name: Windows Build (Experimental)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches:
+      - main
+
+jobs:
+  check-label:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.label-check.outputs.has_label }}
+    steps:
+      - name: Check for build-windows label
+        id: label-check
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            // For push events on main, always run
+            if (context.eventName === 'push' && context.ref === 'refs/heads/main') {
+              core.setOutput('has_label', 'true');
+              return;
+            }
+            
+            // For PRs, check for the build-windows label
+            if (context.eventName === 'pull_request') {
+              const payload = context.payload;
+              const label = !!payload.pull_request.labels.find(l => l.name === 'build-windows');
+              core.setOutput('has_label', label.toString());
+            } else {
+              core.setOutput('has_label', 'false');
+            }
+
+  windows-build:
+    name: Windows Build and Test
+    runs-on: windows-latest
+    needs: check-label
+    if: needs.check-label.outputs.should-run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        action: [check, test, build]
+        include:
+          - action: check
+            command: ci\windows\check.ps1
+          - action: test
+            command: ci\windows\test.ps1
+          - action: build
+            command: ci\windows\build.ps1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+        with:
+          components: rustfmt,clippy
+      
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      
+      - name: Install nextest
+        if: matrix.action == 'test'
+        uses: taiki-e/install-action@3839ec485e8ef50e4a86e9cd116260b68a412c07 # v2.58.10
+        with:
+          tool: nextest@0.9
+      
+      - name: Run ${{ matrix.action }}
+        run: ${{ matrix.command }}
+        shell: pwsh
+      
+      - name: Upload Windows artifacts
+        if: matrix.action == 'build'
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: lading-windows-x86_64-${{ github.sha }}
+          path: target/release/lading.exe
+          retention-days: 30

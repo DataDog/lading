@@ -14,7 +14,9 @@ pub mod splunk_hec;
 pub mod sqs;
 pub mod tcp;
 pub mod udp;
+#[cfg(unix)]
 pub mod unix_datagram;
+#[cfg(unix)]
 pub mod unix_stream;
 
 #[derive(thiserror::Error, Debug)]
@@ -33,9 +35,11 @@ pub enum Error {
     #[error(transparent)]
     Udp(udp::Error),
     /// See [`crate::blackhole::unix_stream::Error`] for details.
+    #[cfg(unix)]
     #[error(transparent)]
     UnixStream(unix_stream::Error),
     /// See [`crate::blackhole::unix_datagram::Error`] for details.
+    #[cfg(unix)]
     #[error(transparent)]
     UnixDatagram(unix_datagram::Error),
     /// See [`crate::blackhole::sqs::Error`] for details.
@@ -82,8 +86,10 @@ pub enum Inner {
     /// See [`crate::blackhole::udp::Config`] for details.
     Udp(udp::Config),
     /// See [`crate::blackhole::unix_stream::Config`] for details.
+    #[cfg(unix)]
     UnixStream(unix_stream::Config),
     /// See [`crate::blackhole::unix_datagram::Config`] for details.
+    #[cfg(unix)]
     UnixDatagram(unix_datagram::Config),
     /// See [`crate::blackhole::sqs::Config`] for details.
     Sqs(sqs::Config),
@@ -106,8 +112,10 @@ pub enum Server {
     /// See [`crate::blackhole::udp::Udp`] for details.
     Udp(udp::Udp),
     /// See [`crate::blackhole::unix_stream::UnixStream`] for details.
+    #[cfg(unix)]
     UnixStream(unix_stream::UnixStream),
     /// See [`crate::blackhole::unix_datagram::UnixDatagram`] for details.
+    #[cfg(unix)]
     UnixDatagram(unix_datagram::UnixDatagram),
     /// See [`crate::blackhole::sqs::Sqs`] for details.
     Sqs(sqs::Sqs),
@@ -132,9 +140,11 @@ impl Server {
                 Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
             }
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)),
+            #[cfg(unix)]
             Inner::UnixStream(conf) => {
                 Self::UnixStream(unix_stream::UnixStream::new(config.general, conf, shutdown))
             }
+            #[cfg(unix)]
             Inner::UnixDatagram(conf) => Self::UnixDatagram(unix_datagram::UnixDatagram::new(
                 config.general,
                 conf,
@@ -165,7 +175,9 @@ impl Server {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
             Server::Udp(inner) => Box::pin(inner.run()).await.map_err(Error::Udp),
+            #[cfg(unix)]
             Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
+            #[cfg(unix)]
             Server::UnixDatagram(inner) => Box::pin(inner.run()).await.map_err(Error::UnixDatagram),
             Server::Sqs(inner) => inner.run().await.map_err(Error::Sqs),
             Server::SplunkHec(inner) => inner.run().await.map_err(Error::SplunkHec),

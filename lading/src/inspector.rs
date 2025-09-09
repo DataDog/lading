@@ -14,6 +14,7 @@ use std::{
     process::{ExitStatus, Stdio},
 };
 
+#[cfg(unix)]
 use nix::{
     errno::Errno,
     sys::signal::{SIGTERM, kill},
@@ -33,6 +34,7 @@ use crate::{
 /// Errors produced by [`Server`]
 pub enum Error {
     /// Wrapper for [`nix::errno::Errno`]
+    #[cfg(unix)]
     #[error(transparent)]
     Errno(Errno),
     /// Wrapper for [`std::io::Error`]
@@ -150,8 +152,16 @@ impl Server {
                 // Note that `Child::kill` sends SIGKILL which is not what we
                 // want. We instead send SIGTERM so that the child has a chance
                 // to clean up.
-                let pid: Pid = Pid::from_raw(target_child.id().ok_or(Error::ProcessFinished)?.try_into().expect("Failed to convert into valid PID"));
-                kill(pid, SIGTERM).map_err(Error::Errno)?;
+                #[cfg(unix)]
+                {
+                    let pid: Pid = Pid::from_raw(target_child.id().ok_or(Error::ProcessFinished)?.try_into().expect("Failed to convert into valid PID"));
+                    kill(pid, SIGTERM).map_err(Error::Errno)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    // On Windows, use the standard kill mechanism
+                    target_child.kill().await.map_err(Error::Io)?;
+                }
                 let res = target_child.wait().await.map_err(Error::Io)?;
                 Ok(res)
             }

@@ -77,6 +77,7 @@ pub enum Telemetry {
     },
     /// In prometheus socket mode lading will emit its internal telemetry for
     /// scraping on a unix socket.
+    #[cfg(unix)]
     PrometheusSocket {
         /// Path of the socket for the prometheus exporter
         path: PathBuf,
