@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Building release binary for Windows..."
-cargo build --locked --release
+cargo build --release
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed"

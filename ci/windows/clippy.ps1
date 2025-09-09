@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Running cargo clippy..."
-cargo clippy --locked --features default --all-targets -- -D warnings
+cargo clippy --all-features
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE

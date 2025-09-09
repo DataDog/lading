@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Running cargo check..."
-cargo check --locked --features default
+cargo check --locked --all-features
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
