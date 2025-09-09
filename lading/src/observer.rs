@@ -20,6 +20,7 @@ mod linux;
 /// Errors produced by [`Server`]
 pub enum Error {
     /// Wrapper for [`nix::errno::Errno`]
+    #[cfg(unix)]
     #[error("erno: {0}")]
     Errno(#[from] nix::errno::Errno),
     /// Wrapper for [`std::io::Error`]

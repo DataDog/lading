@@ -322,10 +322,18 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref prom_path) = args.prometheus_path {
-        config.telemetry = Telemetry::PrometheusSocket {
-            path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
-            global_labels: options_global_labels.inner,
-        };
+        #[cfg(unix)]
+        {
+            config.telemetry = Telemetry::PrometheusSocket {
+                path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
+                global_labels: options_global_labels.inner,
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = prom_path; // Suppress unused variable warning on non-Unix platforms
+            return Err(Error::PrometheusPath);
+        }
     } else if let Some(ref capture_path) = args.capture_path {
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
@@ -342,6 +350,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
                     global_labels.insert(k, v);
                 }
             }
+            #[cfg(unix)]
             Telemetry::PrometheusSocket {
                 ref mut global_labels,
                 ..
@@ -379,6 +388,7 @@ async fn inner_main(
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
     match config.telemetry {
+        #[cfg(unix)]
         Telemetry::PrometheusSocket {
             path,
             global_labels,
