@@ -43,7 +43,9 @@ use crate::generator::splunk_hec::acknowledgements::Channel;
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{BytesThrottleConfig, ThrottleConversionError, create_throttle};
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
@@ -187,13 +189,9 @@ impl SplunkHec {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "splunk_hec".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("splunk_hec")
+            .with_id(general.id)
+            .build();
 
         let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
