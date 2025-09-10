@@ -294,47 +294,49 @@ async fn inner_main() -> Result<()> {
             .ok_or_else(|| anyhow!("No generator found with id: {}", generator_id))?;
         let fingerprint = check_generator(generator, args.fingerprint)?;
         if args.fingerprint
-            && let Some(fp) = fingerprint {
-                if let Some(verify_path) = args.verify {
-                    let expected_content =
-                        fs::read_to_string(&verify_path).await.with_context(|| {
-                            format!("Could not read verify file {}", verify_path.display())
-                        })?;
+            && let Some(fp) = fingerprint
+        {
+            if let Some(verify_path) = args.verify {
+                let expected_content =
+                    fs::read_to_string(&verify_path).await.with_context(|| {
+                        format!("Could not read verify file {}", verify_path.display())
+                    })?;
 
-                    // Look for the specific generator ID in the file
-                    let expected = expected_content
-                        .lines()
-                        .find(|line| line.starts_with(&format!("{}: ", generator_id)))
-                        .and_then(|line| line.split(": ").nth(1))
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "No fingerprint found for {} in {}",
-                                generator_id,
-                                verify_path.display()
-                            )
-                        })?;
+                // Look for the specific generator ID in the file
+                let expected = expected_content
+                    .lines()
+                    .find(|line| line.starts_with(&format!("{}: ", generator_id)))
+                    .and_then(|line| line.split(": ").nth(1))
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "No fingerprint found for {} in {}",
+                            generator_id,
+                            verify_path.display()
+                        )
+                    })?;
 
-                    if fp == expected {
-                        info!("✓ Fingerprint matches expected value");
-                    } else {
-                        error!("✗ Fingerprint mismatch!");
-                        error!("  Expected: {}", expected);
-                        error!("  Got:      {}", fp);
-                        return Err(anyhow!("Fingerprint verification failed"));
-                    }
+                if fp == expected {
+                    info!("✓ Fingerprint matches expected value");
                 } else {
-                    println!("{fp}");
+                    error!("✗ Fingerprint mismatch!");
+                    error!("  Expected: {}", expected);
+                    error!("  Got:      {}", fp);
+                    return Err(anyhow!("Fingerprint verification failed"));
                 }
+            } else {
+                println!("{fp}");
             }
+        }
     } else {
         let mut all_fingerprints = Vec::new();
         for generator in config.generator {
             let fingerprint = check_generator(&generator, args.fingerprint)?;
             if args.fingerprint
-                && let Some(fp) = fingerprint {
-                    let gen_id = generator.general.id.as_deref().unwrap_or("<unnamed>");
-                    all_fingerprints.push((gen_id.to_string(), fp));
-                }
+                && let Some(fp) = fingerprint
+            {
+                let gen_id = generator.general.id.as_deref().unwrap_or("<unnamed>");
+                all_fingerprints.push((gen_id.to_string(), fp));
+            }
         }
         if args.fingerprint && !all_fingerprints.is_empty() {
             if let Some(verify_path) = args.verify {
