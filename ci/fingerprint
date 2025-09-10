@@ -14,7 +14,7 @@ total=0
 passed=0
 
 echo "Building payloadtool..."
-cargo build --bin payloadtool --quiet 2>/dev/null || cargo build --bin payloadtool
+cargo build --release --bin payloadtool --quiet 2>/dev/null || cargo build --release --bin payloadtool
 
 echo
 echo "Checking fingerprints..."
@@ -38,7 +38,7 @@ for dir in "$CI_DIR"/fingerprints/*/; do
 
     echo -n "Checking $payload_type... "
 
-    if ! actual=$(cargo run --bin payloadtool --quiet -- "$config_file" --fingerprint 2>/dev/null); then
+    if ! actual=$(cargo run --release --bin payloadtool --quiet -- "$config_file" --fingerprint 2>/dev/null); then
         echo "FAILED (could not generate fingerprint)"
         failed=$((failed + 1))
         continue

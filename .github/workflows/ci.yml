@@ -138,6 +138,8 @@ jobs:
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
+      - name: Build payloadtool
+        run: cargo build --release --bin payloadtool
       - run: ci/fingerprint
         timeout-minutes: 10
 
