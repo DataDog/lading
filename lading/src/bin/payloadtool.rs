@@ -129,13 +129,13 @@ fn check_generator(
         generator::Inner::Tcp(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            return generate_and_check(
+            generate_and_check(
                 &g.variant,
                 g.seed,
                 total_bytes,
                 g.maximum_block_size,
                 compute_fingerprint,
-            );
+            )
         }
         generator::Inner::Udp(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -159,13 +159,13 @@ fn check_generator(
             };
             let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            return generate_and_check(
+            generate_and_check(
                 variant,
                 g.seed,
                 total_bytes,
                 g.maximum_block_size,
                 compute_fingerprint,
-            );
+            )
         }
         generator::Inner::SplunkHec(_) => {
             if compute_fingerprint {
@@ -184,35 +184,35 @@ fn check_generator(
         generator::Inner::Grpc(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            return generate_and_check(
+            generate_and_check(
                 &g.variant,
                 g.seed,
                 total_bytes,
                 g.maximum_block_size,
                 compute_fingerprint,
-            );
+            )
         }
         generator::Inner::UnixStream(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            return generate_and_check(
+            generate_and_check(
                 &g.variant,
                 g.seed,
                 total_bytes,
                 g.maximum_block_size,
                 compute_fingerprint,
-            );
+            )
         }
         generator::Inner::PassthruFile(g) => {
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            return generate_and_check(
+            generate_and_check(
                 &g.variant,
                 g.seed,
                 total_bytes,
                 g.maximum_block_size,
                 compute_fingerprint,
-            );
+            )
         }
         generator::Inner::ProcessTree(_) => {
             if compute_fingerprint {
@@ -293,8 +293,8 @@ async fn inner_main() -> Result<()> {
             })
             .ok_or_else(|| anyhow!("No generator found with id: {}", generator_id))?;
         let fingerprint = check_generator(generator, args.fingerprint)?;
-        if args.fingerprint {
-            if let Some(fp) = fingerprint {
+        if args.fingerprint
+            && let Some(fp) = fingerprint {
                 if let Some(verify_path) = args.verify {
                     let expected_content =
                         fs::read_to_string(&verify_path).await.with_context(|| {
@@ -326,17 +326,15 @@ async fn inner_main() -> Result<()> {
                     println!("{fp}");
                 }
             }
-        }
     } else {
         let mut all_fingerprints = Vec::new();
         for generator in config.generator {
             let fingerprint = check_generator(&generator, args.fingerprint)?;
-            if args.fingerprint {
-                if let Some(fp) = fingerprint {
+            if args.fingerprint
+                && let Some(fp) = fingerprint {
                     let gen_id = generator.general.id.as_deref().unwrap_or("<unnamed>");
                     all_fingerprints.push((gen_id.to_string(), fp));
                 }
-            }
         }
         if args.fingerprint && !all_fingerprints.is_empty() {
             if let Some(verify_path) = args.verify {
