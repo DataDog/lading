@@ -1646,6 +1646,7 @@ dependencies = [
 name = "lading"
 version = "0.28.0"
 dependencies = [
+ "anyhow",
  "async-compression",
  "async-pidfd",
  "average",
@@ -1690,6 +1691,7 @@ dependencies = [
  "serde_json",
  "serde_qs",
  "serde_yaml",
+ "sha2",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.16",

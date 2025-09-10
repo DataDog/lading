@@ -128,6 +128,21 @@ jobs:
       - run: ci/fuzz --check lading_payload
         timeout-minutes: 10
 
+  fingerprint:
+    name: Payload Fingerprint Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.10
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install FUSE
+        uses: ./.github/actions/install-fuse
+      - name: Build payloadtool
+        run: cargo build --release --bin payloadtool
+      - run: ci/fingerprint
+        timeout-minutes: 10
+
   buf:
     runs-on: ubuntu-latest
     steps:
