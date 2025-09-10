@@ -99,7 +99,7 @@ procfs = { version = "0.18", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.21"
+tempfile = "3.22"
 proptest = { workspace = true }
 tower-test = "0.4"
 
