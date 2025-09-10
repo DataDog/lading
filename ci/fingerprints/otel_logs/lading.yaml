@@ -1,0 +1,15 @@
+generator:
+  - id: "otel_logs_grpc"
+    grpc:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4]
+      target_uri: "http://127.0.0.1:4317"
+      variant:
+        opentelemetry_logs: {}
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"

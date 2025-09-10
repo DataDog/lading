@@ -20,6 +20,7 @@ lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
+anyhow = { workspace = true }
 async-compression = { version = "0.4.30", features = ["tokio", "zstd"] }
 average = { version = "0.16", default-features = false, features = [] }
 bollard = { version = "0.19", default-features = false, features = ["pipe", "http"] }
@@ -72,6 +73,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_qs = { version = "0.15", default-features = false }
 serde_yaml = { version = "0.9" }
+sha2 = "0.10"
 sysinfo = { workspace = true, features = ["system"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
