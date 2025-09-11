@@ -171,7 +171,7 @@ pub enum Config {
     DogStatsD(crate::dogstatsd::Config),
     /// Generates `TraceAgent` payloads in `MsgPack` format
     #[serde(rename = "trace_agent")]
-    TraceAgent(crate::trace_agent::v04::Config),
+    TraceAgent(crate::trace_agent::Config),
 }
 
 /// Unified payload type for all serializers
@@ -203,7 +203,7 @@ pub enum Payload {
     /// `DogStatsD` metrics
     DogStatsdD(DogStatsD),
     /// Datadog Trace Agent format
-    TraceAgent(trace_agent::v04::V04),
+    TraceAgent(crate::trace_agent::v04::V04),
 }
 
 impl Serialize for Payload {
@@ -239,6 +239,10 @@ impl Serialize for Payload {
 }
 
 /// Generate instances of `Self::Output` from source of randomness.
+///
+/// NOTE this generator is suitable for use only when the size of a
+/// serialization is not perfectly predictable. If it is use `SizedGenerator`
+/// instead.
 pub(crate) trait Generator<'a> {
     type Output: 'a;
     type Error: 'a;
@@ -250,6 +254,10 @@ pub(crate) trait Generator<'a> {
 
 /// Generate instances of `Self::Output` from source of randomness, constrained
 /// to byte budgets.
+///
+/// NOTE this generator is suitable for use only when the size of a
+/// serialization is perfectly predictable. If it is not use `Generator`
+/// instead.
 pub(crate) trait SizedGenerator<'a> {
     type Output: 'a;
     type Error: 'a;
