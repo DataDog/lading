@@ -1,9 +1,21 @@
 //! Datadog Trace Agent v0.4 endpoint payload implementation.
 //!
-//! This module generates payloads compatible with the `/v0.4/traces` endpoint
-//! as specified in `pkg/trace/api/version.go:22-57` of the datadog-agent.
+//! This module generates payloads compatible with the `/v0.4/traces` endpoint.
+//!
+//! V0.4 SPECIFICATION (pkg/trace/api/version.go:22-57):
+//! - Request: application/msgpack
+//! - Payload: "An array of arrays of Span" (pb.Traces = [][]Span)
+//! - Response: application/json service sampling rates
+//!
+//! V0.4 PROCESSING PATH:
+//! - Uses default case in `decodeTracerPayload()` (api.go:522)
+//! - Calls `decodeRequest()` expecting `pb.Traces` (api.go:523-524)
+//! - `MessagePack` decoded via `pb.Traces.UnmarshalMsg()` (api.go:897)
+//!
+//! Our implementation generates `Vec<Vec<Span>>` that serializes to msgpack
+//! in the exact format the v0.4 endpoint expects for `pb.Traces`.
 
-use std::io::Write;
+use std::{io::Write, time};
 
 use rand::{Rng, seq::IndexedRandom};
 use rmp_serde::Serializer;
@@ -15,76 +27,90 @@ use crate::{
     common::{config::ConfRange, strings},
 };
 
-/// Configuration for v0.4 trace payload generation
+// String pool and context sizing constants
+const STRING_POOL_SIZE: usize = 1_000_000;
+
+// Trace generation constants
+const MAX_TRACE_DEPTH: usize = 3;
+const INITIAL_TRACE_COUNT: usize = 10;
+const TRACE_BATCH_SIZE: usize = 10;
+
+// Timestamp constants
+//
+// NOTE(claude) You MAY NOT change these.
+const MAX_SPAN_AGE: time::Duration = time::Duration::from_secs(3600); // 1 hour
+const MIN_SPAN_DURATION: time::Duration = time::Duration::from_millis(1);
+const MAX_SPAN_DURATION: time::Duration = time::Duration::from_secs(1);
+
+// NOTE(claude) You _may_ use allow to avoid clippy dings but you may only use
+// them on single functions. You MUST not have them inline in functions. You
+// MUST carefully justify why you have used an allow. You MAY NOT use them just
+// to make clippy pass; clippy is here for a reason and it forces better code,
+// code that you try to skip writing.
+
+/// Configuration for v0.4 trace payload generation.
+///
+/// Focuses on parameters that affect trace-agent scaling performance:
+/// cardinality (contexts), payload structure (spans per trace), and
+/// string variety (tags/metrics per span).
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Number of traces per payload
-    pub traces_per_payload: ConfRange<u16>,
-    /// Number of spans per trace
+    /// The unique trace contexts to generate. A context is a unique combination
+    /// of service + operation + resource. This is the primary cardinality driver
+    /// for trace-agent memory usage and processing overhead.
+    pub contexts: ConfRange<u32>,
+    /// Number of spans per trace. Affects trace processing complexity and
+    /// memory allocation patterns in the agent.
     pub spans_per_trace: ConfRange<u16>,
-    /// Maximum depth of span hierarchy
-    pub trace_depth: u8,
+    /// Number of tags per span. Tags are the main source of cardinality
+    /// and memory pressure in trace processing.
+    pub tags_per_span: ConfRange<u8>,
+    /// Number of metrics per span. Affects metric processing overhead.
+    pub metrics_per_span: ConfRange<u8>,
+    /// Probability of a span having an error. Affects error tracking overhead.
+    pub error_rate: f32,
     /// Length range for service names
     pub service_name_length: ConfRange<u8>,
     /// Length range for operation names
     pub operation_name_length: ConfRange<u8>,
     /// Length range for resource names
     pub resource_name_length: ConfRange<u8>,
-    /// Length range for span type names  
+    /// Length range for span type names
     pub span_type_length: ConfRange<u8>,
     /// Length range for tag keys
     pub tag_key_length: ConfRange<u8>,
+    /// Length range for tag values
+    pub tag_value_length: ConfRange<u8>,
     /// Length range for metric keys
     pub metric_key_length: ConfRange<u8>,
-    /// Number of tags per span
-    pub tags_per_span: ConfRange<u8>,
-    /// Size of pre-generated tag key pool
-    pub tag_key_pool_size: u32,
-    /// Size of pre-generated tag value pool
-    pub tag_value_pool_size: u32,
-    /// Number of metrics per span
-    pub metrics_per_span: ConfRange<u8>,
-    /// Size of pre-generated metric key pool
-    pub metric_key_pool_size: u32,
-    /// Probability of a span having an error (0.0-1.0)
-    pub error_rate: f32,
-    /// Size of the string pool for dynamic strings
-    pub string_pool_size: u32,
-    /// Number of service names to pre-generate
-    pub service_name_pool_size: u32,
-    /// Number of operation names to pre-generate
-    pub operation_name_pool_size: u32,
-    /// Number of resource names to pre-generate
-    pub resource_name_pool_size: u32,
-    /// Number of span types to pre-generate
-    pub span_type_pool_size: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            traces_per_payload: ConfRange::Inclusive { min: 1, max: 10 },
-            spans_per_trace: ConfRange::Inclusive { min: 1, max: 20 },
-            trace_depth: 3,
-            service_name_length: ConfRange::Inclusive { min: 4, max: 16 },
-            operation_name_length: ConfRange::Inclusive { min: 6, max: 20 },
-            resource_name_length: ConfRange::Inclusive { min: 8, max: 64 },
-            span_type_length: ConfRange::Inclusive { min: 2, max: 8 },
-            tag_key_length: ConfRange::Inclusive { min: 3, max: 24 },
-            metric_key_length: ConfRange::Inclusive { min: 4, max: 32 },
-            tags_per_span: ConfRange::Inclusive { min: 0, max: 10 },
-            tag_key_pool_size: 100,
-            tag_value_pool_size: 1000,
+            // High cardinality similar to dogstatsd contexts (5K-10K)
+            contexts: ConfRange::Inclusive {
+                min: 5_000,
+                max: 10_000,
+            },
+            // Realistic span counts that stress trace assembly
+            spans_per_trace: ConfRange::Inclusive { min: 1, max: 50 },
+            // Tag cardinality is critical for agent memory usage
+            tags_per_span: ConfRange::Inclusive { min: 2, max: 20 },
+            // Metrics processing overhead
             metrics_per_span: ConfRange::Inclusive { min: 0, max: 5 },
-            metric_key_pool_size: 50,
-            error_rate: 0.05, // 5% error rate
-            string_pool_size: 1_000_000,
-            service_name_pool_size: 50,
-            operation_name_pool_size: 100,
-            resource_name_pool_size: 200,
-            span_type_pool_size: 20,
+            // Low error rate (most traces succeed)
+            error_rate: 0.01, // 1% error rate
+            // String length ranges - configurable from 0 to 128
+            service_name_length: ConfRange::Inclusive { min: 0, max: 128 },
+            operation_name_length: ConfRange::Inclusive { min: 0, max: 128 },
+            resource_name_length: ConfRange::Inclusive { min: 0, max: 128 },
+            span_type_length: ConfRange::Inclusive { min: 0, max: 128 },
+            tag_key_length: ConfRange::Inclusive { min: 0, max: 128 },
+            tag_value_length: ConfRange::Inclusive { min: 0, max: 128 },
+            metric_key_length: ConfRange::Inclusive { min: 0, max: 128 },
         }
     }
 }
@@ -94,12 +120,12 @@ impl Config {
     /// # Errors
     /// Returns an error string if configuration is invalid
     pub fn valid(&self) -> Result<(), String> {
-        let (traces_valid, reason) = self.traces_per_payload.valid();
-        if !traces_valid {
-            return Err(format!("traces_per_payload is invalid: {reason}"));
+        let (contexts_valid, reason) = self.contexts.valid();
+        if !contexts_valid {
+            return Err(format!("contexts is invalid: {reason}"));
         }
-        if self.traces_per_payload.start() == 0 {
-            return Err("traces_per_payload start value cannot be 0".to_string());
+        if self.contexts.start() == 0 {
+            return Err("contexts start value cannot be 0".to_string());
         }
 
         let (spans_valid, reason) = self.spans_per_trace.valid();
@@ -108,61 +134,6 @@ impl Config {
         }
         if self.spans_per_trace.start() == 0 {
             return Err("spans_per_trace start value cannot be 0".to_string());
-        }
-
-        if self.trace_depth == 0 {
-            return Err("trace_depth cannot be 0".to_string());
-        }
-        if self.trace_depth > 10 {
-            return Err("trace_depth cannot be greater than 10".to_string());
-        }
-
-        let (service_length_valid, reason) = self.service_name_length.valid();
-        if !service_length_valid {
-            return Err(format!("service_name_length is invalid: {reason}"));
-        }
-        if self.service_name_length.start() == 0 {
-            return Err("service_name_length start value cannot be 0".to_string());
-        }
-
-        let (operation_length_valid, reason) = self.operation_name_length.valid();
-        if !operation_length_valid {
-            return Err(format!("operation_name_length is invalid: {reason}"));
-        }
-        if self.operation_name_length.start() == 0 {
-            return Err("operation_name_length start value cannot be 0".to_string());
-        }
-
-        let (resource_length_valid, reason) = self.resource_name_length.valid();
-        if !resource_length_valid {
-            return Err(format!("resource_name_length is invalid: {reason}"));
-        }
-        if self.resource_name_length.start() == 0 {
-            return Err("resource_name_length start value cannot be 0".to_string());
-        }
-
-        let (span_type_length_valid, reason) = self.span_type_length.valid();
-        if !span_type_length_valid {
-            return Err(format!("span_type_length is invalid: {reason}"));
-        }
-        if self.span_type_length.start() == 0 {
-            return Err("span_type_length start value cannot be 0".to_string());
-        }
-
-        let (tag_key_length_valid, reason) = self.tag_key_length.valid();
-        if !tag_key_length_valid {
-            return Err(format!("tag_key_length is invalid: {reason}"));
-        }
-        if self.tag_key_length.start() == 0 {
-            return Err("tag_key_length start value cannot be 0".to_string());
-        }
-
-        let (metric_key_length_valid, reason) = self.metric_key_length.valid();
-        if !metric_key_length_valid {
-            return Err(format!("metric_key_length is invalid: {reason}"));
-        }
-        if self.metric_key_length.start() == 0 {
-            return Err("metric_key_length start value cannot be 0".to_string());
         }
 
         let (tags_valid, reason) = self.tags_per_span.valid();
@@ -175,10 +146,6 @@ impl Config {
             return Err(format!("metrics_per_span is invalid: {reason}"));
         }
 
-        if self.metric_key_pool_size == 0 {
-            return Err("metric_key_pool_size cannot be 0".to_string());
-        }
-
         if !self.error_rate.is_finite() || !(0.0..=1.0).contains(&self.error_rate) {
             return Err(format!(
                 "error_rate must be finite and in range [0.0, 1.0], got {}",
@@ -186,42 +153,37 @@ impl Config {
             ));
         }
 
-        if self.tag_key_pool_size == 0 {
-            return Err("tag_key_pool_size cannot be 0".to_string());
-        }
-        if self.tag_value_pool_size == 0 {
-            return Err("tag_value_pool_size cannot be 0".to_string());
-        }
-        if self.string_pool_size == 0 {
-            return Err("string_pool_size cannot be 0".to_string());
-        }
-        if self.service_name_pool_size == 0 {
-            return Err("service_name_pool_size cannot be 0".to_string());
-        }
-        if self.operation_name_pool_size == 0 {
-            return Err("operation_name_pool_size cannot be 0".to_string());
-        }
-        if self.resource_name_pool_size == 0 {
-            return Err("resource_name_pool_size cannot be 0".to_string());
-        }
-        if self.span_type_pool_size == 0 {
-            return Err("span_type_pool_size cannot be 0".to_string());
+        // Validate string length ranges
+        let string_ranges = [
+            ("service_name_length", &self.service_name_length),
+            ("operation_name_length", &self.operation_name_length),
+            ("resource_name_length", &self.resource_name_length),
+            ("span_type_length", &self.span_type_length),
+            ("tag_key_length", &self.tag_key_length),
+            ("tag_value_length", &self.tag_value_length),
+            ("metric_key_length", &self.metric_key_length),
+        ];
+
+        for (name, range) in &string_ranges {
+            let (valid, reason) = range.valid();
+            if !valid {
+                return Err(format!("{name} is invalid: {reason}"));
+            }
         }
 
         Ok(())
     }
 }
 
-/// V0.4 span structure matching protobuf definition with MessagePack encoding.
+/// V0.4 span structure matching protobuf definition with `MessagePack` encoding.
 ///
 /// This struct corresponds exactly to the Span message in pkg/proto/datadog/trace/span.proto
 /// (lines 101-147). The protobuf uses `@gotags: msg:"field_name"` annotations to generate
-/// MessagePack serialization methods via github.com/tinylib/msgp.
+/// `MessagePack` serialization methods via github.com/tinylib/msgp.
 ///
-/// Our serde-based serialization produces the same MessagePack format that the datadog-agent
-/// expects when calling pb.Traces.UnmarshalMsg() in pkg/trace/api/api.go:897.
+/// Our serde-based serialization produces the same `MessagePack` format that the datadog-agent
+/// expects when calling `pb.Traces.UnmarshalMsg()` in pkg/trace/api/api.go:897.
 #[derive(Debug, serde::Serialize)]
-#[allow(clippy::struct_field_names)]
 pub struct Span<'a> {
     /// service is the name of the service with which this span is associated.
     service: &'a str,
@@ -252,110 +214,91 @@ pub struct Span<'a> {
     meta_struct: FxHashMap<&'a str, Vec<u8>>,
 }
 
-/// String pools for v0.4 payload generation following lading's pre-computation principle.
+/// Context represents a unique service+operation+resource combination.
+/// This is the key cardinality driver for trace-agent performance.
 #[derive(Debug, Clone)]
-struct StringPools {
-    /// Pool for dynamic string generation
-    dynamic: strings::Pool,
-    /// Pre-generated service names
-    service_names: Vec<String>,
-    /// Pre-generated operation names
-    operation_names: Vec<String>,
-    /// Pre-generated resource names  
-    resource_names: Vec<String>,
-    /// Pre-generated span types
-    span_types: Vec<String>,
-    /// Pre-generated tag keys
-    tag_keys: Vec<String>,
-    /// Pre-generated tag values
-    tag_values: Vec<String>,
-    /// Pre-generated metric keys
-    metric_keys: Vec<String>,
+struct Context {
+    service: String,
+    operation: String,
+    resource: String,
+    span_type: String,
 }
 
-impl StringPools {
+/// Context generator for v0.4 following lading's pre-computation pattern.
+///
+/// Pre-generates contexts (unique service+operation+resource combinations)
+/// to create realistic cardinality pressure on the trace agent.
+#[derive(Debug, Clone)]
+struct ContextGenerator {
+    /// Pre-generated trace contexts (service+operation+resource combinations)
+    contexts: Vec<Context>,
+}
+
+impl ContextGenerator {
     fn new<R>(config: &Config, rng: &mut R) -> Self
     where
         R: Rng + ?Sized,
     {
-        let dynamic = strings::Pool::with_size(rng, config.string_pool_size as usize);
-        
-        // Pre-generate service names
-        let mut service_names = Vec::new();
-        for _ in 0..config.service_name_pool_size {
-            let length = config.service_name_length.sample(rng);
-            if let Some(name) = dynamic.of_size_range(rng, length..length+1) {
-                service_names.push(name.to_string());
-            }
+        let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
+
+        // Generate unique contexts (like dogstatsd contexts)
+        let context_count = config.contexts.sample(rng);
+        let mut contexts = Vec::new();
+
+        for _ in 0..context_count {
+            let service_len = config.service_name_length.sample(rng);
+            let service = if service_len == 0 {
+                String::new()
+            } else {
+                str_pool
+                    .of_size_range(rng, service_len..service_len + 1)
+                    .unwrap_or("service")
+                    .to_string()
+            };
+
+            let operation_len = config.operation_name_length.sample(rng);
+            let operation = if operation_len == 0 {
+                String::new()
+            } else {
+                str_pool
+                    .of_size_range(rng, operation_len..operation_len + 1)
+                    .unwrap_or("operation")
+                    .to_string()
+            };
+
+            let resource_len = config.resource_name_length.sample(rng);
+            let resource = if resource_len == 0 {
+                String::new()
+            } else {
+                str_pool
+                    .of_size_range(rng, resource_len..resource_len + 1)
+                    .unwrap_or("resource")
+                    .to_string()
+            };
+
+            let span_type_len = config.span_type_length.sample(rng);
+            let span_type = if span_type_len == 0 {
+                String::new()
+            } else {
+                str_pool
+                    .of_size_range(rng, span_type_len..span_type_len + 1)
+                    .unwrap_or("web")
+                    .to_string()
+            };
+
+            contexts.push(Context {
+                service,
+                operation,
+                resource,
+                span_type,
+            });
         }
 
-        // Pre-generate operation names
-        let mut operation_names = Vec::new();
-        for _ in 0..config.operation_name_pool_size {
-            let length = config.operation_name_length.sample(rng);
-            if let Some(name) = dynamic.of_size_range(rng, length..length+1) {
-                operation_names.push(name.to_string());
-            }
-        }
-
-        // Pre-generate resource names
-        let mut resource_names = Vec::new();
-        for _ in 0..config.resource_name_pool_size {
-            let length = config.resource_name_length.sample(rng);
-            if let Some(name) = dynamic.of_size_range(rng, length..length+1) {
-                resource_names.push(name.to_string());
-            }
-        }
-
-        // Pre-generate span types
-        let mut span_types = Vec::new();
-        for _ in 0..config.span_type_pool_size {
-            let length = config.span_type_length.sample(rng);
-            if let Some(span_type) = dynamic.of_size_range(rng, length..length+1) {
-                span_types.push(span_type.to_string());
-            }
-        }
-
-        // Pre-generate tag keys
-        let mut tag_keys = Vec::new();
-        for _ in 0..config.tag_key_pool_size {
-            let length = config.tag_key_length.sample(rng);
-            if let Some(key) = dynamic.of_size_range(rng, length..length+1) {
-                tag_keys.push(key.to_string());
-            }
-        }
-
-        // Pre-generate tag values
-        let mut tag_values = Vec::new();
-        for _ in 0..config.tag_value_pool_size {
-            if let Some(value) = dynamic.of_size_range(rng, 1_u8..32) {
-                tag_values.push(value.to_string());
-            }
-        }
-
-        // Pre-generate metric keys
-        let mut metric_keys = Vec::new();
-        for _ in 0..config.metric_key_pool_size {
-            let length = config.metric_key_length.sample(rng);
-            if let Some(key) = dynamic.of_size_range(rng, length..length+1) {
-                metric_keys.push(key.to_string());
-            }
-        }
-
-        Self {
-            dynamic,
-            service_names,
-            operation_names,
-            resource_names,
-            span_types,
-            tag_keys,
-            tag_values,
-            metric_keys,
-        }
+        Self { contexts }
     }
 }
 
-/// Represents a single trace (array of spans with same trace_id)
+/// Represents a single trace (array of spans with same `trace_id`)
 #[derive(Debug)]
 pub struct Trace<'a> {
     /// The spans that make up this trace
@@ -366,7 +309,8 @@ pub struct Trace<'a> {
 #[derive(Debug, Clone)]
 pub struct V04 {
     config: Config,
-    pools: StringPools,
+    str_pool: strings::Pool,
+    context_generator: ContextGenerator,
 }
 
 impl V04 {
@@ -384,14 +328,23 @@ impl V04 {
     where
         R: Rng + ?Sized,
     {
-        let pools = StringPools::new(&config, rng);
-        Self { config, pools }
+        let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
+        let context_generator = ContextGenerator::new(&config, rng);
+        Self {
+            config,
+            str_pool,
+            context_generator,
+        }
     }
 
-    /// Generate a complete trace with proper parent-child relationships.
+    /// Generate a complete trace matching the datadog-agent's pb.Traces format.
     ///
-    /// Follows the trace generation pattern from pkg/trace/testutil/trace.go:74-87
-    /// but uses dynamic string pools for performance and configurability.
+    /// Based on analysis of pkg/trace/testutil/trace.go:102-128, this generates
+    /// proper trace hierarchies where all spans share the same `trace_id` and
+    /// have realistic parent-child timestamp relationships.
+    ///
+    /// Critical for v0.4: Each trace becomes one element in the `pb.Traces` array,
+    /// and all spans within must have the same `trace_id` for agent acceptance.
     pub fn generate_trace<R>(&self, rng: &mut R) -> Result<Trace<'_>, Error>
     where
         R: Rng + ?Sized,
@@ -400,41 +353,46 @@ impl V04 {
         let span_count = self.config.spans_per_trace.sample(rng);
         let mut spans = Vec::with_capacity(span_count as usize);
 
-        // Generate base timestamp (within last hour)
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        // Generate realistic base timestamp (recent, within configured age)
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos() as i64;
-        let base_time = now - rng.random_range(0..3_600_000_000_000i64);
-        
-        // Generate root span
+        let base_time = now - rng.random_range(0..MAX_SPAN_AGE.as_nanos() as i64);
+
+        // Generate root span (parent_id = 0)
         let root_span_id = rng.random();
-        let root_duration = rng.random_range(1_000_000i64..1_000_000_000); // 1ms to 1s
+        let root_duration = rng
+            .random_range(MIN_SPAN_DURATION.as_nanos() as i64..MAX_SPAN_DURATION.as_nanos() as i64);
         let root_span = generate_span(
             self,
             rng,
             trace_id,
             root_span_id,
-            0, // Root span has no parent
+            0, // Root spans have parent_id = 0 per agent expectations
             base_time,
             root_duration,
-        )?;
+        );
         spans.push(root_span);
-        
-        // Generate child spans with proper parent-child relationships
+
+        // Generate child spans following testutil/trace.go:33-67 pattern
+        // Each child span must fit within its parent's time window
         let mut parent_candidates = vec![(root_span_id, base_time, base_time + root_duration)];
-        
+
         for _ in 1..span_count {
             let (parent_id, parent_start, parent_end) = parent_candidates
                 .choose(rng)
                 .copied()
                 .unwrap_or((root_span_id, base_time, base_time + root_duration));
-            
-            // Child span must start after parent and end before parent
-            let span_start = rng.random_range(parent_start..parent_end.saturating_sub(1_000_000));
+
+            // Child must start within parent and end before parent ends
+            // This matches the logic in testutil/trace.go:56-61
+            let min_duration = MIN_SPAN_DURATION.as_nanos() as i64;
+            let span_start =
+                rng.random_range(parent_start..parent_end.saturating_sub(min_duration));
             let max_duration = parent_end - span_start;
-            let span_duration = rng.random_range(1_000_000..=max_duration.max(1_000_000));
-            
+            let span_duration = rng.random_range(min_duration..=max_duration.max(min_duration));
+
             let span_id = rng.random();
             let span = generate_span(
                 self,
@@ -444,10 +402,10 @@ impl V04 {
                 parent_id,
                 span_start,
                 span_duration,
-            )?;
-            
-            // Add this span as potential parent if we haven't reached max depth
-            if spans.len() < self.config.trace_depth as usize {
+            );
+
+            // Add as potential parent for deeper nesting
+            if spans.len() < MAX_TRACE_DEPTH {
                 parent_candidates.push((span_id, span_start, span_start + span_duration));
             }
 
@@ -458,10 +416,10 @@ impl V04 {
     }
 }
 
-/// Generate a single span using string pools.
+/// Generate a single span using context-based approach like dogstatsd.
 ///
-/// Creates spans compatible with the protobuf Span message but uses pre-generated
-/// string pools instead of static values for optimal performance.
+/// Selects from pre-generated contexts to create realistic cardinality
+/// that stresses trace-agent processing and memory usage patterns.
 fn generate_span<'a, R>(
     generator: &'a V04,
     rng: &mut R,
@@ -470,67 +428,69 @@ fn generate_span<'a, R>(
     parent_id: u64,
     start_time: i64,
     duration: i64,
-) -> Result<Span<'a>, Error>
+) -> Span<'a>
 where
     R: Rng + ?Sized,
 {
-
-    let service = generator
-        .pools
-        .service_names
+    // Choose a context (service+operation+resource combination)
+    // This drives cardinality like dogstatsd contexts
+    let context = generator
+        .context_generator
+        .contexts
         .choose(rng)
-        .expect("service_names should not be empty");
+        .expect("contexts should not be empty");
 
-    let name = generator
-        .pools
-        .operation_names
-        .choose(rng)
-        .expect("operation_names should not be empty");
-
-    let resource = generator
-        .pools
-        .resource_names
-        .choose(rng)
-        .expect("resource_names should not be empty");
-
-    let kind = generator
-        .pools
-        .span_types
-        .choose(rng)
-        .expect("span_types should not be empty");
-
-    // Generate tags (meta)
+    // Generate tags (meta) - key source of cardinality
     let tag_count = generator.config.tags_per_span.sample(rng);
     let mut meta = FxHashMap::default();
     for _ in 0..tag_count {
-        if let (Some(key), Some(value)) = (
-            generator.pools.tag_keys.choose(rng),
-            generator.pools.tag_values.choose(rng),
-        ) {
-            meta.insert(key.as_str(), value.as_str());
-        }
+        let key_len = generator.config.tag_key_length.sample(rng);
+        let value_len = generator.config.tag_value_length.sample(rng);
+
+        let key = if key_len == 0 {
+            ""
+        } else {
+            generator
+                .str_pool
+                .of_size_range(rng, key_len..key_len + 1)
+                .unwrap_or("key")
+        };
+
+        let value = if value_len == 0 {
+            ""
+        } else {
+            generator
+                .str_pool
+                .of_size_range(rng, value_len..value_len + 1)
+                .unwrap_or("value")
+        };
+
+        meta.insert(key, value);
     }
 
-    // Generate metrics
+    // Generate metrics - affects processing overhead
     let metric_count = generator.config.metrics_per_span.sample(rng);
     let mut metrics = FxHashMap::default();
     for _ in 0..metric_count {
-        if let Some(key) = generator.pools.metric_keys.choose(rng) {
-            metrics.insert(key.as_str(), rng.random::<f64>());
-        }
+        let key_len = generator.config.metric_key_length.sample(rng);
+        let key = if key_len == 0 {
+            ""
+        } else {
+            generator
+                .str_pool
+                .of_size_range(rng, key_len..key_len + 1)
+                .unwrap_or("metric")
+        };
+        metrics.insert(key, rng.random::<f64>());
     }
 
-    // Determine if this span should have an error
-    let error = if rng.random::<f32>() < generator.config.error_rate {
-        1
-    } else {
-        0
-    };
+    // Error rate affects agent error handling paths
+    let error = i32::from(rng.random::<f32>() < generator.config.error_rate);
 
-    Ok(Span {
-        service,
-        name,
-        resource,
+    Span {
+        service: &context.service,
+        name: &context.operation,
+        resource: &context.resource,
         trace_id,
         span_id,
         parent_id,
@@ -539,9 +499,9 @@ where
         error,
         meta,
         metrics,
-        kind,
+        kind: &context.span_type,
         meta_struct: FxHashMap::default(),
-    })
+    }
 }
 
 impl<'a> Generator<'a> for V04 {
@@ -557,29 +517,23 @@ impl<'a> Generator<'a> for V04 {
 }
 
 impl crate::Serialize for V04 {
-    /// Serialize traces in v0.4 format per official specification.
+    /// Serialize traces in v0.4 msgpack format exactly as agent expects.
     ///
-    /// OFFICIAL V0.4 SPEC (pkg/trace/api/version.go:24-26):
-    /// "An array of arrays of Span (pkg/proto/datadog/trace/span.proto)"
-    ///
-    /// This generates `Vec<Vec<Span>>` serialized as MessagePack, which is exactly
-    /// what the v0.4 endpoint expects when calling pb.Traces.UnmarshalMsg().
+    /// CRITICAL V0.4 FORMAT: "An array of arrays of Span" → `pb.Traces = [][]Span`
     fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
         W: Write,
     {
-        // Generate traces (Vec<Vec<Span>>) matching pb.Traces format
         let mut traces: Vec<Vec<Span>> = vec![];
 
-        // Start by generating the configured number of traces
-        let initial_trace_count = self.config.traces_per_payload.sample(&mut rng);
-        for _ in 0..initial_trace_count {
+        // Start with initial traces
+        for _ in 0..INITIAL_TRACE_COUNT {
             let trace = self.generate(&mut rng)?;
             traces.push(trace.spans);
         }
 
-        // Keep adding traces until we exceed max_bytes
+        // Grow until we exceed max_bytes
         loop {
             let mut buf = Vec::with_capacity(max_bytes);
             traces.serialize(&mut Serializer::new(&mut buf))?;
@@ -589,19 +543,18 @@ impl crate::Serialize for V04 {
             }
 
             // Add more traces
-            let additional_traces = self.config.traces_per_payload.sample(&mut rng).min(100);
-            for _ in 0..additional_traces {
+            for _ in 0..TRACE_BATCH_SIZE {
                 let trace = self.generate(&mut rng)?;
                 traces.push(trace.spans);
             }
         }
 
-        // Binary search to find the right number of traces that fit in max_bytes
+        // Binary search for optimal size
         let mut high = traces.len();
         let mut low = 0;
 
         while low < high {
-            let mid = (low + high + 1) / 2;
+            let mid = (low + high).div_ceil(2);
             let mut buf = Vec::with_capacity(max_bytes);
             traces[0..mid].serialize(&mut Serializer::new(&mut buf))?;
 
@@ -612,7 +565,6 @@ impl crate::Serialize for V04 {
             }
         }
 
-        // Serialize the final result
         let mut buf = Vec::with_capacity(max_bytes);
         traces[0..low].serialize(&mut Serializer::new(&mut buf))?;
         writer.write_all(&buf)?;
@@ -640,16 +592,14 @@ mod test {
             generator.to_bytes(rng, max_bytes, &mut bytes)?;
             debug_assert!(bytes.len() <= max_bytes);
         }
-    }
 
-    proptest! {
         #[test]
         fn trace_spans_have_same_trace_id_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let generator = V04::new(&mut rng);
-            
+            let mut generator = V04::new(&mut rng);
+
             let trace = generator.generate(&mut rng)?;
-            
+
             // All spans in a trace should have the same trace_id
             if let Some(first_span) = trace.spans.first() {
                 let expected_trace_id = first_span.trace_id;
@@ -658,16 +608,14 @@ mod test {
                 }
             }
         }
-    }
 
-    proptest! {
         #[test]
         fn parent_child_timestamp_validity_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let generator = V04::new(&mut rng);
-            
+            let mut generator = V04::new(&mut rng);
+
             let trace = generator.generate(&mut rng)?;
-            
+
             for span in &trace.spans {
                 if span.parent_id != 0 {
                     // Find parent span
@@ -680,23 +628,21 @@ mod test {
                 }
             }
         }
-    }
 
-    proptest! {
         #[test]
         fn config_validation_works_v04(
-            traces_per_payload_min in 1u16..=100,
-            traces_per_payload_max in 1u16..=100,
+            contexts_min in 1u32..=1000,
+            contexts_max in 1u32..=1000,
             error_rate in 0.0f32..=1.0
         ) {
             let mut config = Config::default();
-            config.traces_per_payload = if traces_per_payload_min <= traces_per_payload_max {
-                ConfRange::Inclusive { min: traces_per_payload_min, max: traces_per_payload_max }
+            config.contexts = if contexts_min <= contexts_max {
+                ConfRange::Inclusive { min: contexts_min, max: contexts_max }
             } else {
-                ConfRange::Inclusive { min: traces_per_payload_max, max: traces_per_payload_min }
+                ConfRange::Inclusive { min: contexts_max, max: contexts_min }
             };
             config.error_rate = error_rate;
-            
+
             prop_assert!(config.valid().is_ok());
         }
     }
@@ -712,25 +658,9 @@ mod test {
     }
 
     #[test]
-    fn config_validation_catches_zero_pool_sizes_v04() {
+    fn config_validation_catches_zero_contexts_v04() {
         let mut config = Config::default();
-        config.service_name_pool_size = 0;
-        assert!(config.valid().is_err());
-
-        let mut config = Config::default();
-        config.operation_name_pool_size = 0;
-        assert!(config.valid().is_err());
-
-        let mut config = Config::default();
-        config.resource_name_pool_size = 0;
-        assert!(config.valid().is_err());
-
-        let mut config = Config::default();
-        config.span_type_pool_size = 0;
-        assert!(config.valid().is_err());
-
-        let mut config = Config::default();
-        config.metric_key_pool_size = 0;
+        config.contexts = ConfRange::Constant(0);
         assert!(config.valid().is_err());
     }
 }
