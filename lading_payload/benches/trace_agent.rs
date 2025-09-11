@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
-use lading_payload::{Serialize, trace_agent};
+use lading_payload::{Serialize, trace_agent::v04};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
@@ -8,7 +8,7 @@ fn trace_agent_setup(c: &mut Criterion) {
     c.bench_function("trace_agent_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19690716);
-            let _ta = trace_agent::TraceAgent::msg_pack(&mut rng);
+            let _ta = v04::V04::with_config(v04::Config::default(), &mut rng);
         })
     });
 }
@@ -22,7 +22,7 @@ fn trace_agent_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let ta = trace_agent::TraceAgent::msg_pack(&mut rng);
+                let mut ta = v04::V04::with_config(v04::Config::default(), &mut rng);
                 let mut writer = Vec::with_capacity(size);
 
                 ta.to_bytes(rng, size, &mut writer)
