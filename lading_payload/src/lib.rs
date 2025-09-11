@@ -28,7 +28,6 @@ pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
 pub use statik::Static;
 pub use syslog::Syslog5424;
-pub use trace_agent::TraceAgent;
 
 pub mod apache_common;
 pub mod ascii;
@@ -146,7 +145,8 @@ pub enum Config {
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
     /// Generates `TraceAgent` payloads in `MsgPack` format
-    TraceAgent,
+    #[serde(rename = "trace_agent")]
+    TraceAgent(crate::trace_agent::v04::Config),
 }
 
 /// Unified payload type for all serializers
@@ -178,7 +178,7 @@ pub enum Payload {
     /// `DogStatsD` metrics
     DogStatsdD(DogStatsD),
     /// Datadog Trace Agent format
-    TraceAgent(TraceAgent),
+    TraceAgent(trace_agent::v04::V04),
 }
 
 impl Serialize for Payload {

@@ -209,8 +209,8 @@ impl Cache {
         };
 
         let blocks = match payload {
-            crate::Config::TraceAgent => {
-                let mut ta = crate::TraceAgent::new(&mut rng);
+            crate::Config::TraceAgent(config) => {
+                let mut ta = crate::trace_agent::v04::V04::with_config(*config, &mut rng);
 
                 let span = span!(Level::INFO, "fixed", payload = "trace-agent");
                 let _guard = span.enter();
