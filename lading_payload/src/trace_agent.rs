@@ -11,4 +11,36 @@
 //!
 //! See the individual module documentation for version-specific details.
 
+use serde::{Deserialize, Serialize};
+
 pub mod v04;
+
+/// Configuration for trace agent payload generation by version.
+///
+/// Each version has different format requirements and performance characteristics.
+/// This allows users to specify which trace agent protocol version to target.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[serde(tag = "version", rename_all = "snake_case")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum Config {
+    /// Version 0.4: msgpack array of arrays of spans
+    #[serde(rename = "v0.4")]
+    V04(v04::Config),
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config::V04(v04::Config::default())
+    }
+}
+
+impl Config {
+    /// Validate the configuration
+    /// # Errors
+    /// Returns an error if the configuration is invalid
+    pub fn valid(&self) -> Result<(), String> {
+        match self {
+            Config::V04(config) => config.valid(),
+        }
+    }
+}
