@@ -15,7 +15,10 @@
 //! Our implementation generates `Vec<Vec<Span>>` that serializes to msgpack
 //! in the exact format the v0.4 endpoint expects for `pb.Traces`.
 
-use std::{io::Write, time};
+use std::{
+    io::Write,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use rand::{Rng, seq::IndexedRandom};
 use rmp_serde::Serializer;
@@ -27,26 +30,21 @@ use crate::{
     common::{config::ConfRange, strings},
 };
 
-// String pool and context sizing constants
+/// Configuration validation error
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigError {
+    /// Configuration range is invalid (min > max)
+    InvalidRange,
+    /// Configuration value cannot be zero
+    ZeroValue,
+    /// Error rate is not finite or outside [0.0, 1.0]
+    InvalidErrorRate,
+}
+
 const STRING_POOL_SIZE: usize = 1_000_000;
-
-// Trace generation constants
-const MAX_TRACE_DEPTH: usize = 3;
-const INITIAL_TRACE_COUNT: usize = 10;
-const TRACE_BATCH_SIZE: usize = 10;
-
-// Timestamp constants
-//
-// NOTE(claude) You MAY NOT change these.
-const MAX_SPAN_AGE: time::Duration = time::Duration::from_secs(3600); // 1 hour
-const MIN_SPAN_DURATION: time::Duration = time::Duration::from_millis(1);
-const MAX_SPAN_DURATION: time::Duration = time::Duration::from_secs(1);
-
-// NOTE(claude) You _may_ use allow to avoid clippy dings but you may only use
-// them on single functions. You MUST not have them inline in functions. You
-// MUST carefully justify why you have used an allow. You MAY NOT use them just
-// to make clippy pass; clippy is here for a reason and it forces better code,
-// code that you try to skip writing.
+const MAX_TRACE_DEPTH: usize = 8;
+const MIN_SPAN_DURATION: Duration = Duration::from_millis(1);
+const MAX_SPAN_DURATION: Duration = Duration::from_secs(1);
 
 /// Configuration for v0.4 trace payload generation.
 ///
@@ -90,20 +88,16 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // High cardinality similar to dogstatsd contexts (5K-10K)
+            // All defaults arbitrarily chosen to be "large, but not too
+            // large". A nice way of saying these values are all guesses.
             contexts: ConfRange::Inclusive {
                 min: 5_000,
                 max: 10_000,
             },
-            // Realistic span counts that stress trace assembly
             spans_per_trace: ConfRange::Inclusive { min: 1, max: 50 },
-            // Tag cardinality is critical for agent memory usage
             tags_per_span: ConfRange::Inclusive { min: 2, max: 20 },
-            // Metrics processing overhead
             metrics_per_span: ConfRange::Inclusive { min: 0, max: 5 },
-            // Low error rate (most traces succeed)
             error_rate: 0.01, // 1% error rate
-            // String length ranges - configurable from 0 to 128
             service_name_length: ConfRange::Inclusive { min: 0, max: 128 },
             operation_name_length: ConfRange::Inclusive { min: 0, max: 128 },
             resource_name_length: ConfRange::Inclusive { min: 0, max: 128 },
@@ -116,58 +110,51 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Validate the configuration parameters
+    /// Validate configuration parameters
+    ///
     /// # Errors
-    /// Returns an error string if configuration is invalid
-    pub fn valid(&self) -> Result<(), String> {
-        let (contexts_valid, reason) = self.contexts.valid();
-        if !contexts_valid {
-            return Err(format!("contexts is invalid: {reason}"));
+    ///
+    /// Returns a `ConfigError` if configuration is invalid
+    pub fn valid(&self) -> Result<(), ConfigError> {
+        if !self.contexts.valid().0 {
+            return Err(ConfigError::InvalidRange);
         }
         if self.contexts.start() == 0 {
-            return Err("contexts start value cannot be 0".to_string());
+            return Err(ConfigError::ZeroValue);
         }
 
-        let (spans_valid, reason) = self.spans_per_trace.valid();
-        if !spans_valid {
-            return Err(format!("spans_per_trace is invalid: {reason}"));
+        if !self.spans_per_trace.valid().0 {
+            return Err(ConfigError::InvalidRange);
         }
         if self.spans_per_trace.start() == 0 {
-            return Err("spans_per_trace start value cannot be 0".to_string());
+            return Err(ConfigError::ZeroValue);
         }
 
-        let (tags_valid, reason) = self.tags_per_span.valid();
-        if !tags_valid {
-            return Err(format!("tags_per_span is invalid: {reason}"));
+        if !self.tags_per_span.valid().0 {
+            return Err(ConfigError::InvalidRange);
         }
 
-        let (metrics_valid, reason) = self.metrics_per_span.valid();
-        if !metrics_valid {
-            return Err(format!("metrics_per_span is invalid: {reason}"));
+        if !self.metrics_per_span.valid().0 {
+            return Err(ConfigError::InvalidRange);
         }
 
         if !self.error_rate.is_finite() || !(0.0..=1.0).contains(&self.error_rate) {
-            return Err(format!(
-                "error_rate must be finite and in range [0.0, 1.0], got {}",
-                self.error_rate
-            ));
+            return Err(ConfigError::InvalidErrorRate);
         }
 
-        // Validate string length ranges
-        let string_ranges = [
-            ("service_name_length", &self.service_name_length),
-            ("operation_name_length", &self.operation_name_length),
-            ("resource_name_length", &self.resource_name_length),
-            ("span_type_length", &self.span_type_length),
-            ("tag_key_length", &self.tag_key_length),
-            ("tag_value_length", &self.tag_value_length),
-            ("metric_key_length", &self.metric_key_length),
+        let ranges = [
+            &self.service_name_length,
+            &self.operation_name_length,
+            &self.resource_name_length,
+            &self.span_type_length,
+            &self.tag_key_length,
+            &self.tag_value_length,
+            &self.metric_key_length,
         ];
 
-        for (name, range) in &string_ranges {
-            let (valid, reason) = range.valid();
-            if !valid {
-                return Err(format!("{name} is invalid: {reason}"));
+        for range in ranges {
+            if !range.valid().0 {
+                return Err(ConfigError::InvalidRange);
             }
         }
 
@@ -175,42 +162,53 @@ impl Config {
     }
 }
 
-/// V0.4 span structure matching protobuf definition with `MessagePack` encoding.
+/// V0.4 span structure matching protobuf definition with `MessagePack`
+/// encoding.
 ///
-/// This struct corresponds exactly to the Span message in pkg/proto/datadog/trace/span.proto
-/// (lines 101-147). The protobuf uses `@gotags: msg:"field_name"` annotations to generate
-/// `MessagePack` serialization methods via github.com/tinylib/msgp.
+/// This struct corresponds exactly to the Span message in
+/// pkg/proto/datadog/trace/span.proto (lines 101-147). The protobuf uses
+/// `@gotags: msg:"field_name"` annotations to generate `MessagePack`
+/// serialization methods via github.com/tinylib/msgp.
 ///
-/// Our serde-based serialization produces the same `MessagePack` format that the datadog-agent
-/// expects when calling `pb.Traces.UnmarshalMsg()` in pkg/trace/api/api.go:897.
+/// Our serde-based serialization produces the same `MessagePack` format that
+/// the datadog-agent expects when calling `pb.Traces.UnmarshalMsg()` in
+/// pkg/trace/api/api.go:897.
 #[derive(Debug, serde::Serialize)]
+#[allow(clippy::struct_field_names)] // Field names match protobuf definition exactly
 pub struct Span<'a> {
-    /// service is the name of the service with which this span is associated.
+    /// `service` is the name of the service with which this span is associated.
     service: &'a str,
-    /// name is the operation name of this span.
+    /// `name` is the operation name of this span.
     name: &'a str,
-    /// resource is the resource name of this span, also sometimes called the endpoint (for web spans).
+    /// `resource` is the resource name of this span, also sometimes called the
+    /// endpoint (for web spans).
     resource: &'a str,
-    /// traceID is the ID of the trace to which this span belongs.
+    /// `traceID` is the ID of the trace to which this span belongs.
     trace_id: u64,
-    /// spanID is the ID of this span.
+    /// `spanID` is the ID of this span.
     span_id: u64,
-    /// parentID is the ID of this span's parent, or zero if this span has no parent.
+    /// `parentID` is the ID of this span's parent, or zero if this span has no
+    /// parent.
     parent_id: u64,
-    /// start is the number of nanoseconds between the Unix epoch and the beginning of this span.
+    /// `start` is the number of nanoseconds between the Unix epoch and the
+    /// beginning of this span.
     start: i64,
-    /// duration is the time length of this span in nanoseconds.
+    /// `duration` is the time length of this span in nanoseconds.
     duration: i64,
-    /// error is 1 if there is an error associated with this span, or 0 if there is not.
+    /// `error` is 1 if there is an error associated with this span, or 0 if
+    /// there is not.
     error: i32,
-    /// meta is a mapping from tag name to tag value for string-valued tags.
+    /// `meta` is a mapping from tag name to tag value for string-valued tags.
     meta: FxHashMap<&'a str, &'a str>,
-    /// metrics is a mapping from tag name to tag value for numeric-valued tags.
+    /// `metrics` is a mapping from tag name to tag value for numeric-valued
+    /// tags.
     metrics: FxHashMap<&'a str, f64>,
-    /// type is the type of the service with which this span is associated.  Example values: web, db, lambda.
+    /// `kind` is the type of the service with which this span is associated.
+    /// Example values: web, db, lambda.
     #[serde(alias = "type")]
     kind: &'a str,
-    /// `meta_struct` is a registry of structured "other" data used by, e.g., `AppSec`.
+    /// `meta_struct` is a registry of structured "other" data used by, e.g.,
+    /// `AppSec`.
     meta_struct: FxHashMap<&'a str, Vec<u8>>,
 }
 
@@ -241,17 +239,15 @@ impl ContextGenerator {
     {
         let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
 
-        // Generate unique contexts (like dogstatsd contexts)
         let context_count = config.contexts.sample(rng);
         let mut contexts = Vec::new();
-
         for _ in 0..context_count {
             let service_len = config.service_name_length.sample(rng);
             let service = if service_len == 0 {
                 String::new()
             } else {
                 str_pool
-                    .of_size_range(rng, service_len..service_len + 1)
+                    .of_size(rng, service_len.into())
                     .unwrap_or("service")
                     .to_string()
             };
@@ -261,7 +257,7 @@ impl ContextGenerator {
                 String::new()
             } else {
                 str_pool
-                    .of_size_range(rng, operation_len..operation_len + 1)
+                    .of_size(rng, operation_len.into())
                     .unwrap_or("operation")
                     .to_string()
             };
@@ -271,7 +267,7 @@ impl ContextGenerator {
                 String::new()
             } else {
                 str_pool
-                    .of_size_range(rng, resource_len..resource_len + 1)
+                    .of_size(rng, resource_len.into())
                     .unwrap_or("resource")
                     .to_string()
             };
@@ -281,7 +277,7 @@ impl ContextGenerator {
                 String::new()
             } else {
                 str_pool
-                    .of_size_range(rng, span_type_len..span_type_len + 1)
+                    .of_size(rng, span_type_len.into())
                     .unwrap_or("web")
                     .to_string()
             };
@@ -302,7 +298,7 @@ impl ContextGenerator {
 #[derive(Debug)]
 pub struct Trace<'a> {
     /// The spans that make up this trace
-    pub spans: Vec<Span<'a>>,
+    spans: Vec<Span<'a>>,
 }
 
 /// V0.4 payload generator
@@ -314,15 +310,6 @@ pub struct V04 {
 }
 
 impl V04 {
-    /// Create a new v0.4 payload generator with default configuration
-    pub fn new<R>(rng: &mut R) -> Self
-    where
-        R: Rng + ?Sized,
-    {
-        let config = Config::default();
-        Self::with_config(config, rng)
-    }
-
     /// Create a new v0.4 payload generator with provided configuration
     pub fn with_config<R>(config: Config, rng: &mut R) -> Self
     where
@@ -343,9 +330,16 @@ impl V04 {
     /// proper trace hierarchies where all spans share the same `trace_id` and
     /// have realistic parent-child timestamp relationships.
     ///
-    /// Critical for v0.4: Each trace becomes one element in the `pb.Traces` array,
-    /// and all spans within must have the same `trace_id` for agent acceptance.
-    pub fn generate_trace<R>(&self, rng: &mut R) -> Result<Trace<'_>, Error>
+    /// Critical for v0.4: Each trace becomes one element in the `pb.Traces`
+    /// array, and all spans within must have the same `trace_id` for agent
+    /// acceptance.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if timestamp calculations result in invalid ranges
+    #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64
+    // encompases multiple hundred years.
+    fn generate_trace<R>(&self, rng: &mut R) -> Trace<'_>
     where
         R: Rng + ?Sized,
     {
@@ -353,45 +347,49 @@ impl V04 {
         let span_count = self.config.spans_per_trace.sample(rng);
         let mut spans = Vec::with_capacity(span_count as usize);
 
-        // Generate realistic base timestamp (recent, within configured age)
-        let now = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as i64;
-        let base_time = now - rng.random_range(0..MAX_SPAN_AGE.as_nanos() as i64);
-
-        // Generate root span (parent_id = 0)
+        let base_timestamp = UNIX_EPOCH;
         let root_span_id = rng.random();
-        let root_duration = rng
-            .random_range(MIN_SPAN_DURATION.as_nanos() as i64..MAX_SPAN_DURATION.as_nanos() as i64);
+        let root_duration = Duration::from_nanos(rng.random_range(
+            MIN_SPAN_DURATION.as_nanos() as u64..MAX_SPAN_DURATION.as_nanos() as u64,
+        ));
         let root_span = generate_span(
             self,
             rng,
             trace_id,
             root_span_id,
-            0, // Root spans have parent_id = 0 per agent expectations
-            base_time,
+            0, // Root spans have parent_id = 0
+            base_timestamp,
             root_duration,
         );
         spans.push(root_span);
 
-        // Generate child spans following testutil/trace.go:33-67 pattern
-        // Each child span must fit within its parent's time window
-        let mut parent_candidates = vec![(root_span_id, base_time, base_time + root_duration)];
-
+        // Generate child spans following testutil/trace.go:33-67 pattern. Each
+        // child span must fit within its parent's time window.
+        let mut parent_candidates =
+            vec![(root_span_id, base_timestamp, base_timestamp + root_duration)];
         for _ in 1..span_count {
             let (parent_id, parent_start, parent_end) = parent_candidates
                 .choose(rng)
                 .copied()
-                .unwrap_or((root_span_id, base_time, base_time + root_duration));
+                .unwrap_or((root_span_id, base_timestamp, base_timestamp + root_duration));
 
-            // Child must start within parent and end before parent ends
-            // This matches the logic in testutil/trace.go:56-61
-            let min_duration = MIN_SPAN_DURATION.as_nanos() as i64;
-            let span_start =
-                rng.random_range(parent_start..parent_end.saturating_sub(min_duration));
-            let max_duration = parent_end - span_start;
-            let span_duration = rng.random_range(min_duration..=max_duration.max(min_duration));
+            // Child must start within parent and end before parent ends,
+            // matches the logic in testutil/trace.go:56-61.
+            let time_window = parent_end
+                .duration_since(parent_start)
+                .unwrap_or(Duration::ZERO);
+            let max_start_offset = time_window.saturating_sub(MIN_SPAN_DURATION);
+            let span_start_offset =
+                Duration::from_nanos(rng.random_range(0..=max_start_offset.as_nanos() as u64));
+            let span_start = parent_start + span_start_offset;
+
+            let remaining_time = parent_end
+                .duration_since(span_start)
+                .unwrap_or(Duration::ZERO);
+            let max_duration = remaining_time.max(MIN_SPAN_DURATION);
+            let span_duration = Duration::from_nanos(rng.random_range(
+                MIN_SPAN_DURATION.as_nanos() as u64..=max_duration.as_nanos() as u64,
+            ));
 
             let span_id = rng.random();
             let span = generate_span(
@@ -404,43 +402,38 @@ impl V04 {
                 span_duration,
             );
 
-            // Add as potential parent for deeper nesting
+            // If we aren't past the max trace depth, add as a potential parent.
             if spans.len() < MAX_TRACE_DEPTH {
                 parent_candidates.push((span_id, span_start, span_start + span_duration));
             }
-
             spans.push(span);
         }
 
-        Ok(Trace { spans })
+        Trace { spans }
     }
 }
 
-/// Generate a single span using context-based approach like dogstatsd.
-///
-/// Selects from pre-generated contexts to create realistic cardinality
-/// that stresses trace-agent processing and memory usage patterns.
+/// Generate a single span using context-based approach. This follows our
+/// dogstatsd and otel pattern.
+#[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 is safe for reasonable durations
 fn generate_span<'a, R>(
     generator: &'a V04,
     rng: &mut R,
     trace_id: u64,
     span_id: u64,
     parent_id: u64,
-    start_time: i64,
-    duration: i64,
+    start_time: SystemTime,
+    duration: Duration,
 ) -> Span<'a>
 where
     R: Rng + ?Sized,
 {
-    // Choose a context (service+operation+resource combination)
-    // This drives cardinality like dogstatsd contexts
     let context = generator
         .context_generator
         .contexts
         .choose(rng)
         .expect("contexts should not be empty");
 
-    // Generate tags (meta) - key source of cardinality
     let tag_count = generator.config.tags_per_span.sample(rng);
     let mut meta = FxHashMap::default();
     for _ in 0..tag_count {
@@ -452,7 +445,7 @@ where
         } else {
             generator
                 .str_pool
-                .of_size_range(rng, key_len..key_len + 1)
+                .of_size(rng, key_len.into())
                 .unwrap_or("key")
         };
 
@@ -461,14 +454,13 @@ where
         } else {
             generator
                 .str_pool
-                .of_size_range(rng, value_len..value_len + 1)
+                .of_size(rng, value_len.into())
                 .unwrap_or("value")
         };
 
         meta.insert(key, value);
     }
 
-    // Generate metrics - affects processing overhead
     let metric_count = generator.config.metrics_per_span.sample(rng);
     let mut metrics = FxHashMap::default();
     for _ in 0..metric_count {
@@ -478,15 +470,13 @@ where
         } else {
             generator
                 .str_pool
-                .of_size_range(rng, key_len..key_len + 1)
+                .of_size(rng, key_len.into())
                 .unwrap_or("metric")
         };
         metrics.insert(key, rng.random::<f64>());
     }
 
-    // Error rate affects agent error handling paths
     let error = i32::from(rng.random::<f32>() < generator.config.error_rate);
-
     Span {
         service: &context.service,
         name: &context.operation,
@@ -494,8 +484,11 @@ where
         trace_id,
         span_id,
         parent_id,
-        start: start_time,
-        duration,
+        start: start_time
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_nanos() as i64,
+        duration: duration.as_nanos() as i64,
         error,
         meta,
         metrics,
@@ -512,14 +505,11 @@ impl<'a> Generator<'a> for V04 {
     where
         R: rand::Rng + ?Sized,
     {
-        self.generate_trace(rng)
+        Ok(self.generate_trace(rng))
     }
 }
 
 impl crate::Serialize for V04 {
-    /// Serialize traces in v0.4 msgpack format exactly as agent expects.
-    ///
-    /// CRITICAL V0.4 FORMAT: "An array of arrays of Span" → `pb.Traces = [][]Span`
     fn to_bytes<W, R>(&mut self, mut rng: R, max_bytes: usize, writer: &mut W) -> Result<(), Error>
     where
         R: Rng + Sized,
@@ -527,13 +517,14 @@ impl crate::Serialize for V04 {
     {
         let mut traces: Vec<Vec<Span>> = vec![];
 
-        // Start with initial traces
-        for _ in 0..INITIAL_TRACE_COUNT {
+        // Elide the cost of per-message serialization, batching in fixed size
+        // chunks.
+        let batch_size = 10;
+
+        for _ in 0..batch_size {
             let trace = self.generate(&mut rng)?;
             traces.push(trace.spans);
         }
-
-        // Grow until we exceed max_bytes
         loop {
             let mut buf = Vec::with_capacity(max_bytes);
             traces.serialize(&mut Serializer::new(&mut buf))?;
@@ -541,15 +532,15 @@ impl crate::Serialize for V04 {
             if buf.len() > max_bytes {
                 break;
             }
-
-            // Add more traces
-            for _ in 0..TRACE_BATCH_SIZE {
+            for _ in 0..batch_size {
                 let trace = self.generate(&mut rng)?;
                 traces.push(trace.spans);
             }
         }
 
-        // Binary search for optimal size
+        // Unlike a protobuf based format, or an in-place string we can't know
+        // the exact size of the msgpack serialized form. We've made a good
+        // guess, now use a binary search to refine.
         let mut high = traces.len();
         let mut low = 0;
 
@@ -599,8 +590,6 @@ mod test {
             let mut generator = V04::new(&mut rng);
 
             let trace = generator.generate(&mut rng)?;
-
-            // All spans in a trace should have the same trace_id
             if let Some(first_span) = trace.spans.first() {
                 let expected_trace_id = first_span.trace_id;
                 for span in &trace.spans {
@@ -618,11 +607,8 @@ mod test {
 
             for span in &trace.spans {
                 if span.parent_id != 0 {
-                    // Find parent span
                     if let Some(parent) = trace.spans.iter().find(|s| s.span_id == span.parent_id) {
-                        // Child should start after or at the same time as parent
                         prop_assert!(span.start >= parent.start);
-                        // Child should end before or at the same time as parent
                         prop_assert!(span.start + span.duration <= parent.start + parent.duration);
                     }
                 }
