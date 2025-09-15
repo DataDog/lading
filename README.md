@@ -150,6 +150,6 @@ Licensed under the [MIT license][mit-license].
 
 [contributing]: CONTRIBUTING.md
 [mit-license]: LICENSE
-[vector]: github.com/vectordotdev/vector
-[agent]: github.com/DataDog/datadog-agent
+[vector]: https://github.com/vectordotdev/vector
+[agent]: https://github.com/DataDog/datadog-agent
 [fluent]: https://github.com/fluent/fluentd/wiki/Forward-Protocol-Specification-v1
