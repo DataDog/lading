@@ -40,7 +40,9 @@ impl Config {
     /// Returns an error if the configuration is invalid
     pub fn valid(&self) -> Result<(), String> {
         match self {
-            Config::V04(config) => config.valid(),
+            Config::V04(config) => config
+                .valid()
+                .map_err(|_| "invalid configuration".to_string()),
         }
     }
 }
