@@ -46,6 +46,18 @@ const MAX_TRACE_DEPTH: usize = 8;
 const MIN_SPAN_DURATION: Duration = Duration::from_millis(1);
 const MAX_SPAN_DURATION: Duration = Duration::from_secs(1);
 
+/// Generate a random duration within the given range
+#[allow(clippy::cast_possible_truncation)] // u128 nanos to u64 safe for reasonable duration ranges
+fn random_duration<R>(rng: &mut R, min: Duration, max: Duration) -> Duration
+where
+    R: Rng + ?Sized,
+{
+    let min_nanos = min.as_nanos() as u64;
+    let max_nanos = max.as_nanos() as u64;
+    let random_nanos = rng.random_range(min_nanos..=max_nanos);
+    Duration::from_nanos(random_nanos)
+}
+
 /// Configuration for v0.4 trace payload generation.
 ///
 /// Focuses on parameters that affect trace-agent scaling performance:
@@ -337,8 +349,6 @@ impl V04 {
     /// # Errors
     ///
     /// Returns error if timestamp calculations result in invalid ranges
-    #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64
-    // encompases multiple hundred years.
     fn generate_trace<R>(&self, rng: &mut R) -> Trace<'_>
     where
         R: Rng + ?Sized,
@@ -349,9 +359,7 @@ impl V04 {
 
         let base_timestamp = UNIX_EPOCH;
         let root_span_id = rng.random();
-        let root_duration = Duration::from_nanos(rng.random_range(
-            MIN_SPAN_DURATION.as_nanos() as u64..MAX_SPAN_DURATION.as_nanos() as u64,
-        ));
+        let root_duration = random_duration(rng, MIN_SPAN_DURATION, MAX_SPAN_DURATION);
         let root_span = generate_span(
             self,
             rng,
@@ -379,17 +387,18 @@ impl V04 {
                 .duration_since(parent_start)
                 .unwrap_or(Duration::ZERO);
             let max_start_offset = time_window.saturating_sub(MIN_SPAN_DURATION);
-            let span_start_offset =
-                Duration::from_nanos(rng.random_range(0..=max_start_offset.as_nanos() as u64));
+            let span_start_offset = if max_start_offset.is_zero() {
+                Duration::ZERO
+            } else {
+                random_duration(rng, Duration::ZERO, max_start_offset)
+            };
             let span_start = parent_start + span_start_offset;
 
             let remaining_time = parent_end
                 .duration_since(span_start)
                 .unwrap_or(Duration::ZERO);
             let max_duration = remaining_time.max(MIN_SPAN_DURATION);
-            let span_duration = Duration::from_nanos(rng.random_range(
-                MIN_SPAN_DURATION.as_nanos() as u64..=max_duration.as_nanos() as u64,
-            ));
+            let span_duration = random_duration(rng, MIN_SPAN_DURATION, max_duration);
 
             let span_id = rng.random();
             let span = generate_span(
@@ -415,7 +424,6 @@ impl V04 {
 
 /// Generate a single span using context-based approach. This follows our
 /// dogstatsd and otel pattern.
-#[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 is safe for reasonable durations
 fn generate_span<'a, R>(
     generator: &'a V04,
     rng: &mut R,
@@ -484,10 +492,12 @@ where
         trace_id,
         span_id,
         parent_id,
+        #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 safe for reasonable durations
         start: start_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_nanos() as i64,
+        #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 safe for reasonable durations
         duration: duration.as_nanos() as i64,
         error,
         meta,
@@ -577,7 +587,7 @@ mod test {
         fn payload_not_exceed_max_bytes_v04(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut generator = V04::new(&mut rng);
+            let mut generator = V04::with_config(Config::default(), &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             generator.to_bytes(rng, max_bytes, &mut bytes)?;
@@ -587,7 +597,7 @@ mod test {
         #[test]
         fn trace_spans_have_same_trace_id_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut generator = V04::new(&mut rng);
+            let generator = V04::with_config(Config::default(), &mut rng);
 
             let trace = generator.generate(&mut rng)?;
             if let Some(first_span) = trace.spans.first() {
@@ -601,7 +611,7 @@ mod test {
         #[test]
         fn parent_child_timestamp_validity_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut generator = V04::new(&mut rng);
+            let generator = V04::with_config(Config::default(), &mut rng);
 
             let trace = generator.generate(&mut rng)?;
 
