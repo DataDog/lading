@@ -16,13 +16,13 @@
 //! in the exact format the v0.4 endpoint expects for `pb.Traces`.
 
 use std::{
+    collections::BTreeMap,
     io::Write,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rand::{Rng, seq::IndexedRandom};
 use rmp_serde::Serializer;
-use rustc_hash::FxHashMap;
 use serde::Serialize;
 
 use crate::{
@@ -211,17 +211,17 @@ pub struct Span<'a> {
     /// there is not.
     error: i32,
     /// `meta` is a mapping from tag name to tag value for string-valued tags.
-    meta: FxHashMap<&'a str, &'a str>,
+    meta: BTreeMap<&'a str, &'a str>,
     /// `metrics` is a mapping from tag name to tag value for numeric-valued
     /// tags.
-    metrics: FxHashMap<&'a str, f64>,
+    metrics: BTreeMap<&'a str, f64>,
     /// `kind` is the type of the service with which this span is associated.
     /// Example values: web, db, lambda.
     #[serde(alias = "type")]
     kind: &'a str,
     /// `meta_struct` is a registry of structured "other" data used by, e.g.,
     /// `AppSec`.
-    meta_struct: FxHashMap<&'a str, Vec<u8>>,
+    meta_struct: BTreeMap<&'a str, Vec<u8>>,
 }
 
 /// Context represents a unique service+operation+resource combination.
@@ -443,7 +443,7 @@ where
         .expect("contexts should not be empty");
 
     let tag_count = generator.config.tags_per_span.sample(rng);
-    let mut meta = FxHashMap::default();
+    let mut meta = BTreeMap::default();
     for _ in 0..tag_count {
         let key_len = generator.config.tag_key_length.sample(rng);
         let value_len = generator.config.tag_value_length.sample(rng);
@@ -470,7 +470,7 @@ where
     }
 
     let metric_count = generator.config.metrics_per_span.sample(rng);
-    let mut metrics = FxHashMap::default();
+    let mut metrics = BTreeMap::default();
     for _ in 0..metric_count {
         let key_len = generator.config.metric_key_length.sample(rng);
         let key = if key_len == 0 {
@@ -503,7 +503,7 @@ where
         meta,
         metrics,
         kind: &context.span_type,
-        meta_struct: FxHashMap::default(),
+        meta_struct: BTreeMap::default(),
     }
 }
 
