@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout)]
+
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
 use std::hash::BuildHasher;

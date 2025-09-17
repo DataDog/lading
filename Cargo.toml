@@ -53,6 +53,7 @@ pedantic = "deny"
 unwrap_used = "deny"
 mod_module_files = "deny"
 dbg_macro = "deny"
+print_stdout = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

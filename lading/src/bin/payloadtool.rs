@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout)]
+
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::num::NonZeroU32;
