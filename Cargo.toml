@@ -57,6 +57,11 @@ print_stdout = "deny"
 print_stderr = "deny"
 redundant_allocation = "deny"
 rc_buffer = "deny"
+large_futures = "deny"
+large_stack_arrays = "deny"
+float_cmp = "deny"
+manual_memcpy = "deny"
+unnecessary_to_owned = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
