@@ -20,12 +20,30 @@ pub mod v04;
 /// Each version has different format requirements and performance characteristics.
 /// This allows users to specify which trace agent protocol version to target.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
-#[serde(tag = "version", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Config {
     /// Version 0.4: msgpack array of arrays of spans
     #[serde(rename = "v0.4")]
     V04(v04::Config),
+}
+
+impl Config {
+    #[must_use]
+    /// Return the stringy version number of the config.
+    pub fn version(self) -> &'static str {
+        match self {
+            Self::V04(_) => "v0.4",
+        }
+    }
+
+    #[must_use]
+    /// Return the API endpoint path for this trace agent version.
+    pub fn endpoint_path(self) -> &'static str {
+        match self {
+            Self::V04(_) => "/v0.4/traces",
+        }
+    }
 }
 
 impl Default for Config {

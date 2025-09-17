@@ -7,6 +7,7 @@ on:
       - 'examples/**/*.yml'
       - 'lading/**'
       - '.github/workflows/config-validation.yml'
+      - 'ci/config-validation'
   push:
     branches:
       - main
@@ -15,24 +16,11 @@ on:
       - 'examples/**/*.yml'
       - 'lading/**'
       - '.github/workflows/config-validation.yml'
+      - 'ci/config-validation'
 
 jobs:
-  generate-matrix:
-    name: Generate Config Matrix
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - id: set-matrix
-        run: |
-          # Find all YAML files in examples directory
-          configs=$(find examples -name "*.yaml" -o -name "*.yml" | sort | jq -R -s -c 'split("\n")[:-1]')
-          echo "matrix={\"config\":$configs}" >> $GITHUB_OUTPUT
-          echo "Found configs: $configs"
-
-  build:
-    name: Build lading binary
+  validate-configs:
+    name: Validate Example Configs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -46,31 +34,5 @@ jobs:
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
-      - name: Build lading binary
-        run: cargo build --bin=lading --all-features
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: lading-binary
-          path: target/debug/lading
-
-  validate-configs:
-    name: Validate ${{ matrix.config }}
-    runs-on: ubuntu-latest
-    needs: [generate-matrix, build]
-    strategy:
-      fail-fast: false
-      matrix: ${{fromJson(needs.generate-matrix.outputs.matrix)}}
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - name: Download binary artifact
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        with:
-          name: lading-binary
-          path: target/debug/
-      - name: Make binary executable
-        run: chmod +x target/debug/lading
-      - name: Validate config
-        run: |
-          echo "Validating: ${{ matrix.config }}"
-          ./target/debug/lading config-check --config-path="${{ matrix.config }}"
+      - name: Run config validation
+        run: ./ci/config-validation
