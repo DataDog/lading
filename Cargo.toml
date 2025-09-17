@@ -50,6 +50,7 @@ sysinfo = { version = "0.37", default-features = false }
 
 [workspace.lints.clippy]
 pedantic = "deny"
+unwrap_used = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
