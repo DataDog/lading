@@ -4,7 +4,6 @@
 
 #![deny(clippy::all)]
 #![deny(clippy::cargo)]
-#![deny(clippy::pedantic)]
 #![deny(clippy::perf)]
 #![deny(clippy::suspicious)]
 #![deny(clippy::complexity)]
