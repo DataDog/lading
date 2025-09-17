@@ -51,6 +51,9 @@ sysinfo = { version = "0.37", default-features = false }
 [workspace.lints.clippy]
 pedantic = "deny"
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
+
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optimization alternatives.
