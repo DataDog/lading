@@ -27,6 +27,7 @@ pub mod process_tree;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod tcp;
+pub mod trace_agent;
 pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
@@ -76,6 +77,9 @@ pub enum Error {
     /// See [`crate::generator::kubernetes::Error`] for details.
     #[error(transparent)]
     Kubernetes(#[from] kubernetes::Error),
+    /// See [`crate::generator::trace_agent::Error`] for details.
+    #[error(transparent)]
+    TraceAgent(#[from] trace_agent::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -133,6 +137,8 @@ pub enum Inner {
     Container(container::Config),
     /// See [`crate::generator::kubernetes::Config`] for details.
     Kubernetes(kubernetes::Config),
+    /// See [`crate::generator::trace_agent::Config`] for details.
+    TraceAgent(trace_agent::Config),
 }
 
 #[derive(Debug)]
@@ -170,6 +176,8 @@ pub enum Server {
     Container(container::Container),
     /// See [`crate::generator::kubernetes::Kubernetes`] for details.
     Kubernetes(kubernetes::Kubernetes),
+    /// See [`crate::generator::trace_agent::TraceAgent`] for details.
+    TraceAgent(trace_agent::TraceAgent),
 }
 
 impl Server {
@@ -232,6 +240,11 @@ impl Server {
                 &conf,
                 shutdown,
             )?),
+            Inner::TraceAgent(conf) => Self::TraceAgent(trace_agent::TraceAgent::new(
+                config.general,
+                &conf,
+                shutdown,
+            )?),
         };
         Ok(srv)
     }
@@ -267,6 +280,7 @@ impl Server {
             Server::ProcFs(inner) => inner.spin().await?,
             Server::Container(inner) => inner.spin().await?,
             Server::Kubernetes(inner) => inner.spin().await?,
+            Server::TraceAgent(inner) => inner.spin().await?,
         }
 
         Ok(())
