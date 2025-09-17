@@ -17,7 +17,6 @@
 #![deny(clippy::redundant_allocation)]
 #![deny(clippy::print_stdout)]
 #![deny(clippy::print_stderr)]
-#![deny(clippy::dbg_macro)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]
