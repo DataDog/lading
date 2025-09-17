@@ -371,34 +371,20 @@ impl V04 {
         );
         spans.push(root_span);
 
-        // Generate child spans following testutil/trace.go:33-67 pattern. Each
-        // child span must fit within its parent's time window.
-        let mut parent_candidates =
-            vec![(root_span_id, base_timestamp, base_timestamp + root_duration)];
+        // Generate child spans with random timing, allowing for async patterns
+        // where child spans may have gaps or overlaps with parents.
+        let mut parent_candidates = vec![root_span_id];
         for _ in 1..span_count {
-            let (parent_id, parent_start, parent_end) = parent_candidates
+            let parent_id = parent_candidates
                 .choose(rng)
                 .copied()
-                .unwrap_or((root_span_id, base_timestamp, base_timestamp + root_duration));
+                .unwrap_or(root_span_id);
 
-            // Child must start within parent and end before parent ends,
-            // matches the logic in testutil/trace.go:56-61.
-            let time_window = parent_end
-                .duration_since(parent_start)
-                .unwrap_or(Duration::ZERO);
-            let max_start_offset = time_window.saturating_sub(MIN_SPAN_DURATION);
-            let span_start_offset = if max_start_offset.is_zero() {
-                Duration::ZERO
-            } else {
-                random_duration(rng, Duration::ZERO, max_start_offset)
-            };
-            let span_start = parent_start + span_start_offset;
-
-            let remaining_time = parent_end
-                .duration_since(span_start)
-                .unwrap_or(Duration::ZERO);
-            let max_duration = remaining_time.max(MIN_SPAN_DURATION);
-            let span_duration = random_duration(rng, MIN_SPAN_DURATION, max_duration);
+            // Child spans get independent random timing, not constrained by
+            // parent.
+            let span_start_offset = random_duration(rng, Duration::ZERO, MAX_SPAN_DURATION);
+            let span_start = base_timestamp + span_start_offset;
+            let span_duration = random_duration(rng, MIN_SPAN_DURATION, MAX_SPAN_DURATION);
 
             let span_id = rng.random();
             let span = generate_span(
@@ -413,7 +399,7 @@ impl V04 {
 
             // If we aren't past the max trace depth, add as a potential parent.
             if spans.len() < MAX_TRACE_DEPTH {
-                parent_candidates.push((span_id, span_start, span_start + span_duration));
+                parent_candidates.push(span_id);
             }
             spans.push(span);
         }
@@ -609,19 +595,24 @@ mod test {
         }
 
         #[test]
-        fn parent_child_timestamp_validity_v04(seed: u64) {
+        fn parent_child_structure_validity_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng);
 
             let trace = generator.generate(&mut rng)?;
 
+            // Verify structural properties but not temporal constraints
             for span in &trace.spans {
                 if span.parent_id != 0 {
-                    if let Some(parent) = trace.spans.iter().find(|s| s.span_id == span.parent_id) {
-                        prop_assert!(span.start >= parent.start);
-                        prop_assert!(span.start + span.duration <= parent.start + parent.duration);
-                    }
+                    // Parent must exist in the trace
+                    prop_assert!(trace.spans.iter().any(|s| s.span_id == span.parent_id));
                 }
+            }
+
+            // All spans should have the same trace_id
+            let trace_id = trace.spans[0].trace_id;
+            for span in &trace.spans {
+                prop_assert_eq!(span.trace_id, trace_id);
             }
         }
 
