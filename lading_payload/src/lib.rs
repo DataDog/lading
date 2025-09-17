@@ -17,7 +17,6 @@
 #![deny(clippy::print_stdout)]
 #![deny(clippy::print_stderr)]
 #![deny(clippy::dbg_macro)]
-#![deny(clippy::mod_module_files)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]
