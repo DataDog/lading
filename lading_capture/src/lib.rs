@@ -12,7 +12,6 @@
 #![deny(clippy::large_futures)]
 #![deny(clippy::rc_buffer)]
 #![deny(clippy::redundant_allocation)]
-#![deny(clippy::print_stderr)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]

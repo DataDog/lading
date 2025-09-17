@@ -1,5 +1,6 @@
 //! Common utilities for fuzzing in lading.
 
+#![allow(clippy::print_stderr)]
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 #![deny(missing_docs)]
