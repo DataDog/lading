@@ -55,6 +55,8 @@ mod_module_files = "deny"
 dbg_macro = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
+redundant_allocation = "deny"
+rc_buffer = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

@@ -13,8 +13,6 @@
 #![deny(clippy::float_cmp)]
 #![deny(clippy::large_stack_arrays)]
 #![deny(clippy::large_futures)]
-#![deny(clippy::rc_buffer)]
-#![deny(clippy::redundant_allocation)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]
