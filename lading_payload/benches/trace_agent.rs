@@ -8,10 +8,8 @@ fn trace_agent_setup(c: &mut Criterion) {
     c.bench_function("trace_agent_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19690716);
-            let _ta = trace_agent::v04::V04::with_config(
-                trace_agent::v04::Config::default(),
-                &mut rng
-            );
+            let _ta =
+                trace_agent::v04::V04::with_config(trace_agent::v04::Config::default(), &mut rng);
         })
     });
 }
@@ -27,7 +25,7 @@ fn trace_agent_all(c: &mut Criterion) {
                 let mut rng = SmallRng::seed_from_u64(19690716);
                 let mut ta = trace_agent::v04::V04::with_config(
                     trace_agent::v04::Config::default(),
-                    &mut rng
+                    &mut rng,
                 );
                 let mut writer = Vec::with_capacity(size);
 
