@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a backwards incompatible change to any lading configuration using
   `trace_agent` payload.
 ## Added
+- Introduce a trace-agent generator for Datadog Agent traces.
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
 - `logrotate_fs` now randomizes its read offset from the block cache in order to return unique contents per log file

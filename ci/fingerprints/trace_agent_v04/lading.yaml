@@ -5,30 +5,30 @@ generator:
       addr: "127.0.0.1:8126"
       variant:
         trace_agent:
-          version: "v0.4"
-          contexts:
-            constant: 100
-          spans_per_trace:
-            constant: 5
-          tags_per_span:
-            constant: 3
-          metrics_per_span:
-            constant: 1
-          error_rate: 0.1
-          service_name_length:
-            constant: 10
-          operation_name_length:
-            constant: 15
-          resource_name_length:
-            constant: 20
-          span_type_length:
-            constant: 5
-          tag_key_length:
-            constant: 8
-          tag_value_length:
-            constant: 12
-          metric_key_length:
-            constant: 10
+          v0.4:
+            contexts:
+              constant: 100
+            spans_per_trace:
+              constant: 5
+            tags_per_span:
+              constant: 3
+            metrics_per_span:
+              constant: 1
+            error_rate: 0.1
+            service_name_length:
+              constant: 10
+            operation_name_length:
+              constant: 15
+            resource_name_length:
+              constant: 20
+            span_type_length:
+              constant: 5
+            tag_key_length:
+              constant: 8
+            tag_value_length:
+              constant: 12
+            metric_key_length:
+              constant: 10
       bytes_per_second: "100 Mb"
       maximum_block_size: "1 Mb"
       maximum_prebuild_cache_size_bytes: "10 Mb"

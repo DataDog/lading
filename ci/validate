@@ -33,6 +33,7 @@ run_check "$CI_DIR/check" "cargo check"
 run_check "$CI_DIR/custom_lints" "project-specific lints"
 run_check "$CI_DIR/clippy" "cargo clippy"
 run_check "$CI_DIR/deny" "cargo deny"
+run_check "$CI_DIR/config-validation" "example config validation"
 run_check "$CI_DIR/test" "cargo nextest"
 
 # NOTE: These we run only in CI, leaving this note here to allow for as-needed

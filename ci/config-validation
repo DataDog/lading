@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Validates all configuration files in the examples directory
+# This ensures all example configs remain valid as lading evolves
+
+echo "Building lading binary for config validation..."
+cargo build --bin=lading --all-features --quiet
+
+echo "Finding configuration files in examples directory..."
+config_files=$(find examples -name "*.yaml" -o -name "*.yml" | sort)
+config_count=$(echo "${config_files}" | wc -l | tr -d ' ')
+
+echo "Found ${config_count} configuration files to validate"
+echo
+
+failed=0
+for config in ${config_files}; do
+    echo "Validating: ${config}"
+    if ! ./target/debug/lading config-check --config-path="${config}"; then
+        echo "FAILED: ${config}"
+        failed=$((failed + 1))
+    fi
+done
+
+echo
+if [ ${failed} -gt 0 ]; then
+    echo "FAILED: ${failed}/${config_count} configurations failed validation"
+    exit 1
+fi
+
+echo "SUCCESS: All ${config_count} configurations are valid"
