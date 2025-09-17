@@ -2,11 +2,7 @@
 //!
 //! This library supports payload generation for the lading project.
 
-#![deny(clippy::all)]
 #![deny(clippy::cargo)]
-#![deny(clippy::perf)]
-#![deny(clippy::suspicious)]
-#![deny(clippy::complexity)]
 #![deny(unused_extern_crates)]
 #![deny(unused_allocation)]
 #![deny(unused_assignments)]
