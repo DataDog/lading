@@ -24,7 +24,7 @@ use tokio::{
     sync::broadcast::Receiver,
     task::{JoinError, JoinHandle},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::General;
 use crate::generator::common::{
@@ -268,7 +268,7 @@ impl Child {
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                 }
                                 Err(err) => {
-                                    debug!("write failed: {}", err);
+                                    warn!("write failed: {}", err);
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
