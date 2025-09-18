@@ -239,7 +239,10 @@ jobs:
           echo "9a1cab3e7916c98c6fe0079cc2c3b44d98832ba3bdb9db492d04a4e60e41fd0f  app-x86_64-unknown-linux-gnu.zip" | sha256sum -c
           unzip app-x86_64-unknown-linux-gnu.zip
           sudo mv sg /usr/local/bin/sg
-          chmod +x /usr/local/bin/sg
+          sudo chmod +x /usr/local/bin/sg
+          echo "PATH: $PATH"
+          which sg
+          sg --version
       - name: Test custom lints
         run: ci/test_custom_lints
       - name: Run custom lints
