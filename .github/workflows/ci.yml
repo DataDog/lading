@@ -242,8 +242,6 @@ jobs:
           mv ast-grep /usr/local/bin/ast-grep
           chmod +x /usr/local/bin/sg
           chmod +x /usr/local/bin/ast-grep
-          echo "PATH: $PATH"
-          which sg
           sg --version
       - name: Test custom lints
         run: ci/test_custom_lints

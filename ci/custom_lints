@@ -2,7 +2,6 @@
 set -o errexit
 set -o nounset
 set -o pipefail
-set -x
 
 test_mode=false
 if [[ $# -gt 0 && "$1" == "--test" ]]; then

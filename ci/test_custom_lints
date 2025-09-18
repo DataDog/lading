@@ -2,7 +2,6 @@
 set -o errexit
 set -o nounset
 set -o pipefail
-set -x
 
 # The purpose of this script is to test our utility ci/custom_lints. We run it
 # in --test mode in order to check the assertions in lints/, running it NOT
