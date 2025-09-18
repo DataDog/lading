@@ -76,6 +76,8 @@ unused_comparisons = "deny"
 unreachable_pub = "deny"
 missing_copy_implementations = "deny"
 missing_debug_implementations = "deny"
+missing_docs = "deny"
+warnings = "deny"
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.

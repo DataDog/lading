@@ -4,7 +4,6 @@
 //! project.
 
 #![deny(clippy::cargo)]
-#![deny(missing_docs)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
 

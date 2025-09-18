@@ -1,3 +1,5 @@
+//! Main lading binary for load testing.
+
 use std::{
     env,
     fmt::{self, Display},

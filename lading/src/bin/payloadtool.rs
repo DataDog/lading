@@ -1,3 +1,5 @@
+//! Payload generation tool for lading configurations.
+
 #![allow(clippy::print_stdout)]
 
 use std::fs::{File, OpenOptions};

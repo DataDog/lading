@@ -1,3 +1,5 @@
+//! Capture analysis tool for lading capture files.
+
 #![allow(clippy::print_stdout)]
 
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
@@ -35,12 +37,16 @@ struct Args {
     capture_path: String,
 }
 
+/// Errors that can occur while running captool.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Invalid command line arguments provided.
     #[error("Invalid arguments specified")]
     InvalidArgs,
+    /// I/O operation failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// JSON deserialization failed.
     #[error(transparent)]
     Deserialize(#[from] serde_json::Error),
 }
