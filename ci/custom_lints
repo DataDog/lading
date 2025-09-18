@@ -15,11 +15,11 @@ fi
 
 if [[ "$test_mode" == "true" ]]; then
     echo "Running ast-grep custom lints in test mode (only on lints/ test files)..."
-    find lints/ -name "*.rs" | xargs -r sg scan --config sgconfig.yml
+    find lints/ -name "*.rs" -print0 | xargs -0 -r sg scan --config sgconfig.yml
 else
     echo "Running ast-grep custom lints..."
     # Exclude the test files in lints/ directory from scanning
-    find . -name "*.rs" -not -path "./lints/*" -not -path "./target/*" | xargs -r sg scan --config sgconfig.yml
+    find . -name "*.rs" -not -path "./lints/*" -not -path "./target/*" -print0 | xargs -0 -r sg scan --config sgconfig.yml
 fi
 
 echo "ast-grep lints passed!"
