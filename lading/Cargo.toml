@@ -114,3 +114,6 @@ doctest = false
 
 [[bin]]
 name = "lading"
+
+[lints]
+workspace = true

@@ -1,3 +1,7 @@
+//! Payload generation tool for lading configurations.
+
+#![allow(clippy::print_stdout)]
+
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::num::NonZeroU32;
@@ -68,7 +72,7 @@ fn generate_and_check(
     // to the end and sha256'ing the blocks.
     let fingerprint = if compute_fingerprint {
         let mut hasher = Sha256::new();
-        for block in blocks.iter() {
+        for block in &blocks {
             hasher.update(&block.bytes);
         }
         let result = hasher.finalize();
@@ -78,7 +82,7 @@ fn generate_and_check(
     };
 
     let mut total_generated_bytes: u32 = 0;
-    for block in blocks.iter() {
+    for block in &blocks {
         total_generated_bytes += block.total_bytes.get();
     }
     let total_requested_bytes =
@@ -94,14 +98,15 @@ fn generate_and_check(
             .to_string();
         warn!(
             "Generator failed to generate {total_requested_bytes_str}, producing {total_generated_bytes_str} of data"
-        )
+        );
     } else {
-        info!("Generator succeeded in generating {total_requested_bytes_str} of data")
+        info!("Generator succeeded in generating {total_requested_bytes_str} of data");
     }
 
     Ok(fingerprint)
 }
 
+#[allow(clippy::too_many_lines)]
 fn check_generator(
     config: &generator::Config,
     compute_fingerprint: bool,
@@ -116,6 +121,7 @@ fn check_generator(
         }
         generator::Inner::UnixDatagram(g) => {
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -127,6 +133,7 @@ fn check_generator(
             )
         }
         generator::Inner::Tcp(g) => {
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -138,6 +145,7 @@ fn check_generator(
             )
         }
         generator::Inner::Udp(g) => {
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
@@ -157,6 +165,7 @@ fn check_generator(
                     block_cache_method: _,
                 } => (variant, maximum_prebuild_cache_size_bytes),
             };
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -182,6 +191,7 @@ fn check_generator(
             unimplemented!("FileTree not supported")
         }
         generator::Inner::Grpc(g) => {
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -193,6 +203,7 @@ fn check_generator(
             )
         }
         generator::Inner::UnixStream(g) => {
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -204,6 +215,7 @@ fn check_generator(
             )
         }
         generator::Inner::PassthruFile(g) => {
+            #[allow(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -245,6 +257,7 @@ fn check_generator(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn inner_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
@@ -305,7 +318,7 @@ async fn inner_main() -> Result<()> {
                 // Look for the specific generator ID in the file
                 let expected = expected_content
                     .lines()
-                    .find(|line| line.starts_with(&format!("{}: ", generator_id)))
+                    .find(|line| line.starts_with(&format!("{generator_id}: ")))
                     .and_then(|line| line.split(": ").nth(1))
                     .ok_or_else(|| {
                         anyhow!(
@@ -350,7 +363,7 @@ async fn inner_main() -> Result<()> {
                 for (id, fp) in &all_fingerprints {
                     let expected = expected_content
                         .lines()
-                        .find(|line| line.starts_with(&format!("{}: ", id)))
+                        .find(|line| line.starts_with(&format!("{id}: ")))
                         .and_then(|line| line.split(": ").nth(1));
 
                     if let Some(expected) = expected {

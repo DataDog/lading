@@ -58,3 +58,6 @@ harness = false
 [[bench]]
 name = "opentelemetry_metric"
 harness = false
+
+[lints]
+workspace = true

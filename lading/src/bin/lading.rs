@@ -1,3 +1,5 @@
+//! Main lading binary for load testing.
+
 use std::{
     env,
     fmt::{self, Display},
@@ -18,9 +20,9 @@ use lading::{
 };
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use rustc_hash::FxHashMap;
+use std::sync::LazyLock;
 use tokio::{
     runtime::Builder,
     signal,
@@ -80,7 +82,7 @@ impl CliKeyValues {
 
 impl Display for CliKeyValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        for (k, v) in self.inner.iter() {
+        for (k, v) in &self.inner {
             write!(f, "{k}={v},")?;
         }
         Ok(())
@@ -99,8 +101,9 @@ impl FromStr for CliKeyValues {
         //
         // The approach taken here is to use the key notion as delimiter and
         // then tidy up afterward to find values.
-        static RE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"([[:alpha:]_]+)=").expect("Invalid regex pattern provided"));
+        static RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"([[:alpha:]_]+)=").expect("Invalid regex pattern provided")
+        });
 
         let mut labels = FxHashMap::default();
 
@@ -139,6 +142,7 @@ struct CliFlatLegacy {
 
 // Shared arguments used by both modes
 #[derive(clap::Args)]
+#[allow(clippy::struct_excessive_bools)]
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
@@ -337,20 +341,12 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             Telemetry::Prometheus {
                 ref mut global_labels,
                 ..
-            } => {
-                for (k, v) in options_global_labels.inner {
-                    global_labels.insert(k, v);
-                }
             }
-            Telemetry::PrometheusSocket {
+            | Telemetry::PrometheusSocket {
                 ref mut global_labels,
                 ..
-            } => {
-                for (k, v) in options_global_labels.inner {
-                    global_labels.insert(k, v);
-                }
             }
-            Telemetry::Log {
+            | Telemetry::Log {
                 ref mut global_labels,
                 ..
             } => {
@@ -363,6 +359,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
     Ok(config)
 }
 
+#[allow(clippy::too_many_lines)]
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
@@ -526,7 +523,7 @@ async fn inner_main(
         tgt_snd.send(None)?;
         // Newer usage prefers the `target_running` signal where the PID isn't needed.
         target_running_broadcast.signal();
-    };
+    }
 
     let (timer_watcher, timer_broadcast) = lading_signal::signal();
 
@@ -554,15 +551,15 @@ async fn inner_main(
     let mut interval = time::interval(Duration::from_millis(400));
     let res = loop {
         tokio::select! {
-            _ = interval.tick() => {
+            _instant = interval.tick() => {
                 gauge!("lading.running").set(1.0);
             },
 
-            _ = signal::ctrl_c() => {
+            _res = signal::ctrl_c() => {
                 info!("received ctrl-c");
                 break Ok(());
             },
-            _ = &mut timer_watcher_wait => {
+            () = &mut timer_watcher_wait => {
                 info!("shutdown signal received.");
                 break Ok(());
             }
@@ -594,7 +591,7 @@ async fn inner_main(
                 match target_result {
                     // joined successfully, but how did the target server exit?
                     Ok(target_result) => match target_result {
-                        Ok(_) => {
+                        Ok(()) => {
                             debug!("Target shut down successfully");
                             break Ok(());
                         }

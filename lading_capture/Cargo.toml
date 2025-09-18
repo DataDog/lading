@@ -19,3 +19,6 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 
 [lib]
 doctest = false
+
+[lints]
+workspace = true

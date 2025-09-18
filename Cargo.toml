@@ -48,6 +48,37 @@ hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 sysinfo = { version = "0.37", default-features = false }
 
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "deny"
+perf = "deny"
+suspicious = "deny"
+complexity = "deny"
+unwrap_used = "deny"
+mod_module_files = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+redundant_allocation = "deny"
+rc_buffer = "deny"
+large_futures = "deny"
+large_stack_arrays = "deny"
+float_cmp = "deny"
+manual_memcpy = "deny"
+unnecessary_to_owned = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
+unused_extern_crates = "deny"
+unused_allocation = "deny"
+unused_assignments = "deny"
+unused_comparisons = "deny"
+unreachable_pub = "deny"
+missing_copy_implementations = "deny"
+missing_debug_implementations = "deny"
+missing_docs = "deny"
+warnings = "deny"
+
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optimization alternatives.
