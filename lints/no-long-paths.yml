@@ -4,11 +4,7 @@ severity: error
 language: rust
 rule:
   all:
-    - pattern: $A::$B::$C::$$$REST
+    - pattern: $A::$B::$$$REST
     - not:
         inside:
           pattern: use $_
-    - not:
-        pattern: std::$_::$_::$$$_
-    - not:
-        pattern: tokio::$_::$_::$$$_

@@ -1,4 +1,34 @@
 error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+  ┌─ lints/no-long-paths/invalid.rs:5:18
+  │
+5 │     let config = target::Config::Pid;
+  │                  ^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+  ┌─ lints/no-long-paths/invalid.rs:6:18
+  │
+6 │     let server = generator::Server::new();
+  │                  ^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+  ┌─ lints/no-long-paths/invalid.rs:7:19
+  │
+7 │     let metrics = json::MetricKind::Counter;
+  │                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:10:17
+   │
+10 │     let cache = block::Cache::fixed_with_max_overhead();
+   │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:11:19
+   │
+11 │     let sampler = cgroup::Sampler::new();
+   │                   ^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
    ┌─ lints/no-long-paths/invalid.rs:14:21
    │
 14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
@@ -23,6 +53,12 @@ error[no-long-paths]: Found long path (3+ segments) - import a subset of this pa
    │                     ^^^^^^^^^^^^^^^^^^
 
 error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:14:21
+   │
+14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
+   │                     ^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
    ┌─ lints/no-long-paths/invalid.rs:15:19
    │
 15 │     let another = project::module::submodule::function::call::chain();
@@ -40,5 +76,35 @@ error[no-long-paths]: Found long path (3+ segments) - import a subset of this pa
 15 │     let another = project::module::submodule::function::call::chain();
    │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Error: 7 error(s) found in code.
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:15:19
+   │
+15 │     let another = project::module::submodule::function::call::chain();
+   │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:19:16
+   │
+19 │     let file = fs::File::open("valid"); // 3 segments - should trigger
+   │                ^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:20:21
+   │
+20 │     let violation = target::Config::Docker; // 3 segments - should trigger
+   │                     ^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:26:26
+   │
+26 │         self.field.some::long::path::here(); // should trigger
+   │                          ^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:33:9
+   │
+33 │         some::variant::Path => {}, // should trigger
+   │         ^^^^^^^^^^^^^^^^^^^
+
+Error: 18 error(s) found in code.
 Help: Scan succeeded and found error level diagnostics in the codebase.

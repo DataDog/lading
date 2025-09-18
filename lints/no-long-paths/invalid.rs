@@ -15,7 +15,8 @@ fn example_violations() {
     let another = project::module::submodule::function::call::chain();
 
     // Mixed with valid code
-    let file = fs::File::open("valid"); // 2 segments - OK
+    let foo = Balk::close("valid"); // 2 segments - OK
+    let file = fs::File::open("valid"); // 3 segments - should trigger
     let violation = target::Config::Docker; // 3 segments - should trigger
 }
 

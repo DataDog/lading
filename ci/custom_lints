@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
-# Check for ast-grep custom lints
+set -o errexit
+set -o nounset
+set -o pipefail
 
-set -euo pipefail
+test_mode=false
+if [[ $# -gt 0 && "$1" == "--test" ]]; then
+    test_mode=true
+fi
 
 if ! command -v sg &> /dev/null; then
     echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
     exit 1
 fi
 
-echo "Running ast-grep custom lints..."
-sg scan --config sgconfig.yml
+if [[ "$test_mode" == "true" ]]; then
+    echo "Running ast-grep custom lints in test mode (only on lints/ test files)..."
+    find lints/ -name "*.rs" | xargs -r sg scan --config sgconfig.yml
+else
+    echo "Running ast-grep custom lints..."
+    # Exclude the test files in lints/ directory from scanning
+    find . -name "*.rs" -not -path "./lints/*" -not -path "./target/*" | xargs -r sg scan --config sgconfig.yml
+fi
 
 echo "ast-grep lints passed!"
