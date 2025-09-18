@@ -1,0 +1,14 @@
+id: no-long-paths
+message: "Found long path: $A::$B::$C - import a subset of this path"
+severity: error
+language: rust
+rule:
+  all:
+    - pattern: $A::$B::$C
+    - not:
+        inside:
+          pattern: use $_
+    - not:
+        pattern: std::$_::$_
+    - not:
+        pattern: tokio::$_::$_

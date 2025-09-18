@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Check for ast-grep custom lints
+
+set -euo pipefail
+
+if ! command -v sg &> /dev/null; then
+    echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
+    exit 1
+fi
+
+echo "Running ast-grep custom lints..."
+sg scan --config sgconfig.yml
+
+echo "ast-grep lints passed!"
