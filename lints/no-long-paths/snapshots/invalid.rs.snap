@@ -1,0 +1,44 @@
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:14:21
+   │
+14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
+   │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:14:21
+   │
+14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
+   │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:14:21
+   │
+14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
+   │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:14:21
+   │
+14 │     let very_long = foo::bar::baz::qux::deeply::nested::call();
+   │                     ^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:15:19
+   │
+15 │     let another = project::module::submodule::function::call::chain();
+   │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:15:19
+   │
+15 │     let another = project::module::submodule::function::call::chain();
+   │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[no-long-paths]: Found long path (3+ segments) - import a subset of this path
+   ┌─ lints/no-long-paths/invalid.rs:15:19
+   │
+15 │     let another = project::module::submodule::function::call::chain();
+   │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Error: 7 error(s) found in code.
+Help: Scan succeeded and found error level diagnostics in the codebase.

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Test ast-grep lints and generate snapshots
+
+set -euo pipefail
+
+if ! command -v sg &> /dev/null; then
+    echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
+    exit 1
+fi
+
+echo "Testing ast-grep lints..."
+
+# Create snapshots directory if it doesn't exist
+mkdir -p lints/no-long-paths/snapshots
+
+# Test each file and capture output
+for test_file in lints/no-long-paths/*.rs; do
+    if [[ -f "$test_file" ]]; then
+        filename=$(basename "$test_file")
+        snapshot_file="lints/no-long-paths/snapshots/${filename}.snap"
+
+        echo "Testing $filename..."
+
+        # Run ast-grep and capture output (both stdout and stderr)
+        # Use || true to prevent script from failing on lint violations
+        output=$(sg scan --config sgconfig.yml "$test_file" 2>&1 || true)
+
+        if [[ -n "$output" ]]; then
+            echo "$output" > "$snapshot_file"
+            echo "  Generated snapshot: $snapshot_file"
+        else
+            echo "  No violations found - clean output" > "$snapshot_file"
+            echo "  Generated clean snapshot: $snapshot_file"
+        fi
+    fi
+done
+
+echo "Lint testing complete. Snapshots generated in lints/no-long-paths/snapshots/"

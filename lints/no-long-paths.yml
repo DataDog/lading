@@ -1,0 +1,14 @@
+id: no-long-paths
+message: "Found long path (3+ segments) - import a subset of this path"
+severity: error
+language: rust
+rule:
+  all:
+    - pattern: $A::$B::$C::$$$REST
+    - not:
+        inside:
+          pattern: use $_
+    - not:
+        pattern: std::$_::$_::$$$_
+    - not:
+        pattern: tokio::$_::$_::$$$_

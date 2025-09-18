@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Check if ast-grep lint snapshots match current output
+
+set -euo pipefail
+
+if ! command -v sg &> /dev/null; then
+    echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
+    exit 1
+fi
+
+echo "Checking ast-grep lint snapshots..."
+
+failure=0
+
+# Check each test file against its snapshot
+for test_file in lints/no-long-paths/*.rs; do
+    if [[ -f "$test_file" ]]; then
+        filename=$(basename "$test_file")
+        snapshot_file="lints/no-long-paths/snapshots/${filename}.snap"
+
+        if [[ ! -f "$snapshot_file" ]]; then
+            echo "ERROR: Missing snapshot file: $snapshot_file"
+            failure=1
+            continue
+        fi
+
+        echo "Checking $filename..."
+
+        # Run ast-grep and capture output
+        current_output=$(sg scan --config sgconfig.yml "$test_file" 2>&1 || true)
+
+        if [[ -z "$current_output" ]]; then
+            current_output="  No violations found - clean output"
+        fi
+
+        # Read snapshot
+        expected_output=$(cat "$snapshot_file")
+
+        # Compare outputs
+        if [[ "$current_output" != "$expected_output" ]]; then
+            echo "ERROR: Snapshot mismatch for $filename"
+            echo "Expected:"
+            echo "$expected_output"
+            echo ""
+            echo "Got:"
+            echo "$current_output"
+            echo ""
+            failure=1
+        else
+            echo "  ✓ Snapshot matches"
+        fi
+    fi
+done
+
+if [[ $failure -eq 1 ]]; then
+    echo ""
+    echo "Snapshot check failed. Run './ci/test-lints' to regenerate snapshots."
+    exit 1
+fi
+
+echo "All lint snapshots match current output ✓"
