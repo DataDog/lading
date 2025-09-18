@@ -39,7 +39,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.14.1
         with:
           cache: true
-      - uses: taiki-e/install-action@57511bcdf8cdb0eab6448cb7fa632952d9f25742 # v2.44.60
+      - uses: taiki-e/install-action@8ea32481661d5e04d602f215b94f17e4014b44f9 # v2.44.60
         with:
           tool: nextest@0.9.72
       - name: Install Protobuf

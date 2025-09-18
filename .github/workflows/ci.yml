@@ -74,7 +74,7 @@ jobs:
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
       - name: Install nextest
-        uses: taiki-e/install-action@57511bcdf8cdb0eab6448cb7fa632952d9f25742 # v2.59.1
+        uses: taiki-e/install-action@8ea32481661d5e04d602f215b94f17e4014b44f9 # v2.61.9
         with:
           tool: nextest@0.9
       - run: ci/test
@@ -223,7 +223,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.14.1
         with:
           cache: false
-      - uses: taiki-e/install-action@0c5db7f7f897c03b771660e91d065338615679f4 # v2.60.0
+      - uses: taiki-e/install-action@8ea32481661d5e04d602f215b94f17e4014b44f9 # v2.61.9
         with:
           tool: cargo-machete@0.9.1
       - run: cargo machete
