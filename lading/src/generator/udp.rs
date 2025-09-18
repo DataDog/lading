@@ -26,7 +26,7 @@ use tokio::{
     net::UdpSocket,
     task::{JoinError, JoinSet},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace};
 
 use lading_payload::block;
 
@@ -226,7 +226,7 @@ impl UdpWorker {
                             connection = Some(sock);
                         }
                         Err(err) => {
-                            warn!("binding UDP port failed: {}", err);
+                            trace!("binding UDP port failed: {}", err);
 
                             let mut error_labels = self.metric_labels.clone();
                             error_labels.push(("error".to_string(), err.to_string()));
@@ -247,7 +247,7 @@ impl UdpWorker {
                                     connection = Some(sock);
                                 }
                                 Err(err) => {
-                                    warn!("write failed: {}", err);
+                                    debug!("write failed: {}", err);
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
