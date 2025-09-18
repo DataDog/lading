@@ -214,3 +214,16 @@ jobs:
           dockerfiles: ""
           fail_on_unpinned: true
           open_pr: false
+
+  cargo-machete:
+    name: Check unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.14.1
+        with:
+          cache: false
+      - uses: taiki-e/install-action@0c5db7f7f897c03b771660e91d065338615679f4 # v2.60.0
+        with:
+          tool: cargo-machete@0.9.1
+      - run: cargo machete
