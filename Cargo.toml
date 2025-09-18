@@ -69,6 +69,13 @@ unnecessary_to_owned = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
+unused_extern_crates = "deny"
+unused_allocation = "deny"
+unused_assignments = "deny"
+unused_comparisons = "deny"
+unreachable_pub = "deny"
+missing_copy_implementations = "deny"
+missing_debug_implementations = "deny"
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.

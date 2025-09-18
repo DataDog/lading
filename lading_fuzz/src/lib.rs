@@ -1,8 +1,6 @@
 //! Common utilities for fuzzing in lading.
 
 #![allow(clippy::print_stderr)]
-#![deny(clippy::all)]
-#![deny(clippy::pedantic)]
 #![deny(missing_docs)]
 // Allow unused crate dependencies: cargo-fuzz --build-std adds std crates as
 // dependencies that we don't use, breaks the build.
