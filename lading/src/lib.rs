@@ -7,7 +7,6 @@
 
 #![deny(clippy::cargo)]
 #![deny(missing_docs)]
-#![warn(missing_copy_implementations)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
 
