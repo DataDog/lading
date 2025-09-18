@@ -25,7 +25,7 @@ use tokio::{
     net::TcpStream,
     task::{JoinError, JoinSet},
 };
-use tracing::{error, info, warn};
+use tracing::{error, info, trace};
 
 use lading_payload::block;
 
@@ -81,7 +81,7 @@ pub enum Error {
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] ThrottleConversionError),
-    /// Throttle error
+    /// Throttle error  
     #[error("Throttle error: {0}")]
     Throttle(#[from] lading_throttle::Error),
     /// Child sub-task error.
@@ -215,7 +215,7 @@ impl TcpWorker {
                         current_connection = Some(client);
                     }
                     Err(err) => {
-                        warn!("connection to {} failed: {}", self.addr, err);
+                        trace!("connection to {} failed: {}", self.addr, err);
 
                         let mut error_labels = self.metric_labels.clone();
                         error_labels.push(("error".to_string(), err.to_string()));
@@ -238,7 +238,7 @@ impl TcpWorker {
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                 }
                                 Err(err) => {
-                                    warn!("write failed: {}", err);
+                                    trace!("write failed: {}", err);
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));
