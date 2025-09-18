@@ -233,17 +233,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.14.1
-      - name: Checkout ast-grep source
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ast-grep/ast-grep
-          ref: 190a5ca0506450ccd24bc9e4a6275bd93b3dbb38
-          path: ast-grep-src
-      - name: Build ast-grep from source
+      - name: Install ast-grep
         run: |
-          cd ast-grep-src
-          cargo install --path ./crates/cli --locked
+          wget https://github.com/ast-grep/ast-grep/releases/download/0.39.5/app-x86_64-unknown-linux-gnu.zip
+          echo "9a1cab3e7916c98c6fe0079cc2c3b44d98832ba3bdb9db492d04a4e60e41fd0f  app-x86_64-unknown-linux-gnu.zip" | sha256sum -c
+          unzip app-x86_64-unknown-linux-gnu.zip
+          sudo mv sg /usr/local/bin/sg
+          chmod +x /usr/local/bin/sg
       - name: Test custom lints
         run: ci/test_custom_lints
       - name: Run custom lints
