@@ -1,4 +1,6 @@
-// Cases that SHOULD trigger the lint (3+ segments, not in use statements)
+// Cases that SHOULD trigger the lint (3+ segments, not in use statements). If
+// custom_lints does NOT trigger on this file the tool is NOT working as
+// intended.
 
 fn example_violations() {
     // 3 segments - should trigger
@@ -15,7 +17,6 @@ fn example_violations() {
     let another = project::module::submodule::function::call::chain();
 
     // Mixed with valid code
-    let foo = Balk::close("valid"); // 2 segments - OK
     let file = fs::File::open("valid"); // 3 segments - should trigger
     let violation = target::Config::Docker; // 3 segments - should trigger
 }
@@ -23,14 +24,40 @@ fn example_violations() {
 // More examples in different contexts
 impl SomeStruct {
     fn method(&self) {
-        self.field.some::long::path::here(); // should trigger
+        some::long::path::here().field; // should trigger
     }
 }
 
 // In match statements
 fn match_example(value: SomeEnum) {
     match value {
-        some::variant::Path => {}, // should trigger
+        some::variant::Path => {} // should trigger
         other => {}
     }
+}
+
+// Complex expressions that should trigger
+fn complex_cases() {
+    // Method chaining - the path segments should trigger
+    let result = some::long::path::to::function()
+        .map(|x| x.process())
+        .unwrap_or_default();
+
+    // Nested calls
+    let value = outer::function(inner::long::path::call());
+
+    // Array/struct initialization
+    let config = Config {
+        field: some::module::Type::default(),
+        other: valid_two::segments(),
+    };
+
+    // Turbofish syntax
+    let parsed = some::parser::module::<String>::parse();
+}
+
+// Macros with long paths
+fn macro_violations() {
+    some_macro!(with::long::path::args);
+    format!("string with {}", some::path::variable);
 }

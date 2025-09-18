@@ -1,28 +1,31 @@
-// Cases that should NOT trigger the lint
+// Cases that should NOT trigger the lint. If custom_lints triggers in this file
+// the tool is NOT working as intended.
+
+// Use statements should be excluded (even with 3+ segments)
+use self::module::submodule::function;
+use crate::generator::http::Server;
+use foo::{bar::baz, bard::baz::bing, bing::foo};
+use lading_payload::dogstatsd::metric::Counter;
+use std::collections::{BTreeMap, HashMap};
+use tokio::sync::broadcast::Sender;
 
 // Two segments are fine
 fn example_two_segments() {
-    let file = fs::File::open("path");
-    let result = http::Response::new();
-    let data = json::Value::from(42);
+    let config = Config::new();
+    let server = Server::start();
+    let file = File::open("path");
+    let result = Response::ok();
 }
 
-// Use statements should be excluded (even with 3+ segments)
-use std::collections::HashMap;
-use tokio::sync::broadcast::Sender;
-use crate::generator::http::Server;
-use lading_payload::dogstatsd::metric::Counter;
-
-// std:: paths should be excluded
-fn example_std_paths() {
-    let path = std::env::current_dir().unwrap();
-    let file = std::fs::File::create("test.txt").unwrap();
-    let thread = std::thread::Builder::new().spawn(|| {});
+// Comments and strings should not trigger
+fn strings_and_comments() {
+    // This comment mentions some::long::path::here but shouldn't trigger
+    let string = "some::long::path::in::string";
+    let raw_string = r#"another::long::path::here"#;
 }
 
-// tokio:: paths should be excluded
-fn example_tokio_paths() {
-    let rt = tokio::runtime::Builder::new_multi_thread().build();
-    let file = tokio::fs::File::create("test.txt").await;
-    let sender = tokio::sync::broadcast::channel(10);
+// Simple macros
+fn macro_cases() {
+    println!("valid");
+    format!("string with {}", some_variable);
 }

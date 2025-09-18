@@ -7,4 +7,5 @@ rule:
     - pattern: $A::$B::$$$REST
     - not:
         inside:
-          pattern: use $_
+          stopBy: end
+          pattern: use $$$_;
