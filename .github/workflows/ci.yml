@@ -227,3 +227,32 @@ jobs:
         with:
           tool: cargo-machete@0.9.1
       - run: cargo machete
+
+  custom-lints:
+    name: Custom Lints (ast-grep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ac90e63697ac2784f4ecfe2964e1a285c304003a # v1.14.1
+      - name: Cache ast-grep
+        id: cache-ast-grep
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: ~/.cargo/bin/sg
+          key: ast-grep-35868dbb7df5c9af3cab83402d12b440a2c44aab
+      - name: Checkout ast-grep source
+        if: steps.cache-ast-grep.outputs.cache-hit != 'true'
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ast-grep/ast-grep
+          ref: 190a5ca0506450ccd24bc9e4a6275bd93b3dbb38
+          path: ast-grep-src
+      - name: Build ast-grep from source
+        if: steps.cache-ast-grep.outputs.cache-hit != 'true'
+        run: |
+          cd ast-grep-src
+          cargo install --path ./crates/cli --locked
+      - name: Test custom lints
+        run: ci/test_custom_lints
+      - name: Run custom lints
+        run: ci/custom_lints
