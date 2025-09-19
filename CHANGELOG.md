@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `u64`.
 - Containers generator internals reworked to match the kubernetes generator's
   approach: explicit state machine driven by a `lading_throttle`.
+- Replaced capture manager storage implementation with a store that is cleared
+  out on each write iteration.
 ## Added
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
