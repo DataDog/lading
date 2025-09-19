@@ -334,7 +334,6 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
-            expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
         };
     } else {
         match config.telemetry {
@@ -407,14 +406,12 @@ async fn inner_main(
         Telemetry::Log {
             path,
             global_labels,
-            expiration,
         } => {
             let mut capture_manager = CaptureManager::new(
                 path,
                 shutdown_watcher.register()?,
                 experiment_started_watcher.clone(),
                 target_running_watcher.clone(),
-                expiration,
             )
             .await?;
             for (k, v) in global_labels {
