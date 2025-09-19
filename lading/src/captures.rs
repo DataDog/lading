@@ -11,17 +11,18 @@ use std::{
     ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use lading_capture::json;
 use metrics::Key;
-use metrics_util::{
-    MetricKindMask,
-    registry::{AtomicStorage, GenerationalAtomicStorage, GenerationalStorage, Recency, Registry},
-};
+use metrics_util::registry::{AtomicStorage, Storage};
 use rustc_hash::FxHashMap;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -50,9 +51,21 @@ pub enum Error {
     CapturePath,
 }
 
+enum MetricValue {
+    Gauge(Arc<AtomicU64>),
+    Counter(Arc<AtomicU64>),
+}
+
+impl MetricValue {
+    fn inner(&self) -> Arc<AtomicU64> {
+        match &self {
+            MetricValue::Gauge(inner) | MetricValue::Counter(inner) => inner.clone(),
+        }
+    }
+}
+
 struct Inner {
-    registry: Registry<Key, GenerationalAtomicStorage>,
-    recency: Recency<Key>,
+    registry: FxHashMap<Key, MetricValue>,
 }
 
 #[allow(missing_debug_implementations)]
@@ -69,7 +82,7 @@ pub struct CaptureManager {
     shutdown: lading_signal::Watcher,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
-    inner: Arc<Inner>,
+    inner: Arc<Mutex<Inner>>,
     global_labels: FxHashMap<String, String>,
 }
 
@@ -84,18 +97,12 @@ impl CaptureManager {
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
-        expiration: Duration,
     ) -> Result<Self, io::Error> {
         let fp = tokio::fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
 
         let inner = Inner {
-            registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
-            recency: Recency::new(
-                quanta::Clock::new(),
-                MetricKindMask::GAUGE | MetricKindMask::COUNTER,
-                Some(expiration),
-            ),
+            registry: FxHashMap::default(),
         };
 
         Ok(Self {
@@ -106,7 +113,7 @@ impl CaptureManager {
             shutdown,
             _experiment_started: experiment_started,
             target_running,
-            inner: Arc::new(inner),
+            inner: Arc::new(Mutex::new(inner)),
             global_labels: FxHashMap::default(),
         })
     }
@@ -118,7 +125,7 @@ impl CaptureManager {
     /// Returns an error if there is already a global recorder set.
     pub fn install(&self) -> Result<(), Error> {
         let recorder = CaptureRecorder {
-            inner: Arc::clone(&self.inner),
+            inner: self.inner.clone(),
         };
         metrics::set_global_recorder(recorder).map_err(|_| Error::SetRecorderError)?;
         Ok(())
@@ -137,60 +144,44 @@ impl CaptureManager {
         let now_ms: u128 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
         let mut lines = Vec::new();
 
-        let counter_handles = self.inner.registry.get_counter_handles();
-        for (key, counter) in counter_handles {
-            let g = counter.get_generation();
-            if !self
-                .inner
-                .recency
-                .should_store_counter(&key, g, &self.inner.registry)
-            {
-                continue;
-            }
+        let mut state = self.inner.blocking_lock();
+        #[allow(clippy::mutable_key_type)] // This is safe. See safety note on [`metrics::Key`].
+        let mut map = FxHashMap::default();
+        std::mem::swap(&mut state.registry, &mut map);
+        drop(state);
 
+        for (key, val) in map {
             let mut labels = self.global_labels.clone();
             for lbl in key.labels() {
                 // TODO we're allocating the same small strings over and over most likely
                 labels.insert(lbl.key().into(), lbl.value().into());
             }
-            let value: u64 = counter.get_inner().load(Ordering::Relaxed);
-            let line = json::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: self.fetch_index,
-                metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Counter,
-                value: json::LineValue::Int(value),
-                labels,
-            };
-            lines.push(line);
-        }
 
-        let gauge_handles = self.inner.registry.get_gauge_handles();
-        for (key, gauge) in gauge_handles {
-            let g = gauge.get_generation();
-            if !self
-                .inner
-                .recency
-                .should_store_gauge(&key, g, &self.inner.registry)
-            {
-                continue;
-            }
-
-            let mut labels = self.global_labels.clone();
-            for lbl in key.labels() {
-                // TODO we're allocating the same small strings over and over most likely
-                labels.insert(lbl.key().into(), lbl.value().into());
-            }
-            let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
-            let line = json::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: self.fetch_index,
-                metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Gauge,
-                value: json::LineValue::Float(value),
-                labels,
+            let line = match val {
+                MetricValue::Gauge(gauge) => {
+                    let value: f64 = f64::from_bits(gauge.load(Ordering::Relaxed));
+                    json::Line {
+                        run_id: self.run_id,
+                        time: now_ms,
+                        fetch_index: self.fetch_index,
+                        metric_name: key.name().into(),
+                        metric_kind: json::MetricKind::Gauge,
+                        value: json::LineValue::Float(value),
+                        labels,
+                    }
+                }
+                MetricValue::Counter(counter) => {
+                    let value: u64 = counter.load(Ordering::Relaxed);
+                    json::Line {
+                        run_id: self.run_id,
+                        time: now_ms,
+                        fetch_index: self.fetch_index,
+                        metric_name: key.name().into(),
+                        metric_kind: json::MetricKind::Counter,
+                        value: json::LineValue::Int(value),
+                        labels,
+                    }
+                }
             };
             lines.push(line);
         }
@@ -277,7 +268,7 @@ impl CaptureManager {
 }
 
 struct CaptureRecorder {
-    inner: Arc<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl metrics::Recorder for CaptureRecorder {
@@ -310,14 +301,30 @@ impl metrics::Recorder for CaptureRecorder {
 
     fn register_counter(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Counter {
         self.inner
+            .blocking_lock()
             .registry
-            .get_or_create_counter(key, |c| c.clone().into())
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let storage = AtomicStorage;
+                let counter = storage.counter(key);
+                MetricValue::Counter(counter)
+            })
+            .inner()
+            .into()
     }
 
     fn register_gauge(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
         self.inner
+            .blocking_lock()
             .registry
-            .get_or_create_gauge(key, |c| c.clone().into())
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let storage = AtomicStorage;
+                let counter = storage.counter(key);
+                MetricValue::Gauge(counter)
+            })
+            .inner()
+            .into()
     }
 
     fn register_histogram(
