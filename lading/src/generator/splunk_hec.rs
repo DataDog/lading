@@ -16,6 +16,7 @@
 
 mod acknowledgements;
 
+use lading_payload::splunk_hec;
 use std::{future::ready, num::NonZeroU32, sync::Arc, time::Duration};
 
 use acknowledgements::Channels;
@@ -74,7 +75,7 @@ pub struct Config {
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
     /// Format used when submitting event data to Splunk HEC
-    pub format: lading_payload::splunk_hec::Encoding,
+    pub format: splunk_hec::Encoding,
     /// Splunk HEC authentication token
     pub token: String,
     /// Splunk HEC indexer acknowledgements behavior options
@@ -149,13 +150,10 @@ pub struct SplunkHec {
 
 /// Derive the intended path from the format configuration
 // https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_uri_by_format(
-    base_uri: &Uri,
-    format: lading_payload::splunk_hec::Encoding,
-) -> Result<Uri, Error> {
+fn get_uri_by_format(base_uri: &Uri, format: splunk_hec::Encoding) -> Result<Uri, Error> {
     let path = match format {
-        lading_payload::splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
-        lading_payload::splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
+        splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
+        splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
     };
 
     let uri = Uri::builder()

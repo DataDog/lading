@@ -1,0 +1,13 @@
+id: no-as-imports
+language: Rust
+rule:
+  all:
+    - kind: use_declaration
+    - regex: '\bas\b'
+
+message: "Found an 'as' import"
+severity: error
+note: |
+  In lading project we prefer that imports retain the names from their
+  origin. Else, it become difficult to track changing context as one reads the
+  source code.

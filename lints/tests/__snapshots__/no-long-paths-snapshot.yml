@@ -1,0 +1,67 @@
+id: no-long-paths
+snapshots:
+  ? |-
+    impl SomeStruct {
+        fn method(&self) {
+            some::long::path::here().field; // should trigger
+        }
+    }
+  : labels:
+    - source: some::long::path::here
+      style: primary
+      start: 49
+      end: 71
+  let another = project::module::submodule::function::call::chain();:
+    labels:
+    - source: project::module::submodule::function::call::chain
+      style: primary
+      start: 14
+      end: 63
+  let config = target::Config::Pid;:
+    labels:
+    - source: target::Config::Pid
+      style: primary
+      start: 13
+      end: 32
+  let metrics = json::MetricKind::Counter;:
+    labels:
+    - source: json::MetricKind::Counter
+      style: primary
+      start: 14
+      end: 39
+  let metrics = json::MetricKind::private::Counter;:
+    labels:
+    - source: json::MetricKind::private::Counter
+      style: primary
+      start: 14
+      end: 48
+  let parsed = some::parser::inner::parse<String>();:
+    labels:
+    - source: some::parser::inner::parse
+      style: primary
+      start: 13
+      end: 39
+  let parsed = some::parser::module::<String>::parse();:
+    labels:
+    - source: some::parser::module
+      style: primary
+      start: 13
+      end: 33
+  let server = generator::Server::new();:
+    labels:
+    - source: generator::Server::new
+      style: primary
+      start: 13
+      end: 35
+  let value = outer::function(inner::long::path::call());:
+    labels:
+    - source: inner::long::path::call
+      style: primary
+      start: 28
+      end: 51
+  let very_long = foo::bar::baz::qux::deeply::nested::call();:
+    labels:
+    - source: foo::bar::baz::qux::deeply::nested::call
+      style: primary
+      start: 16
+      end: 56

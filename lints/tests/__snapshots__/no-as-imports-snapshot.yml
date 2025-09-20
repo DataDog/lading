@@ -1,0 +1,60 @@
+id: no-as-imports
+snapshots:
+  use foo as Foo;:
+    labels:
+    - source: use foo as Foo;
+      style: primary
+      start: 0
+      end: 15
+  use foo::bar as FooBar;:
+    labels:
+    - source: use foo::bar as FooBar;
+      style: primary
+      start: 0
+      end: 23
+  ? |-
+    use foo::{
+      bar::bing::baz::bang,
+      one::two::three as TwoThree,
+      four::five::six::seven::eight,
+    };
+  : labels:
+    - source: |-
+        use foo::{
+          bar::bing::baz::bang,
+          one::two::three as TwoThree,
+          four::five::six::seven::eight,
+        };
+      style: primary
+      start: 0
+      end: 101
+  use foo::{ bar as FooBar };:
+    labels:
+    - source: use foo::{ bar as FooBar };
+      style: primary
+      start: 0
+      end: 27
+  use foo::{ bar, bar::baz as BarBaz };:
+    labels:
+    - source: use foo::{ bar, bar::baz as BarBaz };
+      style: primary
+      start: 0
+      end: 37
+  use foo::{ bar::baz as BarBaz, bar };:
+    labels:
+    - source: use foo::{ bar::baz as BarBaz, bar };
+      style: primary
+      start: 0
+      end: 37
+  use foo::{ bar::baz as FooBaz };:
+    labels:
+    - source: use foo::{ bar::baz as FooBaz };
+      style: primary
+      start: 0
+      end: 32
+  use tokio::sync::broadcast::Sender as BroadcastSender;:
+    labels:
+    - source: use tokio::sync::broadcast::Sender as BroadcastSender;
+      style: primary
+      start: 0
+      end: 54

@@ -6,15 +6,20 @@ use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
+use std::path;
 
 use async_compression::tokio::bufread::ZstdDecoder;
 use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
 use lading_capture::json::{Line, MetricKind};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, BufReader},
+};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::LinesStream;
+use tokio_util::either;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -63,7 +68,7 @@ async fn main() -> Result<(), Error> {
     info!("Welcome to captool");
     let args = Args::parse();
 
-    let capture_path = std::path::Path::new(&args.capture_path);
+    let capture_path = path::Path::new(&args.capture_path);
     if !capture_path.exists() {
         error!("Capture file {} does not exist", &args.capture_path);
         return Err(Error::InvalidArgs);
@@ -73,16 +78,16 @@ async fn main() -> Result<(), Error> {
         .extension()
         .is_some_and(|ext| ext == OsStr::new("zstd"));
 
-    let file = tokio::fs::File::open(capture_path).await?;
+    let file = fs::File::open(capture_path).await?;
 
     let lines = if is_zstd {
         let reader = BufReader::new(file);
         let decoder = ZstdDecoder::new(reader);
         let reader = BufReader::new(decoder);
-        tokio_util::either::Either::Right(LinesStream::new(reader.lines()))
+        either::Either::Right(LinesStream::new(reader.lines()))
     } else {
         let reader = BufReader::new(file);
-        tokio_util::either::Either::Left(LinesStream::new(reader.lines()))
+        either::Either::Left(LinesStream::new(reader.lines()))
     };
 
     let lines = lines.map(|l| {

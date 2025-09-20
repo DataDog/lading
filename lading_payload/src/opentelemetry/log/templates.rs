@@ -12,11 +12,10 @@ use rand::{
 };
 
 use super::Config;
-use crate::opentelemetry::common::templates::Pool as GenericPool;
-use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO};
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO, templates};
 use crate::{Error, common::config::ConfRange, common::strings};
 
-pub(crate) type Pool = GenericPool<ResourceLogs, ResourceTemplateGenerator>;
+pub(crate) type Pool = templates::Pool<ResourceLogs, ResourceTemplateGenerator>;
 
 /// Shared pool of trace IDs
 #[derive(Debug, Clone)]

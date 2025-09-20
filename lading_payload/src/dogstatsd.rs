@@ -3,7 +3,7 @@
 use std::{fmt, io::Write, rc::Rc};
 
 use rand::{Rng, distr::weighted::WeightedIndex, prelude::Distribution};
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::{
@@ -34,7 +34,7 @@ const LENGTH_PREFIX_SIZE: usize = std::mem::size_of::<u32>();
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -67,7 +67,7 @@ impl Default for KindWeights {
 }
 
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -109,7 +109,7 @@ impl Default for MetricWeights {
 }
 
 /// Configuration for the values of a metric.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ValueConf {
@@ -146,7 +146,7 @@ impl Default for ValueConf {
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {

@@ -4,7 +4,9 @@ use opentelemetry_proto::tonic::{
     common::v1::InstrumentationScope,
     metrics::{
         self,
-        v1::{Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data},
+        v1::{
+            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data, number_data_point,
+        },
     },
     resource,
 };
@@ -16,11 +18,10 @@ use rand::{
 use tracing::debug;
 
 use super::{Config, UnitGenerator};
-use crate::opentelemetry::common::templates::Pool as GenericPool;
-use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO};
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO, templates};
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
-pub(crate) type Pool = GenericPool<ResourceMetrics, ResourceTemplateGenerator>;
+pub(crate) type Pool = templates::Pool<ResourceMetrics, ResourceTemplateGenerator>;
 
 /// Generate a random number between min and max (inclusive) with heavy bias
 /// toward min. Uses exponential decay: each doubling of the range has half the
@@ -57,8 +58,8 @@ impl Distribution<Ndp> for StandardUniform {
         R: Rng + ?Sized,
     {
         let value = match rng.random_range(0..=1) {
-            0 => metrics::v1::number_data_point::Value::AsDouble(0.0),
-            1 => metrics::v1::number_data_point::Value::AsInt(0),
+            0 => number_data_point::Value::AsDouble(0.0),
+            1 => number_data_point::Value::AsInt(0),
             _ => unreachable!(),
         };
 

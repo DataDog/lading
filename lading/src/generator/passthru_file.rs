@@ -11,7 +11,7 @@
 //!
 
 use std::{num::NonZeroU32, path::PathBuf, time::Duration};
-use tokio::io::AsyncWriteExt;
+use tokio::{fs, io::AsyncWriteExt};
 
 use byte_unit::Byte;
 use lading_throttle::Throttle;
@@ -160,7 +160,7 @@ impl PassthruFile {
         let mut current_file = None;
         loop {
             let Some(ref mut current_file) = current_file else {
-                match tokio::fs::OpenOptions::new()
+                match fs::OpenOptions::new()
                     .create(true)
                     .write(true)
                     .truncate(true)

@@ -21,7 +21,7 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
@@ -155,8 +155,8 @@ impl Server {
             total_bytes.get() as usize,
         )?;
 
-        let start_time = std::time::Instant::now();
-        let start_time_system = std::time::SystemTime::now();
+        let start_time = Instant::now();
+        let start_time_system = SystemTime::now();
 
         let state = model::State::new(
             &mut rng,
@@ -220,8 +220,8 @@ struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
     open_files: Arc<Mutex<HashMap<u64, model::FileHandle>>>,
 
-    start_time: std::time::Instant,
-    start_time_system: std::time::SystemTime,
+    start_time: Instant,
+    start_time_system: SystemTime,
 }
 
 impl LogrotateFS {
@@ -235,7 +235,7 @@ impl LogrotateFS {
 #[allow(clippy::similar_names)] // ctime and crtime are standard Unix file time names
 fn getattr_helper(
     state: &mut MutexGuard<model::State>,
-    start_time_system: std::time::SystemTime,
+    start_time_system: SystemTime,
     tick: model::Tick,
     inode: usize,
 ) -> Option<FileAttr> {

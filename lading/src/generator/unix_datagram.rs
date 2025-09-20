@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::{
     net,
-    sync::broadcast::Receiver,
+    sync::broadcast::{self, Receiver},
     task::{JoinError, JoinHandle},
+    time::Duration,
 };
 use tracing::{debug, error, info};
 
@@ -87,10 +88,10 @@ pub enum Error {
     Child(JoinError),
     /// Startup send error.
     #[error("Startup send error: {0}")]
-    StartupSend(#[from] tokio::sync::broadcast::error::SendError<()>),
+    StartupSend(#[from] broadcast::error::SendError<()>),
     /// Child startup wait error.
     #[error("Child startup wait error: {0}")]
-    StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
+    StartupWait(#[from] broadcast::error::RecvError),
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
@@ -160,7 +161,7 @@ impl UnixDatagram {
         };
         let block_cache = Arc::new(block_cache);
 
-        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+        let (startup, _startup_rx) = broadcast::channel(1);
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
@@ -238,7 +239,7 @@ impl Child {
                     let mut error_labels = self.metric_labels.clone();
                     error_labels.push(("error".to_string(), err.to_string()));
                     counter!("connection_failure", &error_labels).increment(1);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }

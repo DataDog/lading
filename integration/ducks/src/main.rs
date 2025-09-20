@@ -35,11 +35,12 @@ use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Dura
 use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener},
+    net::{self, TcpListener, TcpStream, UdpSocket, UnixListener},
     sync::{Mutex, mpsc},
 };
 use tokio_stream::{Stream, wrappers::UnixListenerStream};
 use tonic::Status;
+use tonic::transport;
 use tracing::error;
 use tracing::{debug, trace, warn};
 
@@ -203,7 +204,7 @@ impl IntegrationTarget for DucksTarget {
             shared::ListenConfig::Http => {
                 // bind to a random open TCP port
                 let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-                let listener = tokio::net::TcpListener::bind(addr).await?;
+                let listener = net::TcpListener::bind(addr).await?;
                 let port = listener.local_addr()?.port() as u32;
                 tokio::spawn(Self::http_listen(config, listener));
 
@@ -383,7 +384,7 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown_tx: shutdown_tx.clone(),
     };
 
-    let rpc_server = tonic::transport::Server::builder()
+    let rpc_server = transport::Server::builder()
         .add_service(IntegrationTargetServer::new(server))
         .serve_with_incoming_shutdown(ducks_comm, async move {
             internal_shutdown_rx.recv().await;

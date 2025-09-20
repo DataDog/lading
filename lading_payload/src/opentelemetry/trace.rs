@@ -7,6 +7,7 @@
 //! currently implemented.
 
 use crate::{Error, common::strings};
+use opentelemetry_proto::tonic::collector::trace;
 use opentelemetry_proto::tonic::trace::v1;
 use prost::Message;
 use rand::{Rng, distr::StandardUniform, prelude::Distribution};
@@ -18,10 +19,8 @@ use crate::Generator;
 struct ExportTraceServiceRequest(Vec<Span>);
 
 impl ExportTraceServiceRequest {
-    fn into_prost_type(
-        self,
-    ) -> opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest {
-        opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest {
+    fn into_prost_type(self) -> trace::v1::ExportTraceServiceRequest {
+        trace::v1::ExportTraceServiceRequest {
             resource_spans: [v1::ResourceSpans {
                 resource: None,
                 scope_spans: [v1::ScopeSpans {
@@ -141,6 +140,7 @@ impl crate::Serialize for OpentelemetryTraces {
 mod test {
     use super::OpentelemetryTraces;
     use crate::Serialize;
+    use opentelemetry_proto::tonic::collector::trace;
     use proptest::prelude::*;
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
@@ -187,7 +187,7 @@ mod test {
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             traces.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+            trace::v1::ExportTraceServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 }

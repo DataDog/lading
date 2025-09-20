@@ -14,7 +14,7 @@ use opentelemetry_proto::tonic::collector::metrics::v1::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use opentelemetry_proto::tonic::metrics::v1::metric::Data as MetricData;
+use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use prost::Message;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -293,11 +293,11 @@ impl OtlpHttpHandler {
                     for m in &sm.metrics {
                         if let Some(data) = &m.data {
                             let points_count = match data {
-                                MetricData::Gauge(g) => g.data_points.len(),
-                                MetricData::Sum(s) => s.data_points.len(),
-                                MetricData::Histogram(h) => h.data_points.len(),
-                                MetricData::ExponentialHistogram(eh) => eh.data_points.len(),
-                                MetricData::Summary(s) => s.data_points.len(),
+                                Data::Gauge(g) => g.data_points.len(),
+                                Data::Sum(s) => s.data_points.len(),
+                                Data::Histogram(h) => h.data_points.len(),
+                                Data::ExponentialHistogram(eh) => eh.data_points.len(),
+                                Data::Summary(s) => s.data_points.len(),
                             };
                             total_points += points_count as u64;
                         }

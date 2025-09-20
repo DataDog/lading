@@ -1,11 +1,11 @@
 //! Common configuration for all lading payloads
 
 use rand::distr::uniform::SampleUniform;
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use std::{cmp, fmt};
 
 /// Range expression for configuration
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

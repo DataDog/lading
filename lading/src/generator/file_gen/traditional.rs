@@ -37,7 +37,9 @@ use tracing::{error, info};
 use lading_payload::{self, block};
 
 use super::General;
-use crate::generator::common::{BytesThrottleConfig, MetricsBuilder, create_throttle};
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileGen`].
@@ -62,7 +64,7 @@ pub enum Error {
     Throttle(#[from] lading_throttle::Error),
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 fn default_rotation() -> bool {

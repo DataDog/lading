@@ -24,6 +24,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     task::{JoinError, JoinSet},
+    time::Duration,
 };
 use tracing::{error, info, trace};
 
@@ -220,7 +221,7 @@ impl TcpWorker {
                         let mut error_labels = self.metric_labels.clone();
                         error_labels.push(("error".to_string(), err.to_string()));
                         counter!("connection_failure", &error_labels).increment(1);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 }
                 continue;

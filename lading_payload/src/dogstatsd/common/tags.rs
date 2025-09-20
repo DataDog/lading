@@ -1,12 +1,15 @@
 //! Tag generation for dogstatsd payloads
-use crate::{common::strings::Pool, dogstatsd::ConfRange};
+use crate::{
+    common::{strings::Pool, tags},
+    dogstatsd::ConfRange,
+};
 use std::rc::Rc;
 
 pub(crate) type Tagset = Vec<String>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Generator {
-    inner: crate::common::tags::Generator,
+    inner: tags::Generator,
 }
 
 /// Error type for `TagGenerator`
@@ -38,7 +41,7 @@ impl Generator {
             max: tag_length.end().saturating_sub(1),
         };
 
-        let inner = crate::common::tags::Generator::new(
+        let inner = tags::Generator::new(
             seed,
             tags_per_msg,
             adjusted_tag_length,
@@ -66,7 +69,7 @@ impl<'a> crate::Generator<'a> for Generator {
     {
         let mut tag_handles = self.inner.generate(rng)?;
         let mut tagset = Vec::with_capacity(tag_handles.len());
-        for crate::common::tags::Tag { key, value } in tag_handles.drain(..) {
+        for tags::Tag { key, value } in tag_handles.drain(..) {
             let key_s = self
                 .inner
                 .using_handle(key)

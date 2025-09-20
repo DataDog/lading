@@ -1,0 +1,29 @@
+id: no-as-imports
+valid:
+  - use foobar;
+  - >-
+    use foo::{
+      bar::bing::baz::bang,
+      one::two::three,
+      four::five::six::seven::eight,
+    };
+  - use self::module::submodule::function;
+  - use crate::generator::http::Server;
+  - use foo::{bar::baz, bard::baz::bing, bing::foo};
+  - use lading_payload::dogstatsd::metric::Counter;
+  - use std::collections::{BTreeMap, HashMap};
+  - use tokio::sync::broadcast::Sender;
+invalid:
+  - use foo as Foo;
+  - use foo::bar as FooBar;
+  - use foo::{ bar as FooBar };
+  - use foo::{ bar::baz as FooBaz };
+  - use foo::{ bar, bar::baz as BarBaz };
+  - use foo::{ bar::baz as BarBaz, bar };
+  - use tokio::sync::broadcast::Sender as BroadcastSender;
+  - >-
+    use foo::{
+      bar::bing::baz::bang,
+      one::two::three as TwoThree,
+      four::five::six::seven::eight,
+    };
