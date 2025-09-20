@@ -18,7 +18,7 @@ use prost::Message;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tonic::Status;
+use tonic::{Status, transport};
 use tracing::{error, info};
 
 pub(crate) fn run_server(
@@ -55,7 +55,7 @@ pub(crate) fn run_server(
     };
 
     info!("Starting OTLP gRPC service (all signal types) on {addr}");
-    let router = tonic::transport::Server::builder()
+    let router = transport::Server::builder()
         .concurrency_limit_per_connection(concurrency_limit)
         .add_service(MetricsServiceServer::new(metrics_service))
         .add_service(TraceServiceServer::new(traces_service))

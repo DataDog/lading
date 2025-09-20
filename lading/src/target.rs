@@ -33,7 +33,7 @@ use nix::{
     unistd::Pid,
 };
 use rustc_hash::FxHashMap;
-use tokio::{process::Command, time};
+use tokio::{process::Command, sync::broadcast, time};
 use tracing::{error, info};
 
 use crate::common::stdio;
@@ -41,7 +41,7 @@ pub use crate::common::{Behavior, Output};
 
 /// Type used to receive the target PID once it is running.
 #[allow(clippy::module_name_repetitions)]
-pub type TargetPidReceiver = tokio::sync::broadcast::Receiver<Option<i32>>;
+pub type TargetPidReceiver = broadcast::Receiver<Option<i32>>;
 
 #[allow(clippy::module_name_repetitions)]
 type TargetPidSender = tokio::sync::broadcast::Sender<Option<i32>>;
@@ -69,7 +69,7 @@ pub enum Error {
     TargetExited(Option<ExitStatus>),
     /// See [`SendError`]
     #[error(transparent)]
-    Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
+    Send(#[from] broadcast::error::SendError<Option<i32>>),
     /// Process already finished error
     #[error("Child has already been polled to completion")]
     ProcessFinished,

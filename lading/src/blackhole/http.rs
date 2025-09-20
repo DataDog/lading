@@ -16,6 +16,7 @@ use std::{net::SocketAddr, time::Duration};
 use tracing::error;
 
 use super::General;
+use crate::blackhole::common;
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -234,7 +235,7 @@ impl Http {
     /// Function will return an error if the configuration is invalid or if
     /// receiving a packet fails.
     pub async fn run(self) -> Result<(), Error> {
-        crate::blackhole::common::run_httpd(
+        common::run_httpd(
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,

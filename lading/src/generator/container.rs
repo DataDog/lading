@@ -13,8 +13,8 @@ use bollard::secret::ContainerCreateResponse;
 use lading_throttle::Throttle;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::{collections::HashMap, process};
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
@@ -491,7 +491,7 @@ impl Drop for Container {
 
         // Clean up containers using synchronous docker command
         for container in self.containers.values() {
-            match std::process::Command::new("docker")
+            match process::Command::new("docker")
                 .arg("rm")
                 .arg("--force")
                 .arg("--volumes")

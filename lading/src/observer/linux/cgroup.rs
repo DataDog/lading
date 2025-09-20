@@ -3,6 +3,8 @@ pub(crate) mod v2;
 
 use std::{collections::VecDeque, io, path::PathBuf};
 
+use v2::cpu;
+
 use nix::errno::Errno;
 use procfs::process::Process;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -28,7 +30,7 @@ pub enum Error {
 
 #[derive(Debug)]
 struct CgroupInfo {
-    cpu_sampler: v2::cpu::Sampler,
+    cpu_sampler: cpu::Sampler,
 }
 
 #[derive(Debug)]
@@ -124,7 +126,7 @@ impl Sampler {
                     .cgroup_info
                     .entry(cgroup_path.clone())
                     .or_insert_with(|| CgroupInfo {
-                        cpu_sampler: v2::cpu::Sampler::new(),
+                        cpu_sampler: cpu::Sampler::new(),
                     });
 
                 if let Err(err) = v2::poll(&cgroup_path, &self.labels).await {

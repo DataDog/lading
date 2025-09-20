@@ -1,8 +1,8 @@
 //! Static file/directory payload.
 
 use std::{
-    fs,
-    io::{BufRead, Write},
+    fs::{self, OpenOptions},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
 
@@ -53,7 +53,7 @@ impl Static {
                 let entry = entry?;
                 let entry_pth = entry.path();
                 debug!("Attempting to open {} as file.", entry_pth.display());
-                if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&entry_pth) {
+                if let Ok(file) = OpenOptions::new().read(true).open(&entry_pth) {
                     let byte_size = file.metadata()?.len();
                     sources.push(Source {
                         byte_size,
@@ -89,9 +89,9 @@ impl crate::Serialize for Static {
             .filter(|src| src.byte_size < max_bytes as u64);
         if let Some(source) = subset.choose(&mut rng) {
             debug!("Opening {} static file.", &source.path.display());
-            let file = std::fs::OpenOptions::new().read(true).open(&source.path)?;
+            let file = OpenOptions::new().read(true).open(&source.path)?;
 
-            let mut reader = std::io::BufReader::new(file);
+            let mut reader = BufReader::new(file);
             let buffer = reader.fill_buf()?;
             let buffer_length = buffer.len();
             writer.write_all(buffer)?;

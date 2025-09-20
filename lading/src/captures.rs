@@ -12,8 +12,11 @@ use std::{
     io::{self, BufWriter, Write},
     path::PathBuf,
     sync::{Arc, atomic::Ordering},
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+use tokio::fs;
 
 use lading_capture::json;
 use metrics::Key;
@@ -86,7 +89,7 @@ impl CaptureManager {
         target_running: lading_signal::Watcher,
         expiration: Duration,
     ) -> Result<Self, io::Error> {
-        let fp = tokio::fs::File::create(&capture_path).await?;
+        let fp = fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
 
         let inner = Inner {
@@ -239,7 +242,7 @@ impl CaptureManager {
         self.install()?;
         info!("Capture manager installed, recording to capture file.");
 
-        std::thread::Builder::new()
+        thread::Builder::new()
             .name("capture-manager".into())
             .spawn(move || {
                 while let Ok(false) = self.target_running.try_recv() {

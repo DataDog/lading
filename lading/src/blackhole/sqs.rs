@@ -16,6 +16,7 @@ use std::{fmt::Write, net::SocketAddr};
 use tracing::{debug, error};
 
 use super::General;
+use crate::blackhole::common;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Sqs`]
@@ -97,7 +98,7 @@ impl Sqs {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        crate::blackhole::common::run_httpd(
+        common::run_httpd(
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,

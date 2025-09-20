@@ -45,6 +45,8 @@ mod tests {
     use std::io::BufReader;
     use std::process::{Command, Stdio};
 
+    use nix::{sys::signal, unistd};
+
     /// Test the ProcessDescendentsIterator by creating a process tree.
     /// Each process will print its PID to stdout.
     /// The test will read the PIDs from stdout and check that the iterator returns all of them.
@@ -87,9 +89,9 @@ mod tests {
             "ProcessDescendentsIterator didn’t return all PIDs: {children_pids:?}"
         );
 
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(child.id() as i32),
-            nix::sys::signal::Signal::SIGTERM,
+        signal::kill(
+            unistd::Pid::from_raw(child.id() as i32),
+            signal::Signal::SIGTERM,
         )
         .expect("Failed to kill process tree");
 

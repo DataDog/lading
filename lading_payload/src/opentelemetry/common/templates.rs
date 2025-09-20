@@ -186,7 +186,8 @@ mod tests {
 
     #[test]
     fn pool_should_return_existing_template_when_generation_fails() {
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+        use rand::{SeedableRng, rngs::SmallRng};
+        let mut rng = SmallRng::seed_from_u64(42);
 
         // Generator that will create:
         // 1. First call: 100-byte item (succeeds)
@@ -223,7 +224,8 @@ mod tests {
 
     #[test]
     fn pool_with_no_templates_should_fail_when_generation_fails() {
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+        use rand::{SeedableRng, rngs::SmallRng};
+        let mut rng = SmallRng::seed_from_u64(42);
 
         // Generator that can only create 500-byte items
         let generator = TestGenerator::new(vec![500]);

@@ -6,6 +6,8 @@ mod vmstat;
 
 use std::io;
 
+use memory::{smaps, smaps_rollup};
+
 use metrics::{counter, gauge};
 use nix::errno::Errno;
 use procfs::process::Process;
@@ -105,7 +107,7 @@ impl Sampler {
     pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
-        let mut aggr = memory::smaps_rollup::Aggregator::default();
+        let mut aggr = smaps_rollup::Aggregator::default();
         let mut processes_found: u32 = 0;
         let mut processes_skipped: u32 = 0;
 
@@ -183,7 +185,7 @@ impl Sampler {
     async fn handle_process(
         &mut self,
         process: Process,
-        aggr: &mut memory::smaps_rollup::Aggregator,
+        aggr: &mut smaps_rollup::Aggregator,
         include_smaps: bool,
     ) -> Result<bool, Error> {
         let pid = process.pid();
@@ -240,7 +242,7 @@ impl Sampler {
 
         if include_smaps {
             // `/proc/{pid}/smaps`
-            match memory::smaps::Regions::from_pid(pid) {
+            match smaps::Regions::from_pid(pid) {
                 Ok(memory_regions) => {
                     for (pathname, measures) in memory_regions.aggregate_by_pathname() {
                         let labels: [(&'static str, String); 5] = [
@@ -309,7 +311,7 @@ impl Sampler {
         }
 
         // `/proc/{pid}/smaps_rollup`
-        if let Err(err) = memory::smaps_rollup::poll(pid, &labels, aggr).await {
+        if let Err(err) = smaps_rollup::poll(pid, &labels, aggr).await {
             // We don't want to bail out entirely if we can't read smap rollup
             // which will happen if we don't have permissions or, more
             // likely, the process has exited.

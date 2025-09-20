@@ -8,4 +8,4 @@ if ! command -v sg &> /dev/null; then
     exit 1
 fi
 
-sg scan
+sg scan --threads 1

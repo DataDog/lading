@@ -25,7 +25,10 @@ use loom::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{
+    Notify,
+    broadcast::{self, error},
+};
 use tracing::info;
 
 /// Construct a `Watcher` and `Broadcaster` pair.
@@ -199,11 +202,11 @@ impl Watcher {
         }
 
         match self.receiver.recv().await {
-            Ok(()) | Err(broadcast::error::RecvError::Closed) => {
+            Ok(()) | Err(error::RecvError::Closed) => {
                 self.decrease_peer_count();
                 self.signal_received = true;
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
+            Err(error::RecvError::Lagged(_)) => {
                 panic!("Catastrophic programming error: lagged behind");
             }
         }
@@ -230,13 +233,13 @@ impl Watcher {
         }
 
         match self.receiver.try_recv() {
-            Ok(()) | Err(broadcast::error::TryRecvError::Closed) => {
+            Ok(()) | Err(error::TryRecvError::Closed) => {
                 self.decrease_peer_count();
                 self.signal_received = true;
                 Ok(true)
             }
-            Err(broadcast::error::TryRecvError::Empty) => Ok(false),
-            Err(broadcast::error::TryRecvError::Lagged(_)) => {
+            Err(error::TryRecvError::Empty) => Ok(false),
+            Err(error::TryRecvError::Lagged(_)) => {
                 panic!("Catastrophic programming error: lagged behind")
             }
         }

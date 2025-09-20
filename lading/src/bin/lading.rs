@@ -3,6 +3,7 @@
 use std::{
     env,
     fmt::{self, Display},
+    fs,
     io::Read,
     num::NonZeroU32,
     path::PathBuf,
@@ -27,6 +28,7 @@ use tokio::{
     runtime::Builder,
     signal,
     sync::broadcast,
+    task,
     time::{self, Duration, sleep},
 };
 use tracing::{Instrument, debug, error, info, info_span, warn};
@@ -49,7 +51,7 @@ enum Error {
     #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
-    Send(#[from] tokio::sync::broadcast::error::SendError<Option<i32>>),
+    Send(#[from] broadcast::error::SendError<Option<i32>>),
     #[error("Parsing Prometheus address failed: {0}")]
     PrometheusAddr(#[from] std::net::AddrParseError),
     #[error("Invalid capture path")]
@@ -253,7 +255,7 @@ fn load_config_contents(config_path: &str) -> Result<String, Error> {
         Ok(env_var_value)
     } else {
         debug!("Attempting to open configuration file at: {}", config_path);
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
             .read(true)
             .open(config_path)
             .map_err(|err| {
@@ -443,7 +445,7 @@ async fn inner_main(
 
     let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
-    let mut gsrv_joinset = tokio::task::JoinSet::new();
+    let mut gsrv_joinset = task::JoinSet::new();
     //
     // GENERATOR
     //
@@ -501,8 +503,8 @@ async fn inner_main(
         }
     }
 
-    let mut tsrv_joinset = tokio::task::JoinSet::new();
-    let mut osrv_joinset = tokio::task::JoinSet::new();
+    let mut tsrv_joinset = task::JoinSet::new();
+    let mut osrv_joinset = task::JoinSet::new();
     //
     // OBSERVER
     //

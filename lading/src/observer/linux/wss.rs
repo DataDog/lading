@@ -1,7 +1,10 @@
 use metrics::gauge;
 use nix::unistd::AccessFlags;
 use procfs::process::{MemoryMap, MemoryPageFlags, PageInfo};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::{
+    fs,
+    io::{Read, Seek, SeekFrom, Write},
+};
 use tracing::debug;
 
 use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
@@ -50,7 +53,7 @@ impl Sampler {
         Ok(Self {
             parent_pid,
             // See https://www.kernel.org/doc/html/latest/admin-guide/mm/idle_page_tracking.html
-            page_idle_bitmap: std::fs::OpenOptions::new()
+            page_idle_bitmap: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(PAGE_IDLE_BITMAP)?,

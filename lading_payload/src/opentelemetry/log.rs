@@ -46,9 +46,7 @@ use crate::{
     opentelemetry::common::templates::PoolError,
 };
 use bytes::BytesMut;
-use opentelemetry_proto::tonic::{
-    collector::logs::v1::ExportLogsServiceRequest, logs::v1::ResourceLogs,
-};
+use opentelemetry_proto::tonic::{collector::logs, logs::v1::ResourceLogs};
 use prost::Message;
 use rand::Rng;
 use serde::Deserialize;
@@ -357,7 +355,7 @@ impl crate::Serialize for OpentelemetryLogs {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
-        let mut request = ExportLogsServiceRequest {
+        let mut request = logs::v1::ExportLogsServiceRequest {
             resource_logs: Vec::with_capacity(8),
         };
 
@@ -440,7 +438,7 @@ mod test {
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+            logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 
@@ -614,8 +612,8 @@ mod test {
     #[test]
     fn smallest_protobuf() {
         use opentelemetry_proto::tonic::{
-            collector::logs::v1::ExportLogsServiceRequest,
             common::v1::{AnyValue, any_value},
+            logs::v1::ExportLogsServiceRequest,
             logs::v1::{LogRecord, ResourceLogs, ScopeLogs, SeverityNumber},
         };
 
@@ -648,7 +646,7 @@ mod test {
         };
 
         // The most minimal request we care to support, just one single log record
-        let minimal_request = ExportLogsServiceRequest {
+        let minimal_request = logs::v1::ExportLogsServiceRequest {
             resource_logs: vec![resource_logs],
         };
 

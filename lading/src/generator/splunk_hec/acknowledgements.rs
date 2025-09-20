@@ -28,7 +28,7 @@ pub enum Error {
     Http(#[from] hyper::http::Error),
     /// receiver dropped unexpectedly
     #[error("receiver dropped unexpectedly: {0}")]
-    Send(#[from] tokio::sync::mpsc::error::SendError<AckId>),
+    Send(#[from] mpsc::error::SendError<AckId>),
     /// Wrapper around [`hyper::Error`].
     #[error("Hyper error: {0}")]
     Hyper(#[from] hyper::Error),

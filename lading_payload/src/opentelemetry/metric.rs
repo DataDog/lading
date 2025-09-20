@@ -49,8 +49,7 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::metric::Data;
-use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
 use prost::Message;
 use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
@@ -333,7 +332,7 @@ impl OpentelemetryMetrics {
 }
 
 impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
-    type Output = v1::ResourceMetrics;
+    type Output = ResourceMetrics;
     type Error = Error;
 
     /// Generate OTLP metrics with the following enhancements:
@@ -351,7 +350,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
-        let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
+        let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
                 debug!("Pool was unable to satify request for {budget} size");
@@ -757,10 +756,8 @@ mod test {
             .to_bytes(&mut rng, max_bytes, &mut bytes)
             .expect("failed to convert to bytes");
 
-        opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
-            bytes.as_slice(),
-        )
-        .expect("failed to decode the message from the buffer");
+        ExportMetricsServiceRequest::decode(bytes.as_slice())
+            .expect("failed to decode the message from the buffer");
     }
 
     // Confirm that configuration bounds are naively obeyed. For instance, this
