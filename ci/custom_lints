@@ -3,23 +3,9 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-test_mode=false
-if [[ $# -gt 0 && "$1" == "--test" ]]; then
-    test_mode=true
-fi
-
 if ! command -v sg &> /dev/null; then
     echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
     exit 1
 fi
 
-if [[ "$test_mode" == "true" ]]; then
-    echo "Running ast-grep custom lints in test mode (only on lints/ test files)..."
-    find lints/ -name "*.rs" -print0 | xargs -0 -r sg scan --config sgconfig.yml
-else
-    echo "Running ast-grep custom lints..."
-    # Exclude the test files in lints/ directory from scanning
-    find . -name "*.rs" -not -path "./lints/*" -not -path "./target/*" -print0 | xargs -0 -r sg scan --config sgconfig.yml
-fi
-
-echo "ast-grep lints passed!"
+sg scan

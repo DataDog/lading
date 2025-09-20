@@ -1,0 +1,16 @@
+id: no-long-paths
+language: rust
+rule:
+  all:
+    - pattern: $A::$B::$C::$$$REST
+    - not:
+        inside:
+          stopBy: end
+          pattern: use $$$_;
+
+message: "Found long path (4+ segments)"
+severity: error
+note: |
+  In lading project we prefer that full paths not be used for types and function
+  calls if three or more segments are in the path. That is, foo::bar is okay but
+  foo::bar::baz is not. Import a prefix to satisfy this lint.

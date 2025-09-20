@@ -537,6 +537,7 @@ mod test {
         common::config::ConfRange,
         opentelemetry::metric::v1::{ResourceMetrics, metric},
     };
+    use metric::Data;
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
         Metric, NumberDataPoint, ScopeMetrics, number_data_point,
@@ -893,8 +894,8 @@ mod test {
                 metric.unit.hash(&mut hasher);
                 if let Some(data) = &metric.data {
                     match data {
-                        metric::Data::Gauge(_) => "gauge".hash(&mut hasher),
-                        metric::Data::Sum(sum) => {
+                        Data::Gauge(_) => "gauge".hash(&mut hasher),
+                        Data::Sum(sum) => {
                             "sum".hash(&mut hasher);
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
@@ -996,7 +997,7 @@ mod test {
 
                             if let Some(data) = &metric.data {
                                 match data {
-                                    metric::Data::Gauge(gauge) => {
+                                    Data::Gauge(gauge) => {
                                         for point in &gauge.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -1004,7 +1005,7 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    metric::Data::Sum(sum) => {
+                                    Data::Sum(sum) => {
                                         for point in &sum.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -1124,7 +1125,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1144,7 +1145,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1185,7 +1186,7 @@ mod test {
             name: "x".into(), // Minimal valid name
             description: "".into(),
             unit: "".into(),
-            data: Some(metric::Data::Gauge(gauge)),
+            data: Some(Data::Gauge(gauge)),
             metadata: Vec::new(), // No metadata
         };
 

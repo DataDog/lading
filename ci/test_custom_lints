@@ -3,42 +3,5 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# The purpose of this script is to test our utility ci/custom_lints. We run it
-# in --test mode in order to check the assertions in lints/, running it NOT
-# against our actual source code.
-echo "Testing ast-grep lints..."
-
-# First verify that custom_lints --test mode runs. Expected to exit with error
-# due to violations.
-echo "Verifying custom_lints --test mode finds violations..."
-if ./ci/custom_lints --test >/dev/null 2>&1; then
-    echo "[FAIL] custom_lints --test mode should have failed (no violations found)"
-    exit 1
-else
-    echo "[PASS] custom_lints --test mode correctly found violations"
-fi
-
-mkdir -p lints/no-long-paths/snapshots
-
-for test_file in lints/no-long-paths/*.rs; do
-    if [[ -f "$test_file" ]]; then
-        filename=$(basename "$test_file")
-        snapshot_file="lints/no-long-paths/snapshots/${filename}.snap"
-
-        echo "Testing $filename..."
-
-        # Run sg scan directly on individual file for precise snapshot
-        # generation.
-        output=$(sg scan --config sgconfig.yml "$test_file" 2>&1 || true)
-
-        if [[ -n "$output" ]]; then
-            echo "$output" > "$snapshot_file"
-            echo "  Generated snapshot: $snapshot_file"
-        else
-            echo "  No violations found - clean output" > "$snapshot_file"
-            echo "  Generated clean snapshot: $snapshot_file"
-        fi
-    fi
-done
-
-echo "Lint testing complete. Snapshots generated in lints/no-long-paths/snapshots/"
+# The purpose of this script is to test our utility ci/custom_lints.
+sg test
