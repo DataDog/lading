@@ -16,11 +16,10 @@ use rand::{
 use tracing::debug;
 
 use super::{Config, UnitGenerator};
-use crate::opentelemetry::common::templates::Pool as GenericPool;
-use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO};
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO, templates};
 use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
-pub(crate) type Pool = GenericPool<ResourceMetrics, ResourceTemplateGenerator>;
+pub(crate) type Pool = templates::Pool<ResourceMetrics, ResourceTemplateGenerator>;
 
 /// Generate a random number between min and max (inclusive) with heavy bias
 /// toward min. Uses exponential decay: each doubling of the range has half the

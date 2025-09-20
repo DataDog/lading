@@ -1,5 +1,5 @@
 id: no-long-paths
-language: rust
+language: Rust
 rule:
   all:
     - pattern: $A::$B::$C::$$$REST

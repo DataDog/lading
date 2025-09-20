@@ -52,7 +52,7 @@ use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequ
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
 use prost::Message;
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
 use tracing::debug;
 use unit::UnitGenerator;
@@ -65,7 +65,7 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
@@ -100,7 +100,7 @@ impl Default for Contexts {
 }
 
 /// Defines the relative probability of each kind of OpenTelemetry metric.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricWeights {
@@ -123,7 +123,7 @@ impl Default for MetricWeights {
 }
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {

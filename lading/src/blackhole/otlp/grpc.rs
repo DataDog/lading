@@ -13,12 +13,12 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
     trace_service_server::{TraceService, TraceServiceServer},
 };
-use opentelemetry_proto::tonic::metrics::v1::metric::Data as MetricData;
+use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use prost::Message;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status};
+use tonic::Status;
 use tracing::{error, info};
 
 pub(crate) fn run_server(
@@ -80,8 +80,8 @@ struct OtlpMetricsService {
 impl MetricsService for OtlpMetricsService {
     async fn export(
         &self,
-        request: TonicRequest<ExportMetricsServiceRequest>,
-    ) -> Result<TonicResponse<ExportMetricsServiceResponse>, Status> {
+        request: tonic::Request<ExportMetricsServiceRequest>,
+    ) -> Result<tonic::Response<ExportMetricsServiceResponse>, Status> {
         let request = request.into_inner();
         let size = request.encoded_len();
 
@@ -94,11 +94,11 @@ impl MetricsService for OtlpMetricsService {
                 for m in &sm.metrics {
                     if let Some(data) = &m.data {
                         let points_count = match data {
-                            MetricData::Gauge(g) => g.data_points.len(),
-                            MetricData::Sum(s) => s.data_points.len(),
-                            MetricData::Histogram(h) => h.data_points.len(),
-                            MetricData::ExponentialHistogram(eh) => eh.data_points.len(),
-                            MetricData::Summary(s) => s.data_points.len(),
+                            Data::Gauge(g) => g.data_points.len(),
+                            Data::Sum(s) => s.data_points.len(),
+                            Data::Histogram(h) => h.data_points.len(),
+                            Data::ExponentialHistogram(eh) => eh.data_points.len(),
+                            Data::Summary(s) => s.data_points.len(),
                         };
                         total_points += points_count as u64;
                     }
@@ -113,7 +113,7 @@ impl MetricsService for OtlpMetricsService {
         if self.response_delay.as_micros() > 0 {
             tokio::time::sleep(self.response_delay).await;
         }
-        Ok(TonicResponse::new(self.empty_response.clone()))
+        Ok(tonic::Response::new(self.empty_response.clone()))
     }
 }
 
@@ -129,8 +129,8 @@ struct OtlpTracesService {
 impl TraceService for OtlpTracesService {
     async fn export(
         &self,
-        request: TonicRequest<ExportTraceServiceRequest>,
-    ) -> Result<TonicResponse<ExportTraceServiceResponse>, Status> {
+        request: tonic::Request<ExportTraceServiceRequest>,
+    ) -> Result<tonic::Response<ExportTraceServiceResponse>, Status> {
         let request = request.into_inner();
         let size = request.encoded_len();
 
@@ -152,7 +152,7 @@ impl TraceService for OtlpTracesService {
         if self.response_delay.as_micros() > 0 {
             tokio::time::sleep(self.response_delay).await;
         }
-        Ok(TonicResponse::new(self.empty_response.clone()))
+        Ok(tonic::Response::new(self.empty_response.clone()))
     }
 }
 
@@ -168,8 +168,8 @@ struct OtlpLogsService {
 impl LogsService for OtlpLogsService {
     async fn export(
         &self,
-        request: TonicRequest<ExportLogsServiceRequest>,
-    ) -> Result<TonicResponse<ExportLogsServiceResponse>, Status> {
+        request: tonic::Request<ExportLogsServiceRequest>,
+    ) -> Result<tonic::Response<ExportLogsServiceResponse>, Status> {
         let request = request.into_inner();
         let size = request.encoded_len();
 
@@ -191,6 +191,6 @@ impl LogsService for OtlpLogsService {
         if self.response_delay.as_micros() > 0 {
             tokio::time::sleep(self.response_delay).await;
         }
-        Ok(TonicResponse::new(self.empty_response.clone()))
+        Ok(tonic::Response::new(self.empty_response.clone()))
     }
 }

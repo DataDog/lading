@@ -10,7 +10,7 @@ use bollard::query_parameters::{
     StartContainerOptions, StopContainerOptionsBuilder,
 };
 use bollard::secret::ContainerCreateResponse;
-use lading_throttle::{Config as ThrottleConfig, Throttle};
+use lading_throttle::Throttle;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -125,7 +125,7 @@ impl Container {
                 .saturating_div(config.max_lifetime_seconds.get());
             let ops_per_sec = NonZeroU32::new(ops).unwrap_or(NonZeroU32::MIN);
 
-            Some(Throttle::new_with_config(ThrottleConfig::Stable {
+            Some(Throttle::new_with_config(lading_throttle::Config::Stable {
                 maximum_capacity: ops_per_sec,
                 timeout_micros: 0,
             }))
