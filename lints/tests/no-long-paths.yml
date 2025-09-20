@@ -17,6 +17,12 @@ valid:
       let file = File::open("path");
       let result = Response::ok();
     }
+  - >-
+    use foo::{
+      bar::bing::baz::bang,
+      one::two::three,
+      four::five::six::seven::eight,
+    };
   - let config = target::Config::Pid;
   - let server = generator::Server::new();
   - let metrics = json::MetricKind::Counter;
