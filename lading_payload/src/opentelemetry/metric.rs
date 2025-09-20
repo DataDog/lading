@@ -530,16 +530,11 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics, SMALLEST_PROTOBUF};
-    use crate::{
-        Serialize, SizedGenerator,
-        common::config::ConfRange,
-        opentelemetry::metric::v1::{ResourceMetrics, metric},
-    };
-    use metric::Data;
+    use super::{Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF};
+    use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ScopeMetrics, number_data_point,
+        Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,

@@ -344,7 +344,7 @@ pub(crate) fn parse_prometheus_metrics(
 #[allow(clippy::mutable_key_type)]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, net};
 
     use super::*;
     use bytes::Bytes;

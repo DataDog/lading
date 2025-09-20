@@ -140,6 +140,7 @@ impl crate::Serialize for OpentelemetryTraces {
 mod test {
     use super::OpentelemetryTraces;
     use crate::Serialize;
+    use opentelemetry_proto::tonic::collector::trace;
     use proptest::prelude::*;
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};

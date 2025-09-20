@@ -46,7 +46,9 @@ use crate::{
     opentelemetry::common::templates::PoolError,
 };
 use bytes::BytesMut;
-use opentelemetry_proto::tonic::{collector::logs, logs::v1::ResourceLogs};
+use opentelemetry_proto::tonic::{
+    collector::logs::v1::ExportLogsServiceRequest, logs::v1::ResourceLogs,
+};
 use prost::Message;
 use rand::Rng;
 use serde::Deserialize;
@@ -355,7 +357,7 @@ impl crate::Serialize for OpentelemetryLogs {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
-        let mut request = logs::v1::ExportLogsServiceRequest {
+        let mut request = ExportLogsServiceRequest {
             resource_logs: Vec::with_capacity(8),
         };
 
@@ -403,7 +405,10 @@ impl crate::Serialize for OpentelemetryLogs {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryLogs, SMALLEST_PROTOBUF, SeverityWeights};
+    use super::{
+        Config, Contexts, ExportLogsServiceRequest, OpentelemetryLogs, SMALLEST_PROTOBUF,
+        SeverityWeights,
+    };
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use proptest::prelude::*;
     use prost::Message;
@@ -438,7 +443,7 @@ mod test {
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+            ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 
@@ -612,8 +617,8 @@ mod test {
     #[test]
     fn smallest_protobuf() {
         use opentelemetry_proto::tonic::{
+            collector::logs::v1::ExportLogsServiceRequest,
             common::v1::{AnyValue, any_value},
-            logs::v1::ExportLogsServiceRequest,
             logs::v1::{LogRecord, ResourceLogs, ScopeLogs, SeverityNumber},
         };
 
@@ -646,7 +651,7 @@ mod test {
         };
 
         // The most minimal request we care to support, just one single log record
-        let minimal_request = logs::v1::ExportLogsServiceRequest {
+        let minimal_request = ExportLogsServiceRequest {
             resource_logs: vec![resource_logs],
         };
 
