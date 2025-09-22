@@ -273,9 +273,6 @@ impl Sampler {
                         if let Some(m) = measures.anonymous {
                             gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.lazy_free {
-                            gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
-                        }
                         if let Some(m) = measures.anon_huge_pages {
                             gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
                         }
