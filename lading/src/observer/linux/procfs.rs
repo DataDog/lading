@@ -288,9 +288,7 @@ impl Sampler {
                         if let Some(m) = measures.private_hugetlb {
                             gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.file_pmd_mapped {
-                            gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
-                        }
+                        
                         if let Some(m) = measures.locked {
                             gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
                         }
