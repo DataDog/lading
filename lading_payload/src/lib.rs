@@ -12,7 +12,7 @@ use std::{
 };
 
 use rand::{Rng, distr::weighted};
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 
 pub mod block;
 
@@ -108,7 +108,7 @@ pub trait Serialize {
 }
 
 /// Configuration for `Payload`
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields)]

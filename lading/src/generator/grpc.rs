@@ -17,14 +17,18 @@ use std::{convert::TryFrom, num::NonZeroU32, time::Duration};
 
 use byte_unit::Byte;
 use bytes::{Buf, BufMut, Bytes};
-use http::{Uri, uri::PathAndQuery};
+use http::{
+    Uri,
+    uri::{self, PathAndQuery},
+};
 use metrics::counter;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use tonic::{
-    Request, Response, Status,
+    Request, Response, Status, client,
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
+    transport,
 };
 use tracing::{debug, info};
 
@@ -200,7 +204,7 @@ impl Grpc {
         };
 
         let target_uri =
-            http::uri::Uri::try_from(config.target_uri.clone()).expect("target_uri must be valid");
+            uri::Uri::try_from(config.target_uri.clone()).expect("target_uri must be valid");
         let rpc_path = target_uri
             .path_and_query()
             .cloned()
@@ -217,16 +221,16 @@ impl Grpc {
     }
 
     /// Establish a connection with the configured RPC server
-    async fn connect(&self) -> Result<tonic::client::Grpc<tonic::transport::Channel>, Error> {
+    async fn connect(&self) -> Result<client::Grpc<transport::Channel>, Error> {
         let mut parts = self.target_uri.clone().into_parts();
         parts.path_and_query = Some(PathAndQuery::from_static(""));
         let uri = Uri::from_parts(parts).expect("failed to convert parts into uri");
 
-        let endpoint = tonic::transport::Endpoint::new(uri)?;
+        let endpoint = transport::Endpoint::new(uri)?;
         let endpoint = endpoint.concurrency_limit(self.config.parallel_connections as usize);
         let endpoint = endpoint.connect_timeout(Duration::from_secs(1));
         let conn = endpoint.connect().await?;
-        let conn = tonic::client::Grpc::new(conn);
+        let conn = client::Grpc::new(conn);
 
         debug!("gRPC generator connected");
 
@@ -235,7 +239,7 @@ impl Grpc {
 
     /// Send one RPC request
     async fn req(
-        client: &mut tonic::client::Grpc<tonic::transport::Channel>,
+        client: &mut client::Grpc<transport::Channel>,
         rpc_path: http::uri::PathAndQuery,
         request: Bytes,
     ) -> Result<Response<usize>, tonic::Status> {

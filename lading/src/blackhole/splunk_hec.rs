@@ -19,6 +19,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::General;
+use crate::blackhole::common;
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -199,7 +200,7 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        crate::blackhole::common::run_httpd(
+        common::run_httpd(
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,

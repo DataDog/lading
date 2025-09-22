@@ -2,7 +2,7 @@
 
 use either::Either;
 use k8s_openapi::{
-    ClusterResourceScope, NamespaceResourceScope, Resource as KubeResource,
+    ClusterResourceScope, NamespaceResourceScope,
     api::{
         apps::v1::Deployment,
         core::v1::{Namespace, Node, Pod, Service},
@@ -32,11 +32,11 @@ pub(super) enum Resource {
 impl Resource {
     pub(super) fn kind(&self) -> &'static str {
         match self {
-            Resource::Node(_) => <Node as KubeResource>::KIND,
-            Resource::Namespace(_) => <Namespace as KubeResource>::KIND,
-            Resource::Pod(_) => <Pod as KubeResource>::KIND,
-            Resource::Deployment(_) => <Deployment as KubeResource>::KIND,
-            Resource::Service(_) => <Service as KubeResource>::KIND,
+            Resource::Node(_) => <Node as k8s_openapi::Resource>::KIND,
+            Resource::Namespace(_) => <Namespace as k8s_openapi::Resource>::KIND,
+            Resource::Pod(_) => <Pod as k8s_openapi::Resource>::KIND,
+            Resource::Deployment(_) => <Deployment as k8s_openapi::Resource>::KIND,
+            Resource::Service(_) => <Service as k8s_openapi::Resource>::KIND,
         }
     }
 

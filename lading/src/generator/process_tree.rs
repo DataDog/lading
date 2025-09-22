@@ -29,7 +29,7 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    process::{Stdio, exit},
+    process::{self, Stdio, exit},
     str, thread,
     time::Duration,
 };
@@ -467,7 +467,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
         let process = iter.next().expect("process is not populated properly");
 
         if let Some(exec) = &process.exec {
-            let status = std::process::Command::new(&exec.executable)
+            let status = process::Command::new(&exec.executable)
                 .args(&exec.args)
                 .envs(&exec.envs)
                 .stdout(Stdio::null())

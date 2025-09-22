@@ -35,7 +35,9 @@ use tracing::{error, info};
 use lading_payload::block;
 
 use super::General;
-use crate::generator::common::{BytesThrottleConfig, MetricsBuilder, create_throttle};
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 /// An enum to allow us to determine what operation caused an IO errror as the
 /// default error message lacks detail.
@@ -112,7 +114,7 @@ pub enum Error {
     Throttle(#[from] lading_throttle::Error),
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]

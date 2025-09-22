@@ -49,10 +49,9 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::metric::Data;
-use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
 use prost::Message;
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
 use tracing::debug;
 use unit::UnitGenerator;
@@ -65,7 +64,7 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
@@ -100,7 +99,7 @@ impl Default for Contexts {
 }
 
 /// Defines the relative probability of each kind of OpenTelemetry metric.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricWeights {
@@ -123,7 +122,7 @@ impl Default for MetricWeights {
 }
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -333,7 +332,7 @@ impl OpentelemetryMetrics {
 }
 
 impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
-    type Output = v1::ResourceMetrics;
+    type Output = ResourceMetrics;
     type Error = Error;
 
     /// Generate OTLP metrics with the following enhancements:
@@ -351,7 +350,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
-        let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
+        let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
                 debug!("Pool was unable to satify request for {budget} size");
@@ -531,15 +530,11 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics, SMALLEST_PROTOBUF};
-    use crate::{
-        Serialize, SizedGenerator,
-        common::config::ConfRange,
-        opentelemetry::metric::v1::{ResourceMetrics, metric},
-    };
+    use super::{Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF};
+    use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ScopeMetrics, number_data_point,
+        Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
@@ -756,10 +751,8 @@ mod test {
             .to_bytes(&mut rng, max_bytes, &mut bytes)
             .expect("failed to convert to bytes");
 
-        opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
-            bytes.as_slice(),
-        )
-        .expect("failed to decode the message from the buffer");
+        ExportMetricsServiceRequest::decode(bytes.as_slice())
+            .expect("failed to decode the message from the buffer");
     }
 
     // Confirm that configuration bounds are naively obeyed. For instance, this
@@ -893,8 +886,8 @@ mod test {
                 metric.unit.hash(&mut hasher);
                 if let Some(data) = &metric.data {
                     match data {
-                        metric::Data::Gauge(_) => "gauge".hash(&mut hasher),
-                        metric::Data::Sum(sum) => {
+                        Data::Gauge(_) => "gauge".hash(&mut hasher),
+                        Data::Sum(sum) => {
                             "sum".hash(&mut hasher);
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
@@ -996,7 +989,7 @@ mod test {
 
                             if let Some(data) = &metric.data {
                                 match data {
-                                    metric::Data::Gauge(gauge) => {
+                                    Data::Gauge(gauge) => {
                                         for point in &gauge.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -1004,7 +997,7 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    metric::Data::Sum(sum) => {
+                                    Data::Sum(sum) => {
                                         for point in &sum.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -1124,7 +1117,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1144,7 +1137,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1185,7 +1178,7 @@ mod test {
             name: "x".into(), // Minimal valid name
             description: "".into(),
             unit: "".into(),
-            data: Some(metric::Data::Gauge(gauge)),
+            data: Some(Data::Gauge(gauge)),
             metadata: Vec::new(), // No metadata
         };
 

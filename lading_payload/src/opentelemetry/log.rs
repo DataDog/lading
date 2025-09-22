@@ -51,7 +51,7 @@ use opentelemetry_proto::tonic::{
 };
 use prost::Message;
 use rand::Rng;
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use std::{cell::RefCell, io::Write, rc::Rc};
 
 // smallest useful protobuf, determined by experimentation and enforced in
@@ -62,7 +62,7 @@ const SMALLEST_PROTOBUF: usize = 12;
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
 /// Configure the OpenTelemetry log contexts
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Contexts {
@@ -95,7 +95,7 @@ impl Default for Contexts {
 }
 
 /// Defines log severity levels
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct SeverityWeights {
@@ -127,7 +127,7 @@ impl Default for SeverityWeights {
 }
 
 /// Configure the OpenTelemetry log payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -405,7 +405,10 @@ impl crate::Serialize for OpentelemetryLogs {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryLogs, SMALLEST_PROTOBUF, SeverityWeights};
+    use super::{
+        Config, Contexts, ExportLogsServiceRequest, OpentelemetryLogs, SMALLEST_PROTOBUF,
+        SeverityWeights,
+    };
     use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use proptest::prelude::*;
     use prost::Message;
@@ -440,7 +443,7 @@ mod test {
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             logs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
 
-            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
+            ExportLogsServiceRequest::decode(bytes.as_slice()).expect("failed to decode the message from the buffer");
         }
     }
 

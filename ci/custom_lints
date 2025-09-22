@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+if ! command -v sg &> /dev/null; then
+    echo "ast-grep (sg) is not installed. Install with: brew install ast-grep"
+    exit 1
+fi
+
+sg scan --threads 1
