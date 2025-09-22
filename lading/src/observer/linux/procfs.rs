@@ -279,9 +279,7 @@ impl Sampler {
                         if let Some(m) = measures.anon_huge_pages {
                             gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.shmem_pmd_mapped {
-                            gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
-                        }
+                        
                         if let Some(m) = measures.shared_hugetlb {
                             gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
                         }
