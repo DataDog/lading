@@ -273,26 +273,14 @@ impl Sampler {
                         if let Some(m) = measures.anonymous {
                             gauge!("smaps.anonymous.by_pathname", &labels).set(m as f64);
                         }
-                        if let Some(m) = measures.lazy_free {
-                            gauge!("smaps.lazy_free.by_pathname", &labels).set(m as f64);
-                        }
                         if let Some(m) = measures.anon_huge_pages {
                             gauge!("smaps.anon_huge_pages.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.shmem_pmd_mapped {
-                            gauge!("smaps.shmem_pmd_mapped.by_pathname", &labels).set(m as f64);
                         }
                         if let Some(m) = measures.shared_hugetlb {
                             gauge!("smaps.shared_hugetlb.by_pathname", &labels).set(m as f64);
                         }
                         if let Some(m) = measures.private_hugetlb {
                             gauge!("smaps.private_hugetlb.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.file_pmd_mapped {
-                            gauge!("smaps.file_pmd_mapped.by_pathname", &labels).set(m as f64);
-                        }
-                        if let Some(m) = measures.locked {
-                            gauge!("smaps.locked.by_pathname", &labels).set(m as f64);
                         }
                         if let Some(m) = measures.swap_pss {
                             gauge!("smaps.swap_pss.by_pathname", &labels).set(m as f64);
