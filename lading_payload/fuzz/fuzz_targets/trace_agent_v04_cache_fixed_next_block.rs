@@ -6,9 +6,9 @@ use rand::{SeedableRng, rngs::SmallRng};
 use std::num::NonZeroU32;
 
 use lading_payload::{
+    self,
     block::Cache,
-    trace_agent::{Config as TraceAgentConfig, v04::Config},
-    Config as PayloadConfig,
+    trace_agent::{self, v04::Config},
 };
 
 #[derive(arbitrary::Arbitrary, Debug)]
@@ -19,8 +19,8 @@ struct Input {
     config: Config,
 }
 
-const MAX_TOTAL_BYTES: u32 = 10 * 1024 * 1024;  // 10 MiB
-const MAX_BLOCK_SIZE: u32 = 1 * 1024 * 1024;    // 1 MiB
+const MAX_TOTAL_BYTES: u32 = 10 * 1024 * 1024; // 10 MiB
+const MAX_BLOCK_SIZE: u32 = 1 * 1024 * 1024; // 1 MiB
 
 fuzz_target!(|input: Input| {
     lading_fuzz::debug_input(&input);
@@ -42,7 +42,7 @@ fuzz_target!(|input: Input| {
     }
 
     let mut rng = SmallRng::from_seed(input.seed);
-    let payload = PayloadConfig::TraceAgent(TraceAgentConfig::V04(input.config));
+    let payload = lading_payload::Config::TraceAgent(trace_agent::Config::V04(input.config));
 
     let cache = match Cache::fixed_with_max_overhead(
         &mut rng,
