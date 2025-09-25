@@ -31,7 +31,10 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let mut bytes = Vec::with_capacity(budget);
 
-    let mut serializer = V04::with_config(input.config, &mut rng);
+    let mut serializer = match V04::with_config(input.config, &mut rng) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
     if serializer.to_bytes(&mut rng, budget, &mut bytes).is_ok() {
         assert!(bytes.len() <= budget);

@@ -40,8 +40,6 @@ pub enum ConfigError {
 
 const STRING_POOL_SIZE: usize = 1_000_000;
 const MAX_TRACE_DEPTH: usize = 8;
-const MIN_SPAN_DURATION: Duration = Duration::ZERO;
-const MAX_SPAN_DURATION: Duration = Duration::MAX;
 
 /// Generate a random duration within the given range
 #[allow(clippy::cast_possible_truncation)] // u128 nanos to u64 safe for reasonable duration ranges
@@ -275,10 +273,9 @@ impl V04 {
         let base_timestamp = UNIX_EPOCH;
         let root_span_id = rng.random();
         let root_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
-        let root_span = generate_span(
-            self,
+        let root_span = self.generate_span(
             rng,
-            &service,
+            service,
             trace_id,
             root_span_id,
             0, // Root spans have parent_id = 0
@@ -303,10 +300,9 @@ impl V04 {
             let span_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
 
             let span_id = rng.random();
-            let span = generate_span(
-                self,
+            let span = self.generate_span(
                 rng,
-                &service,
+                service,
                 trace_id,
                 span_id,
                 parent_id,
@@ -325,100 +321,94 @@ impl V04 {
     }
 }
 
-/// Generate a single span with per-span operation/resource/type but shared service
-fn generate_span<'a, R>(
-    generator: &'a V04,
-    rng: &mut R,
-    service: &'a str,
-    trace_id: u64,
-    span_id: u64,
-    parent_id: u64,
-    start_time: SystemTime,
-    duration: Duration,
-) -> Result<Span<'a>, Error>
-where
-    R: Rng + ?Sized,
-{
-    // Generate unique operation, resource, and span_type for each span
-    let operation_len = generator.config.operation_name_length.sample(rng);
-    let operation = generator
-        .str_pool
-        .of_size(rng, operation_len.into())
-        .unwrap_or("");
-
-    let resource_len = generator.config.resource_name_length.sample(rng);
-    let resource = generator
-        .str_pool
-        .of_size(rng, resource_len.into())
-        .unwrap_or("");
-
-    let span_type_len = generator.config.span_type_length.sample(rng);
-    let span_type = generator
-        .str_pool
-        .of_size(rng, span_type_len.into())
-        .unwrap_or("");
-
-    let tag_count = generator.config.tags_per_span.sample(rng);
-    let mut meta = BTreeMap::default();
-    for _ in 0..tag_count {
-        let key_len = generator.config.tag_key_length.sample(rng);
-        let value_len = generator.config.tag_value_length.sample(rng);
-
-        let key = generator
+impl V04 {
+    /// Generate a single span with per-span operation/resource/type but shared service
+    #[allow(clippy::too_many_arguments)]
+    fn generate_span<'a, R>(
+        &'a self,
+        rng: &mut R,
+        service: &'a str,
+        trace_id: u64,
+        span_id: u64,
+        parent_id: u64,
+        start_time: SystemTime,
+        duration: Duration,
+    ) -> Result<Span<'a>, Error>
+    where
+        R: Rng + ?Sized,
+    {
+        // Generate unique operation, resource, and span_type for each span
+        let operation_len = self.config.operation_name_length.sample(rng);
+        let operation = self
             .str_pool
-            .of_size(rng, key_len.into())
+            .of_size(rng, operation_len.into())
             .unwrap_or("");
 
-        let value = generator
+        let resource_len = self.config.resource_name_length.sample(rng);
+        let resource = self
             .str_pool
-            .of_size(rng, value_len.into())
+            .of_size(rng, resource_len.into())
             .unwrap_or("");
 
-        meta.insert(key, value);
+        let span_type_len = self.config.span_type_length.sample(rng);
+        let span_type = self
+            .str_pool
+            .of_size(rng, span_type_len.into())
+            .unwrap_or("");
+
+        let tag_count = self.config.tags_per_span.sample(rng);
+        let mut meta = BTreeMap::default();
+        for _ in 0..tag_count {
+            let key_len = self.config.tag_key_length.sample(rng);
+            let value_len = self.config.tag_value_length.sample(rng);
+
+            let key = self.str_pool.of_size(rng, key_len.into()).unwrap_or("");
+
+            let value = self.str_pool.of_size(rng, value_len.into()).unwrap_or("");
+
+            meta.insert(key, value);
+        }
+
+        let metric_count = self.config.metrics_per_span.sample(rng);
+        let mut metrics = BTreeMap::default();
+        for _ in 0..metric_count {
+            let key_len = self.config.metric_key_length.sample(rng);
+            let key = self.str_pool.of_size(rng, key_len.into()).unwrap_or("");
+            metrics.insert(key, rng.random::<f64>());
+        }
+
+        let error = i32::from(rng.random::<f32>() < self.config.error_rate);
+        // SAFETY: 2**63 nanoseconds is ~292 years, which means that since we take
+        // UNIX_EPOCH as time zero we're safet to cast nanos to i64 until the year
+        // 2262.
+        #[allow(clippy::cast_possible_truncation)]
+        Ok(Span {
+            service,
+            name: operation,
+            resource,
+            trace_id,
+            span_id,
+            parent_id,
+            start: start_time
+                .duration_since(UNIX_EPOCH)
+                // NOTE we're constrained by the lading_payload::Error via
+                // Serialize, else we'd have a slightly less awkward construction
+                // here.
+                .map_err(|_| {
+                    Error::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Invalid timestamp",
+                    ))
+                })?
+                .as_nanos() as i64,
+            duration: duration.as_nanos() as i64,
+            error,
+            meta,
+            metrics,
+            kind: span_type,
+            meta_struct: BTreeMap::default(),
+        })
     }
-
-    let metric_count = generator.config.metrics_per_span.sample(rng);
-    let mut metrics = BTreeMap::default();
-    for _ in 0..metric_count {
-        let key_len = generator.config.metric_key_length.sample(rng);
-        let key = generator
-            .str_pool
-            .of_size(rng, key_len.into())
-            .unwrap_or("");
-        metrics.insert(key, rng.random::<f64>());
-    }
-
-    let error = i32::from(rng.random::<f32>() < generator.config.error_rate);
-    // SAFETY: 2**63 nanoseconds is ~292 years, which means that since we take
-    // UNIX_EPOCH as time zero we're safet to cast nanos to i64 until the year
-    // 2262.
-    #[allow(clippy::cast_possible_truncation)]
-    Ok(Span {
-        service,
-        name: operation,
-        resource,
-        trace_id,
-        span_id,
-        parent_id,
-        start: start_time
-            .duration_since(UNIX_EPOCH)
-            // NOTE we're constrained by the lading_payload::Error via
-            // Serialize, else we'd have a slightly less awkward construction
-            // here.
-            .map_err(|_| {
-                Error::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Invalid timestamp",
-                ))
-            })?
-            .as_nanos() as i64,
-        duration: duration.as_nanos() as i64,
-        error,
-        meta,
-        metrics,
-        kind: span_type,
-        meta_struct: BTreeMap::default(),
-    })
 }
 
 impl<'a> Generator<'a> for V04 {
