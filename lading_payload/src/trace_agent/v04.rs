@@ -18,6 +18,15 @@ use crate::{
     common::{config::ConfRange, strings},
 };
 
+// A v0.4 Trace is a Vec<Span> that obeys the following properties:
+//
+// - Spans within a trace share the same trace-id
+// - Spans within a trace have the same service name
+// - Exactly one span has parent_id = 0 (the root span)
+// - All other spans within a trace have parent_id pointing to another span
+//   within the trace
+// - Each span has a unique span_id within the trace
+
 /// Configuration validation error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigError {
@@ -31,8 +40,8 @@ pub enum ConfigError {
 
 const STRING_POOL_SIZE: usize = 1_000_000;
 const MAX_TRACE_DEPTH: usize = 8;
-const MIN_SPAN_DURATION: Duration = Duration::from_millis(1);
-const MAX_SPAN_DURATION: Duration = Duration::from_secs(1);
+const MIN_SPAN_DURATION: Duration = Duration::ZERO;
+const MAX_SPAN_DURATION: Duration = Duration::MAX;
 
 /// Generate a random duration within the given range
 #[allow(clippy::cast_possible_truncation)] // u128 nanos to u64 safe for reasonable duration ranges
@@ -49,15 +58,14 @@ where
 /// Configuration for v0.4 trace payload generation.
 ///
 /// Focuses on parameters that affect trace-agent scaling performance:
-/// cardinality (contexts), payload structure (spans per trace), and
+/// cardinality (service variety), payload structure (spans per trace), and
 /// string variety (tags/metrics per span).
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// The unique trace contexts to generate. A context is a unique combination
-    /// of service + operation + resource + span_type. This is the primary
-    /// cardinality driver for trace-agent memory usage and processing overhead.
+    /// Number of unique services to generate across all traces.
+    /// Each trace gets one service, but different traces can have different services.
     pub contexts: ConfRange<u32>,
     /// Number of spans per trace.
     pub spans_per_trace: ConfRange<u16>,
@@ -211,88 +219,6 @@ pub struct Span<'a> {
     meta_struct: BTreeMap<&'a str, Vec<u8>>,
 }
 
-/// Context represents a unique service+operation+resource combination.
-/// This is the key cardinality driver for trace-agent performance.
-#[derive(Debug, Clone)]
-struct Context {
-    service: String,
-    operation: String,
-    resource: String,
-    span_type: String,
-}
-
-/// Context generator for v0.4
-///
-/// Pre-generates contexts (unique service+operation+resource combinations)
-/// to create realistic cardinality pressure on the trace agent.
-#[derive(Debug, Clone)]
-struct ContextGenerator {
-    /// Pre-generated trace contexts (service+operation+resource combinations)
-    contexts: Vec<Context>,
-}
-
-impl ContextGenerator {
-    fn new<R>(config: &Config, rng: &mut R) -> Result<Self, Error>
-    where
-        R: Rng + ?Sized,
-    {
-        let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
-
-        let context_count = config.contexts.sample(rng);
-        let mut contexts = Vec::new();
-        for _ in 0..context_count {
-            let service_len = config.service_name_length.sample(rng);
-            let service = if service_len == 0 {
-                String::new()
-            } else {
-                str_pool
-                    .of_size(rng, service_len.into())
-                    .ok_or(Error::StringGenerate)?
-                    .to_string()
-            };
-
-            let operation_len = config.operation_name_length.sample(rng);
-            let operation = if operation_len == 0 {
-                String::new()
-            } else {
-                str_pool
-                    .of_size(rng, operation_len.into())
-                    .ok_or(Error::StringGenerate)?
-                    .to_string()
-            };
-
-            let resource_len = config.resource_name_length.sample(rng);
-            let resource = if resource_len == 0 {
-                String::new()
-            } else {
-                str_pool
-                    .of_size(rng, resource_len.into())
-                    .ok_or(Error::StringGenerate)?
-                    .to_string()
-            };
-
-            let span_type_len = config.span_type_length.sample(rng);
-            let span_type = if span_type_len == 0 {
-                String::new()
-            } else {
-                str_pool
-                    .of_size(rng, span_type_len.into())
-                    .ok_or(Error::StringGenerate)?
-                    .to_string()
-            };
-
-            contexts.push(Context {
-                service,
-                operation,
-                resource,
-                span_type,
-            });
-        }
-
-        Ok(Self { contexts })
-    }
-}
-
 /// Represents a single trace (array of spans with same `trace_id`)
 #[derive(Debug)]
 pub struct Trace<'a> {
@@ -305,7 +231,6 @@ pub struct Trace<'a> {
 pub struct V04 {
     config: Config,
     str_pool: strings::Pool,
-    context_generator: ContextGenerator,
 }
 
 impl V04 {
@@ -319,12 +244,7 @@ impl V04 {
         R: Rng + ?Sized,
     {
         let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
-        let context_generator = ContextGenerator::new(&config, rng)?;
-        Ok(Self {
-            config,
-            str_pool,
-            context_generator,
-        })
+        Ok(Self { config, str_pool })
     }
 
     /// Generate a complete trace matching the datadog-agent's pb.Traces format.
@@ -348,12 +268,17 @@ impl V04 {
         let span_count = self.config.spans_per_trace.sample(rng);
         let mut spans = Vec::with_capacity(span_count as usize);
 
+        // Generate service name once per trace - all spans share it
+        let service_len = self.config.service_name_length.sample(rng);
+        let service = self.str_pool.of_size(rng, service_len.into()).unwrap_or("");
+
         let base_timestamp = UNIX_EPOCH;
         let root_span_id = rng.random();
-        let root_duration = random_duration(rng, MIN_SPAN_DURATION, MAX_SPAN_DURATION);
+        let root_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
         let root_span = generate_span(
             self,
             rng,
+            &service,
             trace_id,
             root_span_id,
             0, // Root spans have parent_id = 0
@@ -373,14 +298,15 @@ impl V04 {
 
             // Child spans get independent random timing, not constrained by
             // parent.
-            let span_start_offset = random_duration(rng, Duration::ZERO, MAX_SPAN_DURATION);
+            let span_start_offset = random_duration(rng, Duration::ZERO, Duration::MAX);
             let span_start = base_timestamp + span_start_offset;
-            let span_duration = random_duration(rng, MIN_SPAN_DURATION, MAX_SPAN_DURATION);
+            let span_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
 
             let span_id = rng.random();
             let span = generate_span(
                 self,
                 rng,
+                &service,
                 trace_id,
                 span_id,
                 parent_id,
@@ -399,11 +325,11 @@ impl V04 {
     }
 }
 
-/// Generate a single span using context-based approach. This follows our
-/// dogstatsd and otel pattern.
+/// Generate a single span with per-span operation/resource/type but shared service
 fn generate_span<'a, R>(
     generator: &'a V04,
     rng: &mut R,
+    service: &'a str,
     trace_id: u64,
     span_id: u64,
     parent_id: u64,
@@ -413,11 +339,24 @@ fn generate_span<'a, R>(
 where
     R: Rng + ?Sized,
 {
-    let context = generator
-        .context_generator
-        .contexts
-        .choose(rng)
-        .ok_or(Error::StringGenerate)?;
+    // Generate unique operation, resource, and span_type for each span
+    let operation_len = generator.config.operation_name_length.sample(rng);
+    let operation = generator
+        .str_pool
+        .of_size(rng, operation_len.into())
+        .unwrap_or("");
+
+    let resource_len = generator.config.resource_name_length.sample(rng);
+    let resource = generator
+        .str_pool
+        .of_size(rng, resource_len.into())
+        .unwrap_or("");
+
+    let span_type_len = generator.config.span_type_length.sample(rng);
+    let span_type = generator
+        .str_pool
+        .of_size(rng, span_type_len.into())
+        .unwrap_or("");
 
     let tag_count = generator.config.tags_per_span.sample(rng);
     let mut meta = BTreeMap::default();
@@ -425,23 +364,15 @@ where
         let key_len = generator.config.tag_key_length.sample(rng);
         let value_len = generator.config.tag_value_length.sample(rng);
 
-        let key = if key_len == 0 {
-            ""
-        } else {
-            generator
-                .str_pool
-                .of_size(rng, key_len.into())
-                .ok_or(Error::StringGenerate)?
-        };
+        let key = generator
+            .str_pool
+            .of_size(rng, key_len.into())
+            .unwrap_or("");
 
-        let value = if value_len == 0 {
-            ""
-        } else {
-            generator
-                .str_pool
-                .of_size(rng, value_len.into())
-                .ok_or(Error::StringGenerate)?
-        };
+        let value = generator
+            .str_pool
+            .of_size(rng, value_len.into())
+            .unwrap_or("");
 
         meta.insert(key, value);
     }
@@ -450,14 +381,10 @@ where
     let mut metrics = BTreeMap::default();
     for _ in 0..metric_count {
         let key_len = generator.config.metric_key_length.sample(rng);
-        let key = if key_len == 0 {
-            ""
-        } else {
-            generator
-                .str_pool
-                .of_size(rng, key_len.into())
-                .ok_or(Error::StringGenerate)?
-        };
+        let key = generator
+            .str_pool
+            .of_size(rng, key_len.into())
+            .unwrap_or("");
         metrics.insert(key, rng.random::<f64>());
     }
 
@@ -467,9 +394,9 @@ where
     // 2262.
     #[allow(clippy::cast_possible_truncation)]
     Ok(Span {
-        service: &context.service,
-        name: &context.operation,
-        resource: &context.resource,
+        service,
+        name: operation,
+        resource,
         trace_id,
         span_id,
         parent_id,
@@ -489,7 +416,7 @@ where
         error,
         meta,
         metrics,
-        kind: &context.span_type,
+        kind: span_type,
         meta_struct: BTreeMap::default(),
     })
 }
@@ -512,8 +439,11 @@ impl crate::Serialize for V04 {
         R: Rng + Sized,
         W: Write,
     {
-        let mut traces: Vec<Vec<Span>> = vec![];
+        if max_bytes == 0 {
+            return Ok(());
+        }
 
+        let mut traces: Vec<Vec<Span>> = vec![];
         // Elide the cost of per-message serialization, batching in fixed size
         // chunks.
         let batch_size = 10;
@@ -580,6 +510,7 @@ mod test {
             debug_assert!(bytes.len() <= max_bytes);
         }
 
+        /// Property: Spans within a trace share the same trace-id
         #[test]
         fn trace_spans_have_same_trace_id_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -594,6 +525,7 @@ mod test {
             }
         }
 
+        /// Property: All other spans within a trace have parent_id pointing to another span within the trace
         #[test]
         fn parent_child_structure_validity_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
@@ -601,18 +533,13 @@ mod test {
 
             let trace = generator.generate(&mut rng)?;
 
-            // Verify structural properties but not temporal constraints
+            // Verify that all non-root spans point to existing spans within the trace
             for span in &trace.spans {
                 if span.parent_id != 0 {
                     // Parent must exist in the trace
-                    prop_assert!(trace.spans.iter().any(|s| s.span_id == span.parent_id));
+                    prop_assert!(trace.spans.iter().any(|s| s.span_id == span.parent_id),
+                        "Non-root spans must have parent_id pointing to another span in the trace");
                 }
-            }
-
-            // All spans should have the same trace_id
-            let trace_id = trace.spans[0].trace_id;
-            for span in &trace.spans {
-                prop_assert_eq!(span.trace_id, trace_id);
             }
         }
 
@@ -631,6 +558,46 @@ mod test {
             config.error_rate = error_rate;
 
             prop_assert!(config.valid().is_ok());
+        }
+
+        /// Property: Spans within a trace have the same service name
+        #[test]
+        fn trace_spans_share_same_service_v04(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            if let Some(first_span) = trace.spans.first() {
+                let expected_service = first_span.service;
+                for span in &trace.spans {
+                    prop_assert_eq!(span.service, expected_service,
+                        "All spans in a trace must share the same service name");
+                }
+            }
+        }
+
+        /// Property: Exactly one span has parent_id = 0 (the root span)
+        #[test]
+        fn exactly_one_root_span_v04(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            let root_span_count = trace.spans.iter().filter(|span| span.parent_id == 0).count();
+            prop_assert_eq!(root_span_count, 1, "Trace must have exactly one root span (parent_id = 0)");
+        }
+
+        /// Property: Each span has a unique span_id within the trace
+        #[test]
+        fn unique_span_ids_within_trace_v04(seed: u64) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
+
+            let trace = generator.generate(&mut rng)?;
+            let mut span_ids = std::collections::HashSet::new();
+            for span in &trace.spans {
+                prop_assert!(span_ids.insert(span.span_id), "Each span must have a unique span_id within the trace");
+            }
         }
     }
 
