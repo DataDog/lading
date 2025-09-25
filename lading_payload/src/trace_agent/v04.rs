@@ -56,18 +56,16 @@ where
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// The unique trace contexts to generate. A context is a unique combination
-    /// of service + operation + resource. This is the primary cardinality driver
-    /// for trace-agent memory usage and processing overhead.
+    /// of service + operation + resource + span_type. This is the primary
+    /// cardinality driver for trace-agent memory usage and processing overhead.
     pub contexts: ConfRange<u32>,
-    /// Number of spans per trace. Affects trace processing complexity and
-    /// memory allocation patterns in the agent.
+    /// Number of spans per trace.
     pub spans_per_trace: ConfRange<u16>,
-    /// Number of tags per span. Tags are the main source of cardinality
-    /// and memory pressure in trace processing.
+    /// Number of tags per span.
     pub tags_per_span: ConfRange<u8>,
-    /// Number of metrics per span. Affects metric processing overhead.
+    /// Number of metrics per span.
     pub metrics_per_span: ConfRange<u8>,
-    /// Probability of a span having an error. Affects error tracking overhead.
+    /// Probability of a span having an error.
     pub error_rate: f32,
     /// Length range for service names
     pub service_name_length: ConfRange<u8>,
@@ -223,7 +221,7 @@ struct Context {
     span_type: String,
 }
 
-/// Context generator for v0.4 following lading's pre-computation pattern.
+/// Context generator for v0.4
 ///
 /// Pre-generates contexts (unique service+operation+resource combinations)
 /// to create realistic cardinality pressure on the trace agent.
@@ -519,7 +517,6 @@ impl crate::Serialize for V04 {
         // Elide the cost of per-message serialization, batching in fixed size
         // chunks.
         let batch_size = 10;
-
         for _ in 0..batch_size {
             let trace = self.generate(&mut rng)?;
             traces.push(trace.spans);
