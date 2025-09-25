@@ -5,7 +5,7 @@
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{
     collections::BTreeMap,
-    io::Write,
+    io::{self, Write},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -234,7 +234,7 @@ struct ContextGenerator {
 }
 
 impl ContextGenerator {
-    fn new<R>(config: &Config, rng: &mut R) -> Self
+    fn new<R>(config: &Config, rng: &mut R) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
@@ -249,7 +249,7 @@ impl ContextGenerator {
             } else {
                 str_pool
                     .of_size(rng, service_len.into())
-                    .unwrap_or("service")
+                    .ok_or(Error::StringGenerate)?
                     .to_string()
             };
 
@@ -259,7 +259,7 @@ impl ContextGenerator {
             } else {
                 str_pool
                     .of_size(rng, operation_len.into())
-                    .unwrap_or("operation")
+                    .ok_or(Error::StringGenerate)?
                     .to_string()
             };
 
@@ -269,7 +269,7 @@ impl ContextGenerator {
             } else {
                 str_pool
                     .of_size(rng, resource_len.into())
-                    .unwrap_or("resource")
+                    .ok_or(Error::StringGenerate)?
                     .to_string()
             };
 
@@ -279,7 +279,7 @@ impl ContextGenerator {
             } else {
                 str_pool
                     .of_size(rng, span_type_len.into())
-                    .unwrap_or("web")
+                    .ok_or(Error::StringGenerate)?
                     .to_string()
             };
 
@@ -291,7 +291,7 @@ impl ContextGenerator {
             });
         }
 
-        Self { contexts }
+        Ok(Self { contexts })
     }
 }
 
@@ -312,17 +312,21 @@ pub struct V04 {
 
 impl V04 {
     /// Create a new v0.4 payload generator with provided configuration
-    pub fn with_config<R>(config: Config, rng: &mut R) -> Self
+    ///
+    /// # Errors
+    ///
+    /// Returns error if string generation from the string pool fails
+    pub fn with_config<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
     {
         let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
-        let context_generator = ContextGenerator::new(&config, rng);
-        Self {
+        let context_generator = ContextGenerator::new(&config, rng)?;
+        Ok(Self {
             config,
             str_pool,
             context_generator,
-        }
+        })
     }
 
     /// Generate a complete trace matching the datadog-agent's pb.Traces format.
@@ -338,7 +342,7 @@ impl V04 {
     /// # Errors
     ///
     /// Returns error if timestamp calculations result in invalid ranges
-    fn generate_trace<R>(&self, rng: &mut R) -> Trace<'_>
+    fn generate_trace<R>(&self, rng: &mut R) -> Result<Trace<'_>, Error>
     where
         R: Rng + ?Sized,
     {
@@ -357,7 +361,7 @@ impl V04 {
             0, // Root spans have parent_id = 0
             base_timestamp,
             root_duration,
-        );
+        )?;
         spans.push(root_span);
 
         // Generate child spans with random timing, allowing for async patterns
@@ -367,7 +371,7 @@ impl V04 {
             let parent_id = parent_candidates
                 .choose(rng)
                 .copied()
-                .unwrap_or(root_span_id);
+                .ok_or(Error::StringGenerate)?;
 
             // Child spans get independent random timing, not constrained by
             // parent.
@@ -384,7 +388,7 @@ impl V04 {
                 parent_id,
                 span_start,
                 span_duration,
-            );
+            )?;
 
             // If we aren't past the max trace depth, add as a potential parent.
             if spans.len() < MAX_TRACE_DEPTH {
@@ -393,7 +397,7 @@ impl V04 {
             spans.push(span);
         }
 
-        Trace { spans }
+        Ok(Trace { spans })
     }
 }
 
@@ -407,7 +411,7 @@ fn generate_span<'a, R>(
     parent_id: u64,
     start_time: SystemTime,
     duration: Duration,
-) -> Span<'a>
+) -> Result<Span<'a>, Error>
 where
     R: Rng + ?Sized,
 {
@@ -415,7 +419,7 @@ where
         .context_generator
         .contexts
         .choose(rng)
-        .expect("contexts should not be empty");
+        .ok_or(Error::StringGenerate)?;
 
     let tag_count = generator.config.tags_per_span.sample(rng);
     let mut meta = BTreeMap::default();
@@ -429,7 +433,7 @@ where
             generator
                 .str_pool
                 .of_size(rng, key_len.into())
-                .unwrap_or("key")
+                .ok_or(Error::StringGenerate)?
         };
 
         let value = if value_len == 0 {
@@ -438,7 +442,7 @@ where
             generator
                 .str_pool
                 .of_size(rng, value_len.into())
-                .unwrap_or("value")
+                .ok_or(Error::StringGenerate)?
         };
 
         meta.insert(key, value);
@@ -454,7 +458,7 @@ where
             generator
                 .str_pool
                 .of_size(rng, key_len.into())
-                .unwrap_or("metric")
+                .ok_or(Error::StringGenerate)?
         };
         metrics.insert(key, rng.random::<f64>());
     }
@@ -464,7 +468,7 @@ where
     // UNIX_EPOCH as time zero we're safet to cast nanos to i64 until the year
     // 2262.
     #[allow(clippy::cast_possible_truncation)]
-    Span {
+    Ok(Span {
         service: &context.service,
         name: &context.operation,
         resource: &context.resource,
@@ -473,7 +477,15 @@ where
         parent_id,
         start: start_time
             .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
+            // NOTE we're constrained by the lading_payload::Error via
+            // Serialize, else we'd have a slightly less awkward construction
+            // here.
+            .map_err(|_| {
+                Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid timestamp",
+                ))
+            })?
             .as_nanos() as i64,
         duration: duration.as_nanos() as i64,
         error,
@@ -481,7 +493,7 @@ where
         metrics,
         kind: &context.span_type,
         meta_struct: BTreeMap::default(),
-    }
+    })
 }
 
 impl<'a> Generator<'a> for V04 {
@@ -492,7 +504,7 @@ impl<'a> Generator<'a> for V04 {
     where
         R: rand::Rng + ?Sized,
     {
-        Ok(self.generate_trace(rng))
+        self.generate_trace(rng)
     }
 }
 
@@ -564,7 +576,7 @@ mod test {
         fn payload_not_exceed_max_bytes_v04(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut generator = V04::with_config(Config::default(), &mut rng);
+            let mut generator = V04::with_config(Config::default(), &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
             generator.to_bytes(rng, max_bytes, &mut bytes)?;
@@ -574,7 +586,7 @@ mod test {
         #[test]
         fn trace_spans_have_same_trace_id_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let generator = V04::with_config(Config::default(), &mut rng);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
 
             let trace = generator.generate(&mut rng)?;
             if let Some(first_span) = trace.spans.first() {
@@ -588,7 +600,7 @@ mod test {
         #[test]
         fn parent_child_structure_validity_v04(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
-            let generator = V04::with_config(Config::default(), &mut rng);
+            let generator = V04::with_config(Config::default(), &mut rng)?;
 
             let trace = generator.generate(&mut rng)?;
 

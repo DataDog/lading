@@ -214,7 +214,7 @@ impl Cache {
 
                 let mut ta = match config {
                     trace_agent::Config::V04(v04_config) => {
-                        v04::V04::with_config(*v04_config, &mut rng)
+                        v04::V04::with_config(*v04_config, &mut rng)?
                     }
                 };
 
