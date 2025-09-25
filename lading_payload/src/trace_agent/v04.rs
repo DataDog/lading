@@ -1,20 +1,8 @@
 //! Datadog Trace Agent v0.4 endpoint payload implementation.
 //!
-//! This module generates payloads compatible with the `/v0.4/traces` endpoint.
-//!
-//! V0.4 SPECIFICATION (pkg/trace/api/version.go:22-57):
-//! - Request: application/msgpack
-//! - Payload: "An array of arrays of Span" (pb.Traces = [][]Span)
-//! - Response: application/json service sampling rates
-//!
-//! V0.4 PROCESSING PATH:
-//! - Uses default case in `decodeTracerPayload()` (api.go:522)
-//! - Calls `decodeRequest()` expecting `pb.Traces` (api.go:523-524)
-//! - `MessagePack` decoded via `pb.Traces.UnmarshalMsg()` (api.go:897)
-//!
-//! Our implementation generates `Vec<Vec<Span>>` that serializes to msgpack
-//! in the exact format the v0.4 endpoint expects for `pb.Traces`.
-
+//! This module generates payloads compatible with the `/v0.4/traces`
+//! endpoint. Implemented with reference to Agent version
+//! 8cc5eb3e024ee54283efad4614175a065642bd9c.
 use std::{
     collections::BTreeMap,
     io::Write,
@@ -178,7 +166,8 @@ impl Config {
 /// encoding.
 ///
 /// This struct corresponds exactly to the Span message in
-/// pkg/proto/datadog/trace/span.proto (lines 101-147). The protobuf uses
+/// pkg/proto/datadog/trace/span.proto (lines 101-147), less `spanLinks` and
+/// `spanEvents` which we may choose to support in the future. The protobuf uses
 /// `@gotags: msg:"field_name"` annotations to generate `MessagePack`
 /// serialization methods via github.com/tinylib/msgp.
 ///
@@ -471,6 +460,10 @@ where
     }
 
     let error = i32::from(rng.random::<f32>() < generator.config.error_rate);
+    // SAFETY: 2**63 nanoseconds is ~292 years, which means that since we take
+    // UNIX_EPOCH as time zero we're safet to cast nanos to i64 until the year
+    // 2262.
+    #[allow(clippy::cast_possible_truncation)]
     Span {
         service: &context.service,
         name: &context.operation,
@@ -478,12 +471,10 @@ where
         trace_id,
         span_id,
         parent_id,
-        #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 safe for reasonable durations
         start: start_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_nanos() as i64,
-        #[allow(clippy::cast_possible_truncation)] // Duration.as_nanos() to i64 safe for reasonable durations
         duration: duration.as_nanos() as i64,
         error,
         meta,
