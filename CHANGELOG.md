@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `u64`.
 - Containers generator internals reworked to match the kubernetes generator's
   approach: explicit state machine driven by a `lading_throttle`.
-- Revamp trace-agent payload, limiting to v0.4. This is not a backward compatible change.
+- Revamp trace-agent payload, limiting to v0.4. This is a backwards incompatible change to any lading configuration using 'trace-agent' as a payload
 ## Added
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
