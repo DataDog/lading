@@ -155,8 +155,11 @@ impl TryFrom<&BytesThrottleConfig> for lading_throttle::Config {
 
 /// Concurrency management strategies for generators
 ///
-/// This enum represents the two main concurrency patterns used across generators:
-/// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk HEC pattern)
+/// This enum represents the two main concurrency patterns used across
+/// generators:
+///
+/// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk
+///   HEC pattern)
 /// - Workers: Multiple persistent worker tasks (TCP/UDP/Unix pattern)
 #[derive(Debug)]
 pub(super) enum ConcurrencyStrategy {

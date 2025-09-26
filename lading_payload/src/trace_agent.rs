@@ -28,6 +28,16 @@ pub enum Config {
     V04(v04::Config),
 }
 
+impl Config {
+    #[must_use]
+    /// Return the stringy version number of the config.
+    pub fn version(self) -> &'static str {
+        match self {
+            Self::V04(_) => "v0.4",
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config::V04(v04::Config::default())
