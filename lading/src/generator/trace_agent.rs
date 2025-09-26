@@ -366,8 +366,8 @@ impl TraceAgent {
 ///
 /// Implicitly this is confusing a generic request with a v0.4 request. Given
 /// that we only handle v0.4 load currently we consider this acceptable for the
-/// time being. Once lading_payload supports more than v0.4 this will need to be
-/// addressed.
+/// time being. Once `lading_payload` supports more than v0.4 this will need to
+/// be addressed.
 async fn handle_request(
     client: Client<HttpConnector, BoxBody<Bytes, hyper::Error>>,
     trace_endpoint: &Uri,
