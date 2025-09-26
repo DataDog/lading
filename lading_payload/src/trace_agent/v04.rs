@@ -6,6 +6,7 @@
 use std::{
     collections::BTreeMap,
     io::{self, Write},
+    rc::Rc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -36,10 +37,13 @@ pub enum ConfigError {
     ZeroValue,
     /// Error rate is not finite or outside [0.0, 1.0]
     InvalidErrorRate,
+    /// Context count exceeds maximum allowed value
+    TooManyContexts,
 }
 
 const STRING_POOL_SIZE: usize = 1_000_000;
 const MAX_TRACE_DEPTH: usize = 8;
+const MAX_CONTEXTS: u32 = 1_000_000;
 
 /// Generate a random duration within the given range
 #[allow(clippy::cast_possible_truncation)] // u128 nanos to u64 safe for reasonable duration ranges
@@ -125,6 +129,9 @@ impl Config {
         }
         if self.contexts.start() == 0 {
             return Err(ConfigError::ZeroValue);
+        }
+        if self.contexts.end() > MAX_CONTEXTS {
+            return Err(ConfigError::TooManyContexts);
         }
 
         if !self.spans_per_trace.valid().0 {
@@ -224,11 +231,26 @@ pub struct Trace<'a> {
     spans: Vec<Span<'a>>,
 }
 
+/// A template for service/operation/resource combinations used in trace generation
+#[derive(Debug, Clone)]
+struct TraceTemplate {
+    /// Handle to service name in the string pool
+    service: strings::Handle,
+    /// Handle to operation name in the string pool
+    operation: strings::Handle,
+    /// Handle to resource name in the string pool
+    resource: strings::Handle,
+    /// Handle to span type in the string pool
+    span_type: strings::Handle,
+}
+
 /// V0.4 payload generator
 #[derive(Debug, Clone)]
 pub struct V04 {
     config: Config,
-    str_pool: strings::Pool,
+    str_pool: Rc<strings::Pool>,
+    /// Pre-generated templates indexed by context ID
+    templates: Vec<TraceTemplate>,
 }
 
 impl V04 {
@@ -241,41 +263,90 @@ impl V04 {
     where
         R: Rng + ?Sized,
     {
-        let str_pool = strings::Pool::with_size(rng, STRING_POOL_SIZE);
-        Ok(Self { config, str_pool })
-    }
+        let str_pool = Rc::new(strings::Pool::with_size(rng, STRING_POOL_SIZE));
 
-    /// Generate a complete trace matching the datadog-agent's pb.Traces format.
-    ///
-    /// Based on analysis of pkg/trace/testutil/trace.go:102-128, this generates
-    /// proper trace hierarchies where all spans share the same `trace_id` and
-    /// have realistic parent-child timestamp relationships.
-    ///
-    /// Critical for v0.4: Each trace becomes one element in the `pb.Traces`
-    /// array, and all spans within must have the same `trace_id` for agent
-    /// acceptance.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if timestamp calculations result in invalid ranges
-    fn generate_trace<R>(&self, rng: &mut R) -> Result<Trace<'_>, Error>
+        let num_contexts = config.contexts.sample(rng) as usize;
+        let mut templates = Vec::with_capacity(num_contexts);
+
+        for _ in 0..num_contexts {
+            let service_len = config.service_name_length.sample(rng);
+            let operation_len = config.operation_name_length.sample(rng);
+            let resource_len = config.resource_name_length.sample(rng);
+            let span_type_len = config.span_type_length.sample(rng);
+
+            let (_, service) = str_pool
+                .of_size_with_handle(rng, service_len.into())
+                .ok_or(Error::StringGenerate)?;
+            let (_, operation) = str_pool
+                .of_size_with_handle(rng, operation_len.into())
+                .ok_or(Error::StringGenerate)?;
+            let (_, resource) = str_pool
+                .of_size_with_handle(rng, resource_len.into())
+                .ok_or(Error::StringGenerate)?;
+            let (_, span_type) = str_pool
+                .of_size_with_handle(rng, span_type_len.into())
+                .ok_or(Error::StringGenerate)?;
+
+            templates.push(TraceTemplate {
+                service,
+                operation,
+                resource,
+                span_type,
+            });
+        }
+
+        Ok(Self {
+            config,
+            str_pool,
+            templates,
+        })
+    }
+}
+
+impl<'a> Generator<'a> for V04 {
+    type Output = Trace<'a>;
+    type Error = Error;
+
+    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
     where
-        R: Rng + ?Sized,
+        R: rand::Rng + ?Sized,
     {
         let trace_id = rng.random();
         let span_count = self.config.spans_per_trace.sample(rng);
         let mut spans = Vec::with_capacity(span_count as usize);
 
-        // Generate service name once per trace - all spans share it
-        let service_len = self.config.service_name_length.sample(rng);
-        let service = self.str_pool.of_size(rng, service_len.into()).unwrap_or("");
+        // Select a template for this trace - all spans share the same
+        // service/operation/resource/type
+        let template_index = rng.random_range(0..self.templates.len());
+        let template = &self.templates[template_index];
 
         let base_timestamp = UNIX_EPOCH;
         let root_span_id = rng.random();
         let root_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
-        let root_span = self.generate_span(
+
+        let service = self
+            .str_pool
+            .using_handle(template.service)
+            .ok_or(Error::StringGenerate)?;
+        let operation = self
+            .str_pool
+            .using_handle(template.operation)
+            .ok_or(Error::StringGenerate)?;
+        let resource = self
+            .str_pool
+            .using_handle(template.resource)
+            .ok_or(Error::StringGenerate)?;
+        let span_type = self
+            .str_pool
+            .using_handle(template.span_type)
+            .ok_or(Error::StringGenerate)?;
+
+        let root_span = self.create_span(
             rng,
             service,
+            operation,
+            resource,
+            span_type,
             trace_id,
             root_span_id,
             0, // Root spans have parent_id = 0
@@ -293,16 +364,18 @@ impl V04 {
                 .copied()
                 .ok_or(Error::StringGenerate)?;
 
-            // Child spans get independent random timing, not constrained by
-            // parent.
+            // Child spans get independent random timing, not constrained by parent.
             let span_start_offset = random_duration(rng, Duration::ZERO, Duration::MAX);
             let span_start = base_timestamp + span_start_offset;
             let span_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
 
             let span_id = rng.random();
-            let span = self.generate_span(
+            let span = self.create_span(
                 rng,
                 service,
+                operation,
+                resource,
+                span_type,
                 trace_id,
                 span_id,
                 parent_id,
@@ -322,12 +395,15 @@ impl V04 {
 }
 
 impl V04 {
-    /// Generate a single span with per-span operation/resource/type but shared service
+    /// Create a single span with the provided strings
     #[allow(clippy::too_many_arguments)]
-    fn generate_span<'a, R>(
+    fn create_span<'a, R>(
         &'a self,
         rng: &mut R,
         service: &'a str,
+        operation: &'a str,
+        resource: &'a str,
+        span_type: &'a str,
         trace_id: u64,
         span_id: u64,
         parent_id: u64,
@@ -337,25 +413,6 @@ impl V04 {
     where
         R: Rng + ?Sized,
     {
-        // Generate unique operation, resource, and span_type for each span
-        let operation_len = self.config.operation_name_length.sample(rng);
-        let operation = self
-            .str_pool
-            .of_size(rng, operation_len.into())
-            .unwrap_or("");
-
-        let resource_len = self.config.resource_name_length.sample(rng);
-        let resource = self
-            .str_pool
-            .of_size(rng, resource_len.into())
-            .unwrap_or("");
-
-        let span_type_len = self.config.span_type_length.sample(rng);
-        let span_type = self
-            .str_pool
-            .of_size(rng, span_type_len.into())
-            .unwrap_or("");
-
         let tag_count = self.config.tags_per_span.sample(rng);
         let mut meta = BTreeMap::default();
         for _ in 0..tag_count {
@@ -363,7 +420,6 @@ impl V04 {
             let value_len = self.config.tag_value_length.sample(rng);
 
             let key = self.str_pool.of_size(rng, key_len.into()).unwrap_or("");
-
             let value = self.str_pool.of_size(rng, value_len.into()).unwrap_or("");
 
             meta.insert(key, value);
@@ -379,7 +435,7 @@ impl V04 {
 
         let error = i32::from(rng.random::<f32>() < self.config.error_rate);
         // SAFETY: 2**63 nanoseconds is ~292 years, which means that since we take
-        // UNIX_EPOCH as time zero we're safet to cast nanos to i64 until the year
+        // UNIX_EPOCH as time zero we're safe to cast nanos to i64 until the year
         // 2262.
         #[allow(clippy::cast_possible_truncation)]
         Ok(Span {
@@ -408,18 +464,6 @@ impl V04 {
             kind: span_type,
             meta_struct: BTreeMap::default(),
         })
-    }
-}
-
-impl<'a> Generator<'a> for V04 {
-    type Output = Trace<'a>;
-    type Error = Error;
-
-    fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Error>
-    where
-        R: rand::Rng + ?Sized,
-    {
-        self.generate_trace(rng)
     }
 }
 
@@ -482,27 +526,30 @@ impl crate::Serialize for V04 {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
+    use serde::Serialize;
 
     use super::{ConfRange, Config, V04};
-    use crate::{Generator, Serialize};
+    use crate::Generator;
 
     proptest! {
         #[test]
-        fn payload_not_exceed_max_bytes_v04(seed: u64, max_bytes: u16) {
+        fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut generator = V04::with_config(Config::default(), &mut rng)?;
 
             let mut bytes = Vec::with_capacity(max_bytes);
-            generator.to_bytes(rng, max_bytes, &mut bytes)?;
+            crate::Serialize::to_bytes(&mut generator, rng, max_bytes, &mut bytes)?;
             debug_assert!(bytes.len() <= max_bytes);
         }
 
-        /// Property: Spans within a trace share the same trace-id
+        /// Property: Spans within a trace share the same trace-id.
         #[test]
-        fn trace_spans_have_same_trace_id_v04(seed: u64) {
+        fn trace_spans_have_same_trace_id(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng)?;
 
@@ -515,18 +562,17 @@ mod test {
             }
         }
 
-        /// Property: All other spans within a trace have parent_id pointing to another span within the trace
+        /// Property: All other spans within a trace have parent_id pointing to
+        /// another span within the trace.
         #[test]
-        fn parent_child_structure_validity_v04(seed: u64) {
+        fn parent_child_structure_validity(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng)?;
 
             let trace = generator.generate(&mut rng)?;
 
-            // Verify that all non-root spans point to existing spans within the trace
             for span in &trace.spans {
                 if span.parent_id != 0 {
-                    // Parent must exist in the trace
                     prop_assert!(trace.spans.iter().any(|s| s.span_id == span.parent_id),
                         "Non-root spans must have parent_id pointing to another span in the trace");
                 }
@@ -534,7 +580,7 @@ mod test {
         }
 
         #[test]
-        fn config_validation_works_v04(
+        fn config_validation_works(
             contexts_min in 1u32..=1000,
             contexts_max in 1u32..=1000,
             error_rate in 0.0f32..=1.0
@@ -550,9 +596,9 @@ mod test {
             prop_assert!(config.valid().is_ok());
         }
 
-        /// Property: Spans within a trace have the same service name
+        /// Property: Spans within a trace have the same service name.
         #[test]
-        fn trace_spans_share_same_service_v04(seed: u64) {
+        fn trace_spans_share_same_service(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng)?;
 
@@ -566,9 +612,9 @@ mod test {
             }
         }
 
-        /// Property: Exactly one span has parent_id = 0 (the root span)
+        /// Property: Exactly one span has parent_id = 0: the root span.
         #[test]
-        fn exactly_one_root_span_v04(seed: u64) {
+        fn exactly_one_root_span(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng)?;
 
@@ -577,9 +623,9 @@ mod test {
             prop_assert_eq!(root_span_count, 1, "Trace must have exactly one root span (parent_id = 0)");
         }
 
-        /// Property: Each span has a unique span_id within the trace
+        /// Property: Each span has a unique span_id within the trace.
         #[test]
-        fn unique_span_ids_within_trace_v04(seed: u64) {
+        fn unique_span_ids_within_trace(seed: u64) {
             let mut rng = SmallRng::seed_from_u64(seed);
             let generator = V04::with_config(Config::default(), &mut rng)?;
 
@@ -589,10 +635,34 @@ mod test {
                 prop_assert!(span_ids.insert(span.span_id), "Each span must have a unique span_id within the trace");
             }
         }
+
+        /// Property: Context are bounded.
+        #[test]
+        fn contexts_are_bounded(seed: u64, contexts in 1u32..MAX_CONTEXTS, total_traces in 1u32..10_000) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let mut config = Config::default();
+            config.contexts = ConfRange::Constant(contexts);
+
+            let generator = V04::with_config(config, &mut rng)?;
+
+            let mut combinations = HashSet::new();
+            for _ in 0..total_traces {
+                let trace = generator.generate(&mut rng)?;
+                for span in &trace.spans {
+                    let combination = (span.service, span.name, span.resource, span.kind);
+                    combinations.insert(combination);
+                }
+            }
+
+            prop_assert!(combinations.len() <= contexts as usize,
+                "Found {} unique contexts, expected <= {contexts}",
+                combinations.len(), contexts);
+        }
     }
 
     #[test]
-    fn config_validation_catches_invalid_error_rate_v04() {
+    fn config_validation_catches_invalid_error_rate() {
         let mut config = Config::default();
         config.error_rate = 1.5; // Invalid
         assert!(config.valid().is_err());
@@ -602,9 +672,55 @@ mod test {
     }
 
     #[test]
-    fn config_validation_catches_zero_contexts_v04() {
+    fn config_validation_catches_too_many_contexts() {
+        use crate::common::config::ConfRange;
+
+        let mut config = Config::default();
+        config.contexts = ConfRange::Constant(super::MAX_CONTEXTS + 1);
+        assert_eq!(config.valid(), Err(super::ConfigError::TooManyContexts));
+
+        config.contexts = ConfRange::Inclusive {
+            min: 1,
+            max: super::MAX_CONTEXTS + 100,
+        };
+        assert_eq!(config.valid(), Err(super::ConfigError::TooManyContexts));
+    }
+
+    #[test]
+    fn config_validation_catches_zero_contexts() {
         let mut config = Config::default();
         config.contexts = ConfRange::Constant(0);
         assert!(config.valid().is_err());
+    }
+
+    // Test to enforce size limits on in-memory representations, making sure we
+    // fit well under MAX_CONTEXTS without OOM'ing.
+    #[test]
+    fn template_memory_usage_measurement() {
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        let template_size = std::mem::size_of::<super::TraceTemplate>();
+        assert_eq!(template_size, 32);
+
+        let mut small_config = Config::default();
+        small_config.contexts = ConfRange::Constant(1000);
+        let small_generator = V04::with_config(small_config, &mut rng).unwrap();
+        assert_eq!(small_generator.templates.len(), 1000);
+
+        let mut large_config = Config::default();
+        large_config.contexts = ConfRange::Constant(100_000);
+        let large_generator = V04::with_config(large_config, &mut rng).unwrap();
+        assert_eq!(large_generator.templates.len(), 100_000);
+
+        let trace = large_generator.generate(&mut rng).unwrap();
+        assert!(!trace.spans.is_empty());
+        assert!(trace.spans.len() <= 50); // max from default config
+
+        let mut serialized = Vec::new();
+        let traces = vec![trace.spans];
+        traces
+            .serialize(&mut rmp_serde::Serializer::new(&mut serialized))
+            .unwrap();
+        assert_eq!(serialized.len(), 18_234);
     }
 }
