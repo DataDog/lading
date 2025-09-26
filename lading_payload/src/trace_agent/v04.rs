@@ -70,7 +70,7 @@ pub struct Config {
     /// Each trace gets one service, but different traces can have different services.
     pub contexts: ConfRange<u32>,
     /// Number of spans per trace.
-    pub spans_per_trace: ConfRange<u16>,
+    pub spans_per_trace: ConfRange<u8>,
     /// Number of tags per span.
     pub tags_per_span: ConfRange<u8>,
     /// Number of metrics per span.
@@ -638,7 +638,7 @@ mod test {
 
         /// Property: Context are bounded.
         #[test]
-        fn contexts_are_bounded(seed: u64, contexts in 1u32..MAX_CONTEXTS, total_traces in 1u32..10_000) {
+        fn contexts_are_bounded(seed: u64, contexts in 1u32..super::MAX_CONTEXTS, total_traces in 1u32..10_000) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let mut config = Config::default();
@@ -657,7 +657,7 @@ mod test {
 
             prop_assert!(combinations.len() <= contexts as usize,
                 "Found {} unique contexts, expected <= {contexts}",
-                combinations.len(), contexts);
+                combinations.len());
         }
     }
 
