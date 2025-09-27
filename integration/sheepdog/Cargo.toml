@@ -11,7 +11,7 @@ publish = false
 anyhow = "1.0"
 escargot = "0.5.14"
 shared = { path = "../shared" }
-tempfile = "3.22"
+tempfile = "3.23"
 tokio = { version = "1.47", features = [
   "rt",
   "macros",
