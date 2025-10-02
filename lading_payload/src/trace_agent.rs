@@ -20,7 +20,7 @@ pub mod v04;
 /// Each version has different format requirements and performance characteristics.
 /// This allows users to specify which trace agent protocol version to target.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
-#[serde(tag = "version", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Config {
     /// Version 0.4: msgpack array of arrays of spans
