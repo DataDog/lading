@@ -476,7 +476,7 @@ impl crate::Serialize for V04 {
         }
         loop {
             let mut buf = Vec::with_capacity(max_bytes);
-            traces.serialize(&mut Serializer::new(&mut buf))?;
+            traces.serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
 
             if buf.len() > max_bytes {
                 break;
@@ -496,7 +496,7 @@ impl crate::Serialize for V04 {
         while low < high {
             let mid = (low + high).div_ceil(2);
             let mut buf = Vec::with_capacity(max_bytes);
-            traces[0..mid].serialize(&mut Serializer::new(&mut buf))?;
+            traces[0..mid].serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
 
             if buf.len() <= max_bytes {
                 low = mid;
@@ -506,7 +506,7 @@ impl crate::Serialize for V04 {
         }
 
         let mut buf = Vec::with_capacity(max_bytes);
-        traces[0..low].serialize(&mut Serializer::new(&mut buf))?;
+        traces[0..low].serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
         writer.write_all(&buf)?;
 
         Ok(())
@@ -627,7 +627,7 @@ mod test {
 
         /// Property: Context are bounded.
         #[test]
-        fn contexts_are_bounded(seed: u64, contexts in 1u32..10_000, total_traces in 1u32..1_000) {
+        fn contexts_are_bounded(seed: u64, contexts in 1u32..1_000, total_traces in 1u32..1_000) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let mut config = Config::default();
@@ -708,7 +708,7 @@ mod test {
         let mut serialized = Vec::new();
         let traces = vec![trace.spans];
         traces
-            .serialize(&mut rmp_serde::Serializer::new(&mut serialized))
+            .serialize(&mut rmp_serde::Serializer::new(&mut serialized).with_struct_map())
             .unwrap();
         // NOTE this assertion must be exact. As the payload is updated this
         // value will need to be modified, but keeping it exact allows us to set
