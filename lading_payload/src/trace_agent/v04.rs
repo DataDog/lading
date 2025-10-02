@@ -724,6 +724,6 @@ mod test {
         traces
             .serialize(&mut rmp_serde::Serializer::new(&mut serialized).with_struct_map())
             .unwrap();
-        assert_eq!(serialized.len(), 18_222);
+        assert_eq!(serialized.len(), 19_086);
     }
 }
