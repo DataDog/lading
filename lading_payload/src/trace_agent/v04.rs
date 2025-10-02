@@ -211,16 +211,19 @@ pub struct Span<'a> {
     /// there is not.
     error: i32,
     /// `meta` is a mapping from tag name to tag value for string-valued tags.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     meta: BTreeMap<&'a str, &'a str>,
     /// `metrics` is a mapping from tag name to tag value for numeric-valued
     /// tags.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     metrics: BTreeMap<&'a str, f64>,
     /// `kind` is the type of the service with which this span is associated.
     /// Example values: web, db, lambda.
-    #[serde(alias = "type")]
+    #[serde(rename = "type")]
     kind: &'a str,
     /// `meta_struct` is a registry of structured "other" data used by, e.g.,
     /// `AppSec`.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     meta_struct: BTreeMap<&'a str, Vec<u8>>,
 }
 
@@ -721,6 +724,6 @@ mod test {
         traces
             .serialize(&mut rmp_serde::Serializer::new(&mut serialized))
             .unwrap();
-        assert_eq!(serialized.len(), 18_234);
+        assert_eq!(serialized.len(), 18_222);
     }
 }
