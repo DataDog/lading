@@ -214,6 +214,14 @@ pub enum Error {
         /// The cache size that exceeded the limit
         size: u128,
     },
+    /// Target URI missing required component
+    #[error("Target URI missing {component}: {uri}")]
+    MissingUriComponent {
+        /// The missing component
+        component: &'static str,
+        /// The URI that was missing the component
+        uri: String,
+    },
 }
 
 /// The Datadog Trace Agent generator.
@@ -271,13 +279,26 @@ impl TraceAgent {
             )?,
         });
 
-        let trace_endpoint = format!(
-            "{uri}/{version}/traces",
-            uri = config.target_uri,
-            version = config.variant.version()
-        )
-        .parse()
-        .map_err(|e: hyper::http::uri::InvalidUri| Error::Http(e.into()))?;
+        let trace_endpoint =
+            Uri::builder()
+                .authority(
+                    config
+                        .target_uri
+                        .authority()
+                        .ok_or_else(|| Error::MissingUriComponent {
+                            component: "authority",
+                            uri: config.target_uri.to_string(),
+                        })?
+                        .as_str(),
+                )
+                .scheme(config.target_uri.scheme_str().ok_or_else(|| {
+                    Error::MissingUriComponent {
+                        component: "scheme",
+                        uri: config.target_uri.to_string(),
+                    }
+                })?)
+                .path_and_query(config.variant.endpoint_path())
+                .build()?;
 
         let concurrency =
             ConcurrencyStrategy::new(NonZeroU16::new(config.parallel_connections), false);

@@ -36,6 +36,14 @@ impl Config {
             Self::V04(_) => "v0.4",
         }
     }
+
+    #[must_use]
+    /// Return the API endpoint path for this trace agent version.
+    pub fn endpoint_path(self) -> &'static str {
+        match self {
+            Self::V04(_) => "/v0.4/traces",
+        }
+    }
 }
 
 impl Default for Config {
