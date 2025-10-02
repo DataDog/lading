@@ -427,7 +427,17 @@ async fn handle_request(
                         }
                     }
                     code => {
-                        warn!(code = ?code, "Unhandled status code, ignoring");
+                        let location = response
+                            .headers()
+                            .get("location")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("none");
+                        warn!(
+                            code = ?code,
+                            uri = %trace_endpoint,
+                            location = location,
+                            "Unhandled status code, ignoring"
+                        );
                         return;
                     }
                 }
