@@ -36,12 +36,13 @@ done
 # Validate crate argument
 if [ -z "$CRATE" ]; then
     echo "Usage: $0 [--check|--list] <crate> [target]"
-    echo "Valid crates: lading_payload"
+    echo "Valid crates: lading_payload, lading"
     echo ""
     echo "Examples:"
     echo "  $0 --check lading_payload       # Check all fuzz targets build"
     echo "  $0 --list lading_payload        # List available fuzz targets"
     echo "  $0 lading_payload <target>      # Run specific fuzz target"
+    echo "  $0 lading dogstatsd_parser      # Run lading dogstatsd parser fuzz target"
     exit 1
 fi
 
@@ -50,9 +51,12 @@ case "$CRATE" in
     lading_payload)
         # Valid crate
         ;;
+    lading)
+        # Valid crate
+        ;;
     *)
         echo "Error: Invalid crate '$CRATE'"
-        echo "Valid crates: lading_payload"
+        echo "Valid crates: lading_payload, lading"
         exit 1
         ;;
 esac

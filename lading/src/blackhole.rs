@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 mod common;
+pub mod dogstatsd;
 pub mod http;
 pub mod otlp;
 pub mod splunk_hec;
@@ -23,6 +24,9 @@ pub enum Error {
     /// See [`crate::blackhole::tcp::Error`] for details.
     #[error(transparent)]
     Tcp(tcp::Error),
+    /// See [`crate::blackhole::dogstatsd::Error`] for details.
+    #[error(transparent)]
+    Dogstatsd(dogstatsd::Error),
     /// See [`crate::blackhole::http::Error`] for details.
     #[error(transparent)]
     Http(http::Error),
@@ -75,6 +79,8 @@ pub struct General {
 pub enum Inner {
     /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::blackhole::dogstatsd::Config`] for details.
+    Dogstatsd(dogstatsd::Config),
     /// See [`crate::blackhole::http::Config`] for details.
     Http(http::Config),
     /// See [`crate::blackhole::splunk_hec::Config`] for details.
@@ -99,6 +105,8 @@ pub enum Inner {
 pub enum Server {
     /// See [`crate::blackhole::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::blackhole::dogstatsd::Dogstatsd`] for details.
+    Dogstatsd(dogstatsd::Dogstatsd),
     /// See [`crate::blackhole::http::Http`] for details.
     Http(http::Http),
     /// See [`crate::blackhole::splunk_hec::SplunkHec`] for details.
@@ -128,6 +136,9 @@ impl Server {
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
+            Inner::Dogstatsd(conf) => {
+                Self::Dogstatsd(dogstatsd::Dogstatsd::new(config.general, conf, shutdown))
+            }
             Inner::Http(conf) => {
                 Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
             }
@@ -163,6 +174,7 @@ impl Server {
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
+            Server::Dogstatsd(inner) => inner.run().await.map_err(Error::Dogstatsd),
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
             Server::Udp(inner) => Box::pin(inner.run()).await.map_err(Error::Udp),
             Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
