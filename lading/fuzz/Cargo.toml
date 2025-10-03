@@ -1,0 +1,28 @@
+[package]
+name = "lading-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lading-fuzz = { path = "../../lading_fuzz" }
+
+[dependencies.lading]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "dogstatsd_parser"
+path = "fuzz_targets/dogstatsd_parser.rs"
+test = false
+doc = false

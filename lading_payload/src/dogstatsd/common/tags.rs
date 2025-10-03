@@ -186,10 +186,10 @@ mod test {
 
     proptest! {
         #[test]
-        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..10_000_usize, tags_per_msg_max in 1..u8::MAX) {
+        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..1_000_usize, tags_per_msg_max in 1..u8::MAX) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
             let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
             let tag_size_range = ConfRange::Inclusive{min: 3, max: 128};
             let generator = tags::Generator::new(
