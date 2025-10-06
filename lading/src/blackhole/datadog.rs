@@ -109,13 +109,14 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
-use metrics::counter;
+use metrics::{counter, gauge};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
+use ustr::Ustr;
 
-use crate::proto::datadog::intake::metrics::MetricPayload;
+use crate::proto::datadog::intake::metrics::{MetricPayload, metric_payload::MetricSeries};
 
 use super::General;
 
@@ -284,19 +285,15 @@ async fn handle_request(
             };
 
             match MetricPayload::decode(&decompressed[..]) {
-                Ok(_payload) => {
-                    // info!(
-                    //     "Parsed protobuf MetricPayload: {} series",
-                    //     payload.series.len()
-                    // );
-                    // for series in &payload.series {
-                    //     info!(
-                    //         "  Series: metric={}, points={}, tags={}",
-                    //         series.metric,
-                    //         series.points.len(),
-                    //         series.tags.len()
-                    //     );
-                    // }
+                Ok(payload) => {
+                    info!(
+                        "Parsed protobuf MetricPayload: {} series",
+                        payload.series.len()
+                    );
+
+                    for series in &payload.series {
+                        emit_protobuf_metric(series);
+                    }
                 }
                 Err(e) => {
                     warn!("Failed to parse protobuf: {e}");
@@ -331,6 +328,48 @@ fn decompress_if_needed(body: &[u8], content_encoding: &str) -> Result<Vec<u8>, 
         _ => {
             // No compression or unknown - return as-is
             Ok(body.to_vec())
+        }
+    }
+}
+
+fn emit_protobuf_metric(series: &MetricSeries) {
+    if series.points.is_empty() {
+        return;
+    }
+
+    // Intern the metric name to get a 'static str for the metrics macros.
+    let metric_name: &'static str = Ustr::from(&series.metric).as_str();
+    let labels: &[(&str, &str)] = &[
+        ("component", "datadog_agent"),
+        ("source", "protobuf_intake"),
+    ];
+
+    // Metric types from the agent_payload.proto:
+    //
+    // - COUNT: Monotonic cumulative counter value
+    // - RATE: Already computed per-second rate (not cumulative)
+    // - GAUGE: Point-in-time value
+    //
+    // Only the first maps to metrics' counter!, the rest are point-in-time
+    // values so gauge!.
+    match series.r#type {
+        1 => {
+            // COUNT - emit all points since each has a different timestamp
+            for point in &series.points {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let value = point.value as u64;
+                counter!(metric_name, labels).absolute(value);
+            }
+        }
+        2 => {
+            // RATE - already a per-second rate, emit last point as gauge
+            let last_point = &series.points[series.points.len() - 1];
+            gauge!(metric_name, labels).set(last_point.value);
+        }
+        _ => {
+            // GAUGE (3) or UNSPECIFIED (0) - emit last point
+            let last_point = &series.points[series.points.len() - 1];
+            gauge!(metric_name, labels).set(last_point.value);
         }
     }
 }
