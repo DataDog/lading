@@ -427,7 +427,7 @@ async fn inner_main(
                 capture_manager
                     .start()
                     .await
-                    .expect("failed to start capture manager");
+                    .expect("capture manager suffered unexpected failure");
             });
             capture_manager_handle = Some(handle);
         }

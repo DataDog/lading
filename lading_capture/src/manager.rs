@@ -25,7 +25,7 @@ use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
 use std::sync::LazyLock;
-use tracing::info;
+use tracing::{error, info};
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
 /// `CaptureManager` polling interval.
