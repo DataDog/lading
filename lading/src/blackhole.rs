@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 mod common;
+pub mod datadog;
 pub mod http;
 pub mod otlp;
 pub mod splunk_hec;
@@ -23,6 +24,9 @@ pub enum Error {
     /// See [`crate::blackhole::tcp::Error`] for details.
     #[error(transparent)]
     Tcp(tcp::Error),
+    /// See [`crate::blackhole::datadog::Error`] for details.
+    #[error(transparent)]
+    Datadog(datadog::Error),
     /// See [`crate::blackhole::http::Error`] for details.
     #[error(transparent)]
     Http(http::Error),
@@ -75,6 +79,8 @@ pub struct General {
 pub enum Inner {
     /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),
+    /// See [`crate::blackhole::datadog::Config`] for details.
+    Datadog(datadog::Config),
     /// See [`crate::blackhole::http::Config`] for details.
     Http(http::Config),
     /// See [`crate::blackhole::splunk_hec::Config`] for details.
@@ -99,6 +105,8 @@ pub enum Inner {
 pub enum Server {
     /// See [`crate::blackhole::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
+    /// See [`crate::blackhole::datadog::Datadog`] for details.
+    Datadog(datadog::Datadog),
     /// See [`crate::blackhole::http::Http`] for details.
     Http(http::Http),
     /// See [`crate::blackhole::splunk_hec::SplunkHec`] for details.
@@ -128,6 +136,9 @@ impl Server {
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
+            Inner::Datadog(conf) => {
+                Self::Datadog(datadog::Datadog::new(config.general, conf, shutdown))
+            }
             Inner::Http(conf) => {
                 Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
             }
@@ -163,6 +174,7 @@ impl Server {
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
+            Server::Datadog(inner) => inner.run().await.map_err(Error::Datadog),
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
             Server::Udp(inner) => Box::pin(inner.run()).await.map_err(Error::Udp),
             Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
