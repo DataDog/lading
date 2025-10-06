@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
 - `logrotate_fs` now randomizes its read offset from the block cache in order to return unique contents per log file
+- Added a 'Datadog Intake' blackhole, supporting only the v2 metrics protobuf
+  protocol for now. This captures metrics submitted into capture files.
 
 ## [0.28.0]
 ## Added
