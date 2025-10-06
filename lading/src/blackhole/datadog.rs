@@ -259,11 +259,11 @@ async fn handle_request(
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("none");
+        .unwrap_or("unspecified");
     let content_encoding = headers
         .get(header::CONTENT_ENCODING)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("none");
+        .unwrap_or("unspecified");
 
     info!(
         "Request: path={path}, content_type={content_type}, content_encoding={content_encoding}, body_size={}",
@@ -271,7 +271,7 @@ async fn handle_request(
     );
 
     let status = match (path.as_str(), content_type) {
-        ("/api/v2/series", ct) if ct.contains("protobuf") => {
+        ("/api/v2/series", "application/x-protobuf") => {
             let decompressed = match decompress_if_needed(&whole_body, content_encoding) {
                 Ok(data) => data,
                 Err(e) => {
@@ -284,19 +284,19 @@ async fn handle_request(
             };
 
             match MetricPayload::decode(&decompressed[..]) {
-                Ok(payload) => {
-                    info!(
-                        "Parsed protobuf MetricPayload: {} series",
-                        payload.series.len()
-                    );
-                    for series in &payload.series {
-                        info!(
-                            "  Series: metric={}, points={}, tags={}",
-                            series.metric,
-                            series.points.len(),
-                            series.tags.len()
-                        );
-                    }
+                Ok(_payload) => {
+                    // info!(
+                    //     "Parsed protobuf MetricPayload: {} series",
+                    //     payload.series.len()
+                    // );
+                    // for series in &payload.series {
+                    //     info!(
+                    //         "  Series: metric={}, points={}, tags={}",
+                    //         series.metric,
+                    //         series.points.len(),
+                    //         series.tags.len()
+                    //     );
+                    // }
                 }
                 Err(e) => {
                     warn!("Failed to parse protobuf: {e}");
