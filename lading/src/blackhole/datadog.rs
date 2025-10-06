@@ -99,9 +99,10 @@
 //! - Traces: `pkg/trace/api/api.go`
 //! - Endpoints: `comp/forwarder/defaultforwarder/endpoints/endpoints.go`
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
+use flate2::read::{GzDecoder, ZlibDecoder};
 use http_body_util::{BodyExt, Full};
 use hyper::{
     Method, Request, Response, StatusCode, body::Incoming, header, server::conn::http1,
@@ -109,9 +110,12 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use metrics::counter;
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
+
+use crate::proto::datadog::intake::metrics::MetricPayload;
 
 use super::General;
 
@@ -220,9 +224,14 @@ async fn handle_request(
     state: Arc<AppState>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let path = req.uri().path().to_string();
-    let method = req.method().clone();
-    let headers = req.headers().clone();
+    let path = req.uri().path();
+    let method = req.method();
+    let headers = req.headers();
+
+    // Clone what we need before consuming req
+    let path = path.to_string();
+    let method = method.clone();
+    let headers = headers.clone();
 
     if method != Method::POST {
         return Ok(Response::builder()
@@ -247,7 +256,6 @@ async fn handle_request(
 
     counter!("bytes_received", labels).increment(whole_body.len() as u64);
 
-    // Log request details for observation
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -262,12 +270,69 @@ async fn handle_request(
         whole_body.len()
     );
 
-    let status = StatusCode::ACCEPTED;
+    let status = match (path.as_str(), content_type) {
+        ("/api/v2/series", ct) if ct.contains("protobuf") => {
+            let decompressed = match decompress_if_needed(&whole_body, content_encoding) {
+                Ok(data) => data,
+                Err(e) => {
+                    warn!("Failed to decompress body: {e}");
+                    return Ok(Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Full::new(Bytes::new()))
+                        .expect("building response should not fail"));
+                }
+            };
+
+            match MetricPayload::decode(&decompressed[..]) {
+                Ok(payload) => {
+                    info!(
+                        "Parsed protobuf MetricPayload: {} series",
+                        payload.series.len()
+                    );
+                    for series in &payload.series {
+                        info!(
+                            "  Series: metric={}, points={}, tags={}",
+                            series.metric,
+                            series.points.len(),
+                            series.tags.len()
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to parse protobuf: {e}");
+                }
+            }
+            StatusCode::ACCEPTED
+        }
+        _ => StatusCode::ACCEPTED,
+    };
 
     Ok(Response::builder()
         .status(status)
         .body(Full::new(Bytes::new()))
         .expect("building response should not fail"))
+}
+
+fn decompress_if_needed(body: &[u8], content_encoding: &str) -> Result<Vec<u8>, io::Error> {
+    match content_encoding {
+        "gzip" => {
+            let mut decoder = GzDecoder::new(body);
+            let mut decompressed = Vec::new();
+            io::Read::read_to_end(&mut decoder, &mut decompressed)?;
+            Ok(decompressed)
+        }
+        "deflate" => {
+            let mut decoder = ZlibDecoder::new(body);
+            let mut decompressed = Vec::new();
+            io::Read::read_to_end(&mut decoder, &mut decompressed)?;
+            Ok(decompressed)
+        }
+        "zstd" => zstd::decode_all(body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
+        _ => {
+            // No compression or unknown - return as-is
+            Ok(body.to_vec())
+        }
+    }
 }
 
 #[cfg(test)]
