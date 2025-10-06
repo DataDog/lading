@@ -106,6 +106,9 @@ tempfile = "3.22"
 proptest = { workspace = true }
 tower-test = "0.4"
 
+[build-dependencies]
+prost-build = { workspace = true }
+
 [features]
 default = []
 logrotate_fs = ["fuser"]
