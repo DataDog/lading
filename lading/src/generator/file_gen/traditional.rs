@@ -248,7 +248,11 @@ impl Child {
                 .truncate(true)
                 .write(true)
                 .open(&path)
-                .await?,
+                .await
+                .map_err(|err| {
+                    error!("Failed to open file {path:?}: {err}. Ensure parent directory exists.");
+                    err
+                })?,
         );
 
         let mut handle = self.block_cache.handle();
@@ -290,7 +294,11 @@ impl Child {
                                         .truncate(false)
                                         .write(true)
                                         .open(&path)
-                                        .await?,
+                                        .await
+                                        .map_err(|err| {
+                                            error!("Failed to open file {path:?}: {err}. Ensure parent directory exists.");
+                                            err
+                                        })?,
                                 );
                                 total_bytes_written = 0;
                             }
