@@ -23,7 +23,6 @@ use std::{
 };
 
 use byte_unit::Byte;
-use futures::future::join_all;
 use metrics::counter;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
@@ -47,6 +46,14 @@ pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
     Io(#[from] ::std::io::Error),
+    /// Failed to open a file for writing.
+    #[error("Failed to open file {path:?}: {source}. Ensure parent directory exists.")]
+    FileOpen {
+        /// The path that failed to open
+        path: PathBuf,
+        /// The underlying IO error
+        source: ::std::io::Error,
+    },
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
@@ -209,16 +216,64 @@ impl Server {
     #[allow(clippy::cast_precision_loss)]
     #[allow(clippy::cast_possible_truncation)]
     pub async fn spin(mut self) -> Result<(), Error> {
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        for res in join_all(self.handles.drain(..)).await {
-            match res {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => return Err(err),
-                Err(err) => return Err(Error::Child(err)),
+        use tokio::task::JoinSet;
+
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
+
+        let mut child_tasks = JoinSet::new();
+        for handle in self.handles.drain(..) {
+            child_tasks.spawn(async move { handle.await });
+        }
+
+        loop {
+            tokio::select! {
+                () = &mut shutdown_wait => {
+                    info!("shutdown signal received");
+                    // Graceful shutdown: wait for all children to complete
+                    while let Some(joinset_spawn_result) = child_tasks.join_next().await {
+                        let joinset_spawn_result: Result<Result<Result<(), Error>, JoinError>, JoinError> = joinset_spawn_result;
+                        let original_handle_result: Result<Result<(), Error>, JoinError> = joinset_spawn_result.map_err(Error::Child)?;
+                        let child_spin_result: Result<(), Error> = original_handle_result.map_err(Error::Child)?;
+                        child_spin_result?;
+                    }
+                    return Ok(());
+                }
+                Some(joinset_spawn_result) = child_tasks.join_next() => {
+                    let joinset_spawn_result: Result<Result<Result<(), Error>, JoinError>, JoinError> = joinset_spawn_result;
+
+                    let original_handle_result: Result<Result<(), Error>, JoinError> = match joinset_spawn_result {
+                        Ok(r) => r,
+                        Err(join_err) => {
+                            error!("JoinSet spawned task panicked: {join_err}");
+                            return Err(Error::Child(join_err));
+                        }
+                    };
+
+                    let child_spin_result: Result<(), Error> = match original_handle_result {
+                        Ok(r) => r,
+                        Err(join_err) => {
+                            error!("Original child task panicked: {join_err}");
+                            return Err(Error::Child(join_err));
+                        }
+                    };
+
+                    match child_spin_result {
+                        Ok(()) => {
+                            // Child completed successfully before shutdown
+                            if child_tasks.is_empty() {
+                                error!("All child tasks completed unexpectedly before shutdown");
+                                return Ok(());
+                            }
+                        }
+                        Err(err) => {
+                            error!("Child task failed: {err}");
+                            return Err(err);
+                        }
+                    }
+                }
             }
         }
-        Ok(())
     }
 }
 
@@ -249,9 +304,12 @@ impl Child {
                 .write(true)
                 .open(&path)
                 .await
-                .map_err(|err| {
-                    error!("Failed to open file {path:?}: {err}. Ensure parent directory exists.");
-                    err
+                .map_err(|source| {
+                    error!("Failed to open file {path:?}: {source}. Ensure parent directory exists.");
+                    Error::FileOpen {
+                        path: path.clone(),
+                        source,
+                    }
                 })?,
         );
 
@@ -295,9 +353,12 @@ impl Child {
                                         .write(true)
                                         .open(&path)
                                         .await
-                                        .map_err(|err| {
-                                            error!("Failed to open file {path:?}: {err}. Ensure parent directory exists.");
-                                            err
+                                        .map_err(|source| {
+                                            error!("Failed to open file {path:?}: {source}. Ensure parent directory exists.");
+                                            Error::FileOpen {
+                                                path: path.clone(),
+                                                source,
+                                            }
                                         })?,
                                 );
                                 total_bytes_written = 0;
