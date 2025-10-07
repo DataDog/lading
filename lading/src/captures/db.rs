@@ -393,6 +393,8 @@ mod tests {
         flushed_points: Vec<(Tick, Point)>,
         // Track each flush operation separately to verify ordering
         flush_operations: Vec<Vec<(Tick, Point)>>,
+        // Track flush operations with their returned tick and state.now() at flush time
+        flush_metadata: Vec<(Tick, Tick)>, // (returned_tick, now_at_flush_time)
     }
 
     /// Assert invariant properties of the State.
@@ -419,8 +421,23 @@ mod tests {
             read_idx = state.read_idx,
         );
 
+        // Property 2a: The write_idx is always greater or equal to read_idx.
+        assert!(
+            state.write_idx >= state.read_idx,
+            "{write_idx} < {read_idx}",
+            write_idx = state.write_idx,
+            read_idx = state.read_idx,
+        );
+
         // Property 3: For flushes that return Some(tick) that `tick` is such
         // that state.now() - tick == MAX_INTERVALS.
+        for (returned_tick, now_at_flush) in &ctx.flush_metadata {
+            assert!(
+                now_at_flush - returned_tick == MAX_INTERVALS,
+                "Flush returned tick {returned_tick} but now was {now_at_flush}, difference should be {MAX_INTERVALS} but was {diff}",
+                diff = now_at_flush - returned_tick,
+            );
+        }
 
         // Property 4: Flush operations flush exactly the same number of points
         // that have previously been added to State.
@@ -450,20 +467,43 @@ mod tests {
 
         // Property 5: All flushed points exactly match what was added.
         //
-        // Every flushed point must be found in added_points with matching tick
-        // and data.
+        // For each (tick, point) pair, verify multiplicity in flushed_points
+        // doesn't exceed multiplicity in added_points.
         for (flushed_tick, flushed_point) in &ctx.flushed_points {
-            let found = ctx.added_points.iter().any(|(added_tick, added_point)| {
-                added_tick == flushed_tick && added_point == flushed_point
-            });
+            let flushed_count = ctx
+                .flushed_points
+                .iter()
+                .filter(|(t, p)| t == flushed_tick && p == flushed_point)
+                .count();
+            let added_count = ctx
+                .added_points
+                .iter()
+                .filter(|(t, p)| t == flushed_tick && p == flushed_point)
+                .count();
             assert!(
-                found,
-                "Flushed point at tick {flushed_tick} was not in added points or data was corrupted: {flushed_point:?}",
+                flushed_count == added_count,
+                "Point {flushed_point:?} at tick {flushed_tick} was flushed {flushed_count} times but only added {added_count} times",
             );
         }
 
         // Property 6: Points do not carry forward, they expire. That is, a
         // point is only present in the interval it is written to.
+        //
+        // We verify this by ensuring no (tick, point) pair appears in multiple
+        // distinct flush operations. Since flush drains the interval, each
+        // (tick, point) should appear in at most one flush operation.
+        for (i, flush_op_i) in ctx.flush_operations.iter().enumerate() {
+            for (tick_i, point_i) in flush_op_i {
+                for (j, flush_op_j) in ctx.flush_operations.iter().enumerate().skip(i + 1) {
+                    for (tick_j, point_j) in flush_op_j {
+                        assert!(
+                            !(tick_i == tick_j && point_i == point_j),
+                            "Point {point_i:?} at tick {tick_i} appeared in flush operations {i} and {j} - points must not carry forward",
+                        );
+                    }
+                }
+            }
+        }
     }
 
     proptest! {
@@ -483,6 +523,7 @@ mod tests {
                 added_points: Vec::new(),
                 flushed_points: Vec::new(),
                 flush_operations: Vec::new(),
+                flush_metadata: Vec::new(),
             };
 
             for op in operations {
@@ -509,6 +550,8 @@ mod tests {
                     Operation::Flush => {
                         let mut buffer = Vec::new();
                         if let Some(tick) = state.flush(&mut buffer) {
+                            let now_after_flush = state.now();
+                            ctx.flush_metadata.push((tick, now_after_flush));
                             let mut flush_op = Vec::new();
                             for point in &buffer {
                                 ctx.flushed_points.push((tick, *point));
