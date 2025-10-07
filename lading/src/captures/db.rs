@@ -395,6 +395,8 @@ mod tests {
         flush_operations: Vec<Vec<(Tick, Point)>>,
         // Track flush operations with their returned tick and state.now() at flush time
         flush_metadata: Vec<(Tick, Tick)>, // (returned_tick, now_at_flush_time)
+        // Track flush operations that returned None with state before flush
+        flush_none_operations: Vec<(u64, u64)>, // (write_idx, read_idx) when None returned
     }
 
     /// Assert invariant properties of the State.
@@ -504,6 +506,16 @@ mod tests {
                 }
             }
         }
+
+        // Property 7: If flush operation returned None then write_idx -
+        // read_idx < MAX_INTERVALS.
+        for (write_idx, read_idx) in &ctx.flush_none_operations {
+            assert!(
+                write_idx - read_idx < MAX_INTERVALS,
+                "Flush returned None but write_idx - read_idx = {diff} which is >= MAX_INTERVALS",
+                diff = write_idx - read_idx,
+            );
+        }
     }
 
     proptest! {
@@ -524,6 +536,7 @@ mod tests {
                 flushed_points: Vec::new(),
                 flush_operations: Vec::new(),
                 flush_metadata: Vec::new(),
+                flush_none_operations: Vec::new(),
             };
 
             for op in operations {
@@ -549,6 +562,9 @@ mod tests {
                     }
                     Operation::Flush => {
                         let mut buffer = Vec::new();
+                        let prev_write_idx = state.write_idx;
+                        let prev_read_idx = state.read_idx;
+
                         if let Some(tick) = state.flush(&mut buffer) {
                             let now_after_flush = state.now();
                             ctx.flush_metadata.push((tick, now_after_flush));
@@ -561,6 +577,8 @@ mod tests {
                             if !flush_op.is_empty() {
                                 ctx.flush_operations.push(flush_op);
                             }
+                        } else {
+                            ctx.flush_none_operations.push((prev_write_idx, prev_read_idx));
                         }
                     }
                     Operation::FlushAll => {
