@@ -381,6 +381,9 @@ mod tests {
         flush_metadata: Vec<(Tick, Tick)>, // (returned_tick, now_at_flush_time)
         // Track flush operations that returned None with state before flush
         flush_none_operations: Vec<(u64, u64)>, // (write_idx, read_idx) when None returned
+        // Track AddHistorical operations that should have failed and did fail
+        expected_historical_error_ticks: Vec<Tick>,
+        actual_historical_error_ticks: Vec<Tick>,
     }
 
     /// Assert invariant properties of the State.
@@ -500,6 +503,25 @@ mod tests {
                 diff = write_idx - read_idx,
             );
         }
+
+        // Property 8: AddHistorical operations with invalid ticks are rejected.
+        //
+        // Operations that attempt to add points with ticks that are too old or
+        // in the future should fail. Assert that the specific ticks which
+        // failed match our expectations, in addition to a tally of them.
+        assert!(
+            ctx.actual_historical_error_ticks.len() == ctx.expected_historical_error_ticks.len(),
+            "Expected {expected} historical errors but got {actual}",
+            expected = ctx.expected_historical_error_ticks.len(),
+            actual = ctx.actual_historical_error_ticks.len(),
+        );
+        for expected_tick in &ctx.expected_historical_error_ticks {
+            let found = ctx.actual_historical_error_ticks.contains(expected_tick);
+            assert!(
+                found,
+                "Expected tick {expected_tick} to fail but it did not",
+            );
+        }
     }
 
     proptest! {
@@ -521,6 +543,8 @@ mod tests {
                 flush_operations: Vec::new(),
                 flush_metadata: Vec::new(),
                 flush_none_operations: Vec::new(),
+                expected_historical_error_ticks: Vec::new(),
+                actual_historical_error_ticks: Vec::new(),
             };
 
             for op in operations {
@@ -538,7 +562,18 @@ mod tests {
                     Operation::AddHistorical { point, ticks_ago } => {
                         if state.now() >= u64::from(ticks_ago) {
                             let tick = state.now() - u64::from(ticks_ago);
-                            if state.add_historical_point(point, tick).is_ok() {
+
+                            // Determine if this should fail based on state
+                            let should_fail = tick < state.read_idx || tick > state.write_idx;
+
+                            let result = state.add_historical_point(point, tick);
+
+                            if should_fail {
+                                ctx.expected_historical_error_ticks.push(tick);
+                                if result.is_err() {
+                                    ctx.actual_historical_error_ticks.push(tick);
+                                }
+                            } else if result.is_ok() {
                                 ctx.added_points.push((tick, point));
                                 ctx.added_count += 1;
                             }
