@@ -1,0 +1,552 @@
+//! Time-series for capture data.
+
+// This module provides an in-memory time-series database that buffers metric
+// points for periodic flushing. Much like the way logrotate_fs works this
+// implementation does not handle time directly, it is passed in from the
+// outside world. This allows the implementation to be conveniently property
+// tested.
+//
+// Unlike logrotate_fs the caller does not pass 'now' at every operation, we
+// instead here rely on an explicit 'State::advance'. Actions on this State are
+// discrete whereas logrotate_fs is continuous, simplifying this implementation.
+
+#![allow(dead_code)] // These will be used when integrated with captures
+
+use std::{fmt, u64};
+
+use ustr::Ustr;
+
+pub(crate) const MAX_LABELS: usize = 8;
+pub(crate) const MAX_INTERVALS: usize = 60;
+pub(crate) type Tick = u64;
+
+/// A single metric point.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Point {
+    Counter {
+        name: Ustr,
+        labels: LabelSet,
+        value: u64,
+    },
+    Gauge {
+        name: Ustr,
+        labels: LabelSet,
+        value: f64,
+    },
+}
+
+/// Manually implement Debug to avoid splatting the LabelSet out in tests if
+/// it's otherwise empty.
+impl fmt::Debug for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Point::Counter {
+                name,
+                labels,
+                value,
+            } => f
+                .debug_struct("Counter")
+                .field("name", name)
+                .field("labels", &format_args!("{}", DebugLabelSet(labels)))
+                .field("value", value)
+                .finish(),
+            Point::Gauge {
+                name,
+                labels,
+                value,
+            } => f
+                .debug_struct("Gauge")
+                .field("name", name)
+                .field("labels", &format_args!("{}", DebugLabelSet(labels)))
+                .field("value", value)
+                .finish(),
+        }
+    }
+}
+
+struct DebugLabelSet<'a>(&'a LabelSet);
+
+impl<'a> std::fmt::Display for DebugLabelSet<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|(k, v)| format!("{k}={v}")))
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct LabelSet {
+    /// Fixed-size array of label pairs.
+    labels: [(Option<Ustr>, Option<Ustr>); MAX_LABELS],
+    /// Number of labels currently stored.
+    count: u8,
+}
+
+impl LabelSet {
+    /// Create a new empty label set.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a label key-value pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if already at max capacity (MAX_LABELS).
+    pub(crate) fn add(&mut self, key: &str, value: &str) -> Result<(), LabelError> {
+        if self.count >= MAX_LABELS as u8 {
+            return Err(LabelError::TooManyLabels);
+        }
+        let idx = self.count as usize;
+        self.labels[idx] = (Some(Ustr::from(key)), Some(Ustr::from(value)));
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Iterate over label pairs.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Ustr, &Ustr)> + '_ {
+        self.labels[..self.count as usize]
+            .iter()
+            .filter_map(|(k, v)| match (k, v) {
+                (Some(key), Some(val)) => Some((key, val)),
+                _ => None,
+            })
+    }
+}
+
+/// A time interval containing points.
+#[derive(Debug, Clone)]
+struct Interval {
+    /// The `Tick` on which the `Interval` was created.
+    created_tick: Tick,
+    /// Points stored in this interval.
+    points: Vec<Point>,
+}
+
+/// The time-series database.
+///
+/// This is a pure model with no internal time concepts. All progression
+/// happens through external tick advances. The model maintains a fixed-size
+/// ring buffer of `MAX_INTERVALS` intervals.
+#[derive(Debug)]
+pub(crate) struct State {
+    intervals: Vec<Interval>,
+    /// Current position in the ring buffer.
+    idx: usize,
+    /// Current tick (monotonically increasing).
+    now: Tick,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl State {
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        let mut intervals = Vec::with_capacity(MAX_INTERVALS);
+        for _ in 0..MAX_INTERVALS {
+            intervals.push(Interval {
+                created_tick: 0,
+                points: Vec::new(),
+            });
+        }
+
+        Self {
+            intervals,
+            idx: 0,
+            now: 0,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn now(&self) -> Tick {
+        self.now
+    }
+
+    /// Add a point to the current interval.
+    #[inline]
+    pub(crate) fn add_point(&mut self, point: Point) {
+        self.add_historical_point(point, self.now)
+            .expect("must not fail, catastrophic programming error");
+    }
+
+    /// Add a historical point to a specific tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Tick is in the future (tick > now)
+    /// - Tick is too old (more than MAX_INTERVALS-1 ticks ago)
+    pub(crate) fn add_historical_point(
+        &mut self,
+        point: Point,
+        tick: Tick,
+    ) -> Result<(), StateError> {
+        if tick > self.now {
+            return Err(StateError::TickInFuture);
+        }
+        if self.now > tick && self.now - tick > (MAX_INTERVALS - 1) as u64 {
+            return Err(StateError::TickTooOld);
+        }
+
+        // Calculate the correct interval and write into it, asserting for
+        // validation purposes that the tick is correctly preserved.
+        let ticks_ago = self.now - tick;
+        let Ok(ticks_ago_usize) = usize::try_from(ticks_ago) else {
+            return Err(StateError::TickTooOld);
+        };
+        let target_idx = (self.idx + MAX_INTERVALS - ticks_ago_usize) % MAX_INTERVALS;
+        let interval: &mut Interval = &mut self.intervals[target_idx];
+        debug_assert_eq!(
+            interval.created_tick,
+            tick,
+            "Interval tick not set correctly, time is {now}, target was {target_idx}",
+            now = self.now,
+        );
+        interval.points.push(point);
+        Ok(())
+    }
+
+    /// Flush the currently expiring interval into the provided buffer.
+    ///
+    /// Returns the tick if data was flushed, or None if no intervals have
+    /// expired. The caller's buffer receives the drained points from the
+    /// interval. Time is advanced by this call by one tick.
+    ///
+    /// Passed `buffer` must be cleared by the caller.
+    pub(crate) fn flush(&mut self, buffer: &mut Vec<Point>) -> Option<Tick> {
+        // An interval is ready to be flushed if the (created_tick - now) >
+        // MAX_INTERVALS. By definition the current interval will never be
+        // capable of being flushed and so we update 'now' and 'idx'.
+        self.now += 1;
+        self.idx = (self.idx + 1) % MAX_INTERVALS;
+
+        let interval = &mut self.intervals[self.idx];
+        if !interval.points.is_empty() {
+            buffer.extend(interval.points.drain(..));
+            let old_tick = interval.created_tick;
+            interval.created_tick = self.now;
+            Some(old_tick)
+        } else {
+            interval.created_tick = self.now;
+            None
+        }
+    }
+
+    /// Flush all intervals with data into the provided buffer.
+    ///
+    /// Consumes the State and drains all intervals in order (oldest to newest) into the buffer.
+    /// This is a terminal operation - the State cannot be used after this.
+    pub(crate) fn flush_all(mut self, buffer: &mut Vec<Point>) {
+        buffer.clear();
+
+        // Iterate from oldest to newest (starting after current)
+        for i in 1..=MAX_INTERVALS {
+            let index = (self.idx + i) % MAX_INTERVALS;
+            buffer.extend(self.intervals[index].points.drain(..));
+        }
+    }
+}
+
+/// Errors that can occur in state operations.
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq)]
+pub(crate) enum StateError {
+    /// Tick is too old for current window.
+    #[error("Tick too old for current window")]
+    TickTooOld,
+    /// Tick is in the future.
+    #[error("Tick is in the future")]
+    TickInFuture,
+}
+
+/// Errors that can occur with labels.
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq)]
+pub(crate) enum LabelError {
+    /// Too many labels (max MAX_LABELS).
+    #[error("Too many labels (max {MAX_LABELS})")]
+    TooManyLabels,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    impl Arbitrary for LabelSet {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            // Generate between 0 and MAX_LABELS-1 labels to ensure we never overflow
+            prop::collection::vec(("[a-z]{1,5}", "[a-z]{1,5}"), 0..(MAX_LABELS - 1))
+                .prop_map(|labels| {
+                    let mut label_set = LabelSet::new();
+                    for (k, v) in labels {
+                        // This will always succeed since we limit to MAX_LABELS-1
+                        // CLAUDE then assert that it succeeds
+                        let _ = label_set.add(&k, &v);
+                    }
+                    label_set
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for Point {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                ("[a-z]{1,10}", any::<LabelSet>(), 0u64..1000u64).prop_map(
+                    |(name, labels, value)| Point::Counter {
+                        name: Ustr::from(&name),
+                        labels,
+                        value,
+                    }
+                ),
+                ("[a-z]{1,10}", any::<LabelSet>(), 0f64..1000f64).prop_map(
+                    |(name, labels, value)| Point::Gauge {
+                        name: Ustr::from(&name),
+                        labels,
+                        value,
+                    }
+                ),
+            ]
+            .boxed()
+        }
+    }
+
+    /// Operations that can be performed on the State.
+    #[derive(Debug, Clone)]
+    enum Operation {
+        /// Add a point to current interval
+        AddCurrent { point: Point },
+        /// Add a historical point
+        AddHistorical { point: Point, ticks_ago: u8 },
+        /// Flush, if an interval is ready to be flushed
+        Flush,
+        /// Flush all intervals
+        FlushAll,
+    }
+
+    impl Arbitrary for Operation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                3 => any::<Point>().prop_map(|point| Operation::AddCurrent { point }),
+                2 => Just(Operation::FlushAll),
+                2 => (any::<Point>(), 0u8..70u8)
+                    .prop_map(|(point, ticks_ago)| Operation::AddHistorical { point, ticks_ago }),
+                1 => Just(Operation::Flush),
+            ]
+            .boxed()
+        }
+    }
+
+    /// Context for tracking operation counts and data.
+    struct Context {
+        added_count: usize,
+        flushed_count: usize,
+        previous_tick: Option<Tick>,
+        // Track all points we've added so we can verify they're preserved
+        added_points: Vec<(Tick, Point)>,
+        // Track all points we've flushed to verify against added_points
+        flushed_points: Vec<(Tick, Point)>,
+        // Track each flush operation separately to verify ordering
+        flush_operations: Vec<Vec<(Tick, Point)>>,
+    }
+
+    /// Assert invariant properties of the State.
+    ///
+    /// This is called before and after every option to ensure the model
+    /// maintains its properties. All properties of the model are asserted here.
+    fn assert_properties(state: &State, ctx: &Context) {
+        // Property 1: Tick is monotonic. Time, managed by the caller, is never
+        // mapped backward by this implementation.
+        if let Some(prev) = ctx.previous_tick {
+            assert!(
+                state.now >= prev,
+                "Tick went backwards! Previous: {}, Current: {}",
+                prev,
+                state.now
+            );
+        }
+
+        // Property 2: Each interval has a valid tick <= now. We do not lose
+        // track of time when processing the buffer of intervals.
+        for i in 0..MAX_INTERVALS {
+            let tick = state.intervals[i].created_tick;
+            assert!(
+                tick <= state.now,
+                "Interval {i} has future tick {tick} (now={now})",
+                now = state.now
+            );
+        }
+
+        // Property 3: We never flush more points than added to State.
+        assert!(
+            ctx.flushed_count <= ctx.added_count,
+            "Flushed {flushed} points but only added {added}",
+            flushed = ctx.flushed_count,
+            added = ctx.added_count
+        );
+
+        // Property 4: Each flush operation returns points in tick order.
+        for (op_idx, flush_op) in ctx.flush_operations.iter().enumerate() {
+            let mut last_tick = 0;
+            for (tick, _point) in flush_op {
+                assert!(
+                    *tick >= last_tick,
+                    "Flush operation {op_idx} returned out of order: tick {tick} after {last_tick}",
+                );
+                assert!(
+                    *tick <= state.now,
+                    "Flush operation {op_idx} returned future tick {tick} (now={now})",
+                    now = state.now
+                );
+                last_tick = *tick;
+            }
+        }
+
+        // Property 5: All flushed points exactly match what was added.
+        //
+        // Every flushed point must be found in added_points with matching tick
+        // and data.
+        for (flushed_tick, flushed_point) in &ctx.flushed_points {
+            let found = ctx.added_points.iter().any(|(added_tick, added_point)| {
+                added_tick == flushed_tick && added_point == flushed_point
+            });
+            assert!(
+                found,
+                "Flushed point at tick {flushed_tick} was not in added points or data was corrupted: {flushed_point:?}",
+            );
+        }
+
+        // Property 6: Points carry forward until they expire after MAX_INTERVALS.
+        //
+        // Points within the valid window must still be in state, points outside
+        // must not be unless they have otherwise been written.
+        {
+            let oldest_valid_tick = state.now.saturating_sub(MAX_INTERVALS as u64 - 1);
+
+            // Build a set of what's actually in the state
+            let mut points_in_state: Vec<(Tick, Point)> = Vec::new();
+            for i in 0..MAX_INTERVALS {
+                let interval = &state.intervals[i];
+                for point in &interval.points {
+                    points_in_state.push((interval.created_tick, *point));
+                }
+            }
+
+            // Check each added point
+            for (tick, point) in &ctx.added_points {
+                let should_exist = *tick >= oldest_valid_tick && *tick <= state.now;
+                let does_exist = points_in_state.iter().any(|(t, p)| t == tick && p == point);
+                let was_flushed = ctx
+                    .flushed_points
+                    .iter()
+                    .any(|(t, p)| t == tick && p == point);
+
+                if should_exist && !was_flushed {
+                    // Point is within window and not flushed, must be in state.
+                    assert!(
+                        does_exist,
+                        "Point at tick {} should carry forward (now={}, oldest_valid={})",
+                        tick, state.now, oldest_valid_tick
+                    );
+                } else if !should_exist && *tick > 0 {
+                    // Point is outside window, must not be in state.
+                    assert!(
+                        !does_exist,
+                        "Point at tick {} should have expired (now={}, oldest_valid={})",
+                        tick, state.now, oldest_valid_tick
+                    );
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            max_shrink_iters: 100_000,
+            ..ProptestConfig::default()
+        })]
+
+        #[test]
+        fn state_operations(operations in prop::collection::vec(any::<Operation>(), MAX_INTERVALS*2..MAX_INTERVALS*4)) {
+            let mut state = State::new();
+            let mut ctx = Context {
+                added_count: 0,
+                flushed_count: 0,
+                previous_tick: None,
+                added_points: Vec::new(),
+                flushed_points: Vec::new(),
+                flush_operations: Vec::new(),
+            };
+
+            for op in operations {
+                // Assert properties before operation
+                assert_properties(&state, &ctx);
+
+                ctx.previous_tick = Some(state.now);
+                match op {
+                    Operation::AddCurrent { point } => {
+                        // State is initialized, tick 0 is valid
+                        ctx.added_points.push((state.now, point));
+                        state.add_point(point);
+                        ctx.added_count += 1;
+                    }
+                    Operation::AddHistorical { point, ticks_ago } => {
+                        if state.now >= u64::from(ticks_ago) {
+                            let tick = state.now - u64::from(ticks_ago);
+                            if state.add_historical_point(point, tick).is_ok() {
+                                ctx.added_points.push((tick, point));
+                                ctx.added_count += 1;
+                            }
+                        }
+                    }
+                    Operation::Flush => {
+                        let mut buffer = Vec::new();
+                        if let Some(tick) = state.flush(&mut buffer) {
+                            let mut flush_op = Vec::new();
+                            for point in &buffer {
+                                ctx.flushed_points.push((tick, *point));
+                                flush_op.push((tick, *point));
+                            }
+                            ctx.flushed_count += buffer.len();
+                            if !flush_op.is_empty() {
+                                ctx.flush_operations.push(flush_op);
+                            }
+                        }
+                    }
+                    Operation::FlushAll => {
+                        let mut buffer = Vec::new();
+                        state.flush_all(&mut buffer);
+
+                        // flush_all doesn't provide tick information, so we
+                        // just verify that all points were previously added.
+                        for point in &buffer {
+                            let was_added = ctx.added_points.iter().any(|(_, added_point)| added_point == point);
+                            assert!(was_added, "Flushed point {point:?} was never added");
+                        }
+                        ctx.flushed_count += buffer.len();
+                        return Ok(());
+                    }
+                }
+
+                // Assert properties after operation
+                assert_properties(&state, &ctx);
+            }
+        }
+
+
+    }
+}

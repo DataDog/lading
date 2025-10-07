@@ -7,6 +7,8 @@
 //! their [`metrics`] integration while [`CaptureManager`] need only hook into
 //! that same crate.
 
+pub mod db;
+
 use std::{
     ffi::OsStr,
     io::{self, BufWriter, Write},
