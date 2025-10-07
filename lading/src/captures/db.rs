@@ -224,22 +224,6 @@ impl State {
         Ok(())
     }
 
-    /// Run the clock forward in `State`.
-    ///
-    /// This function runs the clock forward to `now` which may potentially be
-    /// multiple intervals forward from the previous `now`.
-    ///
-    /// Advances the write index and the read index if the read index is greater
-    /// than `MAX_INTERVALS` from the write index.
-    pub(crate) fn advance_time(&mut self, now: Tick) {
-        self.write_idx = self.write_idx.wrapping_add(now);
-        // If the read_idx is too old we advance the read_idx, potentially
-        // dropping any data that has not been flushed.
-        if self.write_idx - MAX_INTERVALS > self.read_idx {
-            self.read_idx = self.write_idx - MAX_INTERVALS;
-        }
-    }
-
     /// Flush the currently expiring interval into the provided buffer.
     ///
     /// Returns the tick if data was flushed, or None if no intervals have
