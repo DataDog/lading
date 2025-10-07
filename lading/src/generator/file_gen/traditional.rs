@@ -23,14 +23,13 @@ use std::{
 };
 
 use byte_unit::Byte;
-use futures::future::join_all;
 use metrics::counter;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinSet},
 };
 use tracing::{error, info};
 
@@ -47,6 +46,14 @@ pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
     Io(#[from] ::std::io::Error),
+    /// Failed to open a file for writing.
+    #[error("Failed to open file {path:?}: {source}. Ensure parent directory exists.")]
+    FileOpen {
+        /// The path that failed to open
+        path: PathBuf,
+        /// The underlying IO error
+        source: ::std::io::Error,
+    },
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
@@ -121,7 +128,7 @@ pub struct Config {
 /// This generator writes files to disk, rotating them as appropriate. It does
 /// this without coordination to the target.
 pub struct Server {
-    handles: Vec<JoinHandle<Result<(), Error>>>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
 }
 
@@ -155,7 +162,7 @@ impl Server {
 
         let maximum_block_size = config.maximum_block_size.as_u128();
 
-        let mut handles = Vec::new();
+        let mut handles = JoinSet::new();
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
@@ -190,7 +197,7 @@ impl Server {
                 shutdown: shutdown.clone(),
             };
 
-            handles.push(tokio::spawn(child.spin()));
+            handles.spawn(child.spin());
         }
 
         Ok(Self { handles, shutdown })
@@ -209,16 +216,48 @@ impl Server {
     #[allow(clippy::cast_precision_loss)]
     #[allow(clippy::cast_possible_truncation)]
     pub async fn spin(mut self) -> Result<(), Error> {
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        for res in join_all(self.handles.drain(..)).await {
-            match res {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => return Err(err),
-                Err(err) => return Err(Error::Child(err)),
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
+
+        loop {
+            tokio::select! {
+                () = &mut shutdown_wait => {
+                    info!("shutdown signal received");
+                    // Graceful shutdown: wait for all children to complete
+                    while let Some(child_result) = self.handles.join_next().await {
+                        let child_result: Result<Result<(), Error>, JoinError> = child_result;
+                        let child_spin_result: Result<(), Error> = child_result.map_err(Error::Child)?;
+                        child_spin_result?;
+                    }
+                    return Ok(());
+                }
+                Some(child_result) = self.handles.join_next() => {
+                    let child_result: Result<Result<(), Error>, JoinError> = child_result;
+
+                    let child_spin_result: Result<(), Error> = match child_result {
+                        Ok(r) => r,
+                        Err(join_err) => {
+                            error!("Child task panicked: {join_err}");
+                            return Err(Error::Child(join_err));
+                        }
+                    };
+
+                    match child_spin_result {
+                        Ok(()) => {
+                            // Child completed successfully before shutdown
+                            if self.handles.is_empty() {
+                                error!("All child tasks completed unexpectedly before shutdown");
+                                return Ok(());
+                            }
+                        }
+                        Err(err) => {
+                            error!("Child task failed: {err}");
+                            return Err(err);
+                        }
+                    }
+                }
             }
         }
-        Ok(())
     }
 }
 
@@ -248,7 +287,16 @@ impl Child {
                 .truncate(true)
                 .write(true)
                 .open(&path)
-                .await?,
+                .await
+                .map_err(|source| {
+                    error!(
+                        "Failed to open file {path:?}: {source}. Ensure parent directory exists."
+                    );
+                    Error::FileOpen {
+                        path: path.clone(),
+                        source,
+                    }
+                })?,
         );
 
         let mut handle = self.block_cache.handle();
@@ -290,7 +338,14 @@ impl Child {
                                         .truncate(false)
                                         .write(true)
                                         .open(&path)
-                                        .await?,
+                                        .await
+                                        .map_err(|source| {
+                                            error!("Failed to open file {path:?}: {source}. Ensure parent directory exists.");
+                                            Error::FileOpen {
+                                                path: path.clone(),
+                                                source,
+                                            }
+                                        })?,
                                 );
                                 total_bytes_written = 0;
                             }
