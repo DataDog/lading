@@ -156,9 +156,11 @@ impl<T> Default for State<T> {
 impl<T> State<T> {
     #[must_use]
     pub(crate) fn new() -> Self {
-        let mut intervals = Vec::new();
+        let mut intervals = Vec::with_capacity(MAX_INTERVALS as usize);
         for _ in 0..MAX_INTERVALS {
-            intervals.push(Interval { points: Vec::new() });
+            intervals.push(Interval {
+                points: Vec::with_capacity(32),
+            });
         }
 
         Self {
