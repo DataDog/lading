@@ -23,11 +23,7 @@ opentelemetry-proto = { version = "0.30.0", features = [
   "with-serde",
 ] }
 prost = { workspace = true }
-rand = { workspace = true, features = [
-  "small_rng",
-  "std",
-  "std_rng",
-] }
+rand = { workspace = true, features = ["small_rng", "std", "std_rng"] }
 rmp-serde = { version = "1.1", default-features = false }
 rustc-hash = { workspace = true }
 serde = { workspace = true }

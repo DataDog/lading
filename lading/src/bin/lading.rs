@@ -13,12 +13,12 @@ use std::{
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use lading::{
     blackhole,
-    captures::CaptureManager,
     config::{Config, Telemetry},
     generator, inspector, observer,
     target::{self, Behavior, Output},
     target_metrics,
 };
+use lading_capture::manager::CaptureManager;
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use regex::Regex;
