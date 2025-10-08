@@ -6,9 +6,9 @@
 // outside world. This allows the implementation to be conveniently property
 // tested.
 //
-// Unlike logrotate_fs the caller does not pass 'now' at every operation, we
-// instead here rely on an explicit 'State::advance'. Actions on this State are
-// discrete whereas logrotate_fs is continuous, simplifying this implementation.
+// Unlike logrotate_fs the caller does not pass 'now' at every operation. Time
+// is advanced by the `flush` operation. Actions on this State are discrete
+// whereas logrotate_fs is continuous, simplifying this implementation.
 //
 // Operations on indexes are saturating. We presume that 1 Tick ~= 1 second,
 // meaning this implemenation will misbehave after 2**64 seconds of continuous
@@ -159,7 +159,7 @@ impl<T> State<T> {
         let mut intervals = Vec::with_capacity(MAX_INTERVALS as usize);
         for _ in 0..MAX_INTERVALS {
             intervals.push(Interval {
-                points: Vec::with_capacity(32),
+                points: Vec::with_capacity(8), // magic constant, lowish but not too low
             });
         }
 
@@ -229,7 +229,6 @@ impl<T> State<T> {
         //
         // * (write_idx - read_idx) > MAX_INTERVALS (pre/post condition)
         // * write_idx - returned(TICK) == MAX_INTERVALS
-
         self.write_idx = self.write_idx.saturating_add(1);
 
         if self.write_idx - self.read_idx == MAX_INTERVALS {
@@ -244,11 +243,12 @@ impl<T> State<T> {
 
     /// Flush all intervals with data into the provided buffer.
     ///
-    /// Consumes the State and drains all intervals in order (oldest to newest) into the buffer.
-    /// This is a terminal operation - the State cannot be used after this.
+    /// Consumes the State and drains all intervals in order (oldest to newest)
+    /// into the buffer. This function is only intended to be called on
+    /// shutdown. `State` is consumed by this operation to prevent mis-use.
+    ///
+    /// Passed `buffer` must be cleared by the caller.
     pub(crate) fn flush_all(mut self, buffer: &mut Vec<T>) {
-        buffer.clear();
-
         while self.read_idx <= self.write_idx {
             let interval = &mut self.intervals[mapped_idx(self.read_idx)];
             buffer.append(&mut interval.points);
@@ -487,7 +487,7 @@ mod tests {
             added = ctx.added_count
         );
 
-        // Property 4: Each flush operation returns points in tick order.
+        // Property 5: Each flush operation returns points in tick order.
         for (op_idx, flush_op) in ctx.flush_operations.iter().enumerate() {
             let mut last_tick = 0;
             for (tick, _point) in flush_op {
@@ -504,7 +504,7 @@ mod tests {
             }
         }
 
-        // Property 5: All flushed points exactly match what was added.
+        // Property 6: All flushed points exactly match what was added.
         //
         // For each (tick, point) pair, verify multiplicity in flushed_points
         // doesn't exceed multiplicity in added_points.
@@ -525,7 +525,7 @@ mod tests {
             );
         }
 
-        // Property 6: Points do not carry forward, they expire. That is, a
+        // Property 7: Points do not carry forward, they expire. That is, a
         // point is only present in the interval it is written to.
         //
         // We verify this by ensuring no (tick, point) pair appears in multiple
@@ -544,7 +544,7 @@ mod tests {
             }
         }
 
-        // Property 7: If flush operation returned None then write_idx -
+        // Property 8: If flush operation returned None then write_idx -
         // read_idx < MAX_INTERVALS.
         for (write_idx, read_idx) in &ctx.flush_none_operations {
             assert!(
@@ -554,7 +554,7 @@ mod tests {
             );
         }
 
-        // Property 8: AddHistorical operations with invalid ticks are rejected.
+        // Property 9: AddHistorical operations with invalid ticks are rejected.
         //
         // Operations that attempt to add points with ticks that are too old or
         // in the future must fail. Assert that the specific ticks which failed
