@@ -1678,6 +1678,7 @@ dependencies = [
  "lading-signal",
  "metrics",
  "metrics-util",
+ "proptest",
  "quanta",
  "rustc-hash",
  "serde",

@@ -122,9 +122,9 @@ impl LabelSet {
 
 /// A time interval containing points.
 #[derive(Debug, Clone)]
-struct Interval {
+struct Interval<T> {
     /// Points stored in this interval.
-    points: Vec<Point>,
+    points: Vec<T>,
 }
 
 #[inline]
@@ -138,8 +138,8 @@ fn mapped_idx(idx: u64) -> usize {
 /// happens through external tick advances. The model maintains a fixed-size
 /// ring buffer of `MAX_INTERVALS` intervals.
 #[derive(Debug)]
-pub(crate) struct State {
-    intervals: Vec<Interval>,
+pub(crate) struct State<T> {
+    intervals: Vec<Interval<T>>,
     /// Current write position in the ring buffer. This is also 'now', that is, the
     /// current tick.
     write_idx: u64, // intentionally not usize to avoid indexing with this value
@@ -147,13 +147,13 @@ pub(crate) struct State {
     read_idx: u64,
 }
 
-impl Default for State {
+impl<T> Default for State<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl State {
+impl<T> State<T> {
     #[must_use]
     pub(crate) fn new() -> Self {
         let mut intervals = Vec::new();
@@ -176,7 +176,7 @@ impl State {
 
     /// Add a point to the current interval.
     #[inline]
-    pub(crate) fn add_point(&mut self, point: Point) {
+    pub(crate) fn add_point(&mut self, point: T) {
         self.add_historical_point(point, self.now())
             .expect("must not fail, catastrophic programming error");
     }
@@ -188,11 +188,7 @@ impl State {
     /// Returns error if:
     /// - Tick is in the future (tick > now)
     /// - Tick is too old (more than MAX_INTERVALS-1 ticks ago)
-    pub(crate) fn add_historical_point(
-        &mut self,
-        point: Point,
-        tick: Tick,
-    ) -> Result<(), StateError> {
+    pub(crate) fn add_historical_point(&mut self, point: T, tick: Tick) -> Result<(), StateError> {
         // Determine that `tick` is within the read and write index interval,
         // meaning that the historical point is neither too old or too in the
         // future.
@@ -219,7 +215,7 @@ impl State {
             read_idx = self.read_idx,
         );
         let target_idx = mapped_idx(self.write_idx - tick);
-        let interval: &mut Interval = &mut self.intervals[target_idx];
+        let interval: &mut Interval<T> = &mut self.intervals[target_idx];
         interval.points.push(point);
         Ok(())
     }
@@ -233,7 +229,7 @@ impl State {
     /// Advances the read index to the write index.
     ///
     /// Passed `buffer` must be cleared by the caller.
-    pub(crate) fn flush(&mut self, buffer: &mut Vec<Point>) -> Option<Tick> {
+    pub(crate) fn flush(&mut self, buffer: &mut Vec<T>) -> Option<Tick> {
         // Flushing advances the write_idx by 1. When write_idx - read_idx >
         // MAX_INTERVALS the interval at read_idx will be flushed into buffer
         // and then read_idx will be advanced.
@@ -259,7 +255,7 @@ impl State {
     ///
     /// Consumes the State and drains all intervals in order (oldest to newest) into the buffer.
     /// This is a terminal operation - the State cannot be used after this.
-    pub(crate) fn flush_all(mut self, buffer: &mut Vec<Point>) {
+    pub(crate) fn flush_all(mut self, buffer: &mut Vec<T>) {
         buffer.clear();
 
         while self.read_idx <= self.write_idx {
@@ -287,6 +283,90 @@ pub(crate) enum LabelError {
     /// Too many labels
     #[error("Too many labels (max {MAX_LABELS})")]
     TooManyLabels,
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Proof that historical points are written to the correct buffer slot.
+    ///
+    /// PROPERTY: When adding a historical point at tick T to State, the point
+    /// must be written to buffer slot mapped_idx(T).
+    ///
+    /// This proof uses symbolic values for all state variables and verifies
+    /// the property holds for ALL valid states, not just specific examples.
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn historical_point_correct_buffer_slot() {
+        // Create a State with symbolic internal state
+        let mut state: State<u32> = State::new();
+
+        // Use symbolic values for state indices
+        let write_idx: u64 = kani::any();
+        let read_idx: u64 = kani::any();
+
+        // Constrain to valid State invariants (from assert_properties in tests)
+        kani::assume(read_idx <= write_idx);
+        kani::assume(write_idx - read_idx < MAX_INTERVALS);
+
+        // Keep bounded for tractability but large enough to show modulo effects
+        kani::assume(write_idx >= MAX_INTERVALS);
+        kani::assume(write_idx < MAX_INTERVALS * 2);
+
+        // Set state to these symbolic values
+        state.write_idx = write_idx;
+        state.read_idx = read_idx;
+
+        // Choose a symbolic tick to add a historical point at
+        let tick: u64 = kani::any();
+
+        // Constrain tick to be in valid range for historical points
+        kani::assume(tick >= read_idx);
+        kani::assume(tick <= write_idx);
+
+        // Create a point to add
+        let point = kani::any();
+
+        // Record the state of all buffer slots before adding the point
+        let mut was_empty = [false; MAX_INTERVALS as usize];
+        for i in 0..MAX_INTERVALS as usize {
+            was_empty[i] = state.intervals[i].points.is_empty();
+        }
+
+        // Calculate which slot the point SHOULD go into based on its tick
+        let expected_slot = mapped_idx(tick);
+
+        // Assume the expected slot is currently empty (to track what we add)
+        kani::assume(was_empty[expected_slot]);
+
+        // Add the historical point
+        let result = state.add_historical_point(point, tick);
+
+        // If operation succeeded, verify the point is in the correct slot
+        if result.is_ok() {
+            // CRITICAL PROPERTY: The point must be in slot mapped_idx(tick)
+            // This is the fundamental correctness requirement of the ring buffer:
+            // a point at tick T belongs in slot (T % MAX_INTERVALS)
+            let point_in_expected_slot = !state.intervals[expected_slot].points.is_empty();
+
+            kani::assert(
+                point_in_expected_slot,
+                "Point added at tick T must be in buffer slot mapped_idx(T)",
+            );
+
+            // Additional property: the point should not appear in other slots
+            // that were previously empty
+            for i in 0..MAX_INTERVALS as usize {
+                if i != expected_slot && was_empty[i] {
+                    kani::assert(
+                        state.intervals[i].points.is_empty(),
+                        "Point should only be in the expected slot",
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -390,7 +470,7 @@ mod tests {
     ///
     /// This is called before and after every option to ensure the model
     /// maintains its properties. All properties of the model are asserted here.
-    fn assert_properties(state: &State, ctx: &Context) {
+    fn assert_properties(state: &State<Point>, ctx: &Context) {
         // Property 1: Ticks are monotonic. Time, managed by the caller, is never
         // mapped backward by this implementation.
         if let Some(prev) = ctx.previous_tick {

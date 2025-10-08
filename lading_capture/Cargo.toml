@@ -27,6 +27,9 @@ tracing = { workspace = true }
 ustr = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lib]
 doctest = false
 
