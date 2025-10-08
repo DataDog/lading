@@ -1,5 +1,4 @@
-//! Crate regarding Lading's 'capture' files
-
-#![deny(clippy::cargo)]
+//! Crate regarding Lading's 'capture' mechanism
 
 pub mod json;
+pub mod manager;

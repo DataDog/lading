@@ -507,8 +507,8 @@ mod tests {
         // Property 8: AddHistorical operations with invalid ticks are rejected.
         //
         // Operations that attempt to add points with ticks that are too old or
-        // in the future should fail. Assert that the specific ticks which
-        // failed match our expectations, in addition to a tally of them.
+        // in the future must fail. Assert that the specific ticks which failed
+        // match our expectations, in addition to a tally of them.
         assert!(
             ctx.actual_historical_error_ticks.len() == ctx.expected_historical_error_ticks.len(),
             "Expected {expected} historical errors but got {actual}",

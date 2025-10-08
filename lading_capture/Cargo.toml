@@ -13,8 +13,18 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
+lading-signal = { version = "0.1", path = "../lading_signal" }
+
+metrics = { workspace = true }
+metrics-util = { workspace = true }
+quanta = { version = "0.12", default-features = false, features = [] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+tracing = { workspace = true }
+ustr = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [lib]

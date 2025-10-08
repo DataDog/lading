@@ -26,7 +26,10 @@ lading-signal = { version = "0.1", path = "../lading_signal" }
 anyhow = { workspace = true }
 async-compression = { version = "0.4.30", features = ["tokio", "zstd"] }
 average = { version = "0.16", default-features = false, features = [] }
-bollard = { version = "0.19", default-features = false, features = ["pipe", "http"] }
+bollard = { version = "0.19", default-features = false, features = [
+  "pipe",
+  "http",
+] }
 byte-unit = { workspace = true, features = ["std"] }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "4.5", default-features = false, features = [
@@ -41,15 +44,26 @@ flate2 = { version = "1.1.2", default-features = false, features = [
 ] }
 futures = "0.3.31"
 fuser = { version = "0.15", optional = true }
-heck  = { version = "0.5", default-features = false }
+heck = { version = "0.5", default-features = false }
 http = { workspace = true }
 http-body-util = { workspace = true }
 http-serde = "2.1"
 hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
-hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
-kube = { version = "2.0.0", default-features = false, features = ["config", "client", "rustls-tls", "ring"] }
+hyper-util = { workspace = true, features = [
+  "default",
+  "client",
+  "client-legacy",
+] }
+kube = { version = "2.0.0", default-features = false, features = [
+  "config",
+  "client",
+  "rustls-tls",
+  "ring",
+] }
 kube-core = "2.0.0"
-k8s-openapi = { version = "0.26.0", default-features = false, features = ["latest"] }
+k8s-openapi = { version = "0.26.0", default-features = false, features = [
+  "latest",
+] }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
@@ -61,7 +75,13 @@ nix = { version = "0.30", default-features = false, features = [
 num_cpus = { version = "1.17" }
 num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
-opentelemetry-proto = { version = "0.30.0", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
+opentelemetry-proto = { version = "0.30.0", features = [
+  "gen-tonic",
+  "logs",
+  "metrics",
+  "trace",
+  "with-serde",
+] }
 prost = { workspace = true }
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
@@ -70,7 +90,10 @@ rand = { workspace = true, default-features = false, features = [
   "thread_rng",
 ] }
 regex = { version = "1.11" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "default-tls",
+] }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -95,9 +118,6 @@ tokio-util = { version = "0.7", features = ["io"] }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
-ustr = { workspace = true }
-uuid = { workspace = true }
-quanta = { version = "0.12", default-features = false, features = [] }
 zstd = "0.13.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
