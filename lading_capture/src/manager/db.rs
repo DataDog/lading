@@ -203,18 +203,7 @@ impl<T> State<T> {
             return Err(StateError::TickTooOld);
         }
 
-        // We find the target index by calculating how many ticks backward
-        // `tick` is from now. Our write_idx only ever grows -- except at
-        // wrap-around -- and because we know that tick < write_idx the
-        // difference between the two is how far back around the buffer we need
-        // to write to.
-        debug_assert!(
-            self.write_idx - tick >= self.read_idx,
-            "Interval tick not set correctly: write_idx {write_idx}, tick {tick}, read_idx: {read_idx}",
-            write_idx = self.write_idx,
-            read_idx = self.read_idx,
-        );
-        let target_idx = mapped_idx(self.write_idx - tick);
+        let target_idx = mapped_idx(tick);
         let interval: &mut Interval<T> = &mut self.intervals[target_idx];
         interval.points.push(point);
         Ok(())
@@ -289,76 +278,55 @@ pub(crate) enum LabelError {
 mod proofs {
     use super::*;
 
-    /// Proof that historical points are written to the correct buffer slot.
-    ///
-    /// PROPERTY: When adding a historical point at tick T to State, the point
-    /// must be written to buffer slot mapped_idx(T).
-    ///
-    /// This proof uses symbolic values for all state variables and verifies
-    /// the property holds for ALL valid states, not just specific examples.
+    /// Proof: When adding a historical point at tick T to State, the point must
+    /// be written to buffer slot mapped_idx(T) and no other.
     #[kani::proof]
     #[kani::unwind(65)]
     fn historical_point_correct_buffer_slot() {
-        // Create a State with symbolic internal state
         let mut state: State<u32> = State::new();
-
-        // Use symbolic values for state indices
         let write_idx: u64 = kani::any();
         let read_idx: u64 = kani::any();
 
-        // Constrain to valid State invariants (from assert_properties in tests)
+        // Constrain to valid State invariants.
         kani::assume(read_idx <= write_idx);
         kani::assume(write_idx - read_idx < MAX_INTERVALS);
-
-        // Keep bounded for tractability but large enough to show modulo effects
-        kani::assume(write_idx >= MAX_INTERVALS);
-        kani::assume(write_idx < MAX_INTERVALS * 2);
-
-        // Set state to these symbolic values
         state.write_idx = write_idx;
         state.read_idx = read_idx;
 
-        // Choose a symbolic tick to add a historical point at
+        // Choose a tick in a valid range for historical points.
         let tick: u64 = kani::any();
-
-        // Constrain tick to be in valid range for historical points
         kani::assume(tick >= read_idx);
         kani::assume(tick <= write_idx);
 
-        // Create a point to add
         let point = kani::any();
 
-        // Record the state of all buffer slots before adding the point
+        // Record the state of all buffer slots before adding the point,
+        // calculate the interval the point should be going into.
         let mut was_empty = [false; MAX_INTERVALS as usize];
         for i in 0..MAX_INTERVALS as usize {
             was_empty[i] = state.intervals[i].points.is_empty();
         }
+        let expected_interval = mapped_idx(tick);
+        kani::assert(
+            was_empty[expected_interval],
+            "Interval {expected_interval} was not empty",
+        );
 
-        // Calculate which slot the point SHOULD go into based on its tick
-        let expected_slot = mapped_idx(tick);
-
-        // Assume the expected slot is currently empty (to track what we add)
-        kani::assume(was_empty[expected_slot]);
-
-        // Add the historical point
         let result = state.add_historical_point(point, tick);
-
-        // If operation succeeded, verify the point is in the correct slot
+        kani::assert(
+            result.is_ok(),
+            "Addition of historical point should have been a success, was not",
+        );
         if result.is_ok() {
-            // CRITICAL PROPERTY: The point must be in slot mapped_idx(tick)
-            // This is the fundamental correctness requirement of the ring buffer:
-            // a point at tick T belongs in slot (T % MAX_INTERVALS)
-            let point_in_expected_slot = !state.intervals[expected_slot].points.is_empty();
-
+            // Point should appear where we expect it.
+            let point_in_expected_interval = !state.intervals[expected_interval].points.is_empty();
             kani::assert(
-                point_in_expected_slot,
-                "Point added at tick T must be in buffer slot mapped_idx(T)",
+                point_in_expected_interval,
+                "Point added at tick T must be in buffer interval mapped_idx(T)",
             );
-
-            // Additional property: the point should not appear in other slots
-            // that were previously empty
+            // Point should not appear anywhere else.
             for i in 0..MAX_INTERVALS as usize {
-                if i != expected_slot && was_empty[i] {
+                if i != expected_interval && was_empty[i] {
                     kani::assert(
                         state.intervals[i].points.is_empty(),
                         "Point should only be in the expected slot",
