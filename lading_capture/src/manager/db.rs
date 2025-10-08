@@ -128,17 +128,17 @@ struct Interval<T> {
 }
 
 #[inline]
-fn mapped_idx(idx: u64) -> usize {
-    (idx % MAX_INTERVALS) as usize
+fn mapped_idx<const N: u64>(idx: u64) -> usize {
+    (idx % N) as usize
 }
 
 /// The time-series database.
 ///
 /// This is a pure model with no internal time concepts. All progression
 /// happens through external tick advances. The model maintains a fixed-size
-/// ring buffer of `MAX_INTERVALS` intervals.
+/// ring buffer of `N` intervals.
 #[derive(Debug)]
-pub(crate) struct State<T> {
+pub(crate) struct State<T, const N: u64> {
     intervals: Vec<Interval<T>>,
     /// Current write position in the ring buffer. This is also 'now', that is, the
     /// current tick.
@@ -147,17 +147,17 @@ pub(crate) struct State<T> {
     read_idx: u64,
 }
 
-impl<T> Default for State<T> {
+impl<T, const N: u64> Default for State<T, N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> State<T> {
+impl<T, const N: u64> State<T, N> {
     #[must_use]
     pub(crate) fn new() -> Self {
-        let mut intervals = Vec::with_capacity(MAX_INTERVALS as usize);
-        for _ in 0..MAX_INTERVALS {
+        let mut intervals = Vec::with_capacity(N as usize);
+        for _ in 0..N {
             intervals.push(Interval {
                 points: Vec::with_capacity(8), // magic constant, lowish but not too low
             });
@@ -189,7 +189,7 @@ impl<T> State<T> {
     ///
     /// Returns error if:
     /// - Tick is in the future (tick > now)
-    /// - Tick is too old (more than MAX_INTERVALS-1 ticks ago)
+    /// - Tick is too old (more than N-1 ticks ago)
     pub(crate) fn add_historical_point(&mut self, point: T, tick: Tick) -> Result<(), StateError> {
         // Determine that `tick` is within the read and write index interval,
         // meaning that the historical point is neither too old or too in the
@@ -201,11 +201,11 @@ impl<T> State<T> {
         if tick < self.read_idx {
             return Err(StateError::TickTooOld);
         }
-        if self.write_idx > tick && self.write_idx - tick > MAX_INTERVALS {
+        if self.write_idx > tick && self.write_idx - tick > N {
             return Err(StateError::TickTooOld);
         }
 
-        let target_idx = mapped_idx(tick);
+        let target_idx = mapped_idx::<N>(tick);
         let interval: &mut Interval<T> = &mut self.intervals[target_idx];
         interval.points.push(point);
         Ok(())
@@ -222,17 +222,17 @@ impl<T> State<T> {
     /// Passed `buffer` must be cleared by the caller.
     pub(crate) fn flush(&mut self, buffer: &mut Vec<T>) -> Option<Tick> {
         // Flushing advances the write_idx by 1. When write_idx - read_idx >
-        // MAX_INTERVALS the interval at read_idx will be flushed into buffer
+        // N the interval at read_idx will be flushed into buffer
         // and then read_idx will be advanced.
         //
         // Properties:
         //
-        // * (write_idx - read_idx) > MAX_INTERVALS (pre/post condition)
-        // * write_idx - returned(TICK) == MAX_INTERVALS
+        // * (write_idx - read_idx) > N (pre/post condition)
+        // * write_idx - returned(TICK) == N
         self.write_idx = self.write_idx.saturating_add(1);
 
-        if self.write_idx - self.read_idx == MAX_INTERVALS {
-            let interval = &mut self.intervals[mapped_idx(self.read_idx)];
+        if self.write_idx - self.read_idx == N {
+            let interval = &mut self.intervals[mapped_idx::<N>(self.read_idx)];
             buffer.append(&mut interval.points);
             let tick = self.read_idx;
             self.read_idx = self.read_idx.saturating_add(1);
@@ -250,7 +250,7 @@ impl<T> State<T> {
     /// Passed `buffer` must be cleared by the caller.
     pub(crate) fn flush_all(mut self, buffer: &mut Vec<T>) {
         while self.read_idx <= self.write_idx {
-            let interval = &mut self.intervals[mapped_idx(self.read_idx)];
+            let interval = &mut self.intervals[mapped_idx::<N>(self.read_idx)];
             buffer.append(&mut interval.points);
             self.read_idx = self.read_idx.saturating_add(1);
         }
@@ -291,15 +291,16 @@ mod proofs {
     /// Proof: When adding a historical point at tick T to State, the point must
     /// be written to buffer slot mapped_idx(T) and no other.
     #[kani::proof]
-    #[kani::unwind(65)]
+    #[kani::unwind(5)]
     fn historical_point_correct_buffer_slot() {
-        let mut state: State<u32> = State::new();
+        const N: u64 = 4;
+        let mut state: State<u32, N> = State::new();
         let write_idx: u64 = kani::any();
         let read_idx: u64 = kani::any();
 
         // Constrain to valid State invariants.
         kani::assume(read_idx <= write_idx);
-        kani::assume(write_idx - read_idx < MAX_INTERVALS);
+        kani::assume(write_idx - read_idx < N);
         state.write_idx = write_idx;
         state.read_idx = read_idx;
 
@@ -312,11 +313,11 @@ mod proofs {
 
         // Record the state of all buffer slots before adding the point,
         // calculate the interval the point should be going into.
-        let mut was_empty = [false; MAX_INTERVALS as usize];
-        for i in 0..MAX_INTERVALS as usize {
+        let mut was_empty = [false; N as usize];
+        for i in 0..N as usize {
             was_empty[i] = state.intervals[i].points.is_empty();
         }
-        let expected_interval = mapped_idx(tick);
+        let expected_interval = mapped_idx::<N>(tick);
         kani::assert(
             was_empty[expected_interval],
             "Interval {expected_interval} was not empty",
@@ -335,7 +336,7 @@ mod proofs {
                 "Point added at tick T must be in buffer interval mapped_idx(T)",
             );
             // Point should not appear anywhere else.
-            for i in 0..MAX_INTERVALS as usize {
+            for i in 0..N as usize {
                 if i != expected_interval && was_empty[i] {
                     kani::assert(
                         state.intervals[i].points.is_empty(),
@@ -347,30 +348,31 @@ mod proofs {
     }
 
     /// Proof: Any sequence of State operations preserves the invariant
-    /// `read_idx <= write_idx` and `write_idx - read_idx < MAX_INTERVALS`.
+    /// `read_idx <= write_idx` and `write_idx - read_idx < N`.
     #[kani::proof]
-    #[kani::unwind(65)]
+    #[kani::unwind(10)]
     fn operation_sequence_preserves_invariants() {
-        let mut state: State<u32> = State::new();
+        const N: u64 = 4;
+        let mut state: State<u32, N> = State::new();
         let write_idx: u64 = kani::any();
         let read_idx: u64 = kani::any();
 
         // Set up arbitrary valid state satisfying invariants
         kani::assume(read_idx <= write_idx);
-        kani::assume(write_idx - read_idx < MAX_INTERVALS);
+        kani::assume(write_idx - read_idx < N);
         state.write_idx = write_idx;
         state.read_idx = read_idx;
 
         // Perform a sequence of arbitrary operations, bounded to ensure
         // termination.
-        for _ in 0..MAX_INTERVALS * 2 {
+        for _ in 0..N * 2 {
             kani::assert(
                 state.read_idx <= state.write_idx,
                 "Invariant read_idx <= write_idx violated",
             );
             kani::assert(
-                state.write_idx - state.read_idx < MAX_INTERVALS,
-                "Invariant write_idx - read_idx < MAX_INTERVALS violated",
+                state.write_idx - state.read_idx < N,
+                "Invariant write_idx - read_idx < N violated",
             );
 
             let op: u8 = kani::any();
@@ -396,8 +398,8 @@ mod proofs {
                 "Invariant read_idx <= write_idx violated",
             );
             kani::assert(
-                state.write_idx - state.read_idx < MAX_INTERVALS,
-                "Invariant write_idx - read_idx < MAX_INTERVALS violated",
+                state.write_idx - state.read_idx < N,
+                "Invariant write_idx - read_idx < N violated",
             );
         }
     }
@@ -504,7 +506,7 @@ mod tests {
     ///
     /// This is called before and after every option to ensure the model
     /// maintains its properties. All properties of the model are asserted here.
-    fn assert_properties(state: &State<Point>, ctx: &Context) {
+    fn assert_properties(state: &State<Point, MAX_INTERVALS>, ctx: &Context) {
         // Property 1: Ticks are monotonic. Time, managed by the caller, is never
         // mapped backward by this implementation.
         if let Some(prev) = ctx.previous_tick {
@@ -647,7 +649,7 @@ mod tests {
 
         #[test]
         fn state_operations(operations in prop::collection::vec(any::<Operation>(), 0..(MAX_INTERVALS*4) as usize)) {
-            let mut state = State::new();
+            let mut state: State<Point, MAX_INTERVALS> = State::new();
             let mut ctx = Context {
                 added_count: 0,
                 flushed_count: 0,
