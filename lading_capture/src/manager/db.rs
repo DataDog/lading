@@ -194,7 +194,7 @@ impl<T> State<T> {
         // Determine that `tick` is within the read and write index interval,
         // meaning that the historical point is neither too old or too in the
         // future.
-        assert!(self.read_idx <= self.write_idx);
+        debug_assert!(self.read_idx <= self.write_idx);
         if tick > self.write_idx {
             return Err(StateError::TickInFuture);
         }
@@ -278,6 +278,14 @@ pub(crate) enum LabelError {
 
 #[cfg(kani)]
 mod proofs {
+    // Note for readers: This module implements proofs regarding State. We have
+    // proofs here to make general assertions about properties that may not hold
+    // but might only be statistically determined by our property tests
+    // below. Those however are bounded runtime and make more complex
+    // assertions, where the proofs do not.
+    //
+    // Both proof and property test drive State directly with operations.
+
     use super::*;
 
     /// Proof: When adding a historical point at tick T to State, the point must
@@ -335,6 +343,62 @@ mod proofs {
                     );
                 }
             }
+        }
+    }
+
+    /// Proof: Any sequence of State operations preserves the invariant
+    /// `read_idx <= write_idx` and `write_idx - read_idx < MAX_INTERVALS`.
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn operation_sequence_preserves_invariants() {
+        let mut state: State<u32> = State::new();
+        let write_idx: u64 = kani::any();
+        let read_idx: u64 = kani::any();
+
+        // Set up arbitrary valid state satisfying invariants
+        kani::assume(read_idx <= write_idx);
+        kani::assume(write_idx - read_idx < MAX_INTERVALS);
+        state.write_idx = write_idx;
+        state.read_idx = read_idx;
+
+        // Perform a sequence of arbitrary operations, bounded to ensure
+        // termination.
+        for _ in 0..MAX_INTERVALS * 2 {
+            kani::assert(
+                state.read_idx <= state.write_idx,
+                "Invariant read_idx <= write_idx violated",
+            );
+            kani::assert(
+                state.write_idx - state.read_idx < MAX_INTERVALS,
+                "Invariant write_idx - read_idx < MAX_INTERVALS violated",
+            );
+
+            let op: u8 = kani::any();
+            match op % 3 {
+                0 => {
+                    let point: u32 = kani::any();
+                    state.add_point(point);
+                }
+                1 => {
+                    let point: u32 = kani::any();
+                    let tick: u64 = kani::any();
+                    let _ = state.add_historical_point(point, tick);
+                }
+                2 => {
+                    let mut buffer = Vec::new();
+                    let _ = state.flush(&mut buffer);
+                }
+                _ => unreachable!(),
+            }
+
+            kani::assert(
+                state.read_idx <= state.write_idx,
+                "Invariant read_idx <= write_idx violated",
+            );
+            kani::assert(
+                state.write_idx - state.read_idx < MAX_INTERVALS,
+                "Invariant write_idx - read_idx < MAX_INTERVALS violated",
+            );
         }
     }
 }
