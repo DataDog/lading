@@ -14,7 +14,7 @@ pub enum MetricKind {
     Gauge,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 /// The value for [`Line`].
 #[serde(untagged)]
 pub enum LineValue {
@@ -50,6 +50,9 @@ impl std::fmt::Display for LineValue {
 pub struct Line {
     /// The time in milliseconds that this line was written.
     pub time: u128,
+    /// The time in milliseconds that this metric was recorded internally.
+    /// This may differ from `time` when historical writes are used.
+    pub recorded_at: u128,
     /// The "fetch index". Previous versions of lading scraped prometheus
     /// metrics from their targets and kept an increment index of polls. Now
     /// this records the number of times the internal metrics cache has been
