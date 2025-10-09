@@ -28,6 +28,36 @@ use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Trait for writing capture lines
+///
+/// This trait abstracts the writing of capture lines, allowing for both
+/// file-based and in-memory implementations for testing.
+pub trait CaptureWriter: Send {
+    /// Write bytes to the capture destination
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write operation fails.
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()>;
+
+    /// Flush any buffered data
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the flush operation fails.
+    fn flush(&mut self) -> io::Result<()>;
+}
+
+impl CaptureWriter for BufWriter<std::fs::File> {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        Write::write_all(self, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Write::flush(self)
+    }
+}
+
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -64,10 +94,10 @@ struct Inner {
 /// This struct is responsible for capturing all internal metrics sent through
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
-pub struct CaptureManager {
+pub struct CaptureManager<W: CaptureWriter> {
     fetch_index: u64,
     run_id: Uuid,
-    capture_fp: BufWriter<std::fs::File>,
+    capture_writer: W,
     capture_path: PathBuf,
     shutdown: lading_signal::Watcher,
     _experiment_started: lading_signal::Watcher,
@@ -76,8 +106,8 @@ pub struct CaptureManager {
     global_labels: FxHashMap<String, String>,
 }
 
-impl CaptureManager {
-    /// Create a new [`CaptureManager`]
+impl CaptureManager<BufWriter<std::fs::File>> {
+    /// Create a new [`CaptureManager`] with file-based writer
     ///
     /// # Errors
     ///
@@ -104,7 +134,7 @@ impl CaptureManager {
         Ok(Self {
             run_id: Uuid::new_v4(),
             fetch_index: 0,
-            capture_fp: BufWriter::new(fp),
+            capture_writer: BufWriter::new(fp),
             capture_path,
             shutdown,
             _experiment_started: experiment_started,
@@ -112,6 +142,39 @@ impl CaptureManager {
             inner: Arc::new(inner),
             global_labels: FxHashMap::default(),
         })
+    }
+}
+
+impl<W: CaptureWriter + 'static> CaptureManager<W> {
+    /// Create a new [`CaptureManager`] with a custom writer for testing
+    #[cfg(test)]
+    pub fn new_with_writer(
+        capture_writer: W,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Self {
+        let inner = Inner {
+            registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
+            recency: Recency::new(
+                quanta::Clock::new(),
+                MetricKindMask::GAUGE | MetricKindMask::COUNTER,
+                Some(expiration),
+            ),
+        };
+
+        Self {
+            run_id: Uuid::new_v4(),
+            fetch_index: 0,
+            capture_writer,
+            capture_path: PathBuf::from("/tmp/test-capture.json"),
+            shutdown,
+            _experiment_started: experiment_started,
+            target_running,
+            inner: Arc::new(inner),
+            global_labels: FxHashMap::default(),
+        }
     }
 
     /// Install the [`CaptureManager`] as global [`metrics::Recorder`]
@@ -208,17 +271,19 @@ impl CaptureManager {
         );
         for line in lines.drain(..) {
             let pyld = serde_json::to_string(&line)?;
-            self.capture_fp
+            self.capture_writer
                 .write_all(pyld.as_bytes())
                 .map_err(|err| Error::Io {
                     context: "payload write",
                     err,
                 })?;
-            self.capture_fp.write_all(b"\n").map_err(|err| Error::Io {
-                context: "newline write",
-                err,
-            })?;
-            self.capture_fp.flush().map_err(|err| Error::Io {
+            self.capture_writer
+                .write_all(b"\n")
+                .map_err(|err| Error::Io {
+                    context: "newline write",
+                    err,
+                })?;
+            self.capture_writer.flush().map_err(|err| Error::Io {
                 context: "flush",
                 err,
             })?;
@@ -330,5 +395,165 @@ impl metrics::Recorder for CaptureRecorder {
     ) -> metrics::Histogram {
         // nothing, intentionally
         unimplemented!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// In-memory writer for testing
+    ///
+    /// Captures all writes to a buffer that can be inspected after the test.
+    #[derive(Clone)]
+    struct InMemoryWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl InMemoryWriter {
+        fn new() -> Self {
+            Self {
+                buffer: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn get_content(&self) -> Vec<u8> {
+            self.buffer.lock().unwrap().clone()
+        }
+
+        fn parse_lines(&self) -> Result<Vec<json::Line>, serde_json::Error> {
+            let content = self.get_content();
+            let content_str = String::from_utf8_lossy(&content);
+            content_str
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(serde_json::from_str)
+                .collect()
+        }
+    }
+
+    impl CaptureWriter for InMemoryWriter {
+        fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+            self.buffer.lock().unwrap().extend_from_slice(buf);
+            Ok(())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn metrics_macros_create_capture_lines() {
+        let writer = InMemoryWriter::new();
+        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
+        let (experiment_rx, _experiment_tx) = lading_signal::signal();
+        let (target_rx, target_tx) = lading_signal::signal();
+
+        target_tx.signal();
+
+        let mut manager = CaptureManager::new_with_writer(
+            writer.clone(),
+            shutdown_rx,
+            experiment_rx,
+            target_rx,
+            Duration::from_secs(60),
+        );
+
+        let recorder = CaptureRecorder {
+            inner: Arc::clone(&manager.inner),
+        };
+
+        let mut expected_counters: Vec<(String, FxHashMap<String, String>, u64)> = Vec::new();
+        let mut expected_gauges: Vec<(String, FxHashMap<String, String>, f64)> = Vec::new();
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("counter_increment").increment(10);
+            metrics::counter!("counter_increment").increment(20);
+            expected_counters.push(("counter_increment".to_string(), FxHashMap::default(), 30));
+
+            metrics::counter!("counter_absolute").absolute(42);
+            expected_counters.push(("counter_absolute".to_string(), FxHashMap::default(), 42));
+
+            metrics::counter!("counter_with_labels", "env" => "test", "region" => "us-east")
+                .increment(100);
+            let mut labels = FxHashMap::default();
+            labels.insert("env".to_string(), "test".to_string());
+            labels.insert("region".to_string(), "us-east".to_string());
+            expected_counters.push(("counter_with_labels".to_string(), labels, 100));
+
+            metrics::gauge!("gauge_set").set(3.14);
+            expected_gauges.push(("gauge_set".to_string(), FxHashMap::default(), 3.14));
+
+            metrics::gauge!("gauge_increment").set(10.0);
+            metrics::gauge!("gauge_increment").increment(5.0);
+            expected_gauges.push(("gauge_increment".to_string(), FxHashMap::default(), 15.0));
+
+            metrics::gauge!("gauge_decrement").set(10.0);
+            metrics::gauge!("gauge_decrement").decrement(3.0);
+            expected_gauges.push(("gauge_decrement".to_string(), FxHashMap::default(), 7.0));
+
+            metrics::gauge!("gauge_with_labels", "service" => "api", "host" => "server1")
+                .set(99.9);
+            let mut labels = FxHashMap::default();
+            labels.insert("service".to_string(), "api".to_string());
+            labels.insert("host".to_string(), "server1".to_string());
+            expected_gauges.push(("gauge_with_labels".to_string(), labels, 99.9));
+        });
+
+        manager.record_captures().unwrap();
+        let lines = writer.parse_lines().unwrap();
+
+        for (name, labels, expected_value) in &expected_counters {
+            let line = lines.iter().find(|line| {
+                line.metric_name == *name
+                    && matches!(line.metric_kind, json::MetricKind::Counter)
+                    && line.labels == *labels
+            });
+
+            assert!(
+                line.is_some(),
+                "Expected to find counter '{name}' with labels {labels:?}"
+            );
+
+            let line = line.unwrap();
+
+            let val = match line.value {
+                json::LineValue::Int(val) => val,
+                json::LineValue::Float(_) => {
+                    assert!(false, "Expected Int value for counter {name}, got Float");
+                    return;
+                }
+            };
+
+            assert_eq!(val, *expected_value, "Counter {name} value mismatch");
+        }
+
+        for (name, labels, expected_value) in &expected_gauges {
+            let line = lines.iter().find(|line| {
+                line.metric_name == *name
+                    && matches!(line.metric_kind, json::MetricKind::Gauge)
+                    && line.labels == *labels
+            });
+
+            assert!(
+                line.is_some(),
+                "Expected to find gauge '{name}' with labels {labels:?}"
+            );
+
+            let line = line.unwrap();
+
+            let val = match line.value {
+                json::LineValue::Float(val) => val,
+                json::LineValue::Int(_) => {
+                    assert!(false, "Expected Float value for gauge {name}, got Int");
+                    return;
+                }
+            };
+
+            let diff = (val - expected_value).abs();
+            assert!(diff < 0.0001, "Gauge {name} value mismatch");
+        }
     }
 }
