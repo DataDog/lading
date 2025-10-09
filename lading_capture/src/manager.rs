@@ -18,7 +18,7 @@ use std::{
 
 use tokio::fs;
 
-use lading_capture::json;
+use crate::json;
 use metrics::Key;
 use metrics_util::{
     MetricKindMask,
