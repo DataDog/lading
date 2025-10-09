@@ -1682,7 +1682,6 @@ dependencies = [
  "procfs",
  "proptest",
  "prost",
- "quanta",
  "rand 0.9.2",
  "regex",
  "reqwest",
@@ -1702,7 +1701,6 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "zstd",
 ]
 
@@ -1710,8 +1708,16 @@ dependencies = [
 name = "lading-capture"
 version = "0.2.0"
 dependencies = [
+ "lading-signal",
+ "metrics",
+ "metrics-util",
+ "quanta",
  "rustc-hash",
  "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
