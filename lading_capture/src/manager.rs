@@ -473,6 +473,7 @@ mod tests {
             metrics::counter!("counter_increment").increment(20);
             expected_counters.push(("counter_increment".to_string(), FxHashMap::default(), 30));
 
+            metrics::counter!("counter_absolute").absolute(18);
             metrics::counter!("counter_absolute").absolute(42);
             expected_counters.push(("counter_absolute".to_string(), FxHashMap::default(), 42));
 
