@@ -318,276 +318,45 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    // Counter: Increment is associative and commutative
-    #[test]
-    fn counter_increment_commutative() {
-        let key = Key::from_name("test");
-
-        // [Increment(5), Increment(3)]
-        let mut acc1 = Accumulator::new();
-        acc1.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(5),
-        })
-        .unwrap();
-        acc1.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(3),
-        })
-        .unwrap();
-
-        // [Increment(3), Increment(5)]
-        let mut acc2 = Accumulator::new();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(3),
-        })
-        .unwrap();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(5),
-        })
-        .unwrap();
-
-        assert_eq!(
-            acc1.get_counter_value(&key, acc1.current_tick),
-            acc2.get_counter_value(&key, acc2.current_tick)
-        );
-        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 8);
+    // Test helpers to reduce duplication
+    fn counter_increment(key: Key, tick_offset: u8, value: u64) -> manager::Counter {
+        manager::Counter {
+            key,
+            tick_offset,
+            value: manager::CounterValue::Increment(value),
+        }
     }
 
-    // Counter: Absolute is idempotent
-    #[test]
-    fn counter_absolute_idempotent() {
-        let key = Key::from_name("test");
-        // [Absolute(100)]
-        let mut acc1 = Accumulator::new();
-        acc1.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Absolute(100),
-        })
-        .unwrap();
-
-        // [Absolute(100), Absolute(100)]
-        let mut acc2 = Accumulator::new();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Absolute(100),
-        })
-        .unwrap();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Absolute(100),
-        })
-        .unwrap();
-
-        assert_eq!(
-            acc1.get_counter_value(&key, acc1.current_tick),
-            acc2.get_counter_value(&key, acc2.current_tick)
-        );
-        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 100);
+    fn counter_absolute(key: Key, tick_offset: u8, value: u64) -> manager::Counter {
+        manager::Counter {
+            key,
+            tick_offset,
+            value: manager::CounterValue::Absolute(value),
+        }
     }
 
-    // Counter: Absolute does NOT commute with Increment
-    #[test]
-    fn counter_absolute_noncommutative_with_increment() {
-        let key = Key::from_name("test");
-
-        // [Increment(10), Absolute(50)]
-        let mut acc1 = Accumulator::new();
-        acc1.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(10),
-        })
-        .unwrap();
-        acc1.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Absolute(50),
-        })
-        .unwrap();
-
-        // [Absolute(50), Increment(10)]
-        let mut acc2 = Accumulator::new();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Absolute(50),
-        })
-        .unwrap();
-        acc2.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(10),
-        })
-        .unwrap();
-
-        // Should differ: acc1 is 50, acc2 is 60
-        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 50);
-        assert_eq!(acc2.get_counter_value(&key, acc2.current_tick), 60);
-        assert_ne!(
-            acc1.get_counter_value(&key, acc1.current_tick),
-            acc2.get_counter_value(&key, acc2.current_tick)
-        );
+    fn gauge_set(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+        manager::Gauge {
+            key,
+            tick_offset,
+            value: manager::GaugeValue::Set(value),
+        }
     }
 
-    // Gauge: Increment and Decrement commute
-    #[test]
-    fn gauge_increment_decrement_commute() {
-        let key = Key::from_name("test");
-
-        // [Increment(10.0), Decrement(3.0)]
-        let mut acc1 = Accumulator::new();
-        acc1.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Increment(10.0),
-        })
-        .unwrap();
-        acc1.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Decrement(3.0),
-        })
-        .unwrap();
-
-        // [Decrement(3.0), Increment(10.0)]
-        let mut acc2 = Accumulator::new();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Decrement(3.0),
-        })
-        .unwrap();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Increment(10.0),
-        })
-        .unwrap();
-
-        assert_eq!(
-            acc1.get_gauge_value(&key, acc1.current_tick),
-            acc2.get_gauge_value(&key, acc2.current_tick)
-        );
-        assert!((acc1.get_gauge_value(&key, acc1.current_tick) - 7.0).abs() < 1e-10);
+    fn gauge_increment(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+        manager::Gauge {
+            key,
+            tick_offset,
+            value: manager::GaugeValue::Increment(value),
+        }
     }
 
-    // Gauge: Set is idempotent
-    #[test]
-    fn gauge_set_idempotent() {
-        let key = Key::from_name("test");
-
-        // [Set(50.0)]
-        let mut acc1 = Accumulator::new();
-        acc1.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Set(50.0),
-        })
-        .unwrap();
-
-        // [Set(50.0), Set(50.0)]
-        let mut acc2 = Accumulator::new();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Set(50.0),
-        })
-        .unwrap();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Set(50.0),
-        })
-        .unwrap();
-
-        assert!(
-            (acc1.get_gauge_value(&key, acc1.current_tick)
-                - acc2.get_gauge_value(&key, acc2.current_tick))
-            .abs()
-                < 1e-10
-        );
-        assert!((acc1.get_gauge_value(&key, acc1.current_tick) - 50.0).abs() < 1e-10);
-    }
-
-    // Gauge: Set does NOT commute with Increment/Decrement
-    #[test]
-    fn gauge_set_noncommutative_with_increment() {
-        let key = Key::from_name("test");
-
-        // [Increment(10.0), Set(25.0)]
-        let mut acc1 = Accumulator::new();
-        acc1.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Increment(10.0),
-        })
-        .unwrap();
-        acc1.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Set(25.0),
-        })
-        .unwrap();
-
-        // [Set(25.0), Increment(10.0)]
-        let mut acc2 = Accumulator::new();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Set(25.0),
-        })
-        .unwrap();
-        acc2.gauge(manager::Gauge {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::GaugeValue::Increment(10.0),
-        })
-        .unwrap();
-
-        let v1 = acc1.get_gauge_value(&key, acc1.current_tick);
-        let v2 = acc2.get_gauge_value(&key, acc2.current_tick);
-
-        // Should differ: acc1 is 25.0, acc2 is 35.0
-        assert!((v1 - 25.0).abs() < 1e-10);
-        assert!((v2 - 35.0).abs() < 1e-10);
-        assert!((v1 - v2).abs() > 1e-10);
-    }
-
-    // Tick advancement: values copy forward, no expiration
-    #[test]
-    fn tick_advancement_copies_forward() {
-        let key = Key::from_name("test");
-
-        let mut acc = Accumulator::new();
-
-        // Write at tick 0
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(42),
-        })
-        .unwrap();
-
-        let value_before_advance = acc.get_counter_value(&key, acc.current_tick);
-
-        // Advance tick
-        acc.advance_tick();
-
-        // Value should be copied to new interval
-        let value_after_advance = acc.get_counter_value(&key, acc.current_tick);
-
-        assert_eq!(value_before_advance, 42);
-        assert_eq!(value_after_advance, 42);
+    fn gauge_decrement(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+        manager::Gauge {
+            key,
+            tick_offset,
+            value: manager::GaugeValue::Decrement(value),
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -617,8 +386,212 @@ mod tests {
         }
     }
 
+    // NOTE generally speaking in lading project we have a complicated System
+    // under Test (SUT) and then a simple, 'obviously correct' model that we do
+    // model checking against. The SuT here is already very simple and so I have
+    // elected to leave the stub of what a model check might be while leaning
+    // more into unit tests. My hope is that as the SuT evolves into something
+    // more complex we can pursue the more common project test approach.
+
+    proptest! {
+        #[test]
+        fn random_operations_maintain_invariants(ops in prop::collection::vec(any::<Op>(), 0..50)) {
+            let key = Key::from_name("test");
+            let mut acc = Accumulator::new();
+            let initial_tick = acc.current_tick;
+
+            for op in ops {
+                let old_tick = acc.current_tick;
+
+                match op {
+                    Op::CounterIncrement(v) => {
+                        let _ = acc.counter(counter_increment(key.clone(), 0, v));
+                    }
+                    Op::CounterAbsolute(v) => {
+                        let _ = acc.counter(counter_absolute(key.clone(), 0, v));
+                    }
+                    Op::GaugeIncrement(v) => {
+                        let _ = acc.gauge(gauge_increment(key.clone(), 0, v));
+                    }
+                    Op::GaugeDecrement(v) => {
+                        let _ = acc.gauge(gauge_decrement(key.clone(), 0, v));
+                    }
+                    Op::GaugeSet(v) => {
+                        let _ = acc.gauge(gauge_set(key.clone(), 0, v));
+                    }
+                    Op::AdvanceTick => {
+                        acc.advance_tick();
+                    }
+                }
+
+                // Invariants
+                assert!(acc.current_tick >= old_tick, "tick must not decrease");
+                assert!(
+                    acc.current_tick <= old_tick + 1,
+                    "tick can only advance by 1 at a time"
+                );
+                assert!(
+                    acc.current_tick >= initial_tick,
+                    "tick must be >= initial tick"
+                );
+            }
+        }
+    }
+
+    // Counter: Increment is associative and commutative
     #[test]
-    fn advancing_to_tick_INTERVALS_makes_data_flushable() {
+    fn counter_increment_commutative() {
+        let key = Key::from_name("test");
+
+        // [Increment(5), Increment(3)]
+        let mut acc1 = Accumulator::new();
+        acc1.counter(counter_increment(key.clone(), 0, 5)).unwrap();
+        acc1.counter(counter_increment(key.clone(), 0, 3)).unwrap();
+
+        // [Increment(3), Increment(5)]
+        let mut acc2 = Accumulator::new();
+        acc2.counter(counter_increment(key.clone(), 0, 3)).unwrap();
+        acc2.counter(counter_increment(key.clone(), 0, 5)).unwrap();
+
+        assert_eq!(
+            acc1.get_counter_value(&key, acc1.current_tick),
+            acc2.get_counter_value(&key, acc2.current_tick)
+        );
+        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 8);
+    }
+
+    // Counter: Absolute is idempotent
+    #[test]
+    fn counter_absolute_idempotent() {
+        let key = Key::from_name("test");
+
+        // [Absolute(100)]
+        let mut acc1 = Accumulator::new();
+        acc1.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
+
+        // [Absolute(100), Absolute(100)]
+        let mut acc2 = Accumulator::new();
+        acc2.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
+        acc2.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
+
+        assert_eq!(
+            acc1.get_counter_value(&key, acc1.current_tick),
+            acc2.get_counter_value(&key, acc2.current_tick)
+        );
+        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 100);
+    }
+
+    // Counter: Absolute does NOT commute with Increment
+    #[test]
+    fn counter_absolute_noncommutative_with_increment() {
+        let key = Key::from_name("test");
+
+        // [Increment(10), Absolute(50)]
+        let mut acc1 = Accumulator::new();
+        acc1.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        acc1.counter(counter_absolute(key.clone(), 0, 50)).unwrap();
+
+        // [Absolute(50), Increment(10)]
+        let mut acc2 = Accumulator::new();
+        acc2.counter(counter_absolute(key.clone(), 0, 50)).unwrap();
+        acc2.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+
+        // Should differ: acc1 is 50, acc2 is 60
+        assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 50);
+        assert_eq!(acc2.get_counter_value(&key, acc2.current_tick), 60);
+        assert_ne!(
+            acc1.get_counter_value(&key, acc1.current_tick),
+            acc2.get_counter_value(&key, acc2.current_tick)
+        );
+    }
+
+    // Gauge: Increment and Decrement commute
+    #[test]
+    fn gauge_increment_decrement_commute() {
+        let key = Key::from_name("test");
+
+        // [Increment(10.0), Decrement(3.0)]
+        let mut acc1 = Accumulator::new();
+        acc1.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+        acc1.gauge(gauge_decrement(key.clone(), 0, 3.0)).unwrap();
+
+        // [Decrement(3.0), Increment(10.0)]
+        let mut acc2 = Accumulator::new();
+        acc2.gauge(gauge_decrement(key.clone(), 0, 3.0)).unwrap();
+        acc2.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+
+        assert_eq!(
+            acc1.get_gauge_value(&key, acc1.current_tick),
+            acc2.get_gauge_value(&key, acc2.current_tick)
+        );
+        assert!((acc1.get_gauge_value(&key, acc1.current_tick) - 7.0).abs() < 1e-10);
+    }
+
+    // Gauge: Set is idempotent
+    #[test]
+    fn gauge_set_idempotent() {
+        let key = Key::from_name("test");
+
+        // [Set(50.0)]
+        let mut acc1 = Accumulator::new();
+        acc1.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
+
+        // [Set(50.0), Set(50.0)]
+        let mut acc2 = Accumulator::new();
+        acc2.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
+        acc2.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
+
+        assert!(
+            (acc1.get_gauge_value(&key, acc1.current_tick)
+                - acc2.get_gauge_value(&key, acc2.current_tick))
+            .abs()
+                < 1e-10
+        );
+        assert!((acc1.get_gauge_value(&key, acc1.current_tick) - 50.0).abs() < 1e-10);
+    }
+
+    // Gauge: Set does NOT commute with Increment/Decrement
+    #[test]
+    fn gauge_set_noncommutative_with_increment() {
+        let key = Key::from_name("test");
+
+        // [Increment(10.0), Set(25.0)]
+        let mut acc1 = Accumulator::new();
+        acc1.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+        acc1.gauge(gauge_set(key.clone(), 0, 25.0)).unwrap();
+
+        // [Set(25.0), Increment(10.0)]
+        let mut acc2 = Accumulator::new();
+        acc2.gauge(gauge_set(key.clone(), 0, 25.0)).unwrap();
+        acc2.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+
+        let v1 = acc1.get_gauge_value(&key, acc1.current_tick);
+        let v2 = acc2.get_gauge_value(&key, acc2.current_tick);
+
+        // Should differ: acc1 is 25.0, acc2 is 35.0
+        assert!((v1 - 25.0).abs() < 1e-10);
+        assert!((v2 - 35.0).abs() < 1e-10);
+        assert!((v1 - v2).abs() > 1e-10);
+    }
+
+    // Tick advancement: values copy forward, no expiration
+    #[test]
+    fn tick_advancement_copies_forward() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        acc.counter(counter_increment(key.clone(), 0, 42)).unwrap();
+        let value_before_advance = acc.get_counter_value(&key, acc.current_tick);
+
+        acc.advance_tick();
+        let value_after_advance = acc.get_counter_value(&key, acc.current_tick);
+
+        assert_eq!(value_before_advance, 42);
+        assert_eq!(value_after_advance, 42);
+    }
+
+    #[test]
+    fn advancing_to_tick_intervals_makes_data_flushable() {
         let mut acc = Accumulator::new();
 
         assert!(acc.current_tick < INTERVALS as u64);
@@ -638,34 +611,19 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Add data at various ticks
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(10),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
 
         for _i in 0..5 {
             acc.advance_tick();
         }
 
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(20),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 20)).unwrap();
 
         for _i in 0..10 {
             acc.advance_tick();
         }
 
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(30),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 30)).unwrap();
 
         // We're now at tick 15. Simulate shutdown pattern:
         // 1. Advance to tick 60 if not there yet
@@ -713,34 +671,19 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Add data at various ticks
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(10),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
 
         for _i in 0..5 {
             acc.advance_tick();
         }
 
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(20),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 20)).unwrap();
 
         for _i in 0..10 {
             acc.advance_tick();
         }
 
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(30),
-        })
-        .unwrap();
+        acc.counter(counter_increment(key.clone(), 0, 30)).unwrap();
 
         // Advance to INTERVALS so data becomes flushable
         while acc.current_tick < INTERVALS as u64 {
@@ -789,68 +732,254 @@ mod tests {
         }
     }
 
-    proptest! {
-        #[test]
-        fn random_operations_maintain_invariants(ops in prop::collection::vec(any::<Op>(), 0..50)) {
-            let key = Key::from_name("test");
-                let mut acc = Accumulator::new();
-            let initial_tick = acc.current_tick;
+    // Test tick_offset > 0 propagates to multiple intervals for counter
+    #[test]
+    fn counter_tick_offset_propagates_to_multiple_intervals() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
 
-            for op in ops {
-                let old_tick = acc.current_tick;
+        // Advance to tick 5
+        for _ in 0..5 {
+            acc.advance_tick();
+        }
 
-                match op {
-                    Op::CounterIncrement(v) => {
-                        let _ = acc.counter(manager::Counter {
-                            key: key.clone(),
-                            tick_offset: 0,
-                            value: manager::CounterValue::Increment(v),
-                        });
-                    }
-                    Op::CounterAbsolute(v) => {
-                        let _ = acc.counter(manager::Counter {
-                            key: key.clone(),
-                            tick_offset: 0,
-                            value: manager::CounterValue::Absolute(v),
-                        });
-                    }
-                    Op::GaugeIncrement(v) => {
-                        let _ = acc.gauge(manager::Gauge {
-                            key: key.clone(),
-                            tick_offset: 0,
-                            value: manager::GaugeValue::Increment(v),
-                        });
-                    }
-                    Op::GaugeDecrement(v) => {
-                        let _ = acc.gauge(manager::Gauge {
-                            key: key.clone(),
-                            tick_offset: 0,
-                            value: manager::GaugeValue::Decrement(v),
-                        });
-                    }
-                    Op::GaugeSet(v) => {
-                        let _ = acc.gauge(manager::Gauge {
-                            key: key.clone(),
-                            tick_offset: 0,
-                            value: manager::GaugeValue::Set(v),
-                        });
-                    }
-                    Op::AdvanceTick => {
-                        acc.advance_tick();
+        // Write with tick_offset=2, should update intervals at ticks 5, 4, 3
+        acc.counter(counter_increment(key.clone(), 2, 100)).unwrap();
+
+        assert_eq!(acc.get_counter_value(&key, 5), 100);
+        assert_eq!(acc.get_counter_value(&key, 4), 100);
+        assert_eq!(acc.get_counter_value(&key, 3), 100);
+        assert_eq!(acc.get_counter_value(&key, 2), 0);
+    }
+
+    // Test tick_offset >= 60 returns TickTooOld error for counter
+    #[test]
+    fn counter_tick_too_old() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        let result = acc.counter(counter_increment(key, 60, 100));
+        assert!(matches!(result, Err(Error::TickTooOld { tick_offset: 60 })));
+    }
+
+    // Test tick_offset > current_tick returns FutureTick error for counter
+    #[test]
+    fn counter_future_tick() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Current tick is 0, try to write with tick_offset=1
+        let result = acc.counter(counter_increment(key.clone(), 1, 100));
+        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 1 })));
+
+        // Advance to tick 5, try tick_offset=6
+        for _ in 0..5 {
+            acc.advance_tick();
+        }
+        let result = acc.counter(counter_increment(key, 6, 100));
+        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 6 })));
+    }
+
+    // Test tick_offset > 0 propagates to multiple intervals for gauge
+    #[test]
+    fn gauge_tick_offset_propagates_to_multiple_intervals() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Advance to tick 5
+        for _ in 0..5 {
+            acc.advance_tick();
+        }
+
+        // Write with tick_offset=2, should update intervals at ticks 5, 4, 3
+        acc.gauge(gauge_set(key.clone(), 2, 42.0)).unwrap();
+
+        assert!((acc.get_gauge_value(&key, 5) - 42.0).abs() < 1e-10);
+        assert!((acc.get_gauge_value(&key, 4) - 42.0).abs() < 1e-10);
+        assert!((acc.get_gauge_value(&key, 3) - 42.0).abs() < 1e-10);
+        assert!((acc.get_gauge_value(&key, 2) - 0.0).abs() < 1e-10);
+    }
+
+    // Test tick_offset >= 60 returns TickTooOld error for gauge
+    #[test]
+    fn gauge_tick_too_old() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        let result = acc.gauge(gauge_set(key, 60, 42.0));
+        assert!(matches!(result, Err(Error::TickTooOld { tick_offset: 60 })));
+    }
+
+    // Test tick_offset > current_tick returns FutureTick error for gauge
+    #[test]
+    fn gauge_future_tick() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Current tick is 0, try to write with tick_offset=1
+        let result = acc.gauge(gauge_set(key.clone(), 1, 42.0));
+        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 1 })));
+
+        // Advance to tick 5, try tick_offset=6
+        for _ in 0..5 {
+            acc.advance_tick();
+        }
+        let result = acc.gauge(gauge_set(key, 6, 42.0));
+        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 6 })));
+    }
+
+    // Test flush filters out zero values
+    #[test]
+    fn flush_filters_zero_values() {
+        let key1 = Key::from_name("counter_zero");
+        let key2 = Key::from_name("counter_nonzero");
+        let key3 = Key::from_name("gauge_zero");
+        let key4 = Key::from_name("gauge_nonzero");
+        let mut acc = Accumulator::new();
+
+        // Write zero and non-zero values
+        acc.counter(counter_absolute(key1.clone(), 0, 0)).unwrap();
+        acc.counter(counter_absolute(key2.clone(), 0, 100)).unwrap();
+        acc.gauge(gauge_set(key3.clone(), 0, 0.0)).unwrap();
+        acc.gauge(gauge_set(key4.clone(), 0, 42.0)).unwrap();
+
+        // Advance to INTERVALS so data becomes flushable
+        while acc.current_tick < INTERVALS as u64 {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+
+        // Only non-zero values should be present
+        assert_eq!(results.len(), 2);
+
+        let keys: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
+        assert!(keys.contains(&"counter_nonzero"));
+        assert!(keys.contains(&"gauge_nonzero"));
+        assert!(!keys.contains(&"counter_zero"));
+        assert!(!keys.contains(&"gauge_zero"));
+    }
+
+    // Test flush handles multiple keys correctly
+    #[test]
+    fn flush_handles_multiple_keys() {
+        let key1 = Key::from_name("counter1");
+        let key2 = Key::from_name("counter2");
+        let key3 = Key::from_name("gauge1");
+        let mut acc = Accumulator::new();
+
+        // Write to multiple keys
+        acc.counter(counter_increment(key1.clone(), 0, 10)).unwrap();
+        acc.counter(counter_increment(key2.clone(), 0, 20)).unwrap();
+        acc.gauge(gauge_set(key3.clone(), 0, 3.14)).unwrap();
+
+        // Advance to INTERVALS so data becomes flushable
+        while acc.current_tick < INTERVALS as u64 {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+
+        assert_eq!(results.len(), 3);
+
+        // Verify all keys are present
+        let keys: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
+        assert!(keys.contains(&"counter1"));
+        assert!(keys.contains(&"counter2"));
+        assert!(keys.contains(&"gauge1"));
+
+        // Verify values
+        for (key, value, _tick) in results {
+            match key.name() {
+                "counter1" => {
+                    assert!(matches!(value, MetricValue::Counter(10)));
+                }
+                "counter2" => {
+                    assert!(matches!(value, MetricValue::Counter(20)));
+                }
+                "gauge1" => {
+                    if let MetricValue::Gauge(v) = value {
+                        assert!((v - 3.14).abs() < 1e-10);
+                    } else {
+                        panic!("Expected gauge value");
                     }
                 }
-
-                // Invariants
-                assert!(acc.current_tick >= old_tick, "tick must not decrease");
-                assert!(
-                    acc.current_tick <= old_tick + 1,
-                    "tick can only advance by 1 at a time"
-                );
-                assert!(
-                    acc.current_tick >= initial_tick,
-                    "tick must be >= initial tick"
-                );
+                _ => panic!("Unexpected key"),
             }
         }
+    }
+
+    // Test interval wrapping beyond INTERVALS
+    #[test]
+    fn interval_wrapping_beyond_intervals() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Write at tick 0
+        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+
+        // Advance beyond INTERVALS
+        for _ in 0..70 {
+            acc.advance_tick();
+        }
+
+        // Write again - should wrap around to reuse intervals
+        acc.counter(counter_increment(key.clone(), 0, 50)).unwrap();
+
+        // Value at current tick should be forwarded value (100) + new increment (50)
+        assert_eq!(acc.get_counter_value(&key, acc.current_tick), 150);
+
+        // Verify interval_idx wraps correctly
+        assert_eq!(interval_idx(0), interval_idx(60));
+        assert_eq!(interval_idx(1), interval_idx(61));
+        assert_eq!(interval_idx(59), interval_idx(119));
+    }
+
+    // Test absolute counter write to historical tick
+    #[test]
+    fn counter_absolute_with_tick_offset() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Advance to tick 10
+        for _ in 0..10 {
+            acc.advance_tick();
+        }
+
+        // Write absolute value with tick_offset=3
+        acc.counter(counter_absolute(key.clone(), 3, 500)).unwrap();
+
+        // Ticks 10, 9, 8, 7 should all have value 500
+        assert_eq!(acc.get_counter_value(&key, 10), 500);
+        assert_eq!(acc.get_counter_value(&key, 9), 500);
+        assert_eq!(acc.get_counter_value(&key, 8), 500);
+        assert_eq!(acc.get_counter_value(&key, 7), 500);
+        assert_eq!(acc.get_counter_value(&key, 6), 0);
+    }
+
+    // Test gauge increment with tick_offset
+    #[test]
+    fn gauge_operations_with_tick_offset() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Advance to tick 5
+        for _ in 0..5 {
+            acc.advance_tick();
+        }
+
+        // Increment with tick_offset=2
+        acc.gauge(gauge_increment(key.clone(), 2, 10.0)).unwrap();
+        // Decrement with tick_offset=1
+        acc.gauge(gauge_decrement(key.clone(), 1, 3.0)).unwrap();
+
+        // Tick 5: +10.0 -3.0 = 7.0
+        assert!((acc.get_gauge_value(&key, 5) - 7.0).abs() < 1e-10);
+        // Tick 4: +10.0 -3.0 = 7.0
+        assert!((acc.get_gauge_value(&key, 4) - 7.0).abs() < 1e-10);
+        // Tick 3: +10.0 = 10.0
+        assert!((acc.get_gauge_value(&key, 3) - 10.0).abs() < 1e-10);
+        // Tick 2: nothing
+        assert!((acc.get_gauge_value(&key, 2) - 0.0).abs() < 1e-10);
     }
 }
