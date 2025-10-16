@@ -815,10 +815,12 @@ mod tests {
 
         // Collect all unique fetch_index values from the captured output
         let lines = writer.parse_lines().unwrap();
-        let mut unique_fetch_indices: Vec<u64> =
-            lines.iter().map(|l| l.fetch_index).collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
+        let mut unique_fetch_indices: Vec<u64> = lines
+            .iter()
+            .map(|l| l.fetch_index)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         unique_fetch_indices.sort_unstable();
 
         // Verify fetch_index values are strictly increasing
