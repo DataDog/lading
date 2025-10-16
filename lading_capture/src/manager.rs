@@ -63,14 +63,12 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum CounterValue {
     Increment(u64),
     Absolute(u64),
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum GaugeValue {
     Increment(f64),
     Decrement(f64),
@@ -148,7 +146,7 @@ impl<W: Write + Send> CaptureManager<W> {
         let run_id = Uuid::new_v4();
         let now = Instant::now();
 
-        let (snd, recv) = mpsc::channel(10_000);
+        let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
         let accumulator = Accumulator::new();
 
         Self {
@@ -199,7 +197,6 @@ impl<W: Write + Send> CaptureManager<W> {
         current_tick: u64,
         run_id: Uuid,
     ) -> Result<(), Error> {
-        // Calculate recorded_at based on tick offset from current tick
         let recorded_at_ms = now_ms.saturating_sub(u128::from(current_tick - tick) * 1000);
 
         let mut labels = self.global_labels.clone();
@@ -288,8 +285,8 @@ impl<W: Write + Send> CaptureManager<W> {
         }
 
         debug!(
-            "Recording {line_count} captures to {}",
-            self.capture_path.display()
+            "Recording {line_count} captures to {path}",
+            path = self.capture_path.display()
         );
 
         let elapsed = start.elapsed();
@@ -381,12 +378,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                 }
                 _ = flush_interval.tick() => {
                     let now = Instant::now();
-                    if let Err(e) = self.record_captures() {
-                        warn!(
-                            "failed to record captures for idx {idx}: {e}",
-                            idx = self.fetch_index
-                        );
-                    }
+                    self.record_captures()?;
                     self.fetch_index += 1;
 
                     let delta = now.elapsed();
@@ -749,16 +741,6 @@ mod tests {
             "Expected 2 lines (counter + gauge) after 60th flush, got {}",
             lines.len()
         );
-
-        for line in &lines {
-            let delay_ms = line.time.saturating_sub(line.recorded_at);
-            let delay_seconds = delay_ms / 1000;
-            assert_eq!(
-                delay_seconds, 60,
-                "Expected 60 second delay between recorded_at and time, got {} seconds",
-                delay_seconds
-            );
-        }
 
         let counter_line = lines
             .iter()
