@@ -397,21 +397,17 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received, flushing all remaining metrics");
                     let run_id = self.run_id;
-
-                    // Drain all remaining data by flushing any remaining ticks
-                    // from the accumulator
                     let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-                    for _ in 0..Accumulator::ticks_to_drain() {
-                        let current_tick = self.accumulator.current_tick;
 
-                        let mut line_count = 0;
-                        for (key, value, tick) in self.accumulator.flush() {
-                            debug!(tick = ?tick, "flushing...");
+                    // Drain all remaining data from the accumulator. Collect to
+                    // release the mutable borrow so we can call
+                    // write_metric_line, sort of an API / ownership smell but
+                    // the allocation is not on a hot path.
+                    let drain: Vec<_> = self.accumulator.drain().collect();
+                    for (current_tick, metrics) in drain {
+                        for (key, value, tick) in metrics {
                             self.write_metric_line(&key, &value, tick, now_ms, current_tick, run_id)?;
-                            line_count += 1;
-                            debug!(tick = ?tick, "flushed {line_count} metrics");
                         }
-                        self.accumulator.advance_tick();
                     }
 
                     return Ok(());
