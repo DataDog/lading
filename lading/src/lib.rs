@@ -12,7 +12,6 @@
 use http_body_util::BodyExt;
 
 pub mod blackhole;
-pub mod captures;
 pub(crate) mod codec;
 mod common;
 pub mod config;
