@@ -101,7 +101,6 @@
 
 use metrics::Key;
 use rustc_hash::FxHashMap;
-use tracing::trace;
 
 use crate::manager;
 
@@ -244,16 +243,12 @@ impl Accumulator {
         let old_interval = interval_idx(self.current_tick);
         self.current_tick = self.current_tick.wrapping_add(1);
         let new_interval = interval_idx(self.current_tick);
-        let mut total_forwarded = 0;
         for values in self.counters.values_mut() {
-            total_forwarded += 1;
             values[new_interval] = values[old_interval];
         }
         for values in self.gauges.values_mut() {
-            total_forwarded += 1;
             values[new_interval] = values[old_interval];
         }
-        trace!(tick = ?self.current_tick, "forwarded {total_forwarded} metrics");
     }
 
     /// Flush T-INTERVALS data, returning an iterator of (Key, `MetricValue`, tick)
@@ -273,16 +268,12 @@ impl Accumulator {
 
         for (key, values) in &self.counters {
             let value = values[flush_interval];
-            if value != 0 {
-                metrics.push((key.clone(), MetricValue::Counter(value), flush_tick));
-            }
+            metrics.push((key.clone(), MetricValue::Counter(value), flush_tick));
         }
 
         for (key, values) in &self.gauges {
             let value = values[flush_interval];
-            if value != 0.0 {
-                metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
-            }
+            metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
         }
 
         metrics.into_iter()
@@ -828,9 +819,9 @@ mod tests {
         assert!(matches!(result, Err(Error::FutureTick { tick_offset: 6 })));
     }
 
-    // Test flush filters out zero values
+    // Test flush includes all values, including zeros
     #[test]
-    fn flush_filters_zero_values() {
+    fn flush_includes_zero_values() {
         let key1 = Key::from_name("counter_zero");
         let key2 = Key::from_name("counter_nonzero");
         let key3 = Key::from_name("gauge_zero");
@@ -850,14 +841,37 @@ mod tests {
 
         let results: Vec<_> = acc.flush().collect();
 
-        // Only non-zero values should be present
-        assert_eq!(results.len(), 2);
+        // All values should be present, including zeros
+        assert_eq!(results.len(), 4);
 
         let keys: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
+        assert!(keys.contains(&"counter_zero"));
         assert!(keys.contains(&"counter_nonzero"));
+        assert!(keys.contains(&"gauge_zero"));
         assert!(keys.contains(&"gauge_nonzero"));
-        assert!(!keys.contains(&"counter_zero"));
-        assert!(!keys.contains(&"gauge_zero"));
+
+        // Verify zero values are actually returned
+        for (key, value, _tick) in results {
+            match key.name() {
+                "counter_zero" => assert!(matches!(value, MetricValue::Counter(0))),
+                "counter_nonzero" => assert!(matches!(value, MetricValue::Counter(100))),
+                "gauge_zero" => {
+                    if let MetricValue::Gauge(v) = value {
+                        assert!((v - 0.0).abs() < 1e-10);
+                    } else {
+                        panic!("Expected gauge value");
+                    }
+                }
+                "gauge_nonzero" => {
+                    if let MetricValue::Gauge(v) = value {
+                        assert!((v - 42.0).abs() < 1e-10);
+                    } else {
+                        panic!("Expected gauge value");
+                    }
+                }
+                _ => panic!("Unexpected key"),
+            }
+        }
     }
 
     // Test flush handles multiple keys correctly
