@@ -124,6 +124,38 @@ pub enum Error {
     FutureTick { tick_offset: u8 },
 }
 
+/// Iterator that drains all accumulated metrics during shutdown.
+///
+/// Each iteration flushes metrics from a single interval until no intervals
+/// remain.
+pub(crate) struct DrainIter<'a> {
+    accumulator: &'a mut Accumulator,
+    remaining: usize,
+}
+
+impl Iterator for DrainIter<'_> {
+    type Item = (u64, Vec<(Key, MetricValue, u64)>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+
+        self.remaining -= 1;
+        let current_tick = self.accumulator.current_tick;
+        let metrics: Vec<_> = self.accumulator.flush().collect();
+        self.accumulator.advance_tick();
+
+        Some((current_tick, metrics))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl ExactSizeIterator for DrainIter<'_> {}
+
 /// Represents a metric value (counter or gauge)
 #[derive(Debug, Clone)]
 pub(crate) enum MetricValue {
@@ -224,11 +256,11 @@ impl Accumulator {
         trace!(tick = ?self.current_tick, "forwarded {total_forwarded} metrics");
     }
 
-    /// Flush T-60 data, returning an iterator of (Key, `MetricValue`, tick)
+    /// Flush T-INTERVALS data, returning an iterator of (Key, `MetricValue`, tick)
     /// tuples.
     ///
-    /// Returns metrics from the interval that is 60 ticks old. If the current
-    /// tick has not yet reached 60, returns an empty iterator.
+    /// Returns metrics from the interval that is INTERVALS ticks old. If the
+    /// current tick has not yet reached INTERVALS, returns an empty iterator.
     pub(crate) fn flush(&self) -> impl Iterator<Item = (Key, MetricValue, u64)> + use<> {
         let mut metrics = Vec::new();
 
@@ -256,12 +288,12 @@ impl Accumulator {
         metrics.into_iter()
     }
 
-    /// Returns the number of flush+advance cycles needed to drain all accumulated data.
-    ///
-    /// During shutdown, call `flush()` then `advance_tick()` this many times
-    /// to ensure all metrics are written out.
-    pub(crate) const fn ticks_to_drain() -> usize {
-        INTERVALS
+    /// Returns an iterator that drains all accumulated metrics.
+    pub(crate) fn drain(&mut self) -> DrainIter<'_> {
+        DrainIter {
+            accumulator: self,
+            remaining: INTERVALS,
+        }
     }
 
     #[cfg(test)]
@@ -585,44 +617,17 @@ mod tests {
         }
     }
 
-    // Test that advancing to tick 60 makes data flushable
     #[test]
-    fn advancing_to_tick_60_makes_data_flushable() {
+    fn advancing_to_tick_INTERVALS_makes_data_flushable() {
         let mut acc = Accumulator::new();
 
-        assert!(acc.current_tick < 60);
+        assert!(acc.current_tick < INTERVALS as u64);
 
-        // Advance to tick 60
         while acc.current_tick < INTERVALS as u64 {
             acc.advance_tick();
         }
 
-        assert!(acc.current_tick >= 60);
-    }
-
-    // Test that advancing to tick 60 preserves data
-    #[test]
-    fn advancing_to_tick_60_preserves_data() {
-        let key = Key::from_name("test");
-        let mut acc = Accumulator::new();
-
-        // Add data early
-        acc.counter(manager::Counter {
-            key: key.clone(),
-            tick_offset: 0,
-            value: manager::CounterValue::Increment(42),
-        })
-        .unwrap();
-
-        let value_before = acc.get_counter_value(&key, acc.current_tick);
-
-        // Advance to tick 60
-        while acc.current_tick < INTERVALS as u64 {
-            acc.advance_tick();
-        }
-
-        // Data should still be there after advancing
-        assert_eq!(value_before, 42);
+        assert!(acc.current_tick >= INTERVALS as u64);
     }
 
     // Test that the shutdown pattern (advance + flush loop) drains all data
@@ -699,6 +704,89 @@ mod tests {
             !all_results.is_empty(),
             "shutdown pattern should return data"
         );
+    }
+
+    // Test drain() iterator drains all data correctly
+    #[test]
+    fn drain_iterator_drains_all_data() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Add data at various ticks
+        acc.counter(manager::Counter {
+            key: key.clone(),
+            tick_offset: 0,
+            value: manager::CounterValue::Increment(10),
+        })
+        .unwrap();
+
+        for _i in 0..5 {
+            acc.advance_tick();
+        }
+
+        acc.counter(manager::Counter {
+            key: key.clone(),
+            tick_offset: 0,
+            value: manager::CounterValue::Increment(20),
+        })
+        .unwrap();
+
+        for _i in 0..10 {
+            acc.advance_tick();
+        }
+
+        acc.counter(manager::Counter {
+            key: key.clone(),
+            tick_offset: 0,
+            value: manager::CounterValue::Increment(30),
+        })
+        .unwrap();
+
+        // Advance to INTERVALS so data becomes flushable
+        while acc.current_tick < INTERVALS as u64 {
+            acc.advance_tick();
+        }
+
+        // Test ExactSizeIterator
+        let drain_iter = acc.drain();
+        assert_eq!(drain_iter.len(), INTERVALS);
+
+        // Collect all drained data
+        let mut all_results = Vec::new();
+        for (current_tick, metrics) in drain_iter {
+            for (key, value, tick) in metrics {
+                all_results.push((key, value, tick, current_tick));
+            }
+        }
+
+        // Extract ticks from results
+        let ticks: Vec<u64> = all_results.iter().map(|(_, _, tick, _)| *tick).collect();
+
+        // Count occurrences of each tick
+        let mut tick_counts: FxHashMap<u64, usize> = FxHashMap::default();
+        for tick in &ticks {
+            *tick_counts.entry(*tick).or_insert(0) += 1;
+        }
+
+        // Verify no duplicates
+        for (tick, count) in &tick_counts {
+            assert_eq!(
+                *count, 1,
+                "tick {tick} appeared {count} times, expected 1. All ticks: {ticks:?}"
+            );
+        }
+
+        // Verify we got data
+        assert!(!all_results.is_empty(), "drain should return data");
+
+        // Verify current_tick increases monotonically in the results
+        let current_ticks: Vec<u64> = all_results.iter().map(|(_, _, _, ct)| *ct).collect();
+        for window in current_ticks.windows(2) {
+            assert!(
+                window[1] >= window[0],
+                "current_tick should increase monotonically"
+            );
+        }
     }
 
     proptest! {
