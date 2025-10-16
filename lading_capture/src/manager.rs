@@ -253,6 +253,7 @@ impl<W: Write + Send> CaptureManager<W> {
 
         for (k, g) in self.registry.get_gauge_handles() {
             let bits = g.load(Ordering::Relaxed);
+            // There's no atomic f64 so we have to convert from AtomicU64
             let value = f64::from_bits(bits);
             let g = Gauge {
                 key: k,
@@ -585,6 +586,7 @@ mod tests {
 
         for (key, gauge) in manager.registry.get_gauge_handles() {
             let bits = gauge.load(Ordering::Acquire);
+            // There's no atomic f64 so we have to convert from AtomicU64
             let value = f64::from_bits(bits);
             let mut labels = FxHashMap::default();
             for lbl in key.labels() {
@@ -681,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn sixty_second_delay_enforced() {
+    fn fetch_index_monotonic_and_accumulator_window_enforced() {
         let writer = InMemoryWriter::new();
         let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
         let (experiment_rx, _experiment_tx) = lading_signal::signal();
@@ -707,26 +709,55 @@ mod tests {
             metrics::gauge!("test_gauge").set(42.0);
         });
 
-        for i in 0..59 {
+        let mut last_fetch_index: Option<u64> = None;
+
+        // Flush (INTERVALS - 1) times, metrics should not appear yet
+        for _ in 0..(accumulator::INTERVALS - 1) {
             manager.record_captures().unwrap();
             let lines = writer.parse_lines().unwrap();
             assert!(
                 lines.is_empty(),
-                "Expected no lines after {} flush calls, but got {}",
-                i + 1,
+                "Expected no lines before INTERVALS flushes, but got {}",
                 lines.len()
             );
+
+            // Track fetch_index even for empty results
+            for line in lines {
+                if let Some(prev) = last_fetch_index {
+                    assert!(
+                        line.fetch_index >= prev,
+                        "fetch_index not monotonic: {} < {}",
+                        line.fetch_index,
+                        prev
+                    );
+                }
+                last_fetch_index = Some(line.fetch_index);
+            }
         }
 
+        // On INTERVALS-th flush, metrics should appear
         manager.record_captures().unwrap();
         let lines = writer.parse_lines().unwrap();
 
         assert_eq!(
             lines.len(),
             2,
-            "Expected 2 lines (counter + gauge) after 60th flush, got {}",
+            "Expected 2 lines (counter + gauge) after INTERVALS flushes, got {}",
             lines.len()
         );
+
+        // Verify fetch_index values are valid and monotonic
+        for line in &lines {
+            if let Some(prev) = last_fetch_index {
+                assert!(
+                    line.fetch_index >= prev,
+                    "fetch_index not monotonic: {} < {}",
+                    line.fetch_index,
+                    prev
+                );
+            }
+            last_fetch_index = Some(line.fetch_index);
+        }
 
         let counter_line = lines
             .iter()
@@ -748,6 +779,62 @@ mod tests {
         assert!(
             (gauge_val - 42.0).abs() < 0.0001,
             "Expected gauge value 42.0"
+        );
+    }
+
+    #[test]
+    fn fetch_index_strictly_increases_across_flushes() {
+        let writer = InMemoryWriter::new();
+        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
+        let (experiment_rx, _experiment_tx) = lading_signal::signal();
+        let (target_rx, target_tx) = lading_signal::signal();
+
+        target_tx.signal();
+
+        let mut manager = CaptureManager::new_with_writer(
+            writer.clone(),
+            PathBuf::from("/tmp/test-capture.json"),
+            shutdown_rx,
+            experiment_rx,
+            target_rx,
+            Duration::from_secs(60),
+        );
+
+        let recorder = CaptureRecorder {
+            registry: Arc::clone(&manager.registry),
+        };
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("counter1").increment(10);
+        });
+
+        // Run enough flushes to see metrics appear
+        for _ in 0..(accumulator::INTERVALS + 10) {
+            manager.record_captures().unwrap();
+        }
+
+        // Collect all unique fetch_index values from the captured output
+        let lines = writer.parse_lines().unwrap();
+        let mut unique_fetch_indices: Vec<u64> =
+            lines.iter().map(|l| l.fetch_index).collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+        unique_fetch_indices.sort_unstable();
+
+        // Verify fetch_index values are strictly increasing
+        for window in unique_fetch_indices.windows(2) {
+            assert!(
+                window[1] > window[0],
+                "fetch_index not strictly increasing: {} >= {}",
+                window[0],
+                window[1]
+            );
+        }
+
+        // Verify we got at least some metrics
+        assert!(
+            !unique_fetch_indices.is_empty(),
+            "Expected to see at least one unique fetch_index"
         );
     }
 }
