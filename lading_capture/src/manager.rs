@@ -90,7 +90,6 @@ pub(crate) struct Gauge {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum Metric {
     /// Counter increment
     Counter(Counter),
@@ -104,8 +103,6 @@ pub(crate) enum Metric {
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
 pub struct CaptureManager<W: Write + Send> {
-    fetch_index: u64,
-    #[allow(dead_code)]
     start: Instant,
     capture_writer: W,
     capture_path: PathBuf,
@@ -123,7 +120,6 @@ pub struct CaptureManager<W: Write + Send> {
 impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
-            .field("fetch_index", &self.fetch_index)
             .field("start", &self.start)
             .field("capture_path", &self.capture_path)
             .field("accumulator", &self.accumulator)
@@ -150,7 +146,6 @@ impl<W: Write + Send> CaptureManager<W> {
         let accumulator = Accumulator::new();
 
         Self {
-            fetch_index: 0,
             start: now,
             capture_writer,
             capture_path,
@@ -194,11 +189,8 @@ impl<W: Write + Send> CaptureManager<W> {
         value: &MetricValue,
         tick: u64,
         now_ms: u128,
-        current_tick: u64,
         run_id: Uuid,
     ) -> Result<(), Error> {
-        let recorded_at_ms = now_ms.saturating_sub(u128::from(current_tick - tick) * 1000);
-
         let mut labels = self.global_labels.clone();
         for lbl in key.labels() {
             labels.insert(lbl.key().into(), lbl.value().into());
@@ -208,8 +200,7 @@ impl<W: Write + Send> CaptureManager<W> {
             MetricValue::Counter(val) => json::Line {
                 run_id,
                 time: now_ms,
-                recorded_at: recorded_at_ms,
-                fetch_index: self.fetch_index,
+                fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
                 value: json::LineValue::Int(*val),
@@ -218,8 +209,7 @@ impl<W: Write + Send> CaptureManager<W> {
             MetricValue::Gauge(val) => json::Line {
                 run_id,
                 time: now_ms,
-                recorded_at: recorded_at_ms,
-                fetch_index: self.fetch_index,
+                fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
                 value: json::LineValue::Float(*val),
@@ -275,12 +265,11 @@ impl<W: Write + Send> CaptureManager<W> {
         self.accumulator.advance_tick();
 
         let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let current_tick = self.accumulator.current_tick;
         let run_id = self.run_id;
 
         let mut line_count = 0;
         for (key, value, tick) in self.accumulator.flush() {
-            self.write_metric_line(&key, &value, tick, now_ms, current_tick, run_id)?;
+            self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
             line_count += 1;
         }
 
@@ -379,7 +368,6 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                 _ = flush_interval.tick() => {
                     let now = Instant::now();
                     self.record_captures()?;
-                    self.fetch_index += 1;
 
                     let delta = now.elapsed();
                     if delta > Duration::from_secs(1) {
@@ -396,9 +384,9 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                     // write_metric_line, sort of an API / ownership smell but
                     // the allocation is not on a hot path.
                     let drain: Vec<_> = self.accumulator.drain().collect();
-                    for (current_tick, metrics) in drain {
+                    for (_, metrics) in drain {
                         for (key, value, tick) in metrics {
-                            self.write_metric_line(&key, &value, tick, now_ms, current_tick, run_id)?;
+                            self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
                         }
                     }
 
@@ -587,7 +575,6 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
-                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -606,7 +593,6 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
-                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
