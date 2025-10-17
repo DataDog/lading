@@ -15,7 +15,7 @@ pub enum MetricKind {
     Gauge,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 /// The value for [`Line`].
 #[serde(untagged)]
 pub enum LineValue {
