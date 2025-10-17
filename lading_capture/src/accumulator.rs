@@ -39,8 +39,8 @@
 //! By way of example, the following orderings of writes must resolve to the
 //! same outcome:
 //!
-//! `[Increment(k, 0, 1), Increment(k, 1, 1), Icrement(k, 1, 2)]`
-//! `[Increment(k, 1, 2), Increment(k, 1, 1), Icrement(k, 0, 1)]`
+//! `[Increment(k, 0, 1), Increment(k, 1, 1), Increment(k, 1, 2)]`
+//! `[Increment(k, 1, 2), Increment(k, 1, 1), Increment(k, 0, 1)]`
 //! -> [(k, 0, 1+1+2), (k, 1, 1+2)]
 //!
 //! Or consider the mixture of absolute and increment writes. Allow that the
