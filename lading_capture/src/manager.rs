@@ -495,8 +495,7 @@ mod tests {
             metrics::gauge!("gauge_decrement").decrement(3.0);
             expected_gauges.push(("gauge_decrement".to_string(), FxHashMap::default(), 7.0));
 
-            metrics::gauge!("gauge_with_labels", "service" => "api", "host" => "server1")
-                .set(99.9);
+            metrics::gauge!("gauge_with_labels", "service" => "api", "host" => "server1").set(99.9);
             let mut labels = FxHashMap::default();
             labels.insert("service".to_string(), "api".to_string());
             labels.insert("host".to_string(), "server1".to_string());
