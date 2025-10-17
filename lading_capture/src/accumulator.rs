@@ -32,56 +32,73 @@
 //!
 //! A `Counter` write may be either `Increment(k, T, i)` or `Absolute(k, T, i)`,
 //! where `T` is the tick interval of the write, `k` is the identifying key of
-//! the metric and `i` is the counter value. If `T==0` then the value i is
-//! summed to all intervals T..=0. An absolute value writes `i` to T..=0
-//! irrespective of what value existed previously in that interval.
+//! the metric and `i` is the counter value. `i` >= 0. The operation
+//! `Increment(k, T, i)` sums `i` to the value of `k` in each interval Ti such
+//! that 0 <= Ti <= T, or sets the value to `i` if there is no value in the
+//! interval for `k`. The operation `Absolute(k, T, i)` sets `i` as the value of
+//! `k` in each interval Ti such that 0 <= Ti <= T.
 //!
-//! By way of example, the following orderings of writes must resolve to the
-//! same outcome:
+//! As a matter of state notation let's adopt a notation for discussing the
+//! evolution of Accumulator state. In what follows we'll describe two
+//! increments to `k` in the same tick `0` with no tick advancement:
 //!
-//! `[Increment(k, 0, 1), Increment(k, 1, 1), Increment(k, 1, 2)]`
-//! `[Increment(k, 1, 2), Increment(k, 1, 1), Increment(k, 0, 1)]`
-//! -> [(k, 0, 1+1+2), (k, 1, 1+2)]
+//! ```
+//! [Increment(k, 0, 10), Increment(k, 0, 100)]
+//!  -> 0:[-]                    => []
+//!  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
+//!  -> 0:[Increment(k, 0, 100)] => [(k, 110)]
+//! ```
 //!
-//! Or consider the mixture of absolute and increment writes. Allow that the
-//! current tick is 5 with no writes. The conceptual state is thus empty. At
-//! tick 5 we receive writes. These orderings of writes will not resolve to the same
-//! outcome:
+//! In the above we begin with empty state -- signaled by `0:[-] => []` -- and
+//! have two increments at time 0 to k, first of 10 and then
+//! 100. `0:[Increment(k, 0, 10)]` denotes the operation `Increment(k, 0, 10)`
+//! being applied to the state at tick 0, resulting in state `[(k, 10)]`. We
+//! allow a further operation `TICK` which advances the tick interval.
 //!
-//! `[Increment(k, 0, 10), Absolute(k, 2, 100)]`
-//! -> [(k, 0, 100), (k, 1, 100), (k, 2, 100)]
-//! `[Absolute(k, 2, 100), Increment(k, 0, 10)]`
-//! -> [(k, 0, 110), (k, 1, 100), (k, 2, 100)]
+//! ```
+//! [Increment(k, 0, 10), TICK, Increment(k, 0, 100)]
+//!  -> 0:[-]                    => []
+//!  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
+//!  -> 0:[TICK]                 => [(k, 10), (k, 10)]
+//!  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 10)]]
+//! ```
 //!
-//! Consider another scenario in which we have absolute writes at distinct tick
-//! offsets. Given that the current tick is 5 and there have been no prior
-//! writes -- resulting in an empty state -- at tick 5 we receive writes. These
-//! orderings of writes must resolve to the same outcome:
+//! Let's demonstrate a slightly more complicated series of writes:
 //!
-//! `[Absolute(k, 0, 200), Absolute(k, 2, 50)]`
-//! `[Absolute(k, 2, 50), Absolute(k, 0, 200)]`
-//! -> [(k, 0, 200), (k, 1, 50), (k, 2, 50)]
+//! ```
+//! [Increment(k, 2, 10), TICK, Increment(k, 0, 100)]
+//!  -> 0:[-]                    => []
+//!  -> 0:[Increment(k, 2, 10)]  => [(k, 10), (k, 10), (k, 10)]]
+//!  -> 0:[TICK]                 => [(k, 10), (k, 10), (k, 10), (k, 10)]
+//!  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 10), (k, 10), (k, 10)]
+//! ```
 //!
-//! Let us now discuss the passage of time. We introduce the operation TICK to
-//! denote that the current tick has advanced. Given that we start from tick 0
-//! and with an empty state the following operations resolve as such:
+//! We see here that historical writes fill in history if state is empty,
+//! specifically the first write to tick 2 'backfills' to tick 0.
 //!
-//! `[Absolute(k, 1, 100), TICK, Absolute(k, 0, 25)]`
-//! -> 0[Absolute(k, 1, 100)]: [(k, 0, 100), (k, 1, 100)]
-//! -> 1[TICK]:                [(k, 0, 100), (k, 1, 100), (k, 2, 100)]
-//! -> 1[Absolute(k, 0, 25)]:  [(k, 0, 25), (k, 1, 100), (k, 2, 100)]
+//! Let's examine the mixture of absolute and increment writes. For instance, an
+//! increment and absolute write to the same `k`:
 //!
-//! Note that the last two operations happen "at the same time" but the
-//! `Accumulator` does not admit concurrent writes and so we can analyze writes
-//! in serial. Consider however these two orderings DO NOT resolve to the same
-//! result:
+//! ```
+//! [Increment(k, 0, 10), Absolute(k, 2, 100)]
+//!  -> 0:[-]                    => []
+//!  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
+//!  -> 0:[Absolute(k, 2, 100)]  => [(k, 100), (k, 100), (k, 100)]
+//! ```
 //!
-//! `[Absolute(k, 0, 10), Increment(k, 0, 100)]`
-//! -> [(k, 0, 110)]
-//! `[Increment(k, 0, 100)], Absolute(k, 0, 10)]`
-//! -> [(k, 0, 10)]
+//! Absolute writes overwrite any value previously set to `k` in an
+//! interval. But, what if the order of writes were different?
 //!
-//! Stated logically:
+//! ```
+//! [Absolute(k, 2, 100), Increment(k, 0, 10)]
+//!  -> 0:[-]                    => []
+//!  -> 0:[Absolute(k, 2, 100)]  => [(k, 100), (k, 100), (k, 100)]
+//!  -> 0:[Increment(k, 0, 10)]  => [(k, 110), (k, 100), (k, 100)]
+//! ```
+//!
+//! Two separate outcomes! The `Accumulator` does not admit concurrent writes
+//! and so we analyze writes in serial. The order of writes therefore matters
+//! very much in the determination of state. Stated logically:
 //!
 //!  * `Increment` is associative and commutative.
 //!  * `Absolute` is idempotent.
