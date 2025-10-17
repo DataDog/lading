@@ -12,13 +12,13 @@
 //! To that end this module supports a Counter and Gauge metric in a 60-tick
 //! rolling accumulation. The core structure is [`Accumulator`]. Calling code is
 //! responsible for defining the real-clock duration of a 'tick'. Conceptually,
-//! every tick the [`Accumulator`]creates a new 0th interval where 'now' writes
+//! every tick the [`Accumulator`] creates a new 0th interval where 'now' writes
 //! are stored. The previous 0th interval becomes the 1st, the 1st the 2nd and
 //! so forth. This is called a 'roll'. After 60 ticks the 60th tick becomes
 //! 'flushable', that is, the metrics stored in that interval will be returned
 //! to the caller should they be requested. Tick time advances independently of
 //! flushes and metrics are _not_ stored to the 61st interval. [`Accumulator`]
-//! supports a `flush_all` operation that consumes the structure, allowing for
+//! supports a `drain` operation that consumes the structure, allowing for
 //! metrics to be exfiltrated on shutdown without delay.
 //
 //! # Semantics
@@ -110,8 +110,8 @@
 //! or `Set(k, T, i)`. The semantic considerations of `Counter` discussed above
 //! largely apply to `Gauge`. Logically:
 //!
-//!  * `Increment` is associative and commutative.
-//!  * `Decrement` is associative and commutative.
+//!  * `Increment` is commutative.
+//!  * `Decrement` is commutative.
 //!  * `Increment` and `Decrement` commute.
 //!  * `Set` is idempotent.
 //!  * `Set` does not commute with `Increment` nor `Decrement`.
