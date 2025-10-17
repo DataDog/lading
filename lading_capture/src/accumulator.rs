@@ -598,17 +598,54 @@ mod tests {
         assert_eq!(value_after_advance, 42);
     }
 
+    // Test that the Accumulator is not flushable until INTERVAL ticks have
+    // passed.
     #[test]
     fn advancing_to_tick_intervals_makes_data_flushable() {
+        let key1 = Key::from_name("counter");
+        let key2 = Key::from_name("gauge");
         let mut acc = Accumulator::new();
 
-        assert!(acc.current_tick < INTERVALS as u64);
+        acc.counter(counter_increment(key1.clone(), 0, 42)).unwrap();
+        acc.gauge(gauge_set(key2.clone(), 0, 3.14)).unwrap();
 
-        while acc.current_tick < INTERVALS as u64 {
+        assert!(
+            acc.flush().count() == 0,
+            "flush should return no data before INTERVALS ticks"
+        );
+        while acc.current_tick < (INTERVALS as u64 - 1) {
             acc.advance_tick();
         }
+        assert!(
+            acc.flush().count() == 0,
+            "flush should return no data at INTERVALS-1 ticks"
+        );
 
-        assert!(acc.current_tick >= INTERVALS as u64);
+        // Advance one more tick to reach INTERVALS, accumulator is now
+        // flushable
+        acc.advance_tick();
+        assert_eq!(acc.current_tick, INTERVALS as u64);
+
+        let results: Vec<_> = acc.flush().collect();
+        assert_eq!(results.len(), 2, "flush should return both metrics");
+
+        // Verify the returned data
+        for (key, value, tick) in results {
+            assert_eq!(tick, 0, "flushed data should be from tick 0");
+            match key.name() {
+                "counter" => {
+                    assert!(matches!(value, MetricValue::Counter(42)));
+                }
+                "gauge" => {
+                    if let MetricValue::Gauge(v) = value {
+                        assert!((v - 3.14).abs() < 1e-10);
+                    } else {
+                        panic!("Expected gauge value");
+                    }
+                }
+                _ => panic!("Unexpected key"),
+            }
+        }
     }
 
     // Test that the shutdown pattern (advance + flush loop) drains all data
