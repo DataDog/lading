@@ -39,12 +39,12 @@ fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
 }
 
 /// Send a historical metric to the capture manager.
-///
-/// The tick offset is calculated from elapsed time since capture start.
-/// Validation happens in `Accumulator`: metrics exceeding the historical window
-/// will be rejected there.
 async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
     let sender = HISTORICAL_SENDER.lock().await;
+    let start = sender.as_ref().ok_or(Error::NotInitialized)?.start;
+
+    let tick_offset = timestamp.duration_since(start).as_secs();
+    let tick_offset = u8::try_from(tick_offset)?;
 
     // TODO the naming conventions here are all wrong. We are not calculating
     // the tick_offset we are calculating the absolute `tick`, that is, we are
