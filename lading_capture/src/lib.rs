@@ -40,6 +40,10 @@ fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
 #[inline]
 async fn send_metric(metric: Metric) -> Result<(), Error> {
     let sender = HISTORICAL_SENDER.lock().await;
+    let start = sender.as_ref().ok_or(Error::NotInitialized)?.start;
+
+    let tick_offset = timestamp.duration_since(start).as_secs();
+    let tick_offset = u8::try_from(tick_offset)?;
 
     sender
         .as_ref()
