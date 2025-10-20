@@ -860,4 +860,51 @@ mod tests {
             "Expected to see at least one unique fetch_index"
         );
     }
+
+    #[test]
+    fn recorded_at_is_monotonic_across_flushes() {
+        let writer = InMemoryWriter::new();
+        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
+        let (experiment_rx, _experiment_tx) = lading_signal::signal();
+        let (target_rx, target_tx) = lading_signal::signal();
+
+        target_tx.signal();
+
+        let mut manager = CaptureManager::new_with_writer(
+            writer.clone(),
+            PathBuf::from("/tmp/test-capture.json"),
+            shutdown_rx,
+            experiment_rx,
+            target_rx,
+            Duration::from_secs(60),
+        );
+
+        let recorder = CaptureRecorder {
+            registry: Arc::clone(&manager.registry),
+        };
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("test_counter").increment(1);
+        });
+
+        // Run enough flushes to see metrics appear across multiple ticks
+        for _ in 0..(accumulator::INTERVALS + 10) {
+            manager.record_captures().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let lines = writer.parse_lines().unwrap();
+        assert!(!lines.is_empty(), "Expected to see some metrics");
+
+        // Verify recorded_at is monotonically increasing (non-decreasing)
+        let recorded_at_values: Vec<u128> = lines.iter().map(|l| l.recorded_at).collect();
+        for window in recorded_at_values.windows(2) {
+            assert!(
+                window[1] >= window[0],
+                "recorded_at not monotonic: {} > {}",
+                window[0],
+                window[1]
+            );
+        }
+    }
 }
