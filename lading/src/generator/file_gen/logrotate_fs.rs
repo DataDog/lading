@@ -160,6 +160,7 @@ impl Server {
 
         let state = model::State::new(
             &mut rng,
+            config.seed,
             start_time.elapsed().as_secs(),
             config.total_rotations,
             config.maximum_bytes_per_log.as_u128() as u64,
