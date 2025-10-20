@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use lading_payload::block;
 use metrics::counter;
-use rand::Rng;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 use tracing::info;
@@ -76,6 +76,11 @@ pub(crate) struct File {
 
     /// The maximual offset observed, maintained by `State`.
     max_offset_observed: u64,
+
+    /// The base offset into the block cache for this file. This is deterministic
+    /// based on `group_id` and `ordinal`, ensuring different files read from different
+    /// parts of the cache.
+    cache_offset: u64,
 }
 
 /// Represents an open file handle.
@@ -100,14 +105,44 @@ impl FileHandle {
 }
 
 impl File {
-    /// Create a new instance of `File`
+    /// Generate a deterministic cache offset based on `seed`, `group_id`, and `ordinal`.
+    /// This ensures that the same (`seed`, `group_id`, `ordinal`) triple always produces
+    /// the same cache offset, regardless of when or in what order files are created.
+    fn generate_cache_offset(
+        seed: &[u8; 32],
+        group_id: u16,
+        ordinal: u8,
+        total_cache_size: u64,
+    ) -> u64 {
+        // Create a deterministic seed by combining the base seed with group_id and ordinal
+        let mut combined_seed = *seed;
+
+        // Mix group_id into bytes 0-1
+        combined_seed[0] ^= (group_id & 0xFF) as u8;
+        combined_seed[1] ^= ((group_id >> 8) & 0xFF) as u8;
+
+        // Mix ordinal into byte 2
+        combined_seed[2] ^= ordinal;
+
+        // Create a new RNG from this combined seed and generate one value
+        let mut rng = SmallRng::from_seed(combined_seed);
+        rng.random_range(0..total_cache_size)
+    }
+
+    /// Create a new instance of `File`, generating a deterministic cache offset
     pub(crate) fn new(
+        seed: &[u8; 32],
         parent: Inode,
         group_id: u16,
         bytes_per_tick: u64,
         now: Tick,
         peer: Option<Inode>,
+        ordinal: u8,
+        total_cache_size: u64,
     ) -> Self {
+        // Generate a deterministic cache offset based on seed, group_id, and ordinal
+        let cache_offset = Self::generate_cache_offset(seed, group_id, ordinal, total_cache_size);
+
         Self {
             parent,
             bytes_written: 0,
@@ -119,13 +154,19 @@ impl File {
             bytes_per_tick,
             read_only: false,
             read_only_since: None,
-            ordinal: 0,
+            ordinal,
             peer,
             group_id,
             open_handles: 0,
             unlinked: false,
             max_offset_observed: 0,
+            cache_offset,
         }
+    }
+
+    /// Get the cache offset for this file
+    pub(crate) fn cache_offset(&self) -> u64 {
+        self.cache_offset
     }
 
     /// Open a new handle to this file.
@@ -225,9 +266,13 @@ impl File {
         self.ordinal
     }
 
-    /// Increment the ordinal number of this File
-    pub(crate) fn incr_ordinal(&mut self) {
+    /// Increment the ordinal number of this File and update its cache offset
+    /// deterministically based on the new ordinal
+    pub(crate) fn incr_ordinal(&mut self, seed: &[u8; 32], total_cache_size: u64) {
         self.ordinal = self.ordinal.saturating_add(1);
+        // Generate a new deterministic cache offset for the new ordinal
+        self.cache_offset =
+            Self::generate_cache_offset(seed, self.group_id, self.ordinal, total_cache_size);
     }
 }
 
@@ -299,6 +344,8 @@ pub(crate) struct State {
     inode_scratch: Vec<Inode>,
     load_profile: LoadProfile,
     valid_file_handles: FxHashMap<u64, Inode>, // Track valid FileHandle IDs -> Inode
+    total_cache_size: u64,
+    seed: [u8; 32], // Store the original seed for deterministic offset generation
 }
 
 impl std::fmt::Debug for State {
@@ -352,6 +399,7 @@ impl State {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         rng: &mut R,
+        seed: [u8; 32],
         initial_tick: Tick,
         max_rotations: u8,
         max_bytes_per_file: u64,
@@ -375,6 +423,8 @@ impl State {
             },
         );
 
+        let total_cache_size = block_cache.total_size();
+
         let mut state = State {
             nodes,
             root_inode,
@@ -389,6 +439,8 @@ impl State {
             inode_scratch: Vec::with_capacity(concurrent_logs as usize),
             load_profile,
             valid_file_handles: FxHashMap::default(),
+            total_cache_size,
+            seed,
         };
 
         if concurrent_logs == 0 {
@@ -480,7 +532,16 @@ impl State {
             let file_inode = state.next_inode;
             state.next_inode += 1;
 
-            let file = File::new(current_inode, group_id, 0, state.now, None);
+            let file = File::new(
+                &state.seed,
+                current_inode,
+                group_id,
+                0,
+                state.now,
+                None,
+                0, // Initial files always have ordinal 0
+                state.total_cache_size,
+            );
             state.nodes.insert(file_inode, Node::File { file });
 
             // Add the file to the directory's children
@@ -624,11 +685,14 @@ impl State {
             // ramp properly.
             let new_file_inode = self.next_inode;
             let mut new_file = File::new(
+                &self.seed,
                 parent_inode,
                 group_id,
                 bytes_per_tick,
                 self.now.saturating_sub(1),
                 Some(rotated_inode),
+                0, // New active file always has ordinal 0
+                self.total_cache_size,
             );
 
             new_file.advance_time(now);
@@ -662,10 +726,14 @@ impl State {
                 // Increment the current_inode's ordinal and determine if
                 // the ordinal is now past max_rotations and whether the
                 // next peer needs to be followed.
+                // We need to get these before borrowing nodes mutably
+                let total_cache_size = self.total_cache_size;
+                let seed = self.seed;
+
                 let node = self.nodes.get_mut(&current_inode).expect("Node must exist");
                 let (remove_current, next_peer) = match node {
                     Node::File { file } => {
-                        file.incr_ordinal();
+                        file.incr_ordinal(&seed, total_cache_size);
                         counter!("log_file_rotated", "group_id" => format!("{}", file.group_id))
                             .increment(1);
 
@@ -851,8 +919,11 @@ impl State {
                 let end_offset = offset as u64 + to_read as u64;
                 file.max_offset_observed = file.max_offset_observed.max(end_offset);
 
-                // Get data from block_cache without worrying about blocks
-                let data = self.block_cache.read_at(offset as u64, to_read);
+                // Get data from block_cache, adding the file's cache_offset to ensure
+                // different files (group_id, ordinal combinations) read from different
+                // parts of the cache
+                let cache_read_offset = file.cache_offset + offset as u64;
+                let data = self.block_cache.read_at(cache_read_offset, to_read);
                 assert!(
                     data.len() == to_read,
                     "Data returned from block_cache is distinct from the read size: {l} != {to_read}",
@@ -1032,6 +1103,11 @@ mod test {
                         load_profile,
                     )| {
                         let mut rng = StdRng::seed_from_u64(seed);
+
+                        // Convert u64 seed to [u8; 32] seed array
+                        let mut seed_array = [0u8; 32];
+                        seed_array[0..8].copy_from_slice(&seed.to_le_bytes());
+
                         let block_cache = block::Cache::fixed_with_max_overhead(
                             &mut rng,
                             NonZeroU32::new(1_000_000).expect("zero value"),
@@ -1043,6 +1119,7 @@ mod test {
 
                         State::new(
                             &mut rng,
+                            seed_array,
                             initial_tick,
                             max_rotations,
                             max_bytes_per_file,
