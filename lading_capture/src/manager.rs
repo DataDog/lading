@@ -26,6 +26,11 @@ use std::sync::LazyLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// Duration of a single `Accumulator` tick in milliseconds, drives the
+/// `CaptureManager` polling interval, allows us to calculate `recorded_at` from
+/// ticks.
+const TICK_DURATION_MS: u128 = 1_000;
+
 pub(crate) struct Sender {
     pub(crate) start: Instant,
     pub(crate) snd: mpsc::Sender<Metric>,
@@ -104,6 +109,7 @@ pub(crate) enum Metric {
 /// [`json::Line`].
 pub struct CaptureManager<W: Write + Send> {
     start: Instant,
+    expiration: Duration,
     capture_writer: W,
     capture_path: PathBuf,
     shutdown: Option<lading_signal::Watcher>,
@@ -136,7 +142,7 @@ impl<W: Write + Send> CaptureManager<W> {
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
-        _expiration: Duration,
+        expiration: Duration,
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
         let run_id = Uuid::new_v4();
@@ -147,6 +153,7 @@ impl<W: Write + Send> CaptureManager<W> {
 
         Self {
             start: now,
+            expiration,
             capture_writer,
             capture_path,
             shutdown: Some(shutdown),
@@ -196,10 +203,20 @@ impl<W: Write + Send> CaptureManager<W> {
             labels.insert(lbl.key().into(), lbl.value().into());
         }
 
+        // Calculate when this metric was actually recorded based on its tick.
+        let tick_age = self.accumulator.current_tick.saturating_sub(tick);
+        let tick_age_ms = u128::from(tick_age) * TICK_DURATION_MS;
+        // Skip any line that has expired.
+        if tick_age_ms > self.expiration.as_millis() {
+            return Ok(());
+        }
+
+        let recorded_at = now_ms.saturating_sub(tick_age_ms);
         let line = match value {
             MetricValue::Counter(val) => json::Line {
                 run_id,
                 time: now_ms,
+                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -209,6 +226,7 @@ impl<W: Write + Send> CaptureManager<W> {
             MetricValue::Gauge(val) => json::Line {
                 run_id,
                 time: now_ms,
+                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
@@ -327,6 +345,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
     /// # Errors
     ///
     /// Will return an error if there is already a global recorder set.
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn start(mut self) -> Result<(), Error> {
         // Initialize historical sender - done here in async context
         *HISTORICAL_SENDER.lock().await = Some(Sender {
@@ -344,7 +363,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             time::sleep(Duration::from_millis(100)).await;
         }
 
-        let mut flush_interval = time::interval(Duration::from_secs(1));
+        let mut flush_interval = time::interval(Duration::from_millis(TICK_DURATION_MS as u64));
         flush_interval.tick().await; // first tick happens immediately
 
         let shutdown_wait = self
@@ -576,6 +595,7 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
+                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -595,6 +615,7 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
+                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
