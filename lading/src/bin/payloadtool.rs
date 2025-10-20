@@ -304,7 +304,7 @@ async fn inner_main() -> Result<()> {
                 };
                 *id == generator_id
             })
-            .ok_or_else(|| anyhow!("No generator found with id: {}", generator_id))?;
+            .ok_or_else(|| anyhow!("No generator found with id: {generator_id}"))?;
         let fingerprint = check_generator(generator, args.fingerprint)?;
         if args.fingerprint
             && let Some(fp) = fingerprint

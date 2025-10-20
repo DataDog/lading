@@ -4,8 +4,8 @@ use std::num::TryFromIntError;
 use std::time::Instant;
 
 use manager::{Counter, CounterValue, Gauge, GaugeValue, HISTORICAL_SENDER, Metric};
-use metrics::Key;
 use tracing::debug;
+use ustr::Ustr;
 
 mod accumulator;
 pub mod json;
@@ -25,10 +25,23 @@ pub enum Error {
     ChannelClosed,
 }
 
+fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
+    let name_static: &'static str = Ustr::from(name).as_str();
+    let metric_labels: Vec<metrics::Label> = labels
+        .iter()
+        .map(|(k, v)| {
+            let k_static: &'static str = Ustr::from(k).as_str();
+            let v_static: &'static str = Ustr::from(v).as_str();
+            metrics::Label::new(k_static, v_static)
+        })
+        .collect();
+    metrics::Key::from_parts(name_static, metric_labels)
+}
+
 /// Send a historical metric to the capture manager.
 ///
 /// The tick offset is calculated from elapsed time since capture start.
-/// Validation happens in the accumulator; metrics exceeding the historical window
+/// Validation happens in `Accumulator`: metrics exceeding the historical window
 /// will be rejected there.
 async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
     let sender = HISTORICAL_SENDER.lock().await;
@@ -62,11 +75,17 @@ async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn counter_incr(key: Key, value: u64, timestamp: Instant) -> Result<(), Error> {
+pub async fn counter_incr(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: u64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
     send_metric(
         Metric::Counter(Counter {
             key,
-            tick: 0,
+            tick: 0, // overwritten in send_metric
             value: CounterValue::Increment(value),
         }),
         timestamp,
@@ -79,7 +98,13 @@ pub async fn counter_incr(key: Key, value: u64, timestamp: Instant) -> Result<()
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn counter_absolute(key: Key, value: u64, timestamp: Instant) -> Result<(), Error> {
+pub async fn counter_absolute(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: u64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
     send_metric(
         Metric::Counter(Counter {
             key,
@@ -96,7 +121,13 @@ pub async fn counter_absolute(key: Key, value: u64, timestamp: Instant) -> Resul
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_increment(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
+pub async fn gauge_increment(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
     send_metric(
         Metric::Gauge(Gauge {
             key,
@@ -113,7 +144,13 @@ pub async fn gauge_increment(key: Key, value: f64, timestamp: Instant) -> Result
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_decrement(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
+pub async fn gauge_decrement(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
     send_metric(
         Metric::Gauge(Gauge {
             key,
@@ -130,7 +167,13 @@ pub async fn gauge_decrement(key: Key, value: f64, timestamp: Instant) -> Result
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_set(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
+pub async fn gauge_set(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
     send_metric(
         Metric::Gauge(Gauge {
             key,
