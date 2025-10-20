@@ -472,7 +472,11 @@ impl metrics::Recorder for CaptureRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::Duration,
+    };
 
     use crate::json;
 
@@ -890,7 +894,7 @@ mod tests {
         // Run enough flushes to see metrics appear across multiple ticks
         for _ in 0..(accumulator::INTERVALS + 10) {
             manager.record_captures().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(10));
         }
 
         let lines = writer.parse_lines().unwrap();
