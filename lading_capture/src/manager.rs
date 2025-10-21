@@ -38,6 +38,13 @@ pub(crate) struct Sender {
 pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
     LazyLock::new(|| Mutex::new(None));
 
+#[inline]
+pub(crate) const fn max_valid_millis() -> u128 {
+    let ms = TICK_DURATION_MS * accumulator::INTERVALS as u128;
+    assert!(ms < (u8::MAX as u128) * 1_000);
+    ms
+}
+
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -169,7 +176,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         let accumulator = Accumulator::new();
 
         Self {
-            start: now,
             expiration,
             capture_writer,
             shutdown: Some(shutdown),
