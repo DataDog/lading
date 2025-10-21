@@ -83,7 +83,7 @@ pub async fn counter_absolute(key: Key, value: u64, timestamp: Instant) -> Resul
     send_metric(
         Metric::Counter(Counter {
             key,
-            tick: Instant::now().duration_since(timestamp).as_secs(),
+            tick: 0, // overwritten in send_metric
             value: CounterValue::Absolute(value),
         }),
         timestamp,
@@ -100,7 +100,7 @@ pub async fn gauge_increment(key: Key, value: f64, timestamp: Instant) -> Result
     send_metric(
         Metric::Gauge(Gauge {
             key,
-            tick: Instant::now().duration_since(timestamp).as_secs(),
+            tick: 0, // overwritten in send_metric
             value: GaugeValue::Increment(value),
         }),
         timestamp,
@@ -117,7 +117,7 @@ pub async fn gauge_decrement(key: Key, value: f64, timestamp: Instant) -> Result
     send_metric(
         Metric::Gauge(Gauge {
             key,
-            tick: Instant::now().duration_since(timestamp).as_secs(),
+            tick: 0, // overwritten in send_metric
             value: GaugeValue::Decrement(value),
         }),
         timestamp,
@@ -134,7 +134,7 @@ pub async fn gauge_set(key: Key, value: f64, timestamp: Instant) -> Result<(), E
     send_metric(
         Metric::Gauge(Gauge {
             key,
-            tick: Instant::now().duration_since(timestamp).as_secs(),
+            tick: 0, // overwritten in send_metric
             value: GaugeValue::Set(value),
         }),
         timestamp,
