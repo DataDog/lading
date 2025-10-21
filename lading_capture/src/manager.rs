@@ -23,7 +23,7 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::LazyLock;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
@@ -32,12 +32,18 @@ use uuid::Uuid;
 const TICK_DURATION_MS: u128 = 1_000;
 
 pub(crate) struct Sender {
-    pub(crate) start: Instant,
     pub(crate) snd: mpsc::Sender<Metric>,
 }
 
 pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
     LazyLock::new(|| Mutex::new(None));
+
+#[inline]
+pub(crate) const fn max_valid_millis() -> u128 {
+    let ms = TICK_DURATION_MS * accumulator::INTERVALS as u128;
+    assert!(ms < (u8::MAX as u128) * 1_000);
+    ms
+}
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -108,7 +114,6 @@ pub(crate) enum Metric {
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
 pub struct CaptureManager<W: Write + Send> {
-    start: Instant,
     expiration: Duration,
     capture_writer: W,
     capture_path: PathBuf,
@@ -126,7 +131,6 @@ pub struct CaptureManager<W: Write + Send> {
 impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
-            .field("start", &self.start)
             .field("capture_path", &self.capture_path)
             .field("accumulator", &self.accumulator)
             .field("global_labels", &self.global_labels)
@@ -146,13 +150,11 @@ impl<W: Write + Send> CaptureManager<W> {
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
         let run_id = Uuid::new_v4();
-        let now = Instant::now();
 
         let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
         let accumulator = Accumulator::new();
 
         Self {
-            start: now,
             expiration,
             capture_writer,
             capture_path,
@@ -292,7 +294,7 @@ impl<W: Write + Send> CaptureManager<W> {
             line_count += 1;
         }
 
-        debug!(
+        trace!(
             "Recording {line_count} captures to {path}",
             path = self.capture_path.display()
         );
@@ -349,7 +351,6 @@ impl CaptureManager<BufWriter<std::fs::File>> {
     pub async fn start(mut self) -> Result<(), Error> {
         // Initialize historical sender - done here in async context
         *HISTORICAL_SENDER.lock().await = Some(Sender {
-            start: self.start,
             snd: self.snd.clone(),
         });
 
@@ -377,8 +378,16 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             tokio::select! {
                 val = self.recv.recv() => {
                     match val {
-                        Some(Metric::Counter(c)) => self.accumulator.counter(c)?,
-                        Some(Metric::Gauge(g)) => self.accumulator.gauge(g)?,
+                        Some(Metric::Counter(c)) => {
+                            if let Err(e) = self.accumulator.counter(c) {
+                                warn!("Failed to record counter metric: {e}");
+                            }
+                        }
+                        Some(Metric::Gauge(g)) => {
+                            if let Err(e) = self.accumulator.gauge(g) {
+                                warn!("Failed to record gauge metric: {e}");
+                            }
+                        }
                         None => {
                             warn!("Timestamped metrics unexpected transmission shutdown");
                             return Ok(());
