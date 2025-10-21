@@ -78,14 +78,14 @@ pub(crate) enum GaugeValue {
 #[derive(Debug, Clone)]
 pub(crate) struct Counter {
     pub key: Key,
-    pub tick_offset: u8,
+    pub tick: u64,
     pub value: CounterValue,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Gauge {
     pub key: Key,
-    pub tick_offset: u8,
+    pub tick: u64,
     pub value: GaugeValue,
 }
 
@@ -245,7 +245,7 @@ impl<W: Write + Send> CaptureManager<W> {
             let val = c.load(Ordering::Relaxed);
             let c = Counter {
                 key: k,
-                tick_offset: 0,
+                tick: self.accumulator.current_tick,
                 value: CounterValue::Absolute(val),
             };
             self.accumulator.counter(c)?;
@@ -257,7 +257,7 @@ impl<W: Write + Send> CaptureManager<W> {
             let value = f64::from_bits(bits);
             let g = Gauge {
                 key: k,
-                tick_offset: 0,
+                tick: self.accumulator.current_tick,
                 value: GaugeValue::Set(value),
             };
             self.accumulator.gauge(g)?;
