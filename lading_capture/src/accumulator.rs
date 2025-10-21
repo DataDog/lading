@@ -23,20 +23,25 @@
 //
 //! # Semantics
 //!
-//! The [`Accumulator`] allows writes from tick 0 to tick 59. Writes do not
-//! expire, that is, conceptually when a roll occurs the data in the previous
-//! 0th interval is copied forward into the new 0th interval. This will be
-//! changed in the future.
+//! The [`Accumulator`] accepts writes to any absolute tick `T` such that:
+//!
+//! * `T <= current_tick` (not in the future)
+//! * `current_tick - T < 60` (within the 60-interval window)
+//!
+//! Writes do not expire. When a tick time advances data in the previous
+//! interval is copied forward into the new interval.
 //!
 //! ## Counters
 //!
 //! A `Counter` write may be either `Increment(k, T, i)` or `Absolute(k, T, i)`,
-//! where `T` is the tick interval of the write, `k` is the identifying key of
-//! the metric and `i` is the counter value. `i` >= 0. The operation
-//! `Increment(k, T, i)` sums `i` to the value of `k` in each interval Ti such
-//! that 0 <= Ti <= T, or sets the value to `i` if there is no value in the
-//! interval for `k`. The operation `Absolute(k, T, i)` sets `i` as the value of
-//! `k` in each interval Ti such that 0 <= Ti <= T.
+//! where `T` is the absolute logical tick when the event occurred, `k` is the
+//! identifying key of the metric, and `i` is the counter value (`i >= 0`).
+//!
+//! The operation `Increment(k, T, i)` sums `i` to the value of `k` in each
+//! interval Ti such that T <= Ti <= current_tick, or sets the value to `i` if
+//! there is no value in the interval for `k`. The operation `Absolute(k, T, i)`
+//! sets `i` as the value of `k` in each interval Ti such that T <= Ti <=
+//! current_tick.
 //!
 //! As a matter of state notation let's adopt a notation for discussing the
 //! evolution of Accumulator state. In what follows we'll describe two
@@ -60,30 +65,17 @@
 //!  -> 0:[-]                    => []
 //!  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
 //!  -> 0:[TICK]                 => [(k, 10), (k, 10)]
-//!  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 10)]]
+//!  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 110)]]
 //! ```
-//!
-//! Let's demonstrate a slightly more complicated series of writes:
-//!
-//! ```
-//! [Increment(k, 2, 10), TICK, Increment(k, 0, 100)]
-//!  -> 0:[-]                    => []
-//!  -> 0:[Increment(k, 2, 10)]  => [(k, 10), (k, 10), (k, 10)]]
-//!  -> 0:[TICK]                 => [(k, 10), (k, 10), (k, 10), (k, 10)]
-//!  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 10), (k, 10), (k, 10)]
-//! ```
-//!
-//! We see here that historical writes fill in history if state is empty,
-//! specifically the first write to tick 2 'backfills' to tick 0.
 //!
 //! Let's examine the mixture of absolute and increment writes. For instance, an
 //! increment and absolute write to the same `k`:
 //!
 //! ```
 //! [Increment(k, 0, 10), Absolute(k, 2, 100)]
-//!  -> 0:[-]                    => []
-//!  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
-//!  -> 0:[Absolute(k, 2, 100)]  => [(k, 100), (k, 100), (k, 100)]
+//!  -> 2:[-]                    => []
+//!  -> 2:[Increment(k, 0, 10)]  => [(k, 10), (k, 10), (k, 10)]
+//!  -> 2:[Absolute(k, 2, 100)]  => [(k, 10), (k, 10), (k, 100)]
 //! ```
 //!
 //! Absolute writes overwrite any value previously set to `k` in an
@@ -91,9 +83,9 @@
 //!
 //! ```
 //! [Absolute(k, 2, 100), Increment(k, 0, 10)]
-//!  -> 0:[-]                    => []
-//!  -> 0:[Absolute(k, 2, 100)]  => [(k, 100), (k, 100), (k, 100)]
-//!  -> 0:[Increment(k, 0, 10)]  => [(k, 110), (k, 100), (k, 100)]
+//!  -> 2:[-]                    => []
+//!  -> 2:[Absolute(k, 2, 100)]  => [∅, ∅, (k, 100)]
+//!  -> 2:[Increment(k, 0, 10)]  => [(k, 10), (k, 10), (k, 110)]
 //! ```
 //!
 //! Two separate outcomes! The `Accumulator` does not admit concurrent writes
@@ -323,42 +315,42 @@ mod tests {
     use proptest::prelude::*;
 
     // Test helpers to reduce duplication
-    fn counter_increment(key: Key, tick_offset: u8, value: u64) -> manager::Counter {
+    fn counter_increment(key: Key, tick: u64, value: u64) -> manager::Counter {
         manager::Counter {
             key,
-            tick_offset,
+            tick,
             value: manager::CounterValue::Increment(value),
         }
     }
 
-    fn counter_absolute(key: Key, tick_offset: u8, value: u64) -> manager::Counter {
+    fn counter_absolute(key: Key, tick: u64, value: u64) -> manager::Counter {
         manager::Counter {
             key,
-            tick_offset,
+            tick,
             value: manager::CounterValue::Absolute(value),
         }
     }
 
-    fn gauge_set(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+    fn gauge_set(key: Key, tick: u64, value: f64) -> manager::Gauge {
         manager::Gauge {
             key,
-            tick_offset,
+            tick,
             value: manager::GaugeValue::Set(value),
         }
     }
 
-    fn gauge_increment(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+    fn gauge_increment(key: Key, tick: u64, value: f64) -> manager::Gauge {
         manager::Gauge {
             key,
-            tick_offset,
+            tick,
             value: manager::GaugeValue::Increment(value),
         }
     }
 
-    fn gauge_decrement(key: Key, tick_offset: u8, value: f64) -> manager::Gauge {
+    fn gauge_decrement(key: Key, tick: u64, value: f64) -> manager::Gauge {
         manager::Gauge {
             key,
-            tick_offset,
+            tick,
             value: manager::GaugeValue::Decrement(value),
         }
     }
@@ -784,8 +776,8 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Write with tick_offset=2, should update intervals at ticks 5, 4, 3
-        acc.counter(counter_increment(key.clone(), 2, 100)).unwrap();
+        // Write event from tick 3, should update intervals at ticks 3, 4, 5
+        acc.counter(counter_increment(key.clone(), 3, 100)).unwrap();
 
         assert_eq!(acc.get_counter_value(&key, 5), 100);
         assert_eq!(acc.get_counter_value(&key, 4), 100);
@@ -799,8 +791,15 @@ mod tests {
         let key = Key::from_name("test");
         let mut acc = Accumulator::new();
 
-        let result = acc.counter(counter_increment(key, 60, 100));
-        assert!(matches!(result, Err(Error::TickTooOld { tick_offset: 60 })));
+        // Advance to tick 60
+        for _ in 0..60 {
+            acc.advance_tick();
+        }
+        assert_eq!(acc.current_tick, 60);
+
+        // Try to write to tick 0 (60 ticks ago, exactly at boundary)
+        let result = acc.counter(counter_increment(key, 0, 100));
+        assert!(matches!(result, Err(Error::TickTooOld { tick: 0 })));
     }
 
     // Test tick_offset > current_tick returns FutureTick error for counter
@@ -809,16 +808,16 @@ mod tests {
         let key = Key::from_name("test");
         let mut acc = Accumulator::new();
 
-        // Current tick is 0, try to write with tick_offset=1
+        // Current tick is 0, try to write with tick=1 (future)
         let result = acc.counter(counter_increment(key.clone(), 1, 100));
-        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 1 })));
+        assert!(matches!(result, Err(Error::FutureTick { tick: 1 })));
 
-        // Advance to tick 5, try tick_offset=6
+        // Advance to tick 5, try tick=6 (future)
         for _ in 0..5 {
             acc.advance_tick();
         }
         let result = acc.counter(counter_increment(key, 6, 100));
-        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 6 })));
+        assert!(matches!(result, Err(Error::FutureTick { tick: 6 })));
     }
 
     // Test tick_offset > 0 propagates to multiple intervals for gauge
@@ -832,8 +831,8 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Write with tick_offset=2, should update intervals at ticks 5, 4, 3
-        acc.gauge(gauge_set(key.clone(), 2, 42.0)).unwrap();
+        // Write event from tick 3, should update intervals at ticks 3, 4, 5
+        acc.gauge(gauge_set(key.clone(), 3, 42.0)).unwrap();
 
         assert!((acc.get_gauge_value(&key, 5) - 42.0).abs() < 1e-10);
         assert!((acc.get_gauge_value(&key, 4) - 42.0).abs() < 1e-10);
@@ -847,8 +846,15 @@ mod tests {
         let key = Key::from_name("test");
         let mut acc = Accumulator::new();
 
-        let result = acc.gauge(gauge_set(key, 60, 42.0));
-        assert!(matches!(result, Err(Error::TickTooOld { tick_offset: 60 })));
+        // Advance to tick 60
+        for _ in 0..60 {
+            acc.advance_tick();
+        }
+        assert_eq!(acc.current_tick, 60);
+
+        // Try to write to tick 0 (60 ticks ago, exactly at boundary)
+        let result = acc.gauge(gauge_set(key, 0, 42.0));
+        assert!(matches!(result, Err(Error::TickTooOld { tick: 0 })));
     }
 
     // Test tick_offset > current_tick returns FutureTick error for gauge
@@ -857,16 +863,16 @@ mod tests {
         let key = Key::from_name("test");
         let mut acc = Accumulator::new();
 
-        // Current tick is 0, try to write with tick_offset=1
+        // Current tick is 0, try to write with tick=1 (future)
         let result = acc.gauge(gauge_set(key.clone(), 1, 42.0));
-        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 1 })));
+        assert!(matches!(result, Err(Error::FutureTick { tick: 1 })));
 
-        // Advance to tick 5, try tick_offset=6
+        // Advance to tick 5, try tick=6 (future)
         for _ in 0..5 {
             acc.advance_tick();
         }
         let result = acc.gauge(gauge_set(key, 6, 42.0));
-        assert!(matches!(result, Err(Error::FutureTick { tick_offset: 6 })));
+        assert!(matches!(result, Err(Error::FutureTick { tick: 6 })));
     }
 
     // Test flush includes all values, including zeros
@@ -987,8 +993,8 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Write again - should wrap around to reuse intervals
-        acc.counter(counter_increment(key.clone(), 0, 50)).unwrap();
+        // Write again at current tick (70) - intervals wrap, so interval[70%60=10] gets reused
+        acc.counter(counter_increment(key.clone(), 70, 50)).unwrap();
 
         // Value at current tick should be forwarded value (100) + new increment (50)
         assert_eq!(acc.get_counter_value(&key, acc.current_tick), 150);
@@ -1010,10 +1016,10 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Write absolute value with tick_offset=3
-        acc.counter(counter_absolute(key.clone(), 3, 500)).unwrap();
+        // Write absolute value from tick 7
+        acc.counter(counter_absolute(key.clone(), 7, 500)).unwrap();
 
-        // Ticks 10, 9, 8, 7 should all have value 500
+        // Ticks 7, 8, 9, 10 should all have value 500
         assert_eq!(acc.get_counter_value(&key, 10), 500);
         assert_eq!(acc.get_counter_value(&key, 9), 500);
         assert_eq!(acc.get_counter_value(&key, 8), 500);
@@ -1032,10 +1038,10 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Increment with tick_offset=2
-        acc.gauge(gauge_increment(key.clone(), 2, 10.0)).unwrap();
-        // Decrement with tick_offset=1
-        acc.gauge(gauge_decrement(key.clone(), 1, 3.0)).unwrap();
+        // Increment from tick 3
+        acc.gauge(gauge_increment(key.clone(), 3, 10.0)).unwrap();
+        // Decrement from tick 4
+        acc.gauge(gauge_decrement(key.clone(), 4, 3.0)).unwrap();
 
         // Tick 5: +10.0 -3.0 = 7.0
         assert!((acc.get_gauge_value(&key, 5) - 7.0).abs() < 1e-10);
@@ -1045,5 +1051,113 @@ mod tests {
         assert!((acc.get_gauge_value(&key, 3) - 10.0).abs() < 1e-10);
         // Tick 2: nothing
         assert!((acc.get_gauge_value(&key, 2) - 0.0).abs() < 1e-10);
+    }
+
+    // Test documentation example 1:
+    // [Increment(k, 0, 10), Increment(k, 0, 100)]
+    //  -> 0:[-]                    => []
+    //  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
+    //  -> 0:[Increment(k, 0, 100)] => [(k, 110)]
+    #[test]
+    fn doc_example_1_two_increments_same_tick() {
+        let key = Key::from_name("k");
+        let mut acc = Accumulator::new();
+
+        // Current tick is 0
+        assert_eq!(acc.current_tick, 0);
+
+        // Increment(k, 0, 10)
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+
+        // Increment(k, 0, 100)
+        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 110);
+    }
+
+    // Test documentation example 2:
+    // [Increment(k, 0, 10), TICK, Increment(k, 0, 100)]
+    //  -> 0:[-]                    => []
+    //  -> 0:[Increment(k, 0, 10)]  => [(k, 10)]
+    //  -> 0:[TICK]                 => [(k, 10), (k, 10)]
+    //  -> 1:[Increment(k, 0, 100)] => [(k, 110), (k, 110)]
+    #[test]
+    fn doc_example_2_increment_tick_historical_increment() {
+        let key = Key::from_name("k");
+        let mut acc = Accumulator::new();
+
+        // Current tick is 0
+        assert_eq!(acc.current_tick, 0);
+
+        // Increment(k, 0, 10)
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+
+        // TICK
+        acc.advance_tick();
+        assert_eq!(acc.current_tick, 1);
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+        assert_eq!(acc.get_counter_value(&key, 1), 10);
+
+        // Increment(k, 0, 100) - historical write to tick 0
+        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 110);
+        assert_eq!(acc.get_counter_value(&key, 1), 110);
+    }
+
+    // Test documentation example 3:
+    // [Increment(k, 0, 10), Absolute(k, 2, 100)]
+    //  -> 2:[-]                    => []
+    //  -> 2:[Increment(k, 0, 10)]  => [(k, 10), (k, 10), (k, 10)]
+    //  -> 2:[Absolute(k, 2, 100)]  => [(k, 10), (k, 10), (k, 100)]
+    #[test]
+    fn doc_example_3_increment_then_absolute() {
+        let key = Key::from_name("k");
+        let mut acc = Accumulator::new();
+
+        // Advance to tick 2
+        acc.advance_tick();
+        acc.advance_tick();
+        assert_eq!(acc.current_tick, 2);
+
+        // Increment(k, 0, 10) - writes to ticks [0, 1, 2]
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+        assert_eq!(acc.get_counter_value(&key, 1), 10);
+        assert_eq!(acc.get_counter_value(&key, 2), 10);
+
+        // Absolute(k, 2, 100) - writes to tick [2]
+        acc.counter(counter_absolute(key.clone(), 2, 100)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+        assert_eq!(acc.get_counter_value(&key, 1), 10);
+        assert_eq!(acc.get_counter_value(&key, 2), 100);
+    }
+
+    // Test documentation example 4:
+    // [Absolute(k, 2, 100), Increment(k, 0, 10)]
+    //  -> 2:[-]                    => []
+    //  -> 2:[Absolute(k, 2, 100)]  => [∅, ∅, (k, 100)]
+    //  -> 2:[Increment(k, 0, 10)]  => [(k, 10), (k, 10), (k, 110)]
+    #[test]
+    fn doc_example_4_absolute_then_increment() {
+        let key = Key::from_name("k");
+        let mut acc = Accumulator::new();
+
+        // Advance to tick 2
+        acc.advance_tick();
+        acc.advance_tick();
+        assert_eq!(acc.current_tick, 2);
+
+        // Absolute(k, 2, 100) - writes to tick [2]
+        acc.counter(counter_absolute(key.clone(), 2, 100)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 0);
+        assert_eq!(acc.get_counter_value(&key, 1), 0);
+        assert_eq!(acc.get_counter_value(&key, 2), 100);
+
+        // Increment(k, 0, 10) - writes to ticks [0, 1, 2]
+        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        assert_eq!(acc.get_counter_value(&key, 0), 10);
+        assert_eq!(acc.get_counter_value(&key, 1), 10);
+        assert_eq!(acc.get_counter_value(&key, 2), 110);
     }
 }
