@@ -133,11 +133,11 @@ fn interval_idx(tick: u64) -> usize {
 #[derive(thiserror::Error, Debug, Copy, Clone)]
 pub enum Error {
     /// Metric tick is too old
-    #[error("Tick for metric too old: {tick_offset}")]
-    TickTooOld { tick_offset: u8 },
+    #[error("Tick for metric too old: {tick}")]
+    TickTooOld { tick: u64 },
     /// Metric tick is from the future
-    #[error("Tick for metric from future: {tick_offset}")]
-    FutureTick { tick_offset: u8 },
+    #[error("Tick for metric from future: {tick}")]
+    FutureTick { tick: u64 },
 }
 
 /// Iterator that drains all accumulated metrics during shutdown.
@@ -199,22 +199,19 @@ impl Accumulator {
     }
 
     pub(crate) fn counter(&mut self, c: manager::Counter) -> Result<(), Error> {
-        if usize::from(c.tick_offset) >= INTERVALS {
-            return Err(Error::TickTooOld {
-                tick_offset: c.tick_offset,
-            });
+        if c.tick > self.current_tick {
+            return Err(Error::FutureTick { tick: c.tick });
         }
 
-        if u64::from(c.tick_offset) > self.current_tick {
-            return Err(Error::FutureTick {
-                tick_offset: c.tick_offset,
-            });
+        let tick_offset = self.current_tick - c.tick;
+        if tick_offset >= INTERVALS as u64 {
+            return Err(Error::TickTooOld { tick: c.tick });
         }
 
         let values = self.counters.entry(c.key).or_insert([0; INTERVALS]);
 
-        for offset in 0..=c.tick_offset {
-            let target_tick = self.current_tick - u64::from(offset); // always lands within u64 range
+        for offset in 0..=tick_offset {
+            let target_tick = self.current_tick - offset; // always lands within u64 range
             let interval = interval_idx(target_tick);
 
             match c.value {
@@ -227,22 +224,21 @@ impl Accumulator {
     }
 
     pub(crate) fn gauge(&mut self, g: manager::Gauge) -> Result<(), Error> {
-        if usize::from(g.tick_offset) >= INTERVALS {
-            return Err(Error::TickTooOld {
-                tick_offset: g.tick_offset,
-            });
+        if g.tick > self.current_tick {
+            return Err(Error::FutureTick { tick: g.tick });
         }
 
-        if u64::from(g.tick_offset) > self.current_tick {
-            return Err(Error::FutureTick {
-                tick_offset: g.tick_offset,
-            });
+        let tick_offset = self.current_tick - g.tick;
+        if tick_offset >= INTERVALS as u64 {
+            return Err(Error::TickTooOld { tick: g.tick });
         }
 
         let values = self.gauges.entry(g.key).or_insert([0.0; INTERVALS]);
 
-        for offset in 0..=g.tick_offset {
-            let target_tick = self.current_tick - u64::from(offset); // always lands within u64 range
+        for offset in 0..=tick_offset {
+            // TODO is this logic right? I'm mapping from absolute time -- tick
+            // -- to relative time -- tick-offset.
+            let target_tick = self.current_tick - offset; // always lands within u64 range
             let interval = interval_idx(target_tick);
 
             match g.value {
