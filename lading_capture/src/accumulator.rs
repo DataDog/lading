@@ -38,10 +38,10 @@
 //! identifying key of the metric, and `i` is the counter value (`i >= 0`).
 //!
 //! The operation `Increment(k, T, i)` sums `i` to the value of `k` in each
-//! interval Ti such that T <= Ti <= current_tick, or sets the value to `i` if
+//! interval Ti such that T <= Ti <= `current_tick`, or sets the value to `i` if
 //! there is no value in the interval for `k`. The operation `Absolute(k, T, i)`
 //! sets `i` as the value of `k` in each interval Ti such that T <= Ti <=
-//! current_tick.
+//! `current_tick`.
 //!
 //! As a matter of state notation let's adopt a notation for discussing the
 //! evolution of Accumulator state. In what follows we'll describe two
