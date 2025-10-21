@@ -37,6 +37,13 @@ pub(crate) struct Sender {
 pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
     LazyLock::new(|| Mutex::new(None));
 
+#[inline]
+pub(crate) const fn max_valid_millis() -> u128 {
+    let ms = TICK_DURATION_MS * accumulator::INTERVALS as u128;
+    assert!(ms < (u8::MAX as u128) * 1_000);
+    ms
+}
+
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -128,7 +135,6 @@ pub struct CaptureManager<W: Write + Send> {
 impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
-            .field("start", &self.start)
             .field("capture_path", &self.capture_path)
             .field("accumulator", &self.accumulator)
             .field("global_labels", &self.global_labels)
@@ -158,7 +164,6 @@ impl<W: Write + Send> CaptureManager<W> {
         let accumulator = Accumulator::new();
 
         Self {
-            start: now,
             expiration,
             capture_writer,
             capture_path,
@@ -308,7 +313,7 @@ impl<W: Write + Send> CaptureManager<W> {
             line_count += 1;
         }
 
-        debug!(
+        trace!(
             "Recording {line_count} captures to {path}",
             path = self.capture_path.display()
         );
