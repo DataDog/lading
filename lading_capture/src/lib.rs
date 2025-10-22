@@ -1,6 +1,7 @@
 //! Crate regarding Lading's 'capture' files
 
 use std::time::Instant;
+use std::{num::TryFromIntError, time::Duration};
 
 use manager::HISTORICAL_SENDER;
 use metric::{Counter, CounterValue, Gauge, GaugeValue, Metric};
@@ -41,22 +42,27 @@ fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
 async fn send_metric(metric: Metric) -> Result<(), Error> {
     let sender = HISTORICAL_SENDER.lock().await;
 
-    // Calculate how many seconds ago this metric occurred.
+    // Calculate how many seconds ago this metric occurred, guarding against
+    // timestamps that are both too old and too from the future. Any bit of
+    // "from the future" is too much.
     let now = Instant::now();
-    let timestamp_millis_in_past: u128 = now.duration_since(timestamp).as_millis();
-    if timestamp_millis_in_past > manager::max_valid_millis() {
+    if timestamp > now {
         warn!(metric = ?metric,
               timestamp = ?timestamp,
               now = ?now,
-              timestamp_millis_in_past,
-              max_valid_millis = manager::max_valid_millis(),
-              "unable to send historical metric");
+              max_valid = ?manager::max_valid(),
+              "historical metric from the future, cannot record");
         return Ok(());
     }
-    let tick_offset: u128 = timestamp_millis_in_past / 1_000;
-    // SAFETY: in max_valid_millis we assert that the maximum valid seconds is
-    // within u8.
-    let tick_offset = u8::try_from(tick_offset).expect("catastrophic programming error");
+    let timestamp_in_past: Duration = now.duration_since(timestamp);
+    if timestamp_in_past > manager::max_valid() {
+        warn!(metric = ?metric,
+              timestamp = ?timestamp,
+              now = ?now,
+              max_valid = ?manager::max_valid(),
+              "historical metric too old, cannot record");
+        return Ok(());
+    }
 
     sender
         .as_ref()
