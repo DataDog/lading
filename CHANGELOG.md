@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with timeout.
 - Added a `recorded_at` to the capture line represenation. Strict parsers will
   need to be updated.
+- Added a 'Datadog Intake' blackhole, supporting only the v2 metrics protobuf
+  protocol for now. This captures metrics submitted into capture files.
 
 ## [0.28.0]
 ## Added
