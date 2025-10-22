@@ -32,16 +32,18 @@ const TICK_DURATION_MS: u128 = 1_000;
 
 pub(crate) struct Sender {
     pub(crate) snd: mpsc::Sender<Metric>,
+    pub(crate) start: Instant,
 }
 
 pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
     LazyLock::new(|| Mutex::new(None));
 
 #[inline]
-pub(crate) const fn max_valid_millis() -> u128 {
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) const fn max_valid() -> Duration {
+    // NOTE apologies, these integer types are all over the place
     let ms = TICK_DURATION_MS * accumulator::INTERVALS as u128;
-    assert!(ms < (u8::MAX as u128) * 1_000);
-    ms
+    Duration::from_millis(ms as u64)
 }
 
 /// Errors produced by [`CaptureManager`]
@@ -373,6 +375,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
         // as the reference point synchronized with accumulator.current_tick.
         *HISTORICAL_SENDER.lock().await = Some(Sender {
             snd: self.snd.clone(),
+            start: Instant::now(),
         });
 
         // Installing the recorder immediately on startup. This does _not_ wait
