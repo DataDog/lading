@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Default values
+MODE="run"
+CRATE=""
+TARGET=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --check)
+            MODE="check"
+            shift
+            ;;
+        --list)
+            MODE="list"
+            shift
+            ;;
+        *)
+            if [ -z "$CRATE" ]; then
+                CRATE="$1"
+            elif [ -z "$TARGET" ]; then
+                TARGET="$1"
+            else
+                echo "Error: Unexpected argument '$1'"
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate crate argument
+if [ -z "$CRATE" ]; then
+    echo "Usage: $0 [--check|--list] <crate> [target]"
+    echo "Valid crates: lading_payload"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --check lading_payload       # Check all fuzz targets build"
+    echo "  $0 --list lading_payload        # List available fuzz targets"
+    echo "  $0 lading_payload <target>      # Run specific fuzz target"
+    exit 1
+fi
+
+# Validate the crate
+case "$CRATE" in
+    lading_payload)
+        # Valid crate
+        ;;
+    *)
+        echo "Error: Invalid crate '$CRATE'"
+        echo "Valid crates: lading_payload"
+        exit 1
+        ;;
+esac
+
+# Check if cargo fuzz is installed
+if ! command -v cargo-fuzz &> /dev/null; then
+    echo "cargo-fuzz not installed. Installing it now..."
+    cargo install cargo-fuzz
+fi
+
+# Execute based on mode
+case "$MODE" in
+    check)
+        echo "Checking all fuzz targets in ${CRATE} build correctly..."
+        cd "${CRATE}"
+        # List all targets and check each one builds
+        for target in $(rustup run nightly cargo fuzz list); do
+            echo "Checking fuzz target: $target"
+            rustup run nightly cargo fuzz check "$target"
+        done
+        echo "All fuzz targets build successfully!"
+        ;;
+    list)
+        echo "Available fuzz targets in ${CRATE}:"
+        cd "${CRATE}"
+        rustup run nightly cargo fuzz list
+        ;;
+    run)
+        if [ -z "$TARGET" ]; then
+            echo "Error: Target required for run mode"
+            echo "Usage: $0 <crate> <target>"
+            exit 1
+        fi
+        echo "Running fuzz test: ${CRATE}/${TARGET}..."
+        cd "${CRATE}"
+        rustup run nightly cargo fuzz run --jobs 8 --build-std --release "${TARGET}"
+        ;;
+esac

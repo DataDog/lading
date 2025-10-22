@@ -18,8 +18,11 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lib]
 doctest = false
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+[lints]
+workspace = true

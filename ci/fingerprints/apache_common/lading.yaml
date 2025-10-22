@@ -1,0 +1,28 @@
+generator:
+  - id: "apache_tcp"
+    tcp:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]
+      addr: "127.0.0.1:8080"
+      variant:
+        apache_common: {}
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+  - id: "apache_http"
+    http:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4]
+      target_uri: "http://127.0.0.1:8080/logs"
+      headers: {}
+      method:
+        post:
+          variant:
+            apache_common: {}
+          maximum_prebuild_cache_size_bytes: "10 Mb"
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"

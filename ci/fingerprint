@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# This script runs fingerprint verification for payload determinism.
+echo "=== Running fingerprint verification ==="
+echo
+
+CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+failed=0
+total=0
+passed=0
+
+echo "Building payloadtool..."
+cargo build --release --bin payloadtool --quiet 2>/dev/null || cargo build --release --bin payloadtool
+
+echo
+echo "Checking fingerprints..."
+echo
+
+for dir in "$CI_DIR"/fingerprints/*/; do
+    if [ ! -d "$dir" ]; then
+        continue
+    fi
+
+    payload_type=$(basename "$dir")
+    config_file="$dir/lading.yaml"
+    fingerprint_file="$dir/fingerprint.txt"
+
+    if [ ! -f "$config_file" ]; then
+        echo "WARNING: No config found for $payload_type"
+        continue
+    fi
+
+    total=$((total + 1))
+
+    echo -n "Checking $payload_type... "
+
+    if ! actual=$(cargo run --release --bin payloadtool --quiet -- "$config_file" --fingerprint 2>/dev/null); then
+        echo "FAILED (could not generate fingerprint)"
+        failed=$((failed + 1))
+        continue
+    fi
+
+    # Check if golden fingerprint exists
+    if [ ! -f "$fingerprint_file" ]; then
+        echo "WARNING: No golden fingerprint found"
+        echo "  Generated fingerprint:"
+        echo "$actual" | while IFS= read -r line; do echo "    $line"; done
+        echo "  To save as golden, run:"
+        echo "    echo '$actual' > $fingerprint_file"
+        failed=$((failed + 1))
+        continue
+    fi
+
+    expected=$(cat "$fingerprint_file")
+    if [ "$actual" = "$expected" ]; then
+        echo "PASSED"
+        passed=$((passed + 1))
+    else
+        echo "FAILED"
+        echo "  Expected:"
+        echo "$expected" | while IFS= read -r line; do echo "    $line"; done
+        echo "  Actual:"
+        echo "$actual" | while IFS= read -r line; do echo "    $line"; done
+        failed=$((failed + 1))
+    fi
+done
+
+echo
+echo "=== Summary ==="
+echo "Total: $total"
+echo "Passed: $passed"
+echo "Failed: $failed"
+
+if [ $failed -gt 0 ]; then
+    echo
+    echo "Fingerprint verification FAILED"
+    exit 1
+else
+    echo
+    echo "All fingerprints verified successfully!"
+fi

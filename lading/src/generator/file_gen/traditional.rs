@@ -20,30 +20,25 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
-    thread,
 };
 
 use byte_unit::Byte;
-use futures::future::join_all;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
-    sync::mpsc,
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinSet},
 };
 use tracing::{error, info};
 
-use crate::common::PeekableReceiver;
-use lading_payload::{
-    self,
-    block::{self, Block},
-};
+use lading_payload::{self, block};
 
 use super::General;
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`FileGen`].
@@ -51,6 +46,14 @@ pub enum Error {
     /// Wrapper around [`std::io::Error`].
     #[error("Io error: {0}")]
     Io(#[from] ::std::io::Error),
+    /// Failed to open a file for writing.
+    #[error("Failed to open file {path:?}: {source}. Ensure parent directory exists.")]
+    FileOpen {
+        /// The path that failed to open
+        path: PathBuf,
+        /// The underlying IO error
+        source: ::std::io::Error,
+    },
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
@@ -63,15 +66,12 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle config were specified
-    #[error("Cannot specify both bytes_per_second and throttle configuration")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Must specify either bytes_per_second or throttle configuration")]
-    NoThrottleConfig,
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 fn default_rotation() -> bool {
@@ -119,7 +119,7 @@ pub struct Config {
     #[serde(default = "default_rotation")]
     rotate: bool,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(Debug)]
@@ -128,7 +128,7 @@ pub struct Config {
 /// This generator writes files to disk, rotating them as appropriate. It does
 /// this without coordination to the target.
 pub struct Server {
-    handles: Vec<JoinHandle<Result<(), Error>>>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
 }
 
@@ -151,26 +151,7 @@ impl Server {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "file_gen".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
-
-        let throttle_config = match (config.bytes_per_second, config.throttle) {
-            (Some(bytes_per_second), None) => {
-                let bytes_per_second =
-                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                }
-            }
-            (None, Some(throttle)) => throttle.try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
+        let _labels = MetricsBuilder::new("file_gen").with_id(general.id).build();
 
         let maximum_bytes_per_file =
             NonZeroU32::new(config.maximum_bytes_per_file.as_u128() as u32).ok_or(Error::Zero)?;
@@ -181,18 +162,28 @@ impl Server {
 
         let maximum_block_size = config.maximum_block_size.as_u128();
 
-        let mut handles = Vec::new();
+        let mut handles = JoinSet::new();
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throttle = Throttle::new_with_config(throttle_config);
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => block::Cache::fixed(
+                block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
                     &mut rng,
                     maximum_prebuild_cache_size_bytes,
                     maximum_block_size,
                     &config.variant,
+                    // NOTE we bound payload generation to have overhead only
+                    // equivalent to the prebuild cache size,
+                    // `maximum_prebuild_cache_size_bytes`. This means on systems with plentiful
+                    // memory we're under generating entropy, on systems with
+                    // minimal memory we're over-generating.
+                    //
+                    // `lading::get_available_memory` suggests we can learn to
+                    // divvy this up in the future.
+                    maximum_prebuild_cache_size_bytes.get() as usize,
                 )?,
             };
 
@@ -200,14 +191,13 @@ impl Server {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
                 throttle,
-                throttle_config,
-                block_cache,
+                block_cache: Arc::new(block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
             };
 
-            handles.push(tokio::spawn(child.spin()));
+            handles.spawn(child.spin());
         }
 
         Ok(Self { handles, shutdown })
@@ -226,25 +216,56 @@ impl Server {
     #[allow(clippy::cast_precision_loss)]
     #[allow(clippy::cast_possible_truncation)]
     pub async fn spin(mut self) -> Result<(), Error> {
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        for res in join_all(self.handles.drain(..)).await {
-            match res {
-                Ok(Ok(())) => continue,
-                Ok(Err(err)) => return Err(err),
-                Err(err) => return Err(Error::Child(err)),
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(shutdown_wait);
+
+        loop {
+            tokio::select! {
+                () = &mut shutdown_wait => {
+                    info!("shutdown signal received");
+                    // Graceful shutdown: wait for all children to complete
+                    while let Some(child_result) = self.handles.join_next().await {
+                        let child_result: Result<Result<(), Error>, JoinError> = child_result;
+                        let child_spin_result: Result<(), Error> = child_result.map_err(Error::Child)?;
+                        child_spin_result?;
+                    }
+                    return Ok(());
+                }
+                Some(child_result) = self.handles.join_next() => {
+                    let child_result: Result<Result<(), Error>, JoinError> = child_result;
+
+                    let child_spin_result: Result<(), Error> = match child_result {
+                        Ok(r) => r,
+                        Err(join_err) => {
+                            error!("Child task panicked: {join_err}");
+                            return Err(Error::Child(join_err));
+                        }
+                    };
+
+                    match child_spin_result {
+                        Ok(()) => {
+                            // Child completed successfully before shutdown
+                            if self.handles.is_empty() {
+                                error!("All child tasks completed unexpectedly before shutdown");
+                                return Ok(());
+                            }
+                        }
+                        Err(err) => {
+                            error!("Child task failed: {err}");
+                            return Err(err);
+                        }
+                    }
+                }
             }
         }
-        Ok(())
     }
 }
 
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    throttle: Throttle,
-    throttle_config: lading_throttle::Config,
-    block_cache: block::Cache,
+    throttle: lading_throttle::Throttle,
+    block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
@@ -252,13 +273,7 @@ struct Child {
 
 impl Child {
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = match self.throttle_config {
-            lading_throttle::Config::Stable { maximum_capacity }
-            | lading_throttle::Config::Linear {
-                maximum_capacity, ..
-            } => maximum_capacity.get() as usize,
-            lading_throttle::Config::AllOut => 1024 * 1024, // 1MiB buffer for all-out
-        };
+        let buffer_capacity = self.throttle.maximum_capacity() as usize;
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
@@ -272,31 +287,34 @@ impl Child {
                 .truncate(true)
                 .write(true)
                 .open(&path)
-                .await?,
+                .await
+                .map_err(|source| {
+                    error!(
+                        "Failed to open file {path:?}: {source}. Ensure parent directory exists."
+                    );
+                    Error::FileOpen {
+                        path: path.clone(),
+                        source,
+                    }
+                })?,
         );
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
+                            let block = self.block_cache.advance(&mut handle);
                             let total_bytes = u64::from(total_bytes.get());
 
                             {
-                                fp.write_all(&blk.bytes).await?;
+                                fp.write_all(&block.bytes).await?;
                                 counter!("bytes_written").increment(total_bytes);
                                 total_bytes_written += total_bytes;
                             }
@@ -320,7 +338,14 @@ impl Child {
                                         .truncate(false)
                                         .write(true)
                                         .open(&path)
-                                        .await?,
+                                        .await
+                                        .map_err(|source| {
+                                            error!("Failed to open file {path:?}: {source}. Ensure parent directory exists.");
+                                            Error::FileOpen {
+                                                path: path.clone(),
+                                                source,
+                                            }
+                                        })?,
                                 );
                                 total_bytes_written = 0;
                             }

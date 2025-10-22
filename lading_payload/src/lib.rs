@@ -2,32 +2,7 @@
 //!
 //! This library supports payload generation for the lading project.
 
-#![deny(clippy::all)]
 #![deny(clippy::cargo)]
-#![deny(clippy::pedantic)]
-#![deny(clippy::perf)]
-#![deny(clippy::suspicious)]
-#![deny(clippy::complexity)]
-#![deny(clippy::unnecessary_to_owned)]
-#![deny(clippy::manual_memcpy)]
-#![deny(clippy::float_cmp)]
-#![deny(clippy::large_stack_arrays)]
-#![deny(clippy::large_futures)]
-#![deny(clippy::rc_buffer)]
-#![deny(clippy::redundant_allocation)]
-#![deny(clippy::print_stdout)]
-#![deny(clippy::print_stderr)]
-#![deny(clippy::dbg_macro)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::mod_module_files)]
-#![deny(unused_extern_crates)]
-#![deny(unused_allocation)]
-#![deny(unused_assignments)]
-#![deny(unused_comparisons)]
-#![deny(unreachable_pub)]
-#![deny(missing_docs)]
-#![deny(missing_copy_implementations)]
-#![deny(missing_debug_implementations)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::multiple_crate_versions)]
 
@@ -37,7 +12,7 @@ use std::{
 };
 
 use rand::{Rng, distr::weighted};
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 
 pub mod block;
 
@@ -98,9 +73,14 @@ pub enum Error {
     /// See [`prost::EncodeError`]
     #[error(transparent)]
     ProstEncode(#[from] prost::EncodeError),
-    /// See [`opentelemetry_metric::templates::PoolError`]
+    /// See [`opentelemetry::common::PoolError`]
     #[error("Unable to choose from pool: {0}")]
-    Pool(#[from] opentelemetry::metric::templates::PoolError),
+    Pool(
+        #[from] opentelemetry::common::templates::PoolError<opentelemetry::common::GeneratorError>,
+    ),
+    /// Validation error
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 /// To serialize into bytes
@@ -129,21 +109,8 @@ pub trait Serialize {
     }
 }
 
-/// Sub-configuration for `TraceAgent` format
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Encoding {
-    /// Use JSON format
-    Json,
-    /// Use `MsgPack` binary format
-    #[serde(alias = "msgpack")]
-    MsgPack,
-}
-
 /// Configuration for `Payload`
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields)]
@@ -174,33 +141,46 @@ pub enum Config {
     /// Generates OpenTelemetry traces
     OpentelemetryTraces,
     /// Generates OpenTelemetry logs
-    OpentelemetryLogs,
+    OpentelemetryLogs(crate::opentelemetry::log::Config),
     /// Generates OpenTelemetry metrics
     OpentelemetryMetrics(crate::opentelemetry::metric::Config),
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
-    /// Generates `TraceAgent` payloads in JSON format
-    TraceAgent(Encoding),
+    TraceAgent,
     /// Generates NetFlow v5 packets
     NetFlowV5(crate::netflow::Config),
 }
 
+/// Unified payload type for all serializers
 #[derive(Debug)]
 #[allow(dead_code, clippy::large_enum_variant)]
-pub(crate) enum Payload {
+pub enum Payload {
+    /// Apache Common Log format
     ApacheCommon(ApacheCommon),
+    /// ASCII text
     Ascii(Ascii),
+    /// Datadog Log format
     DatadogLog(DatadogLog),
+    /// Fluent message format
     Fluent(Fluent),
+    /// JSON format
     Json(Json),
+    /// Splunk HEC format
     SplunkHec(splunk_hec::SplunkHec),
+    /// Static file content
     Static(Static),
+    /// Syslog RFC 5424 format
     Syslog(Syslog5424),
+    /// OpenTelemetry traces
     OtelTraces(OpentelemetryTraces),
+    /// OpenTelemetry logs
     OtelLogs(OpentelemetryLogs),
+    /// OpenTelemetry metrics
     OtelMetrics(OpentelemetryMetrics),
+    /// `DogStatsD` metrics
     DogStatsdD(DogStatsD),
+    /// Datadog Trace Agent format
     TraceAgent(TraceAgent),
     NetFlowV5(NetFlowV5),
 }

@@ -16,7 +16,8 @@
 
 mod acknowledgements;
 
-use std::{future::ready, num::NonZeroU32, thread, time::Duration};
+use lading_payload::splunk_hec;
+use std::{future::ready, num::NonZeroU32, sync::Arc, time::Duration};
 
 use acknowledgements::Channels;
 use http::{
@@ -29,21 +30,23 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{Semaphore, SemaphorePermit, mpsc},
+    sync::{Semaphore, SemaphorePermit},
     time::timeout,
 };
 use tracing::{error, info};
 
-use crate::{common::PeekableReceiver, generator::splunk_hec::acknowledgements::Channel};
-use lading_payload::block::{self, Block};
+use crate::generator::splunk_hec::acknowledgements::Channel;
+use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 const SPLUNK_HEC_ACKNOWLEDGEMENTS_PATH: &str = "/services/collector/ack";
@@ -72,7 +75,7 @@ pub struct Config {
     #[serde(with = "http_serde::uri")]
     pub target_uri: Uri,
     /// Format used when submitting event data to Splunk HEC
-    pub format: lading_payload::splunk_hec::Encoding,
+    pub format: splunk_hec::Encoding,
     /// Splunk HEC authentication token
     pub token: String,
     /// Splunk HEC indexer acknowledgements behavior options
@@ -90,7 +93,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -126,15 +129,9 @@ pub enum Error {
     /// Wrapper around [`hyper::Error`].
     #[error("HTTP error: {0}")]
     Hyper(#[from] hyper::Error),
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -144,8 +141,8 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    throttle: Throttle,
-    block_cache: block::Cache,
+    throttle: lading_throttle::Throttle,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
     shutdown: lading_signal::Watcher,
@@ -153,13 +150,10 @@ pub struct SplunkHec {
 
 /// Derive the intended path from the format configuration
 // https://docs.splunk.com/Documentation/Splunk/latest/Data/FormateventsforHTTPEventCollector#Event_data
-fn get_uri_by_format(
-    base_uri: &Uri,
-    format: lading_payload::splunk_hec::Encoding,
-) -> Result<Uri, Error> {
+fn get_uri_by_format(base_uri: &Uri, format: splunk_hec::Encoding) -> Result<Uri, Error> {
     let path = match format {
-        lading_payload::splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
-        lading_payload::splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
+        splunk_hec::Encoding::Text => SPLUNK_HEC_TEXT_PATH,
+        splunk_hec::Encoding::Json => SPLUNK_HEC_JSON_PATH,
     };
 
     let uri = Uri::builder()
@@ -193,26 +187,11 @@ impl SplunkHec {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "splunk_hec".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("splunk_hec")
+            .with_id(general.id)
+            .build();
 
-        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-            (Some(bps), None) => {
-                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                }
-            }
-            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-        let throttle = Throttle::new_with_config(throttle_config);
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 
@@ -223,11 +202,20 @@ impl SplunkHec {
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
         let block_cache = match config.block_cache_method {
-            block::CacheMethod::Fixed => block::Cache::fixed(
+            block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
                 &mut rng,
                 total_bytes,
                 config.maximum_block_size.as_u128(),
                 &payload_config,
+                // NOTE we bound payload generation to have overhead only
+                // equivalent to the prebuild cache size,
+                // `total_bytes`. This means on systems with plentiful
+                // memory we're under generating entropy, on systems with
+                // minimal memory we're over-generating.
+                //
+                // `lading::get_available_memory` suggests we can learn to
+                // divvy this up in the future.
+                total_bytes.get() as usize,
             )?,
         };
 
@@ -250,7 +238,7 @@ impl SplunkHec {
             parallel_connections: config.parallel_connections,
             uri,
             token: config.token,
-            block_cache,
+            block_cache: Arc::new(block_cache),
             throttle,
             metric_labels: labels,
             shutdown,
@@ -278,12 +266,7 @@ impl SplunkHec {
         let labels = self.metric_labels;
 
         gauge!("maximum_requests", &labels).set(f64::from(self.parallel_connections));
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
         let mut channels = self.channels.iter().cycle();
 
         let request_shutdown = self.shutdown.clone();
@@ -294,8 +277,7 @@ impl SplunkHec {
                 .next()
                 .expect("channel should never be empty")
                 .clone();
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -305,9 +287,9 @@ impl SplunkHec {
                             let labels = labels.clone();
                             let uri = uri.clone();
 
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                            let body = crate::full(blk.bytes.clone());
-                            let block_length = blk.bytes.len();
+                            let block = self.block_cache.advance(&mut handle);
+                            let body = crate::full(block.bytes.clone());
+                            let block_length = block.bytes.len();
 
                             let request = Request::builder()
                                 .method(Method::POST)

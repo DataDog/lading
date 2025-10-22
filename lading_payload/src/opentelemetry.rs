@@ -2,6 +2,7 @@
 //!
 //! This module contains payload generators for OpenTelemetry formats.
 
+pub mod common;
 pub mod log;
 pub mod metric;
 pub mod trace;

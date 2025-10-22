@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.26.0"
+version = "0.28.0"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
   "George Hahn <george.hahn@datadoghq.com>",
@@ -14,16 +14,20 @@ keywords = ["random_test", "generator"]
 categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
+[package.metadata.cargo-machete]
+ignored = ["prost"]
+
 [dependencies]
 lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
-async-compression = { version = "0.4.25", features = ["tokio", "zstd"] }
+anyhow = { workspace = true }
+async-compression = { version = "0.4.30", features = ["tokio", "zstd"] }
 average = { version = "0.16", default-features = false, features = [] }
 bollard = { version = "0.19", default-features = false, features = ["pipe", "http"] }
-byte-unit = { workspace = true }
+byte-unit = { workspace = true, features = ["std"] }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "4.5", default-features = false, features = [
   "std",
@@ -31,6 +35,7 @@ clap = { version = "4.5", default-features = false, features = [
   "derive",
   "help",
 ] }
+either = "1.15.0"
 flate2 = { version = "1.1.2", default-features = false, features = [
   "rust_backend",
 ] }
@@ -42,8 +47,9 @@ http-body-util = { workspace = true }
 http-serde = "2.1"
 hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["default", "client", "client-legacy"] }
-is_executable = "1.0.4"
-jemallocator = { version = "0.5" }
+kube = { version = "2.0.1", default-features = false, features = ["config", "client", "rustls-tls", "ring"] }
+kube-core = "2.0.0"
+k8s-openapi = { version = "0.26.0", default-features = false, features = ["latest"] }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
@@ -70,6 +76,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_qs = { version = "0.15", default-features = false }
 serde_yaml = { version = "0.9" }
+sha2 = { workspace = true, features = ["std"] }
+sysinfo = { workspace = true, features = ["system"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
   "rt",
@@ -87,18 +95,16 @@ tokio-util = { version = "0.7", features = ["io"] }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
-uuid = { workspace = true }
-quanta = { version = "0.12", default-features = false, features = [] }
 zstd = "0.13.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false, features = [] }
+procfs = { version = "0.18", default-features = false, features = [] }
 async-pidfd = "0.1"
 
 [dev-dependencies]
-tempfile = "3.20"
-warp = "0.3"
+tempfile = "3.23"
 proptest = { workspace = true }
+tower-test = "0.4"
 
 [features]
 default = []
@@ -109,3 +115,6 @@ doctest = false
 
 [[bin]]
 name = "lading"
+
+[lints]
+workspace = true

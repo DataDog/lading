@@ -2,7 +2,7 @@
 
 use crate::{Error, Generator, common::strings};
 use rand::{Rng, distr::StandardUniform, prelude::Distribution};
-use std::fmt;
+use std::{cmp, fmt};
 
 mod proc;
 
@@ -1698,10 +1698,10 @@ impl<'a> Generator<'a> for ProcessGenerator {
         // and/or its `cmdline` from what is executed in the terminal, so
         // there's nothing that forces the command name or task name to be a
         // subset of the command line.
-        let comm_size = std::cmp::min(TASK_COMM_LEN, cmdline.len());
+        let comm_size = cmp::min(TASK_COMM_LEN, cmdline.len());
         let comm = String::from(&cmdline[..comm_size]);
 
-        let name_size = std::cmp::min(TASK_NAME_LEN, cmdline.len());
+        let name_size = cmp::min(TASK_NAME_LEN, cmdline.len());
         let name = String::from(&cmdline[..name_size]);
 
         let io: proc::Io = rng.random();

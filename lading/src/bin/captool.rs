@@ -1,22 +1,27 @@
+//! Capture analysis tool for lading capture files.
+
+#![allow(clippy::print_stdout)]
+
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
+use std::path;
 
 use async_compression::tokio::bufread::ZstdDecoder;
 use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
-use jemallocator::Jemalloc;
 use lading_capture::json::{Line, MetricKind};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, BufReader},
+};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::LinesStream;
+use tokio_util::either;
 use tracing::{error, info};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
-
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -37,17 +42,22 @@ struct Args {
     capture_path: String,
 }
 
+/// Errors that can occur while running captool.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Invalid command line arguments provided.
     #[error("Invalid arguments specified")]
     InvalidArgs,
+    /// I/O operation failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// JSON deserialization failed.
     #[error(transparent)]
     Deserialize(#[from] serde_json::Error),
 }
 
 #[tokio::main(flavor = "current_thread")]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)
@@ -58,7 +68,7 @@ async fn main() -> Result<(), Error> {
     info!("Welcome to captool");
     let args = Args::parse();
 
-    let capture_path = std::path::Path::new(&args.capture_path);
+    let capture_path = path::Path::new(&args.capture_path);
     if !capture_path.exists() {
         error!("Capture file {} does not exist", &args.capture_path);
         return Err(Error::InvalidArgs);
@@ -68,16 +78,16 @@ async fn main() -> Result<(), Error> {
         .extension()
         .is_some_and(|ext| ext == OsStr::new("zstd"));
 
-    let file = tokio::fs::File::open(capture_path).await?;
+    let file = fs::File::open(capture_path).await?;
 
-    let lines = if !is_zstd {
-        let reader = BufReader::new(file);
-        tokio_util::either::Either::Left(LinesStream::new(reader.lines()))
-    } else {
+    let lines = if is_zstd {
         let reader = BufReader::new(file);
         let decoder = ZstdDecoder::new(reader);
         let reader = BufReader::new(decoder);
-        tokio_util::either::Either::Right(LinesStream::new(reader.lines()))
+        either::Either::Right(LinesStream::new(reader.lines()))
+    } else {
+        let reader = BufReader::new(file);
+        either::Either::Left(LinesStream::new(reader.lines()))
     };
 
     let lines = lines.map(|l| {
@@ -132,14 +142,14 @@ async fn main() -> Result<(), Error> {
 
         for line in &filtered {
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-            for (key, value) in line.labels.iter() {
+            for (key, value) in &line.labels {
                 let tag = format!("{key}:{value}");
                 sorted_labels.insert(tag);
             }
             let mut context_key = hash_builder.build_hasher();
             context_key.write_usize(metric.len());
             context_key.write(metric.as_bytes());
-            for label in sorted_labels.iter() {
+            for label in &sorted_labels {
                 context_key.write_usize(label.len());
                 context_key.write(label.as_bytes());
             }
@@ -151,7 +161,7 @@ async fn main() -> Result<(), Error> {
         concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
         let is_monotonic = |v: &Vec<_>| v.windows(2).all(|w| w[0] <= w[1]);
 
-        for (_, (labels, values)) in context_map.iter() {
+        for (labels, values) in context_map.values() {
             let s: Estimator = values.iter().copied().collect();
             info!(
                 "{metric}[{labels}]: min: {}, mean: {}, max: {}, is_monotonic: {}",

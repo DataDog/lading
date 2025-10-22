@@ -3,7 +3,7 @@
 use std::{fmt, io::Write, rc::Rc};
 
 use rand::{Rng, distr::weighted::WeightedIndex, prelude::Distribution};
-use serde::{Deserialize, Serialize as SerdeSerialize};
+use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::{
@@ -27,18 +27,17 @@ pub mod event;
 pub mod metric;
 pub mod service_check;
 
-const MAX_CONTEXTS: u32 = 1_000_000;
+const MAX_CONTEXTS: u32 = 10_000_000;
 const MAX_NAME_LENGTH: u16 = 4_096;
 const LENGTH_PREFIX_SIZE: usize = std::mem::size_of::<u32>();
 
 /// Weights for `DogStatsD` kinds: metrics, events, service checks
 ///
 /// Defines the relative probability of each kind of `DogStatsD` datagram.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct KindWeights {
     metric: u8,
     event: u8,
@@ -68,11 +67,10 @@ impl Default for KindWeights {
 }
 
 /// Weights for `DogStatsD` metrics: gauges, counters, etc
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct MetricWeights {
     count: u8,
     gauge: u8,
@@ -111,10 +109,9 @@ impl Default for MetricWeights {
 }
 
 /// Configuration for the values of a metric.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-
 pub struct ValueConf {
     /// Odds out of 256 that the value will be a float and not an integer.
     float_probability: f32,
@@ -149,69 +146,52 @@ impl Default for ValueConf {
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The unique metric contexts to generate. A context is a set of unique
     /// metric name + tags
     pub contexts: ConfRange<u32>,
-
     /// The range of unique service check names.
     pub service_check_names: ConfRange<u16>,
-
     /// Length for a dogstatsd message name
     pub name_length: ConfRange<u16>,
-
     /// Length for a dogstatsd tag
     pub tag_length: ConfRange<u16>,
-
     /// Number of tags per individual dogstatsd msg a tag is a key-value pair
     /// separated by a :
     pub tags_per_msg: ConfRange<u8>,
-
     /// Probability between 0 and 1 that a given dogstatsd msg
     /// contains multiple values
     pub multivalue_pack_probability: f32,
-
     /// The count of values that will be generated if multi-value is chosen to
     /// be generated
     pub multivalue_count: ConfRange<u16>,
-
     /// Range of possible values for the sampling rate sent in dogstatsd messages
     pub sampling_range: ConfRange<f32>,
-
     /// Probability between 0 and 1 that a given dogstatsd msg will specify a sampling rate.
     /// The sampling rate is chosen from `sampling_range`
     pub sampling_probability: f32,
-
     /// Defines the relative probability of each kind of `DogStatsD` kinds of
     /// payload.
     pub kind_weights: KindWeights,
-
     /// Defines the relative probability of each kind of `DogStatsD` metric.
     pub metric_weights: MetricWeights,
-
     /// The configuration of values that appear in all metrics.
     pub value: ValueConf,
-
     /// Whether completed blocks should use length-prefix framing.
     ///
     /// If enabled, each block emitted from this generator will have
     /// a 4-byte header that is a little-endian u32 representing the
     /// total length of the data block.
     pub length_prefix_framed: bool,
-
     /// This is a ratio between 0.10 and 1.0 which determines how many
     /// individual tags are unique vs re-used tags.
     /// If this is 1, then every single tag will be unique.
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
-
-    /// If true, a fixed `smp.` (4 bytes) prefix will be prepended
-    /// to each metric name.
-    pub prefix_metric_names: bool,
 }
 
 impl Default for Config {
@@ -239,7 +219,6 @@ impl Default for Config {
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
-            prefix_metric_names: false,
         }
     }
 }
@@ -256,6 +235,9 @@ impl Config {
         if self.contexts.start() == 0 {
             return Result::Err("Contexts start value cannot be 0".to_string());
         }
+        if let ConfRange::Constant(0) = self.contexts {
+            return Result::Err("Contexts cannot be 0".to_string());
+        }
         if self.contexts.end() > MAX_CONTEXTS {
             return Result::Err(format!(
                 "Contexts end value is greater than the maximum allowed value of {MAX_CONTEXTS}"
@@ -264,6 +246,9 @@ impl Config {
         let (service_check_names_valid, reason) = self.service_check_names.valid();
         if !service_check_names_valid {
             return Result::Err(format!("Service check names value is invalid: {reason}"));
+        }
+        if self.service_check_names.start() == 0 {
+            return Result::Err("Service check names start value cannot be 0".to_string());
         }
 
         let (tag_length_valid, reason) = self.tag_length.valid();
@@ -295,6 +280,55 @@ impl Config {
         if !value_valid {
             return Result::Err(format!("Value configuration is invalid: {reason}"));
         }
+
+        let (sampling_range_valid, reason) = self.sampling_range.valid();
+        if !sampling_range_valid {
+            return Result::Err(format!("Sampling range is invalid: {reason}"));
+        }
+        match self.sampling_range {
+            ConfRange::Constant(v) => {
+                if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+                    return Result::Err(format!(
+                        "Sampling range constant {v} must be finite and in range [0.0, 1.0]"
+                    ));
+                }
+            }
+            ConfRange::Inclusive { min, max } => {
+                if !min.is_finite() || !max.is_finite() {
+                    return Result::Err("Sampling range values must be finite".to_string());
+                }
+                if min < 0.0 || max > 1.0 {
+                    return Result::Err("Sampling range must be within [0.0, 1.0]".to_string());
+                }
+            }
+        }
+
+        if !self.sampling_probability.is_finite()
+            || self.sampling_probability < 0.0
+            || self.sampling_probability > 1.0
+        {
+            return Result::Err(format!(
+                "Sampling probability {} must be finite and in range [0.0, 1.0]",
+                self.sampling_probability
+            ));
+        }
+
+        if self.kind_weights.metric == 0
+            && self.kind_weights.event == 0
+            && self.kind_weights.service_check == 0
+        {
+            return Err("KindWeights cannot all be 0".to_string());
+        }
+
+        if self.metric_weights.gauge == 0
+            && self.metric_weights.count == 0
+            && self.metric_weights.histogram == 0
+            && self.metric_weights.set == 0
+            && self.metric_weights.distribution == 0
+        {
+            return Err("MetricWeights cannot all be 0".to_string());
+        }
+
         Ok(())
     }
 }
@@ -323,7 +357,6 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
-        metric_name_prefix: &'static str,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -398,9 +431,8 @@ impl MemberGenerator {
             &WeightedIndex::new(metric_choices)?,
             small_strings,
             &mut tags_generator,
-            pool.as_ref(),
+            &pool,
             value_conf,
-            metric_name_prefix,
             &mut rng,
         );
 
@@ -508,11 +540,6 @@ impl DogStatsD {
     where
         R: rand::Rng + ?Sized,
     {
-        let prefix = if config.prefix_metric_names {
-            "smp."
-        } else {
-            ""
-        };
         let member_generator = MemberGenerator::new(
             config.contexts,
             config.service_check_names,
@@ -527,7 +554,6 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
-            prefix,
             rng,
         )?;
 
@@ -659,11 +685,30 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod test {
-    use super::Config;
+    use super::{ConfRange, Config};
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::{DogStatsD, Serialize};
+
+    #[test]
+    fn zero_contexts_should_be_rejected() {
+        let config = Config {
+            contexts: ConfRange::Constant(0),
+            ..Default::default()
+        };
+
+        // Validation should reject 0 contexts
+        let validation_result = config.valid();
+        assert!(validation_result.is_err());
+        // The error message could be either one, both indicate 0 contexts is invalid
+        let err = validation_result.unwrap_err();
+        assert!(
+            err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
+            "Expected error about 0 contexts, got: {}",
+            err
+        );
+    }
 
     // We want to be sure that the serialized size of the payload does not
     // exceed `max_bytes`.
@@ -674,7 +719,13 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config::default();
-            let mut dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng)?;
+            let mut dogstatsd = match DogStatsD::new(dogstatsd_config, &mut rng) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Failed to create DogStatsD with error: {e:?}");
+                    return Err(TestCaseError::fail(format!("Failed to create DogStatsD: {e:?}")));
+                }
+            };
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes)?;

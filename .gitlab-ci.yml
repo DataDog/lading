@@ -1,0 +1,23 @@
+include:
+  - .gitlab/fuzz.yml
+
+stages:
+  - fuzz
+
+variables:
+  DOCKER_RUNNER_REGISTRY: "registry.ddbuild.io/docker"
+  DOCKER_RUNNER_IMAGE_TAG: "24.0.4-gbi-focal"
+  REPO_CI_REGISTRY: "registry.ddbuild.io/images/ci/lading-fuzz"
+
+ci-container-image:
+  stage: .pre
+  image: "$DOCKER_RUNNER_REGISTRY:$DOCKER_RUNNER_IMAGE_TAG"
+  script: |
+    IMAGE_TAG="${REPO_CI_REGISTRY}:$(date --utc +%Y-%m-%d)-${CI_COMMIT_SHORT_SHA}"
+    docker buildx build -t $IMAGE_TAG --push . -f ci/Dockerfiles/Dockerfile.fuzz
+  when: manual
+  except:
+    - tags
+    - schedules
+  tags:
+    - "arch:amd64"

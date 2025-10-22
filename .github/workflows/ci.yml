@@ -11,7 +11,7 @@ jobs:
     name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - run: ci/shellcheck
 
   rust_actions:
@@ -39,8 +39,8 @@ jobs:
             components: "clippy"
             command: ci/clippy
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
         with:
           components: ${{matrix.components}}
       - name: Install Protobuf
@@ -55,8 +55,8 @@ jobs:
   cargo-deny: # only runs on Linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -67,14 +67,14 @@ jobs:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
       - name: Install nextest
-        uses: taiki-e/install-action@f3a27926ea13d7be3ee2f4cbb925883cf9442b56 # v2.56.7
+        uses: taiki-e/install-action@e43a5023a747770bfcb71ae048541a681714b951 # v2.62.33
         with:
           tool: nextest@0.9
       - run: ci/test
@@ -83,8 +83,8 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -99,8 +99,8 @@ jobs:
       matrix:
         crate: [lading_throttle, lading_payload]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -110,13 +110,46 @@ jobs:
       - run: ci/kani ${{ matrix.crate }}
         timeout-minutes: 30
 
+  fuzz-check:
+    name: Check Fuzz Targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+        with:
+          toolchain: nightly
+          components: rust-src
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install FUSE
+        uses: ./.github/actions/install-fuse
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - run: ci/fuzz --check lading_payload
+        timeout-minutes: 10
+
+  fingerprint:
+    name: Payload Fingerprint Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install FUSE
+        uses: ./.github/actions/install-fuse
+      - name: Build payloadtool
+        run: cargo build --release --bin payloadtool
+      - run: ci/fingerprint
+        timeout-minutes: 10
+
   buf:
     runs-on: ubuntu-latest
     steps:
       # Check our protobufs for lint cleanliness and for lack of breaking
       # changes
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.10
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -140,7 +173,7 @@ jobs:
           echo "ACTIONLINT=${ACTIONLINT}" >> $GITHUB_OUTPUT
           echo "ACTIONLINT_CHECKSUM=${ACTIONLINT_CHECKSUM}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Download actionlint
         shell: bash
         run: |
@@ -162,7 +195,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out branch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Check all GitHub Actions in ".github/workflows" are pinned to SHAs
         uses: stacklok/frizbee-action@c7009cdb455a69ae0dab0c37f296e0f545b4211c # v0.0.5
         env:
@@ -181,3 +214,36 @@ jobs:
           dockerfiles: ""
           fail_on_unpinned: true
           open_pr: false
+
+  cargo-machete:
+    name: Check unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+        with:
+          cache: false
+      - uses: taiki-e/install-action@e43a5023a747770bfcb71ae048541a681714b951 # v2.62.33
+        with:
+          tool: cargo-machete@0.9.1
+      - run: cargo machete
+
+  custom-lints:
+    name: Custom Lints (ast-grep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Install ast-grep
+        run: |
+          wget https://github.com/ast-grep/ast-grep/releases/download/0.39.5/app-x86_64-unknown-linux-gnu.zip
+          echo "9a1cab3e7916c98c6fe0079cc2c3b44d98832ba3bdb9db492d04a4e60e41fd0f  app-x86_64-unknown-linux-gnu.zip" | sha256sum -c
+          unzip app-x86_64-unknown-linux-gnu.zip
+          mv sg /usr/local/bin/sg
+          mv ast-grep /usr/local/bin/ast-grep
+          chmod +x /usr/local/bin/sg
+          chmod +x /usr/local/bin/ast-grep
+          sg --version
+      - name: Test custom lints
+        run: ci/test_custom_lints
+      - name: Run custom lints
+        run: ci/custom_lints

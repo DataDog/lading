@@ -145,9 +145,11 @@ impl FileTree {
 
         let open_throttle = Throttle::new_with_config(lading_throttle::Config::Stable {
             maximum_capacity: config.open_per_second,
+            timeout_micros: 0,
         });
         let rename_throttle = Throttle::new_with_config(lading_throttle::Config::Stable {
             maximum_capacity: config.rename_per_second,
+            timeout_micros: 0,
         });
         Ok(Self {
             name_len: config.name_len,

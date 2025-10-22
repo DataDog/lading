@@ -1,5 +1,5 @@
 # Update the rust version in-sync with the version in rust-toolchain.toml
-FROM docker.io/rust:1.85.0-bookworm AS builder
+FROM docker.io/rust:1.90.0-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler fuse3 libfuse3-dev \

@@ -1,0 +1,24 @@
+generator:
+  - id: "dogstatsd_tcp"
+    tcp:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+      addr: "127.0.0.1:8080"
+      variant:
+        dogstatsd: {}
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+  - id: "dogstatsd_udp"
+    udp:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]
+      addr: "127.0.0.1:8125"
+      variant:
+        dogstatsd: {}
+      bytes_per_second: "100 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"

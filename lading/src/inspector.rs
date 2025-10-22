@@ -21,7 +21,7 @@ use nix::{
 };
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
-use tokio::process::Command;
+use tokio::{process::Command, sync::broadcast};
 use tracing::{error, info};
 
 use crate::{
@@ -43,7 +43,7 @@ pub enum Error {
     ProcessFinished,
     /// Target failed to transmit PID
     #[error("Target failed to transmit PID, catastrophic failure: {0}")]
-    Recv(#[from] tokio::sync::broadcast::error::RecvError),
+    Recv(#[from] broadcast::error::RecvError),
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]

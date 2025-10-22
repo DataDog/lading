@@ -11,18 +11,12 @@ use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    sync::mpsc::{Sender, error::SendError},
-    time::Instant,
-};
+use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};
 
-/// Error for `Cache::spin`
+/// Error for block construction
 #[derive(Debug, thiserror::Error)]
 pub enum SpinError {
-    /// See [`SendError`]
-    #[error(transparent)]
-    Send(#[from] SendError<Block>),
     /// Provided configuration had validation errors
     #[error("Provided configuration was not valid: {0}")]
     InvalidConfig(String),
@@ -171,11 +165,24 @@ pub enum Cache {
     },
 }
 
+/// An opaque handle for iterating through blocks in a Cache.
+///
+/// Each independent consumer should create its own Handle by calling
+/// `Cache::handle()`. Handles maintain their own position in the cache
+/// and advance independently.
+#[derive(Debug)]
+#[allow(missing_copy_implementations)] // intentionally not Copy to force callers to call `handle`.
+pub struct Handle {
+    idx: usize,
+}
+
 impl Cache {
     /// Construct a `Cache` of fixed size.
     ///
     /// This constructor makes an internal pool of `Block` instances up to
-    /// `total_bytes`, each of which are no larger than `maximum_block_bytes`.
+    /// `total_bytes`, each of which are no larger than
+    /// `maximum_block_bytes`. The `payload` may or may not have internal
+    /// overhead, capped at `payload_overhead_allowance_bytes`.
     ///
     /// # Errors
     ///
@@ -183,11 +190,12 @@ impl Cache {
     /// `u32::MAX` or if it is larger than `total_bytes`.
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn fixed<R>(
+    pub fn fixed_with_max_overhead<R>(
         mut rng: &mut R,
         total_bytes: NonZeroU32,
         maximum_block_bytes: u128,
         payload: &crate::Config,
+        payload_overhead_allowance_bytes: usize,
     ) -> Result<Self, Error>
     where
         R: Rng + ?Sized,
@@ -201,11 +209,8 @@ impl Cache {
         };
 
         let blocks = match payload {
-            crate::Config::TraceAgent(enc) => {
-                let mut ta = match enc {
-                    crate::Encoding::Json => crate::TraceAgent::json(&mut rng),
-                    crate::Encoding::MsgPack => crate::TraceAgent::msg_pack(&mut rng),
-                };
+            crate::Config::TraceAgent => {
+                let mut ta = crate::TraceAgent::new(&mut rng);
 
                 let span = span!(Level::INFO, "fixed", payload = "trace-agent");
                 let _guard = span.enter();
@@ -332,14 +337,29 @@ impl Cache {
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
-            crate::Config::OpentelemetryLogs => {
-                let mut pyld = crate::OpentelemetryLogs::new(&mut rng);
+            crate::Config::OpentelemetryLogs(config) => {
+                match config.valid() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        warn!("Invalid OpentelemetryLogs configuration: {e}");
+                        return Err(Error::InvalidConfig(e));
+                    }
+                }
+                let mut pyld = crate::OpentelemetryLogs::new(
+                    *config,
+                    payload_overhead_allowance_bytes,
+                    &mut rng,
+                )?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-logs");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
             crate::Config::OpentelemetryMetrics(config) => {
-                let mut pyld = crate::OpentelemetryMetrics::new(*config, &mut rng)?;
+                let mut pyld = crate::OpentelemetryMetrics::new(
+                    *config,
+                    payload_overhead_allowance_bytes,
+                    &mut rng,
+                )?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-metrics");
                 let _guard = span.enter();
 
@@ -373,49 +393,37 @@ impl Cache {
         })
     }
 
-    /// Run `Cache` forward on the user-provided mpsc sender.
-    ///
-    /// This is a blocking function that pushes `Block` instances into the
-    /// user-provided mpsc `Sender<Block>`. The user is required to set an
-    /// appropriate size on the channel. This function will never exit.
-    ///
-    /// # Errors
-    ///
-    /// Function will return an error if the user-provided mpsc `Sender<Block>`
-    /// is closed.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn spin(self, snd: Sender<Block>) -> Result<(), SpinError> {
-        match self {
-            Self::Fixed {
-                mut idx, blocks, ..
-            } => loop {
-                snd.blocking_send(blocks[idx].clone())?;
-                idx = (idx + 1) % blocks.len();
-            },
-        }
-    }
-
-    /// Peek at the next `Block` from the `Cache`.
-    ///
-    /// This is a block function that returns a reference to the next `Block`
-    /// instance although the cache is not advanced by this call. Callers must
-    /// call [`Self::next_block`] or this cache will not advance.
+    /// Create a new handle for iterating through blocks.
     #[must_use]
-    pub fn peek_next(&self) -> &Block {
+    pub fn handle(&self) -> Handle {
+        Handle { idx: 0 }
+    }
+
+    /// Get the total bytes of the next block without advancing.
+    #[must_use]
+    pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
         match self {
-            Self::Fixed { idx, blocks, .. } => &blocks[*idx],
+            Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
         }
     }
 
-    /// Return a `Block` from the `Cache`
-    ///
-    /// This is a blocking function that returns a single `Block` instance as
-    /// soon as one is ready, blocking the caller until one is available.
-    pub fn next_block(&mut self) -> &Block {
+    /// Get metadata of the next block without advancing.
+    #[must_use]
+    pub fn peek_next_metadata(&self, handle: &Handle) -> BlockMetadata {
         match self {
-            Self::Fixed { idx, blocks, .. } => {
-                let block = &blocks[*idx];
-                *idx = (*idx + 1) % blocks.len();
+            Self::Fixed { blocks, .. } => blocks[handle.idx].metadata,
+        }
+    }
+
+    /// Advance the handle and return a reference to the current block.
+    ///
+    /// This advances the handle to the next block in the cache and returns a
+    /// reference to the block corresponding to `Handle` internal position.
+    pub fn advance<'a>(&'a self, handle: &mut Handle) -> &'a Block {
+        match self {
+            Self::Fixed { blocks, .. } => {
+                let block = &blocks[handle.idx];
+                handle.idx = (handle.idx + 1) % blocks.len();
                 block
             }
         }

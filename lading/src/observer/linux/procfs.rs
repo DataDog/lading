@@ -2,8 +2,11 @@
 mod memory;
 mod stat;
 mod uptime;
+mod vmstat;
 
 use std::io;
+
+use memory::{smaps, smaps_rollup};
 
 use metrics::{counter, gauge};
 use nix::errno::Errno;
@@ -53,6 +56,9 @@ pub enum Error {
     /// Wrapper for [`uptime::Error`]
     #[error("Unable to read uptime: {0}")]
     Uptime(#[from] uptime::Error),
+    /// Wrapper for [`vmstat::Error`]
+    #[error("Unable to read vmstat: {0}")]
+    Vmstat(#[from] vmstat::Error),
 }
 
 macro_rules! report_status_field {
@@ -101,7 +107,7 @@ impl Sampler {
     pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
-        let mut aggr = memory::smaps_rollup::Aggregator::default();
+        let mut aggr = smaps_rollup::Aggregator::default();
         let mut processes_found: u32 = 0;
         let mut processes_skipped: u32 = 0;
 
@@ -125,12 +131,12 @@ impl Sampler {
 
             if let Ok(stat) = process.stat() {
                 let parent_pid = stat.ppid;
-                if let Some(parent_info) = self.process_info.get(&parent_pid) {
-                    if forked_but_not_execd(&process_info, parent_info) {
-                        counter!("process_skipped").increment(1);
-                        processes_skipped += 1;
-                        continue;
-                    }
+                if let Some(parent_info) = self.process_info.get(&parent_pid)
+                    && forked_but_not_execd(&process_info, parent_info)
+                {
+                    counter!("process_skipped").increment(1);
+                    processes_skipped += 1;
+                    continue;
                 }
             }
 
@@ -154,6 +160,11 @@ impl Sampler {
         gauge!("total_pss_bytes").set(aggr.pss as f64);
         gauge!("processes_found").set(processes_found as f64);
 
+        // Collect system-wide virtual memory statistics
+        if let Err(e) = vmstat::poll().await {
+            warn!("Couldn't process `/proc/vmstat`: {e}");
+        }
+
         // If we skipped any processes, log a warning.
         if processes_skipped > 0 {
             warn!("Skipped {} processes", processes_skipped);
@@ -174,7 +185,7 @@ impl Sampler {
     async fn handle_process(
         &mut self,
         process: Process,
-        aggr: &mut memory::smaps_rollup::Aggregator,
+        aggr: &mut smaps_rollup::Aggregator,
         include_smaps: bool,
     ) -> Result<bool, Error> {
         let pid = process.pid();
@@ -231,7 +242,7 @@ impl Sampler {
 
         if include_smaps {
             // `/proc/{pid}/smaps`
-            match memory::smaps::Regions::from_pid(pid) {
+            match smaps::Regions::from_pid(pid) {
                 Ok(memory_regions) => {
                     for (pathname, measures) in memory_regions.aggregate_by_pathname() {
                         let labels: [(&'static str, String); 5] = [
@@ -300,7 +311,7 @@ impl Sampler {
         }
 
         // `/proc/{pid}/smaps_rollup`
-        if let Err(err) = memory::smaps_rollup::poll(pid, &labels, aggr).await {
+        if let Err(err) = smaps_rollup::poll(pid, &labels, aggr).await {
             // We don't want to bail out entirely if we can't read smap rollup
             // which will happen if we don't have permissions or, more
             // likely, the process has exited.

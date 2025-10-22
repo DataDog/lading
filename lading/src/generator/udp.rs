@@ -13,23 +13,32 @@
 
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    num::NonZeroU32,
-    thread,
+    num::{NonZeroU16, NonZeroU32},
+    sync::Arc,
     time::Duration,
 };
 
 use byte_unit::{Byte, Unit};
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use tokio::{net::UdpSocket, sync::mpsc};
+use tokio::{
+    net::UdpSocket,
+    task::{JoinError, JoinSet},
+};
 use tracing::{debug, error, info, trace};
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 
 use super::General;
+use crate::generator::common::{
+    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
+    create_throttle,
+};
+
+fn default_parallel_connections() -> u16 {
+    1
+}
 
 // https://stackoverflow.com/a/42610200
 fn maximum_block_size() -> Byte {
@@ -53,8 +62,11 @@ pub struct Config {
     pub maximum_block_size: byte_unit::Byte,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    /// The total number of parallel connections to maintain
+    #[serde(default = "default_parallel_connections")]
+    pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 /// Errors produced by [`Udp`].
@@ -72,15 +84,15 @@ pub enum Error {
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
 }
 
 #[derive(Debug)]
@@ -88,10 +100,7 @@ pub enum Error {
 ///
 /// This generator is responsible for sending data to the target via UDP
 pub struct Udp {
-    addr: SocketAddr,
-    throttle: Throttle,
-    block_cache: block::Cache,
-    metric_labels: Vec<(String, String)>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
 }
 
@@ -113,49 +122,57 @@ impl Udp {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "udp".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("udp").with_id(general.id).build();
 
-        let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-            (Some(bps), None) => {
-                let bytes_per_second = NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                }
-            }
-            (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-        let throttle = Throttle::new_with_config(throttle_config);
-
-        let block_cache = block::Cache::fixed(
-            &mut rng,
+        let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .ok_or(Error::Zero)?,
+                .ok_or(Error::Zero)?;
+
+        let block_cache = Arc::new(block::Cache::fixed_with_max_overhead(
+            &mut rng,
+            total_bytes,
             config.maximum_block_size.as_u128(),
             &config.variant,
-        )?;
+            total_bytes.get() as usize,
+        )?);
 
         let addr = config
             .addr
             .to_socket_addrs()
             .expect("could not convert to socket")
             .next()
-            .expect("block cache has no next block");
+            .expect("could not convert to socket addr");
 
-        Ok(Self {
-            addr,
-            block_cache,
-            throttle,
-            metric_labels: labels,
-            shutdown,
-        })
+        let concurrency = ConcurrencyStrategy::new(
+            NonZeroU16::new(config.parallel_connections),
+            true, // Use Workers for UDP
+        );
+        let worker_count = concurrency.connection_count();
+        let mut handles = JoinSet::new();
+
+        for i in 0..worker_count {
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?
+                    .divide(
+                        NonZeroU32::new(worker_count.into()).expect("worker_count is always >= 1"),
+                    )?;
+
+            let mut worker_labels = labels.clone();
+            if worker_count > 1 {
+                worker_labels.push(("worker".to_string(), i.to_string()));
+            }
+
+            let worker = UdpWorker {
+                addr,
+                throttle,
+                block_cache: Arc::clone(&block_cache),
+                metric_labels: worker_labels,
+                shutdown: shutdown.clone(),
+            };
+            handles.spawn(worker.spin());
+        }
+
+        Ok(Self { handles, shutdown })
     }
 
     /// Run [`Udp`] to completion or until a shutdown signal is received.
@@ -168,21 +185,38 @@ impl Udp {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
-        debug!("UDP generator running");
-        let mut connection = Option::<UdpSocket>::None;
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        while let Some(res) = self.handles.join_next().await {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+struct UdpWorker {
+    addr: SocketAddr,
+    throttle: lading_throttle::Throttle,
+    block_cache: Arc<block::Cache>,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+}
+
+impl UdpWorker {
+    async fn spin(mut self) -> Result<(), Error> {
+        debug!("UDP generator worker running");
+        let mut connection = Option::<UdpSocket>::None;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
@@ -205,8 +239,8 @@ impl Udp {
                     match result {
                         Ok(()) => {
                             let sock = connection.expect("connection failed");
-                            let blk = rcv.next().await.expect("failed to advance through the blocks"); // actually advance through the blocks
-                            match sock.send_to(&blk.bytes, self.addr).await {
+                            let block = self.block_cache.advance(&mut handle);
+                            match sock.send_to(&block.bytes, self.addr).await {
                                 Ok(bytes) => {
                                     counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
                                     counter!("packets_sent", &self.metric_labels).increment(1);

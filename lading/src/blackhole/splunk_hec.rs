@@ -19,6 +19,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::General;
+use crate::blackhole::common;
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -95,7 +96,7 @@ async fn srv(
     counter!("bytes_received", &*labels).increment(bytes.len() as u64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
-        Err(response) => Ok(response),
+        Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &*labels).increment(body.len() as u64);
 
@@ -199,7 +200,7 @@ impl SplunkHec {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        crate::blackhole::common::run_httpd(
+        common::run_httpd(
             self.httpd_addr,
             self.concurrency_limit,
             self.shutdown,

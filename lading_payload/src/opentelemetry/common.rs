@@ -1,19 +1,39 @@
-//! Tag generation for OpenTelemetry metric payloads
-use std::{cmp, rc::Rc};
+//! Common utilities and types for OpenTelemetry payload generation
+//!
+//! This module contains shared code used by both metrics and logs implementations.
 
-use super::templates::GeneratorError;
-use crate::{Error, Generator, common::config::ConfRange, common::strings::Pool};
+pub(crate) mod templates;
+
+use crate::{
+    Error, Generator, SizedGenerator,
+    common::{config::ConfRange, strings::Pool, tags},
+};
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use prost::Message;
+use std::{cmp, rc::Rc};
 
-#[derive(Debug, Clone)]
-pub(crate) struct TagGenerator {
-    inner: crate::common::tags::Generator,
+/// Errors that can occur during generation
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum GeneratorError {
+    /// Generator exhausted bytes budget prematurely
+    #[error("Generator exhausted bytes budget prematurely")]
+    SizeExhausted,
+    /// Failed to generate string
+    #[error("Failed to generate string")]
+    StringGenerate,
 }
 
-// smallest useful protobuf, determined by experimentation and enforced in
-// smallest_kv_protobuf test
-const SMALLEST_KV_PROTOBUF: usize = 10;
+/// Ratio of unique tags to use in tag generation
+pub(crate) const UNIQUE_TAG_RATIO: f32 = 0.75;
+
+/// Smallest useful `KeyValue` protobuf, determined by experimentation and enforced in tests
+pub(crate) const SMALLEST_KV_PROTOBUF: usize = 10;
+
+/// Tag generator for OpenTelemetry attributes
+#[derive(Debug, Clone)]
+pub(crate) struct TagGenerator {
+    inner: tags::Generator,
+}
 
 impl TagGenerator {
     /// Creates a new tag generator
@@ -30,7 +50,7 @@ impl TagGenerator {
         str_pool: Rc<Pool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        let inner = crate::common::tags::Generator::new(
+        let inner = tags::Generator::new(
             seed,
             tags_per_msg,
             tag_length,
@@ -43,7 +63,8 @@ impl TagGenerator {
     }
 }
 
-fn varint_len(v: usize) -> usize {
+/// Calculate the length of a varint encoding
+pub(crate) fn varint_len(v: usize) -> usize {
     let mut v = v;
     let mut n = 1;
     while v > 0x7f {
@@ -53,14 +74,15 @@ fn varint_len(v: usize) -> usize {
     n
 }
 
-fn overhead(v: usize) -> usize {
+/// Calculate the overhead for a `KeyValue` in a repeated field
+pub(crate) fn overhead(v: usize) -> usize {
     // overhead in a repeated field is per-item, so:
     //
     // [tag-byte] [varint-length] [kv-bytes…]
     varint_len(v) + 1 + v
 }
 
-impl<'a> crate::SizedGenerator<'a> for TagGenerator {
+impl<'a> SizedGenerator<'a> for TagGenerator {
     type Output = Vec<KeyValue>;
     type Error = GeneratorError;
 
@@ -143,11 +165,11 @@ mod test {
             }),
         };
 
-        let encoded_size = overhead(kv.encoded_len());
+        let sz = overhead(kv.encoded_len());
 
-        assert!(
-            encoded_size == SMALLEST_KV_PROTOBUF,
-            "Minimal useful request size ({encoded_size}) should be == SMALLEST_KV_PROTOBUF ({SMALLEST_KV_PROTOBUF})"
+        assert_eq!(
+            sz, SMALLEST_KV_PROTOBUF,
+            "Minimal useful key/value pair should have size {SMALLEST_KV_PROTOBUF}, was {sz}"
         );
     }
 }

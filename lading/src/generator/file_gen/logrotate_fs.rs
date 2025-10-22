@@ -21,7 +21,7 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
@@ -139,15 +139,24 @@ impl Server {
         let total_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .ok_or(Error::Zero)?;
-        let block_cache = block::Cache::fixed(
+        let block_cache = block::Cache::fixed_with_max_overhead(
             &mut rng,
             total_bytes,
             config.maximum_block_size.as_u128(),
             &config.variant,
+            // NOTE we bound payload generation to have overhead only
+            // equivalent to the prebuild cache size,
+            // `total_bytes`. This means on systems with plentiful
+            // memory we're under generating entropy, on systems with
+            // minimal memory we're over-generating.
+            //
+            // `lading::get_available_memory` suggests we can learn to
+            // divvy this up in the future.
+            total_bytes.get() as usize,
         )?;
 
-        let start_time = std::time::Instant::now();
-        let start_time_system = std::time::SystemTime::now();
+        let start_time = Instant::now();
+        let start_time_system = SystemTime::now();
 
         let state = model::State::new(
             &mut rng,
@@ -211,8 +220,8 @@ struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
     open_files: Arc<Mutex<HashMap<u64, model::FileHandle>>>,
 
-    start_time: std::time::Instant,
-    start_time_system: std::time::SystemTime,
+    start_time: Instant,
+    start_time_system: SystemTime,
 }
 
 impl LogrotateFS {
@@ -223,9 +232,10 @@ impl LogrotateFS {
 }
 
 #[tracing::instrument(skip(state))]
+#[allow(clippy::similar_names)] // ctime and crtime are standard Unix file time names
 fn getattr_helper(
     state: &mut MutexGuard<model::State>,
-    start_time_system: std::time::SystemTime,
+    start_time_system: SystemTime,
     tick: model::Tick,
     inode: usize,
 ) -> Option<FileAttr> {
@@ -247,7 +257,7 @@ fn getattr_helper(
         FileAttr {
             ino: attr.inode as u64,
             size: attr.size,
-            blocks: (attr.size + 511) / 512,
+            blocks: attr.size.div_ceil(512),
             atime,
             mtime,
             ctime,

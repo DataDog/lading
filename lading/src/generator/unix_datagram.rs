@@ -11,23 +11,26 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::common::PeekableReceiver;
 use byte_unit::{Byte, Unit};
 use futures::future::join_all;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU32, path::PathBuf, thread};
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::{
     net,
-    sync::{broadcast::Receiver, mpsc},
+    sync::broadcast::{self, Receiver},
     task::{JoinError, JoinHandle},
+    time::Duration,
 };
 use tracing::{debug, error, info};
 
 use super::General;
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
 
 fn default_parallel_connections() -> u16 {
     1
@@ -65,7 +68,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 /// Errors produced by [`UnixDatagram`].
@@ -85,25 +88,22 @@ pub enum Error {
     Child(JoinError),
     /// Startup send error.
     #[error("Startup send error: {0}")]
-    StartupSend(#[from] tokio::sync::broadcast::error::SendError<()>),
+    StartupSend(#[from] broadcast::error::SendError<()>),
     /// Child startup wait error.
     #[error("Child startup wait error: {0}")]
-    StartupWait(#[from] tokio::sync::broadcast::error::RecvError),
+    StartupWait(#[from] broadcast::error::RecvError),
     /// Failed to convert, value is 0
     #[error("Value provided is zero")]
     Zero,
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] byte_unit::ParseError),
-    /// Both `bytes_per_second` and throttle configurations provided
-    #[error("Both bytes_per_second and throttle configurations provided. Use only one.")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Either bytes_per_second or throttle configuration must be provided")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
 }
 
 #[derive(Debug)]
@@ -135,47 +135,42 @@ impl UnixDatagram {
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "unix_datagram".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
-        }
+        let labels = MetricsBuilder::new("unix_datagram")
+            .with_id(general.id)
+            .build();
 
-        let (startup, _startup_rx) = tokio::sync::broadcast::channel(1);
+        let total_bytes =
+            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                .ok_or(Error::Zero)?;
+        let block_cache = match config.block_cache_method {
+            block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
+                &mut rng,
+                total_bytes,
+                config.maximum_block_size.as_u128(),
+                &config.variant,
+                // NOTE we bound payload generation to have overhead only
+                // equivalent to the prebuild cache size,
+                // `total_bytes`. This means on systems with plentiful
+                // memory we're under generating entropy, on systems with
+                // minimal memory we're over-generating.
+                //
+                // `lading::get_available_memory` suggests we can learn to
+                // divvy this up in the future.
+                total_bytes.get() as usize,
+            )?,
+        };
+        let block_cache = Arc::new(block_cache);
+
+        let (startup, _startup_rx) = broadcast::channel(1);
 
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
-            let throttle_config = match (&config.bytes_per_second, &config.throttle) {
-                (Some(bps), None) => {
-                    let bytes_per_second =
-                        NonZeroU32::new(bps.as_u128() as u32).ok_or(Error::Zero)?;
-                    lading_throttle::Config::Stable {
-                        maximum_capacity: bytes_per_second,
-                    }
-                }
-                (None, Some(throttle_config)) => (*throttle_config).try_into()?,
-                (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-                (None, None) => return Err(Error::NoThrottleConfig),
-            };
-            let throttle = Throttle::new_with_config(throttle_config);
-
-            let total_bytes =
-                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                    .ok_or(Error::Zero)?;
-            let block_cache = match config.block_cache_method {
-                block::CacheMethod::Fixed => block::Cache::fixed(
-                    &mut rng,
-                    total_bytes,
-                    config.maximum_block_size.as_u128(),
-                    &config.variant,
-                )?,
-            };
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let child = Child {
                 path: config.path.clone(),
-                block_cache,
+                block_cache: Arc::clone(&block_cache),
                 throttle,
                 metric_labels: labels.clone(),
                 shutdown: shutdown.clone(),
@@ -206,7 +201,7 @@ impl UnixDatagram {
         info!("shutdown signal received");
         for res in join_all(self.handles.drain(..)).await {
             match res {
-                Ok(Ok(())) => continue,
+                Ok(Ok(())) => {}
                 Ok(Err(err)) => return Err(err),
                 Err(err) => return Err(Error::Child(err)),
             }
@@ -219,7 +214,7 @@ impl UnixDatagram {
 struct Child {
     path: PathBuf,
     throttle: Throttle,
-    block_cache: block::Cache,
+    block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
 }
@@ -244,23 +239,17 @@ impl Child {
                     let mut error_labels = self.metric_labels.clone();
                     error_labels.push(("error".to_string(), err.to_string()));
                     counter!("connection_failure", &error_labels).increment(1);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
+        let mut handle = self.block_cache.handle();
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -273,8 +262,8 @@ impl Child {
                             // block across multiple datagrams which we cannot do
                             // without cooperation of the client, which we are not
                             // guaranteed.
-                            let blk = rcv.next().await.expect("failed to advance through blocks"); // actually advance through the blocks
-                            match socket.send(&blk.bytes).await {
+                            let block = self.block_cache.advance(&mut handle);
+                            match socket.send(&block.bytes).await {
                                 Ok(bytes) => {
                                     counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
                                     counter!("packets_sent", &self.metric_labels).increment(1);

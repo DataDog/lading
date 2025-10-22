@@ -14,7 +14,7 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 bytes = { workspace = true }
-byte-unit = { workspace = true, features = [] }
+byte-unit = { workspace = true }
 opentelemetry-proto = { version = "0.30.0", features = [
   "trace",
   "metrics",
@@ -23,7 +23,7 @@ opentelemetry-proto = { version = "0.30.0", features = [
   "with-serde",
 ] }
 prost = { workspace = true }
-rand = { workspace = true, default-features = false, features = [
+rand = { workspace = true, features = [
   "small_rng",
   "std",
   "std_rng",
@@ -32,7 +32,7 @@ rmp-serde = { version = "1.1", default-features = false }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_tuple = { version = "1.0", default-features = false }
+serde_tuple = { version = "1.1", default-features = false }
 thiserror = { workspace = true }
 time = { version = "0.3", features = ["formatting"] }
 tracing = { workspace = true }
@@ -42,7 +42,7 @@ arbitrary = { version = "1", optional = true, features = ["derive"] }
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
-criterion = { version = "0.6", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 
 [features]
 default = []
@@ -58,3 +58,6 @@ harness = false
 [[bench]]
 name = "opentelemetry_metric"
 harness = false
+
+[lints]
+workspace = true

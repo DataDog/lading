@@ -1,0 +1,41 @@
+id: no-long-paths
+valid:
+  - use self::module::submodule::function;
+  - use crate::generator::http::Server;
+  - use foo::{bar::baz, bard::baz::bing, bing::foo};
+  - use lading_payload::dogstatsd::metric::Counter;
+  - use std::collections::{BTreeMap, HashMap};
+  - use tokio::sync::broadcast::Sender;
+  - let string = "some::long::path::in::string";
+  - let raw_string = r#"another::long::path::here"#;
+  - println!("valid");
+  - format!("string with {}", some_variable);
+  - >-
+    fn example_two_segments() {
+      let config = Config::new();
+      let server = Server::start();
+      let file = File::open("path");
+      let result = Response::ok();
+    }
+  - >-
+    use foo::{
+      bar::bing::baz::bang,
+      one::two::three,
+      four::five::six::seven::eight,
+    };
+  - let config = target::Config::Pid;
+  - let server = generator::Server::new();
+  - let metrics = json::MetricKind::Counter;
+  - let parsed = some::parser::parse<String>();
+invalid:
+  - let metrics = json::MetricKind::private::Counter;
+  - let very_long = foo::bar::baz::qux::deeply::nested::call();
+  - let another = project::module::submodule::function::call::chain();
+  - let parsed = some::parser::inner::parse<String>();
+  - let value = outer::function(inner::long::path::call());
+  - >-
+    impl SomeStruct {
+        fn method(&self) {
+            some::long::path::here().field; // should trigger
+        }
+    }

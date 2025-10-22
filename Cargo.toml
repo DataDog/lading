@@ -5,13 +5,16 @@ members = [
   "integration/ducks",
   "lading",
   "lading_capture",
+  "lading_fuzz",
   "lading_payload",
   "lading_throttle",
 ]
 
 [workspace.dependencies]
+anyhow = { version = "1.0" }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
-byte-unit = { version = "5.1", features = ["serde"] }
+byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
+sha2 = { version = "0.10", default-features = false }
 metrics = { version = "0.23" }
 metrics-util = { version = "0.17" }
 metrics-exporter-prometheus = { version = "0.15", default-features = false, features = [
@@ -24,13 +27,13 @@ rustc-hash = { version = "1.1" }
 serde = { version = "1.0", features = ["std", "derive"] }
 serde_json = { version = "1.0", features = ["std"] }
 thiserror = { version = "2.0" }
-tokio = { version = "1.46" }
+tokio = { version = "1.47" }
 # If you update tonic, search for tonic-build in sub-crates and update their
 # version.
 tonic = { version = "0.13", default-features = false, features = ["server", "transport", "router", "codegen", "prost"] }
 tower = { version = "0.5", default-features = false }
 tracing = { version = "0.1" }
-uuid = { version = "1.17", default-features = false, features = [
+uuid = { version = "1.18", default-features = false, features = [
   "v4",
   "serde",
 ] }
@@ -41,15 +44,50 @@ proptest-derive = { version = "0.6" }
 http = { version = "1.3" }
 http-body-util = { version = "0.1" }
 http-serde = { version = "2.1" }
-hyper = { version = "1.6", default-features = false }
+hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
+sysinfo = { version = "0.37", default-features = false }
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "deny"
+perf = "deny"
+suspicious = "deny"
+complexity = "deny"
+unwrap_used = "deny"
+mod_module_files = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+redundant_allocation = "deny"
+rc_buffer = "deny"
+large_futures = "deny"
+large_stack_arrays = "deny"
+float_cmp = "deny"
+manual_memcpy = "deny"
+unnecessary_to_owned = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
+unused_extern_crates = "deny"
+unused_allocation = "deny"
+unused_assignments = "deny"
+unused_comparisons = "deny"
+unreachable_pub = "deny"
+missing_copy_implementations = "deny"
+missing_debug_implementations = "deny"
+missing_docs = "deny"
+warnings = "deny"
 
 [profile.release]
 lto = true        # Optimize our binary at link stage.
 codegen-units = 1 # Increases compile time but improves optimization alternatives.
 opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
-debug = false
+debug = 2                       # keep symbols in release too
+split-debuginfo = "unpacked"
 
 [profile.dev]
 panic = "abort"
+debug = 2
+split-debuginfo = "unpacked"   # generates a .dSYM bundle Instruments can use

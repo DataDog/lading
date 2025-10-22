@@ -13,7 +13,11 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19690716);
             let config = Config {
-                metric_weights: MetricWeights { gauge: 50, sum: 50 },
+                metric_weights: MetricWeights {
+                    gauge: 50,
+                    sum_delta: 25,
+                    sum_cumulative: 25,
+                },
                 contexts: Contexts {
                     total_contexts: ConfRange::Constant(100),
                     attributes_per_resource: ConfRange::Inclusive { min: 1, max: 64 },
@@ -39,7 +43,11 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
                 let config = Config {
-                    metric_weights: MetricWeights { gauge: 50, sum: 50 },
+                    metric_weights: MetricWeights {
+                        gauge: 50,
+                        sum_delta: 25,
+                        sum_cumulative: 25,
+                    },
                     contexts: Contexts {
                         total_contexts: ConfRange::Constant(100),
                         attributes_per_resource: ConfRange::Inclusive { min: 1, max: 64 },

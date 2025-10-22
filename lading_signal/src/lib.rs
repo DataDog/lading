@@ -25,10 +25,14 @@ use loom::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{
+    Notify,
+    broadcast::{self, error},
+};
 use tracing::info;
 
 /// Construct a `Watcher` and `Broadcaster` pair.
+#[must_use]
 pub fn signal() -> (Watcher, Broadcaster) {
     // NOTE why use a broadcast channel and not a barrier to synchronize the
     // watchers/broadcaster? Or an AtomicBool and a Condvar? Well, it's a good
@@ -180,6 +184,11 @@ impl Watcher {
     ///
     /// If `recv` is called multiple times after the signal has been received
     /// this function will return immediately.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the broadcast receiver has lagged behind, indicating a catastrophic
+    /// programming error in the signal coordination system.
     pub async fn recv(mut self) {
         if self.signal_received {
             // Once the signal is received if this function were called in a
@@ -193,11 +202,11 @@ impl Watcher {
         }
 
         match self.receiver.recv().await {
-            Ok(_) | Err(broadcast::error::RecvError::Closed) => {
+            Ok(()) | Err(error::RecvError::Closed) => {
                 self.decrease_peer_count();
                 self.signal_received = true;
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
+            Err(error::RecvError::Lagged(_)) => {
                 panic!("Catastrophic programming error: lagged behind");
             }
         }
@@ -207,6 +216,16 @@ impl Watcher {
     ///
     /// If the signal has not been received returns Ok(false). If it has been
     /// received Ok(true). All calls after will return `TryRecvError::SignalReceived`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TryRecvError::SignalReceived` if the signal has already been received
+    /// and processed by this watcher.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the broadcast receiver has lagged behind, indicating a catastrophic
+    /// programming error in the signal coordination system.
     pub fn try_recv(&mut self) -> Result<bool, TryRecvError> {
         // If the shutdown signal has already been received, return with error.
         if self.signal_received {
@@ -214,19 +233,24 @@ impl Watcher {
         }
 
         match self.receiver.try_recv() {
-            Ok(_) | Err(broadcast::error::TryRecvError::Closed) => {
+            Ok(()) | Err(error::TryRecvError::Closed) => {
                 self.decrease_peer_count();
                 self.signal_received = true;
                 Ok(true)
             }
-            Err(broadcast::error::TryRecvError::Empty) => Ok(false),
-            Err(broadcast::error::TryRecvError::Lagged(_)) => {
+            Err(error::TryRecvError::Empty) => Ok(false),
+            Err(error::TryRecvError::Lagged(_)) => {
                 panic!("Catastrophic programming error: lagged behind")
             }
         }
     }
 
     /// Register with the `Broadcaster`, returning a new instance of `Watcher`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RegisterError::SignalReceived` if the signal has already been received
+    /// by this watcher, preventing registration of new watchers after shutdown.
     pub fn register(&self) -> Result<Self, RegisterError> {
         if self.signal_received {
             // If the shutdown signal has already been received, return with

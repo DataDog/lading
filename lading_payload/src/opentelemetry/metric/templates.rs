@@ -1,10 +1,12 @@
-use std::{cmp, collections::BTreeMap, rc::Rc};
+use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
     common::v1::InstrumentationScope,
     metrics::{
         self,
-        v1::{Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data},
+        v1::{
+            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data, number_data_point,
+        },
     },
     resource,
 };
@@ -12,102 +14,41 @@ use prost::Message;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform, weighted::WeightedIndex},
-    seq::{IndexedRandom, IteratorRandom},
 };
-use tracing::{debug, error};
+use tracing::debug;
 
-use super::{Config, UnitGenerator, tags::TagGenerator};
-use crate::{Error, Generator, SizedGenerator, common::config::ConfRange, common::strings};
+use super::{Config, UnitGenerator};
+use crate::opentelemetry::common::{GeneratorError, TagGenerator, UNIQUE_TAG_RATIO, templates};
+use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
-const UNIQUE_TAG_RATIO: f32 = 0.75;
+pub(crate) type Pool = templates::Pool<ResourceMetrics, ResourceTemplateGenerator>;
 
-/// Errors related to template generators
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum PoolError {
-    #[error("Choice could not be made on empty container.")]
-    EmptyChoice,
-    #[error("Generation error: {0}")]
-    Generator(#[from] GeneratorError),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Pool {
-    context_cap: u32,
-    /// key: encoded size; val: templates with that size
-    by_size: BTreeMap<usize, Vec<ResourceMetrics>>,
-    generator: ResourceTemplateGenerator,
-    len: u32,
-}
-
-impl Pool {
-    /// Build an empty pool that can hold at most `context_cap` templates.
-    pub(crate) fn new(context_cap: u32, generator: ResourceTemplateGenerator) -> Self {
-        Self {
-            context_cap,
-            by_size: BTreeMap::new(),
-            generator,
-            len: 0,
-        }
+/// Generate a random number between min and max (inclusive) with heavy bias
+/// toward min. Uses exponential decay: each doubling of the range has half the
+/// probability.
+///
+/// For example, with min=1, max=60:
+/// - ~50% chance of returning 1
+/// - ~25% chance of returning 2-3
+/// - ~12.5% chance of returning 4-7
+/// - And so on...
+fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) -> u32 {
+    if min >= max {
+        return min;
     }
 
-    /// Return a `ResourceMetrics` from the pool.
-    ///
-    /// Instances of `ResourceMetrics` returned by this function are guaranteed
-    /// to be of an encoded size no greater than budget. No greater than
-    /// `context_cap` instances of `ResourceMetrics` will ever be stored in this
-    /// structure.
-    pub(crate) fn fetch<R>(
-        &mut self,
-        rng: &mut R,
-        budget: &mut usize,
-    ) -> Result<&ResourceMetrics, PoolError>
-    where
-        R: rand::Rng + ?Sized,
-    {
-        // If we are at context cap, search by_size for templates <= budget and
-        // return a random choice. If we are not at context cap, call
-        // ResourceMetrics::generator with the budget and then store the result
-        // for future use in `by_size`.
-        //
-        // Size search is in the interval (0, budget].
+    let mut current = min;
+    let mut step = 1;
 
-        let upper = *budget;
-        let mut limit = *budget;
-
-        // Generate new instances until either context_cap is hit or the
-        // remaining space drops below our lookup interval.
-        if self.len < self.context_cap {
-            match self.generator.generate(rng, &mut limit) {
-                Ok(rm) => {
-                    let sz = rm.encoded_len();
-                    self.by_size.entry(sz).or_default().push(rm);
-                    self.len += 1;
-                }
-                Err(e) => return Err(PoolError::Generator(e)),
-            }
+    while current < max {
+        if rng.random_bool(0.5) {
+            return rng.random_range(current..=current.min(max));
         }
-
-        let (choice_sz, choices) = self
-            .by_size
-            .range(..=upper)
-            .choose(rng)
-            .ok_or(PoolError::EmptyChoice)?;
-
-        let choice = choices.choose(rng).ok_or(PoolError::EmptyChoice)?;
-        *budget = budget.saturating_sub(*choice_sz);
-
-        Ok(choice)
+        current = (current + step).min(max);
+        step *= 2;
     }
-}
 
-/// Errors related to template generators
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum GeneratorError {
-    #[error("Generator exhausted bytes budget prematurely")]
-    SizeExhausted,
-    /// failed to generate string
-    #[error("Failed to generate string")]
-    StringGenerate,
+    max
 }
 
 struct Ndp(NumberDataPoint);
@@ -117,8 +58,8 @@ impl Distribution<Ndp> for StandardUniform {
         R: Rng + ?Sized,
     {
         let value = match rng.random_range(0..=1) {
-            0 => metrics::v1::number_data_point::Value::AsDouble(0.0),
-            1 => metrics::v1::number_data_point::Value::AsInt(0),
+            0 => number_data_point::Value::AsDouble(0.0),
+            1 => number_data_point::Value::AsInt(0),
             _ => unreachable!(),
         };
 
@@ -169,7 +110,8 @@ impl MetricTemplateGenerator {
         Ok(Self {
             kind_dist: WeightedIndex::new([
                 u16::from(config.metric_weights.gauge),
-                u16::from(config.metric_weights.sum),
+                u16::from(config.metric_weights.sum_delta),
+                u16::from(config.metric_weights.sum_cumulative),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -226,13 +168,18 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
         let kind = match self.kind_dist.sample(rng) {
             0 => Kind::Gauge,
             1 => Kind::Sum {
-                aggregation_temporality: *[1, 2].choose(rng).expect("cannot fail"),
+                aggregation_temporality: 1,
+                is_monotonic: rng.random_bool(0.5),
+            },
+            2 => Kind::Sum {
+                aggregation_temporality: 2,
                 is_monotonic: rng.random_bool(0.5),
             },
             _ => unreachable!(),
         };
 
-        let total_data_points = rng.random_range(1..60);
+        // Use weighted distribution: heavily favors small numbers (1-2) but can go up to 60
+        let total_data_points = exponential_weighted_range(rng, 1, 60);
         let data_points = (0..total_data_points)
             .map(|_| rng.random::<Ndp>().0)
             .collect();
@@ -562,6 +509,61 @@ impl<'a> crate::SizedGenerator<'a> for ResourceTemplateGenerator {
                         continue;
                     }
                     return Err(Self::Error::SizeExhausted);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::SizedGenerator;
+    use proptest::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
+
+    proptest! {
+        #[test]
+        fn metric_template_generator_generate(
+            seed: u64,
+            gauge in 0..2_u8,
+            sum_delta in 0..2_u8,
+            sum_cumulative in 0..2_u8,
+        ) {
+            if gauge == 0 && sum_delta == 0 && sum_cumulative == 0 {
+                return Ok(());
+            }
+
+            let mut config = Config::default();
+            config.metric_weights.gauge = gauge;
+            config.metric_weights.sum_delta = sum_delta;
+            config.metric_weights.sum_cumulative = sum_cumulative;
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            let generator_result = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
+                &mut rng,
+            );
+            assert!(generator_result.is_ok());
+            let mut generator = generator_result.unwrap();
+
+            for _ in 0..100 {
+                let result = generator.generate(&mut rng, &mut 1024);
+                assert!(result.is_ok());
+                let metric = result.unwrap();
+                assert!(metric.data.is_some());
+                match metric.data.unwrap() {
+                    Data::Gauge(_) => assert!(gauge >= 1),
+                    Data::Sum(sum) => {
+                        match sum.aggregation_temporality {
+                            1 => assert!(sum_delta >= 1),
+                            2 => assert!(sum_cumulative >= 1),
+                            _ => panic!("invalid aggregation temporality"),
+                        }
+                    }
+                    _ => panic!("invalid metric data"),
                 }
             }
         }

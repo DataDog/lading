@@ -4,14 +4,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [unreleased]
+## Changed
+- Kubernetes generator maximum lifetime seconds now expressed in `u32`, not
+  `u64`.
+- Containers generator internals reworked to match the kubernetes generator's
+  approach: explicit state machine driven by a `lading_throttle`.
+## Added
+- Stable throttle now has a 'timeout' configuration parameter to model IO done
+  with timeout.
+
+## [0.28.0]
+## Added
+- Added configuration surface area to the OTel logs payload generator, in a
+  manner similar to OTel metrics.
+- Added a way to configure which aggregation temporality is used when using
+  Opentelemetry `Sum` metric.
+- Introduce a `kubernetes` generator able to generate an arbitrary number
+  of Kubernetes resources.
+## Changed
+- Lading toolchain is now 1.89.0
+- Generators now use a handle based mechanism to address their block cache,
+  reducing memory consumption for generators with parallel connection support.
+## Fixed
+- Fixed a bug in OTel payload generation where templates would not be used if
+  context cap number of templates were not pre-generated. This had a knock-on
+  effect of requiring a potentially infinite loop in one of the payload
+  generators.
+- OTel metrics generation now skews data points, no longer using a normal
+  distribution derived number of points.
+## Removed
+- Removed `prefix_metric_names` configuration from DogStatsD generator.
+- Removed JSON support from trace-agent payload
+
+## [0.27.0]
 ## Added
 - Introduced a linear throttle into the project, allowing users to specify
   stable, linear and all-out throttles. Configuration is updated so that
   'capacity' exists in the throttle struct itself, without breaking use-cases
   where bytes-per-second are specified directly. bytes-per-second implies a
   stable throttle.
-- Added NetFlow v5 payload generation support for network flow monitoring.
+- `unix_stream` generator now supports `parallel_connections` in a manner similar to
+  `unix_datagram`.
+- Added a `/proc/vmstat` observer.
+## Changed
+- 'lading process-tree-gen' command is removed as it is currently unused
+- 'lading run' sub-command added as alias for current top-level CLI usage.
+- 'lading config-check' sub-command added to easily validate whether or
+  not a given lading config is structurally valid.
 
 ## [0.26.0]
 ## Added

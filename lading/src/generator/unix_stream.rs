@@ -11,17 +11,28 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 //!
 
-use crate::common::PeekableReceiver;
-use lading_payload::block::{self, Block};
+use lading_payload::block;
 use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU32, path::PathBuf, thread};
-use tokio::{net, sync::mpsc, task::JoinError};
+use std::{num::NonZeroU32, path::PathBuf};
+use tokio::{
+    net,
+    sync::broadcast::{self, Receiver},
+    task::{JoinError, JoinSet},
+    time::Duration,
+};
 use tracing::{debug, error, info, warn};
 
 use super::General;
+use crate::generator::common::{
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+};
+
+fn default_parallel_connections() -> u16 {
+    1
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -33,7 +44,7 @@ pub struct Config {
     pub path: PathBuf,
     /// The payload variant
     pub variant: lading_payload::Config,
-    /// The bytes per second to send or receive from the target
+    /// The bytes per second to send or receive from the target, per connection.
     pub bytes_per_second: Option<byte_unit::Byte>,
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
@@ -43,8 +54,12 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     pub block_cache_method: block::CacheMethod,
+    /// The total number of parallel connections to maintain, see documentation
+    /// on `bytes_per_second`.
+    #[serde(default = "default_parallel_connections")]
+    pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<crate::generator::common::BytesThrottleConfig>,
+    pub throttle: Option<BytesThrottleConfig>,
 }
 
 /// Errors produced by [`UnixStream`].
@@ -59,21 +74,27 @@ pub enum Error {
     /// Subtask error
     #[error("Subtask failure: {0}")]
     Subtask(#[from] JoinError),
+    /// Child sub-task error.
+    #[error("Child join error: {0}")]
+    Child(JoinError),
+    /// Startup send error.
+    #[error("Startup send error: {0}")]
+    StartupSend(#[from] broadcast::error::SendError<()>),
+    /// Child startup wait error.
+    #[error("Child startup wait error: {0}")]
+    StartupWait(#[from] broadcast::error::RecvError),
     /// Byte error
     #[error("Bytes must not be negative: {0}")]
     Byte(#[from] byte_unit::ParseError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
-    /// Both `bytes_per_second` and throttle config were specified
-    #[error("Cannot specify both bytes_per_second and throttle configuration")]
-    ConflictingThrottleConfig,
-    /// No throttle configuration provided
-    #[error("Must specify either bytes_per_second or throttle configuration")]
-    NoThrottleConfig,
-    /// Throttle conversion error
+    /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
-    ThrottleConversion(#[from] crate::generator::common::ThrottleConversionError),
+    ThrottleConversion(#[from] ThrottleConversionError),
+    /// Throttle error
+    #[error("Throttle error: {0}")]
+    Throttle(#[from] lading_throttle::Error),
 }
 
 #[derive(Debug)]
@@ -82,11 +103,9 @@ pub enum Error {
 /// This generator is responsible for sending data to the target via UDS
 /// streams.
 pub struct UnixStream {
-    path: PathBuf,
-    throttle: Throttle,
-    block_cache: block::Cache,
-    metric_labels: Vec<(String, String)>,
+    handles: JoinSet<Result<(), Error>>,
     shutdown: lading_signal::Watcher,
+    startup: tokio::sync::broadcast::Sender<()>,
 }
 
 impl UnixStream {
@@ -103,49 +122,57 @@ impl UnixStream {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
-        config: Config,
+        config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
         let mut rng = StdRng::from_seed(config.seed);
-        let mut labels = vec![
-            ("component".to_string(), "generator".to_string()),
-            ("component_name".to_string(), "unix_stream".to_string()),
-        ];
-        if let Some(id) = general.id {
-            labels.push(("id".to_string(), id));
+        let labels = MetricsBuilder::new("unix_stream")
+            .with_id(general.id)
+            .build();
+
+        let (startup, _startup_rx) = broadcast::channel(1);
+
+        let mut handles = JoinSet::new();
+        for _ in 0..config.parallel_connections {
+            let throttle =
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+
+            let total_bytes =
+                NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
+                    .ok_or(Error::Zero)?;
+            let block_cache = match config.block_cache_method {
+                block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
+                    &mut rng,
+                    total_bytes,
+                    config.maximum_block_size.as_u128(),
+                    &config.variant,
+                    // NOTE we bound payload generation to have overhead only
+                    // equivalent to the prebuild cache size,
+                    // `total_bytes`. This means on systems with plentiful
+                    // memory we're under generating entropy, on systems with
+                    // minimal memory we're over-generating.
+                    //
+                    // `lading::get_available_memory` suggests we can learn to
+                    // divvy this up in the future.
+                    total_bytes.get() as usize,
+                )?,
+            };
+
+            let child = Child {
+                path: config.path.clone(),
+                block_cache,
+                throttle,
+                metric_labels: labels.clone(),
+                shutdown: shutdown.clone(),
+            };
+
+            handles.spawn(child.spin(startup.subscribe()));
         }
 
-        let throttle_config = match (config.bytes_per_second, &config.throttle) {
-            (Some(bytes_per_second), None) => {
-                let bytes_per_second =
-                    NonZeroU32::new(bytes_per_second.as_u128() as u32).ok_or(Error::Zero)?;
-                lading_throttle::Config::Stable {
-                    maximum_capacity: bytes_per_second,
-                }
-            }
-            (None, Some(throttle)) => (*throttle).try_into()?,
-            (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
-            (None, None) => return Err(Error::NoThrottleConfig),
-        };
-
-        let total_bytes =
-            NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
-                .ok_or(Error::Zero)?;
-        let block_cache = match config.block_cache_method {
-            block::CacheMethod::Fixed => block::Cache::fixed(
-                &mut rng,
-                total_bytes,
-                config.maximum_block_size.as_u128(),
-                &config.variant,
-            )?,
-        };
-
         Ok(Self {
-            path: config.path,
-            block_cache,
-            throttle: Throttle::new_with_config(throttle_config),
-            metric_labels: labels,
+            handles,
             shutdown,
+            startup,
         })
     }
 
@@ -159,15 +186,35 @@ impl UnixStream {
     ///
     /// Function will panic if underlying byte capacity is not available.
     pub async fn spin(mut self) -> Result<(), Error> {
+        self.startup.send(())?;
+        self.shutdown.recv().await;
+        info!("shutdown signal received");
+        while let Some(res) = self.handles.join_next().await {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(err) => return Err(Error::Child(err)),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Child {
+    path: PathBuf,
+    throttle: Throttle,
+    block_cache: block::Cache,
+    metric_labels: Vec<(String, String)>,
+    shutdown: lading_signal::Watcher,
+}
+
+impl Child {
+    async fn spin(mut self, mut startup_receiver: Receiver<()>) -> Result<(), Error> {
+        startup_receiver.recv().await?;
         debug!("UnixStream generator running");
 
-        // Move the block_cache into an OS thread, exposing a channel between it
-        // and this async context.
-        let block_cache = self.block_cache;
-        let (snd, rcv) = mpsc::channel(1024);
-        let mut rcv: PeekableReceiver<Block> = PeekableReceiver::new(rcv);
-        thread::Builder::new().spawn(|| block_cache.spin(snd))?;
-
+        let mut handle = self.block_cache.handle();
         let mut current_connection = None;
 
         let shutdown_wait = self.shutdown.recv();
@@ -189,14 +236,13 @@ impl UnixStream {
                         error_labels.push(("error".to_string(), err.to_string()));
                         counter!("connection_failure", &error_labels).increment(1);
 
-                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
                 }
                 continue;
             };
 
-            let blk = rcv.peek().await.expect("block cache should never be empty");
-            let total_bytes = blk.total_bytes;
+            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
                 result = self.throttle.wait_for(total_bytes) => {
@@ -206,9 +252,9 @@ impl UnixStream {
                             // some of the written bytes make it through in which case we
                             // must cycle back around and try to write the remainder of the
                             // buffer.
-                            let blk_max: usize = total_bytes.get() as usize;
+                            let block = self.block_cache.advance(&mut handle);
+                            let blk_max = block.bytes.len();
                             let mut blk_offset = 0;
-                            let blk = rcv.next().await.expect("failed to advance to the next block"); // advance to the block that was previously peeked
                             while blk_offset < blk_max {
                                 let stream = &socket;
 
@@ -219,7 +265,7 @@ impl UnixStream {
                                 if ready.is_writable() {
                                     // Try to write data, this may still fail with `WouldBlock`
                                     // if the readiness event is a false positive.
-                                    match stream.try_write(&blk.bytes[blk_offset..]) {
+                                    match stream.try_write(&block.bytes[blk_offset..]) {
                                         Ok(bytes) => {
                                             counter!("bytes_written", &self.metric_labels).increment(bytes as u64);
                                             counter!("packets_sent", &self.metric_labels).increment(1);

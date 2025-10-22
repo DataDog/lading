@@ -277,10 +277,10 @@ pub(crate) fn parse_prometheus_metrics(
         let metric_type = typemap.get(name);
         let name = name.replace("__", ".");
 
-        if let Some(metrics) = metrics {
-            if !metrics.contains(&name) {
-                continue;
-            }
+        if let Some(metrics) = metrics
+            && !metrics.contains(&name)
+        {
+            continue;
         }
 
         match metric_type {
@@ -344,15 +344,20 @@ pub(crate) fn parse_prometheus_metrics(
 #[allow(clippy::mutable_key_type)]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, net};
 
     use super::*;
+    use bytes::Bytes;
+    use http_body_util::Full;
+    use hyper::server::conn::http1;
+    use hyper::service::service_fn;
+    use hyper::{Request, Response, StatusCode};
+    use hyper_util::rt::TokioIo;
     use metrics::{Key, Label};
-    use metrics_util::{CompositeKey, MetricKind};
+    use metrics_util::{CompositeKey, MetricKind, debugging};
     use rustc_hash::FxHasher;
     use std::hash::BuildHasherDefault;
-    use warp;
-    use warp::Filter;
+    use tokio::{net::TcpListener, sync::oneshot};
 
     fn parse_and_get_metrics(
         s: &str,
@@ -362,14 +367,15 @@ mod tests {
         (
             Option<metrics::Unit>,
             Option<metrics::SharedString>,
-            metrics_util::debugging::DebugValue,
+            debugging::DebugValue,
         ),
     > {
-        let dr = metrics_util::debugging::DebuggingRecorder::new();
+        let dr = debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
-        dr.install().expect("failed to install recorder");
 
-        parse_prometheus_metrics(s, tags.as_ref(), None);
+        metrics::with_local_recorder(&dr, || {
+            parse_prometheus_metrics(s, tags.as_ref(), None);
+        });
 
         snapshotter.snapshot().into_hashmap()
     }
@@ -382,18 +388,54 @@ mod tests {
         (
             Option<metrics::Unit>,
             Option<metrics::SharedString>,
-            metrics_util::debugging::DebugValue,
+            debugging::DebugValue,
         ),
     > {
         let s = s.to_string();
-        let server = warp::serve(
-            warp::path("metrics")
-                .map(move || warp::reply::with_status(s.clone(), warp::http::StatusCode::OK)),
-        );
 
-        let (addr, serve_fut) = server.bind_ephemeral(([127, 0, 0, 1], 0));
-        let _server_handle = tokio::spawn(serve_fut);
+        // Avoid a race with the underlying server by signaling with this
+        // oneshot, underlying server will serve as a test /metrics endpoint.
+        let (tx, rx) = oneshot::channel();
 
+        let _server_handle = tokio::spawn(async move {
+            // Bind an ephemeral port
+            let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+
+            let listener = TcpListener::from_std(listener).unwrap();
+            let _ = tx.send(addr);
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let io = TokioIo::new(stream);
+                let s = s.clone();
+
+                tokio::spawn(async move {
+                    let service = service_fn(move |req: Request<hyper::body::Incoming>| {
+                        let s = s.clone();
+                        async move {
+                            if req.uri().path() == "/metrics" {
+                                Ok::<_, hyper::Error>(
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .body(Full::new(Bytes::from(s)))
+                                        .unwrap(),
+                                )
+                            } else {
+                                Ok(Response::builder()
+                                    .status(StatusCode::NOT_FOUND)
+                                    .body(Full::new(Bytes::new()))
+                                    .unwrap())
+                            }
+                        }
+                    });
+
+                    let _ = http1::Builder::new().serve_connection(io, service).await;
+                });
+            }
+        });
+
+        let addr = rx.await.unwrap();
         let server_uri = format!("http://{addr}/metrics");
 
         let (shutdown_watcher, _) = lading_signal::signal();
@@ -410,9 +452,9 @@ mod tests {
             sample_period,
         );
 
-        let dr = metrics_util::debugging::DebuggingRecorder::new();
+        let dr = debugging::DebuggingRecorder::new();
         let snapshotter = dr.snapshotter();
-        dr.install().expect("failed to install recorder");
+        let _guard = metrics::set_default_local_recorder(&dr);
 
         experiment_started_broadcaster.signal();
 
@@ -448,7 +490,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_one.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 35.0);
             }
             _ => panic!("unexpected metric type"),
@@ -467,7 +509,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_two.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 36.0);
             }
             _ => panic!("unexpected metric type"),
@@ -493,7 +535,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_one.2 {
-            metrics_util::debugging::DebugValue::Counter(v) => {
+            debugging::DebugValue::Counter(v) => {
                 assert_eq!(v, 1027);
             }
             _ => panic!("unexpected metric type"),
@@ -522,7 +564,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_one.2 {
-            metrics_util::debugging::DebugValue::Gauge(v) => {
+            debugging::DebugValue::Gauge(v) => {
                 assert_eq!(v, 5_264_384_f64);
             }
             _ => panic!("unexpected metric type"),
@@ -555,7 +597,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric_one.2 {
-            metrics_util::debugging::DebugValue::Gauge(v) => {
+            debugging::DebugValue::Gauge(v) => {
                 assert_eq!(v, 5_264_384_f64);
             }
             _ => panic!("unexpected metric type"),
@@ -591,7 +633,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
@@ -660,7 +702,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
@@ -694,7 +736,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 42.0);
             }
             _ => panic!("unexpected metric type"),
@@ -729,7 +771,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
@@ -762,7 +804,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
@@ -796,7 +838,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),
@@ -822,7 +864,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 42.0);
             }
             _ => panic!("unexpected metric type"),
@@ -856,7 +898,7 @@ mod tests {
             ))
             .expect("metric not found");
         match metric.2 {
-            metrics_util::debugging::DebugValue::Gauge(ordered_float) => {
+            debugging::DebugValue::Gauge(ordered_float) => {
                 assert_eq!(ordered_float, 1.0);
             }
             _ => panic!("unexpected metric type"),

@@ -115,7 +115,7 @@ impl FileGen {
             Self::Logrotate(inner) => inner.spin().await?,
             #[cfg(feature = "logrotate_fs")]
             Self::LogrotateFs(inner) => inner.spin().await?,
-        };
+        }
 
         Ok(())
     }

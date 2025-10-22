@@ -20,8 +20,9 @@
 //!
 
 use std::{
+    fs,
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
@@ -154,10 +155,10 @@ impl IntegrationTest {
         let ducks_timeout = ducks_timeout.as_secs().to_string();
 
         let ducks_process = Command::new(ducks_binary)
-            .stdout(Stdio::from(std::fs::File::create(
+            .stdout(Stdio::from(fs::File::create(
                 self.tempdir.path().join("ducks.stdout"),
             )?))
-            .stderr(Stdio::from(std::fs::File::create(
+            .stderr(Stdio::from(fs::File::create(
                 self.tempdir.path().join("ducks.stderr"),
             )?))
             .env("RUST_LOG", "ducks=debug,info")
@@ -171,7 +172,7 @@ impl IntegrationTest {
             .context("launch ducks")?;
 
         // wait for ducks to bring up its RPC server and then connect
-        while !std::path::Path::exists(&ducks_comm_file) {
+        while !Path::exists(&ducks_comm_file) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         let channel = Endpoint::try_from("http://127.0.0.1/this-is-not-used")?
@@ -200,7 +201,7 @@ impl IntegrationTest {
         // template & write lading config
         let lading_config_file = self.tempdir.path().join("lading.yaml");
         let mut file =
-            std::fs::File::create(&lading_config_file).context("create lading config file")?;
+            fs::File::create(&lading_config_file).context("create lading config file")?;
         let lading_config = self
             .lading_config_template
             .replace("{{port_number}}", &port.to_string());
@@ -210,10 +211,10 @@ impl IntegrationTest {
         // run lading against the ducks process that was started above
         let captures_file = self.tempdir.path().join("captures");
         let lading = Command::new(lading_binary)
-            .stdout(Stdio::from(std::fs::File::create(
+            .stdout(Stdio::from(fs::File::create(
                 self.tempdir.path().join("lading.stdout"),
             )?))
-            .stderr(Stdio::from(std::fs::File::create(
+            .stderr(Stdio::from(fs::File::create(
                 self.tempdir.path().join("lading.stderr"),
             )?))
             .env("RUST_LOG", "lading=debug,info")
@@ -302,7 +303,7 @@ impl IntegrationTest {
 
         fn try_print_file(name: &str, path: &std::path::Path) -> Result<(), anyhow::Error> {
             let mut contents = String::new();
-            std::fs::File::open(path)?.read_to_string(&mut contents)?;
+            fs::File::open(path)?.read_to_string(&mut contents)?;
             if contents.is_empty() {
                 println!("{name}: <empty>");
             } else {
@@ -423,7 +424,8 @@ generator:
         method:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
-            variant: "opentelemetry_logs"
+            variant:
+              opentelemetry_logs: {}
         headers:
             Content-Type: "application/x-protobuf"
         "#,
@@ -497,7 +499,8 @@ generator:
               opentelemetry_metrics:
                 metric_weights:
                   gauge: 50
-                  sum: 50
+                  sum_delta: 25
+                  sum_cumulative: 25
         headers:
             Content-Type: "application/x-protobuf"
         "#,

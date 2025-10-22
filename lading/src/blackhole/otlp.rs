@@ -89,7 +89,7 @@ impl Otlp {
         // Ensure at least one protocol is enabled
         if config.grpc_addr.is_none() && config.http_addr.is_none() {
             return Err(Error::NoProtocolEnabled);
-        };
+        }
 
         let mut labels = vec![
             ("component".to_string(), "blackhole".to_string()),

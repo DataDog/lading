@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{fs, io::Read};
 
 use regex::Regex;
 use rustc_hash::FxHashMap;
@@ -271,7 +271,7 @@ pub(crate) struct Regions(Vec<Region>);
 impl Regions {
     pub(crate) fn from_pid(pid: i32) -> Result<Self, Error> {
         let path = format!("/proc/{pid}/smaps");
-        let mut file: std::fs::File = std::fs::OpenOptions::new().read(true).open(path)?;
+        let mut file: fs::File = fs::OpenOptions::new().read(true).open(path)?;
 
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
@@ -336,7 +336,7 @@ impl Regions {
             }
 
             str_regions.push(&contents[start_index..]);
-        };
+        }
 
         str_regions
     }

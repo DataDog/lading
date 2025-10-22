@@ -38,7 +38,6 @@
 // * value: enum { u64, f64 } -- the value
 // * flags: uu32 -- I'm not sure what to make of this yet
 
-pub(crate) mod tags;
 pub(crate) mod templates;
 pub(crate) mod unit;
 
@@ -46,26 +45,26 @@ use std::rc::Rc;
 use std::{cell::RefCell, io::Write};
 
 use crate::SizedGenerator;
+use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::metric::Data;
-use opentelemetry_proto::tonic::metrics::v1::{self, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
 use prost::Message;
-use serde::{Deserialize, Serialize as SerdeSerialize};
-use templates::{Pool, PoolError, ResourceTemplateGenerator};
-use tracing::{debug, error};
+use serde::Deserialize;
+use templates::{Pool, ResourceTemplateGenerator};
+use tracing::debug;
 use unit::UnitGenerator;
 
-// smallest useful protobuf, determined by experimentation and enforced in
-// smallest_protobuf test
-const SMALLEST_PROTOBUF: usize = 31;
+/// Smallest useful protobuf, determined by experimentation and enforced in
+/// `smallest_protobuf` test.
+pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 /// OpenTelemetry metric contexts
@@ -100,27 +99,30 @@ impl Default for Contexts {
 }
 
 /// Defines the relative probability of each kind of OpenTelemetry metric.
-#[derive(Debug, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricWeights {
     /// The relative probability of generating a gauge metric.
     pub gauge: u8,
-    /// The relative probability of generating a sum metric.
-    pub sum: u8,
+    /// The relative probability of generating a sum delta metric.
+    pub sum_delta: u8,
+    /// The relative probability of generating a sum cumulative metric.
+    pub sum_cumulative: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50, // 50%
-            sum: 50,   // 50%
+            gauge: 50,          // 50%
+            sum_delta: 25,      // 25%
+            sum_cumulative: 25, // 25%
         }
     }
 }
 
 /// Configure the OpenTelemetry metric payload.
-#[derive(Debug, Default, Deserialize, SerdeSerialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -135,10 +137,14 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
+    #[allow(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
-        if self.metric_weights.gauge == 0 || self.metric_weights.sum == 0 {
+        if self.metric_weights.gauge == 0
+            || self.metric_weights.sum_delta == 0
+            || self.metric_weights.sum_cumulative == 0
+        {
             return Err("Metric weights cannot be 0".to_string());
         }
 
@@ -188,6 +194,29 @@ impl Config {
                     );
                 }
             }
+        }
+
+        // Validate attributes_per_resource range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_resource
+            && min > max
+        {
+            return Err(
+                "attributes_per_resource minimum cannot be greater than maximum".to_string(),
+            );
+        }
+
+        // Validate attributes_per_scope range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_scope
+            && min > max
+        {
+            return Err("attributes_per_scope minimum cannot be greater than maximum".to_string());
+        }
+
+        // Validate attributes_per_metric range
+        if let ConfRange::Inclusive { min, max } = self.contexts.attributes_per_metric
+            && min > max
+        {
+            return Err("attributes_per_metric minimum cannot be greater than maximum".to_string());
         }
 
         let min_contexts = match self.contexts.total_contexts {
@@ -280,7 +309,7 @@ impl OpentelemetryMetrics {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, Error>
+    pub fn new<R>(config: Config, max_overhead_bytes: usize, rng: &mut R) -> Result<Self, Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -291,7 +320,7 @@ impl OpentelemetryMetrics {
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {
-            pool: Pool::new(context_cap, rt_gen),
+            pool: Pool::new(context_cap, max_overhead_bytes, rt_gen),
             scratch: RefCell::new(BytesMut::with_capacity(4096)),
             tick: 0,
             incr_f: 0.0,
@@ -303,7 +332,7 @@ impl OpentelemetryMetrics {
 }
 
 impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
-    type Output = v1::ResourceMetrics;
+    type Output = ResourceMetrics;
     type Error = Error;
 
     /// Generate OTLP metrics with the following enhancements:
@@ -321,10 +350,10 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
-        let mut tpl: v1::ResourceMetrics = match self.pool.fetch(rng, budget) {
+        let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
-                error!("Pool was unable to satify request for {budget} size");
+                debug!("Pool was unable to satify request for {budget} size");
                 Err(PoolError::EmptyChoice)?
             }
             Err(e) => Err(e)?,
@@ -419,6 +448,31 @@ impl crate::Serialize for OpentelemetryMetrics {
         let mut total_data_points = 0;
         let loop_id: u32 = rng.random();
 
+        // Build up the request by adding ResourceMetrics one by one until we
+        // would exceed max_bytes.
+        //
+        // Example: max_bytes = 1000
+        //
+        // - Request with 0 ResourceMetrics: encoded size = 100 bytes
+        // - Add ResourceMetrics #1: encoded size = 400 bytes (still under 1000,
+        //   continue)
+        // - Add ResourceMetrics #2: encoded size = 700 bytes (still under 1000,
+        //   continue)
+        // - Add ResourceMetrics #3: encoded size = 1050 bytes (over 1000!)
+        // - Code detects overflow, pops #3, breaks the loop
+        // - Request now has #1 and #2, encoded size = 700 bytes
+        //
+        // When we call generate we pass bytes_remaining as the budget. After
+        // adding ResourceMetrics #2, we set bytes_remaining = 1000 - 700 =
+        // 300. So when generating #3, we tell it "you have 300 bytes to work
+        // with". The generate method might return something that encodes to 250
+        // bytes on its own.
+        //
+        // But, protobuf encoding isn't strictly additive. When we add that 250
+        // byte ResourceMetrics to a request that's already 700 bytes, the
+        // combined encoding might be > 1000 bytes (not 950) due to additional
+        // framing, length prefixes, field tags or whatever.  We handle this by
+        // checking after adding and removing the item if it exceeds the budget.
         while bytes_remaining >= SMALLEST_PROTOBUF {
             if let Ok(rm) = self.generate(&mut rng, &mut bytes_remaining) {
                 total_data_points += self.data_points_per_resource;
@@ -440,11 +494,14 @@ impl crate::Serialize for OpentelemetryMetrics {
                 }
                 bytes_remaining = max_bytes.saturating_sub(required_bytes);
             } else {
-                debug!(
-                    ?bytes_remaining,
-                    ?SMALLEST_PROTOBUF,
-                    "could not generate ResourceMetrics instance"
+                // Belt with suspenders time: verify no templates could possibly
+                // fit. If we pass this assertion, break as no template will
+                // ever fit the requested max_bytes.
+                assert!(
+                    !self.pool.template_fits(bytes_remaining),
+                    "Pool claims template fits {bytes_remaining} bytes but generate() failed, indicative of a logic error",
                 );
+                break;
             }
         }
 
@@ -473,15 +530,11 @@ impl crate::Serialize for OpentelemetryMetrics {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Contexts, OpentelemetryMetrics, SMALLEST_PROTOBUF};
-    use crate::{
-        Serialize, SizedGenerator,
-        common::config::ConfRange,
-        opentelemetry::metric::v1::{ResourceMetrics, metric},
-    };
+    use super::{Config, Contexts, OpentelemetryMetrics, ResourceMetrics, SMALLEST_PROTOBUF};
+    use crate::{Serialize, SizedGenerator, common::config::ConfRange};
     use opentelemetry_proto::tonic::common::v1::any_value;
     use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ScopeMetrics, number_data_point,
+        Metric, NumberDataPoint, ScopeMetrics, metric::Data, number_data_point,
     };
     use opentelemetry_proto::tonic::{
         collector::metrics::v1::ExportMetricsServiceRequest, metrics::v1::Gauge,
@@ -521,7 +574,7 @@ mod test {
 
             let mut budget = 10_000_000;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             for _ in 0..steps {
                 let prev = budget;
@@ -565,10 +618,10 @@ mod test {
 
             let mut b1 = budget;
             let mut rng1 = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics1 = OpentelemetryMetrics::new(config, &mut rng1)?;
+            let mut otel_metrics1 = OpentelemetryMetrics::new(config, budget, &mut rng1)?;
             let mut b2 = budget;
             let mut rng2 = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics2 = OpentelemetryMetrics::new(config, &mut rng2)?;
+            let mut otel_metrics2 = OpentelemetryMetrics::new(config, budget, &mut rng2)?;
 
             for _ in 0..steps {
                 if let Ok(gen_1) = otel_metrics1.generate(&mut rng1, &mut b1) {
@@ -613,7 +666,7 @@ mod test {
             let mut ids = HashSet::new();
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut b = budget;
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let total_generations = total_contexts_max + (total_contexts_max / 2);
             for _ in 0..total_generations {
@@ -631,35 +684,45 @@ mod test {
     }
 
     // We want to be sure that the serialized size of the payload does not
-    // exceed `max_bytes`.
-    #[test]
-    fn payload_not_exceed_max_bytes() {
-        let config = Config {
-            contexts: Contexts {
-                total_contexts: ConfRange::Constant(10),
-                attributes_per_resource: ConfRange::Constant(5),
-                scopes_per_resource: ConfRange::Constant(2),
-                attributes_per_scope: ConfRange::Constant(3),
-                metrics_per_scope: ConfRange::Constant(4),
-                attributes_per_metric: ConfRange::Constant(2),
-            },
-            ..Default::default()
-        };
+    // exceed `budget`.
+    proptest! {
+        #[test]
+        fn payload_not_exceed_max_bytes(
+            seed: u64,
+            total_contexts in 1..1_000_u32,
+            attributes_per_resource in 0..20_u8,
+            scopes_per_resource in 0..20_u8,
+            attributes_per_scope in 0..20_u8,
+            metrics_per_scope in 0..20_u8,
+            attributes_per_metric in 0..10_u8,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                contexts: Contexts {
+                    total_contexts: ConfRange::Constant(total_contexts),
+                    attributes_per_resource: ConfRange::Constant(attributes_per_resource),
+                    scopes_per_resource: ConfRange::Constant(scopes_per_resource),
+                    attributes_per_scope: ConfRange::Constant(attributes_per_scope),
+                    metrics_per_scope: ConfRange::Constant(metrics_per_scope),
+                    attributes_per_metric: ConfRange::Constant(attributes_per_metric),
+                },
+                ..Default::default()
+            };
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let max_bytes = 10_000;
+            let mut metrics = OpentelemetryMetrics::new(config, max_bytes, &mut rng)
+                .expect("failed to create metrics generator");
 
-        let max_bytes = 512;
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
-            .expect("failed to create metrics generator");
-
-        let mut bytes = Vec::new();
-        metrics
-            .to_bytes(&mut rng, max_bytes, &mut bytes)
-            .expect("failed to convert to bytes");
-        assert!(
-            bytes.len() <= max_bytes,
-            "max len: {max_bytes}, actual: {}",
-            bytes.len()
-        );
+            let mut bytes = Vec::new();
+            metrics
+                .to_bytes(&mut rng, budget, &mut bytes)
+                .expect("failed to convert to bytes");
+            assert!(
+                bytes.len() <= budget,
+                "max len: {budget}, actual: {}",
+                bytes.len()
+            );
+        }
     }
 
     // We want to know that every payload produced by this type actually
@@ -680,7 +743,7 @@ mod test {
 
         let max_bytes = 256;
         let mut rng = SmallRng::seed_from_u64(42);
-        let mut metrics = OpentelemetryMetrics::new(config, &mut rng)
+        let mut metrics = OpentelemetryMetrics::new(config, max_bytes, &mut rng)
             .expect("failed to create metrics generator");
 
         let mut bytes: Vec<u8> = Vec::new();
@@ -688,10 +751,8 @@ mod test {
             .to_bytes(&mut rng, max_bytes, &mut bytes)
             .expect("failed to convert to bytes");
 
-        opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
-            bytes.as_slice(),
-        )
-        .expect("failed to decode the message from the buffer");
+        ExportMetricsServiceRequest::decode(bytes.as_slice())
+            .expect("failed to decode the message from the buffer");
     }
 
     // Confirm that configuration bounds are naively obeyed. For instance, this
@@ -725,7 +786,7 @@ mod test {
 
             let mut b = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             for _ in 0..steps {
                 if let Ok(metric) = otel_metrics.generate(&mut rng, &mut b) {
@@ -825,8 +886,8 @@ mod test {
                 metric.unit.hash(&mut hasher);
                 if let Some(data) = &metric.data {
                     match data {
-                        metric::Data::Gauge(_) => "gauge".hash(&mut hasher),
-                        metric::Data::Sum(sum) => {
+                        Data::Gauge(_) => "gauge".hash(&mut hasher),
+                        Data::Sum(sum) => {
                             "sum".hash(&mut hasher);
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
@@ -869,13 +930,13 @@ mod test {
 
             let mut b1 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let metric1 = otel_metrics.generate(&mut rng, &mut b1);
 
             // Generate two identical metrics
             let mut b2 = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let metric2 = otel_metrics.generate(&mut rng, &mut b2);
 
             // Ensure that the metrics are equal and that their contexts, when
@@ -916,7 +977,7 @@ mod test {
 
             let mut budget = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let mut timestamps_by_metric: HashMap<u64, Vec<u64>> = HashMap::new();
 
@@ -928,7 +989,7 @@ mod test {
 
                             if let Some(data) = &metric.data {
                                 match data {
-                                    metric::Data::Gauge(gauge) => {
+                                    Data::Gauge(gauge) => {
                                         for point in &gauge.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -936,7 +997,7 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    metric::Data::Sum(sum) => {
+                                    Data::Sum(sum) => {
                                         for point in &sum.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
@@ -995,13 +1056,14 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
             let mut budget = budget;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
             let prev = otel_metrics.tick;
             let _ = otel_metrics.generate(&mut rng, &mut budget);
             let cur = otel_metrics.tick;
@@ -1034,12 +1096,13 @@ mod test {
                 },
                 metric_weights: super::MetricWeights {
                     gauge: 0,   // Only generate sum metrics
-                    sum: 100,
+                    sum_delta: 50,
+                    sum_cumulative: 50,
                 },
             };
 
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut otel_metrics = OpentelemetryMetrics::new(config, &mut rng)?;
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
             let mut values: HashMap<u64, f64> = HashMap::new();
 
@@ -1054,7 +1117,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1074,7 +1137,7 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(metric::Data::Sum(sum)) = &metric.data {
+                            if let Some(Data::Sum(sum)) = &metric.data {
                                 if sum.is_monotonic {
                                     for point in sum.data_points.iter() {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
@@ -1115,7 +1178,7 @@ mod test {
             name: "x".into(), // Minimal valid name
             description: "".into(),
             unit: "".into(),
-            data: Some(metric::Data::Gauge(gauge)),
+            data: Some(Data::Gauge(gauge)),
             metadata: Vec::new(), // No metadata
         };
 
@@ -1279,19 +1342,31 @@ mod test {
 
         // Invalid: Zero metric weights
         let zero_gauge_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 50 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 25,
+                sum_cumulative: 25,
+            },
             ..valid_config
         };
         assert!(zero_gauge_weight.valid().is_err());
 
         let zero_sum_weight = Config {
-            metric_weights: super::MetricWeights { gauge: 50, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 50,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_sum_weight.valid().is_err());
 
         let zero_weights = Config {
-            metric_weights: super::MetricWeights { gauge: 0, sum: 0 },
+            metric_weights: super::MetricWeights {
+                gauge: 0,
+                sum_delta: 0,
+                sum_cumulative: 0,
+            },
             ..valid_config
         };
         assert!(zero_weights.valid().is_err());

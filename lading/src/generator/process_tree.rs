@@ -10,7 +10,6 @@
 //! configured [throttle].
 //!
 
-use is_executable::IsExecutable;
 use lading_throttle::Throttle;
 use nix::{
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
@@ -28,8 +27,9 @@ use std::{
     env, error, fmt,
     iter::Peekable,
     num::{NonZeroU32, NonZeroUsize},
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
-    process::{Stdio, exit},
+    process::{self, Stdio, exit},
     str, thread,
     time::Duration,
 };
@@ -247,7 +247,11 @@ impl Config {
     pub fn validate(&self) -> Result<(), Error> {
         let iter = self.executables.iter();
         for exec in iter {
-            if !exec.executable.is_executable() {
+            if !exec
+                .executable
+                .metadata()
+                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+            {
                 return Err(Error::from(NotExecutable {
                     executable: exec.executable.clone(),
                 }));
@@ -291,6 +295,7 @@ impl ProcessTree {
         let throttle = match (&config.max_tree_per_second, &config.throttle) {
             (Some(max_tps), None) => Throttle::new_with_config(lading_throttle::Config::Stable {
                 maximum_capacity: *max_tps,
+                timeout_micros: 0,
             }),
             (None, Some(throttle_config)) => Throttle::new_with_config(*throttle_config),
             (Some(_), Some(_)) => return Err(Error::ConflictingThrottleConfig),
@@ -462,7 +467,7 @@ pub fn spawn_tree(nodes: &VecDeque<Process>, sleep_ns: u32) -> Result<(), Error>
         let process = iter.next().expect("process is not populated properly");
 
         if let Some(exec) = &process.exec {
-            let status = std::process::Command::new(&exec.executable)
+            let status = process::Command::new(&exec.executable)
                 .args(&exec.args)
                 .envs(&exec.envs)
                 .stdout(Stdio::null())
