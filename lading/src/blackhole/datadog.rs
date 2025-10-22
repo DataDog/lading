@@ -204,7 +204,7 @@ async fn handle_request(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unspecified");
 
-    info!(
+    debug!(
         path = ?path,
         content_type = ?content_type,
         content_encoding = ?content_encoding,
