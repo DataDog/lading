@@ -100,7 +100,8 @@
 //!
 //! A `Gauge` write may be either `Increment(k, T, i)` or `Decrement(k, T, i)`
 //! or `Set(k, T, i)`. The semantic considerations of `Counter` discussed above
-//! largely apply to `Gauge`. Logically:
+//! largely apply to `Gauge`. Loss of associativity compared to `Counter` is a
+//! result of the interior f64. Logically:
 //!
 //!  * `Increment` is commutative.
 //!  * `Decrement` is commutative.
