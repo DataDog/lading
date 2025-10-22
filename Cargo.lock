@@ -1605,7 +1605,6 @@ dependencies = [
  "proptest",
  "prost",
  "prost-build",
- "quanta",
  "rand 0.9.2",
  "regex",
  "reqwest",
@@ -1625,8 +1624,6 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-subscriber",
- "ustr",
- "uuid",
  "zstd",
 ]
 

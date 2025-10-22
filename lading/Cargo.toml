@@ -14,9 +14,6 @@ keywords = ["random_test", "generator"]
 categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
-[package.metadata.cargo-machete]
-ignored = ["prost"]
-
 [dependencies]
 lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
@@ -95,9 +92,6 @@ tokio-util = { version = "0.7", features = ["io"] }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
-ustr = { workspace = true }
-uuid = { workspace = true }
-quanta = { version = "0.12", default-features = false, features = [] }
 zstd = "0.13.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]

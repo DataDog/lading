@@ -36,7 +36,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::net::TcpListener;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::General;
 use crate::proto::datadog::intake::metrics::MetricPayload;
