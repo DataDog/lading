@@ -246,6 +246,11 @@ impl Accumulator {
     /// Advance tick and copy forward values
     pub(crate) fn advance_tick(&mut self) {
         let old_interval = interval_idx(self.current_tick);
+        // WARNING: When we hit u64::MAX whether this wrapping_add is correct or
+        // not depends on the value of INTERVALS. For instance, u64::MAX % 60 ==
+        // 15 so when we wrap to 0 we'll index into the wrong spot. However if
+        // an interval is 1 nanosecond we're looking at a continuous runtime of
+        // ~500 years before this becomes a problem.
         self.current_tick = self.current_tick.wrapping_add(1);
         let new_interval = interval_idx(self.current_tick);
         for values in self.counters.values_mut() {
