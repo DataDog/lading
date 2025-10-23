@@ -23,11 +23,15 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::LazyLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
+/// Duration of a single `Accumulator` tick in milliseconds, drives the
+/// `CaptureManager` polling interval, allows us to calculate `recorded_at` from
+/// ticks.
+const TICK_DURATION_MS: u128 = 1_000;
+
 pub(crate) struct Sender {
-    pub(crate) start: Instant,
     pub(crate) snd: mpsc::Sender<Metric>,
 }
 
@@ -78,14 +82,14 @@ pub(crate) enum GaugeValue {
 #[derive(Debug, Clone)]
 pub(crate) struct Counter {
     pub key: Key,
-    pub tick: u64,
+    pub timestamp: Instant,
     pub value: CounterValue,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Gauge {
     pub key: Key,
-    pub tick: u64,
+    pub timestamp: Instant,
     pub value: GaugeValue,
 }
 
@@ -103,7 +107,12 @@ pub(crate) enum Metric {
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
 pub struct CaptureManager<W: Write + Send> {
+    /// Reference start time used to convert Instant timestamps to logical ticks.
+    /// Initialized at `CaptureManager` construction time, before any historical
+    /// metrics are sent. This synchronizes with `accumulator.current_tick` which
+    /// begins at 0 and advances every `TICK_DURATION_MS`.
     start: Instant,
+    expiration: Duration,
     capture_writer: W,
     capture_path: PathBuf,
     shutdown: Option<lading_signal::Watcher>,
@@ -136,10 +145,14 @@ impl<W: Write + Send> CaptureManager<W> {
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
-        _expiration: Duration,
+        expiration: Duration,
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
         let run_id = Uuid::new_v4();
+
+        // Capture start time for timestamp-to-tick conversion. This is the
+        // reference point for all historical metrics: accumulator.current_tick
+        // begins at 0 and this Instant represents tick 0 in real time.
         let now = Instant::now();
 
         let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
@@ -147,6 +160,7 @@ impl<W: Write + Send> CaptureManager<W> {
 
         Self {
             start: now,
+            expiration,
             capture_writer,
             capture_path,
             shutdown: Some(shutdown),
@@ -183,6 +197,12 @@ impl<W: Write + Send> CaptureManager<W> {
         self.global_labels.insert(key.into(), value.into());
     }
 
+    /// Convert an Instant timestamp to `Accumulator` logical tick time.
+    #[inline]
+    fn instant_to_tick(&self, timestamp: Instant) -> u64 {
+        timestamp.duration_since(self.start).as_secs()
+    }
+
     fn write_metric_line(
         &mut self,
         key: &Key,
@@ -196,10 +216,20 @@ impl<W: Write + Send> CaptureManager<W> {
             labels.insert(lbl.key().into(), lbl.value().into());
         }
 
+        // Calculate when this metric was actually recorded based on its tick.
+        let tick_age = self.accumulator.current_tick.saturating_sub(tick);
+        let tick_age_ms = u128::from(tick_age) * TICK_DURATION_MS;
+        // Skip any line that has expired.
+        if tick_age_ms > self.expiration.as_millis() {
+            return Ok(());
+        }
+
+        let recorded_at = now_ms.saturating_sub(tick_age_ms);
         let line = match value {
             MetricValue::Counter(val) => json::Line {
                 run_id,
                 time: now_ms,
+                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -209,6 +239,7 @@ impl<W: Write + Send> CaptureManager<W> {
             MetricValue::Gauge(val) => json::Line {
                 run_id,
                 time: now_ms,
+                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
@@ -239,31 +270,38 @@ impl<W: Write + Send> CaptureManager<W> {
     }
 
     fn record_captures(&mut self) -> Result<(), Error> {
-        let start = Instant::now();
+        let now = Instant::now();
+        let tick = self.accumulator.current_tick;
 
         for (k, c) in self.registry.get_counter_handles() {
             let val = c.load(Ordering::Relaxed);
-            let c = Counter {
+            let counter = Counter {
                 key: k,
-                tick: self.accumulator.current_tick,
+                timestamp: now,
                 value: CounterValue::Absolute(val),
             };
-            self.accumulator.counter(c)?;
+            self.accumulator.counter(counter, tick)?;
         }
 
         for (k, g) in self.registry.get_gauge_handles() {
             let bits = g.load(Ordering::Relaxed);
             // There's no atomic f64 so we have to convert from AtomicU64
             let value = f64::from_bits(bits);
-            let g = Gauge {
+            let gauge = Gauge {
                 key: k,
-                tick: self.accumulator.current_tick,
+                timestamp: now,
                 value: GaugeValue::Set(value),
             };
-            self.accumulator.gauge(g)?;
+            self.accumulator.gauge(gauge, tick)?;
         }
 
+        let old_tick = self.accumulator.current_tick;
         self.accumulator.advance_tick();
+        trace!(
+            old_tick = old_tick,
+            new_tick = self.accumulator.current_tick,
+            "Advanced accumulator tick"
+        );
 
         let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
         let run_id = self.run_id;
@@ -279,7 +317,7 @@ impl<W: Write + Send> CaptureManager<W> {
             path = self.capture_path.display()
         );
 
-        let elapsed = start.elapsed();
+        let elapsed = now.elapsed();
         if elapsed > Duration::from_secs(1) {
             error!("record_captures took {elapsed:?}, exceeded 1 second budget");
         }
@@ -327,10 +365,12 @@ impl CaptureManager<BufWriter<std::fs::File>> {
     /// # Errors
     ///
     /// Will return an error if there is already a global recorder set.
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn start(mut self) -> Result<(), Error> {
-        // Initialize historical sender - done here in async context
+        // Initialize historical sender to allow generators to send metrics with
+        // Instant timestamps. Manager converts these to ticks using self.start
+        // as the reference point synchronized with accumulator.current_tick.
         *HISTORICAL_SENDER.lock().await = Some(Sender {
-            start: self.start,
             snd: self.snd.clone(),
         });
 
@@ -344,7 +384,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             time::sleep(Duration::from_millis(100)).await;
         }
 
-        let mut flush_interval = time::interval(Duration::from_secs(1));
+        let mut flush_interval = time::interval(Duration::from_millis(TICK_DURATION_MS as u64));
         flush_interval.tick().await; // first tick happens immediately
 
         let shutdown_wait = self
@@ -358,8 +398,18 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             tokio::select! {
                 val = self.recv.recv() => {
                     match val {
-                        Some(Metric::Counter(c)) => self.accumulator.counter(c)?,
-                        Some(Metric::Gauge(g)) => self.accumulator.gauge(g)?,
+                        Some(Metric::Counter(c)) => {
+                            let tick = self.instant_to_tick(c.timestamp);
+                            if let Err(e) = self.accumulator.counter(c, tick) {
+                                warn!("Failed to record counter metric: {e}");
+                            }
+                        }
+                        Some(Metric::Gauge(g)) => {
+                            let tick = self.instant_to_tick(g.timestamp);
+                            if let Err(e) = self.accumulator.gauge(g, tick) {
+                                warn!("Failed to record gauge metric: {e}");
+                            }
+                        }
                         None => {
                             warn!("Timestamped metrics unexpected transmission shutdown");
                             return Ok(());
@@ -367,12 +417,27 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                     }
                 }
                 _ = flush_interval.tick() => {
-                    let now = Instant::now();
+                    let tick_start = Instant::now();
+                    let wall_clock_elapsed = tick_start.duration_since(self.start).as_secs();
+                    let tick_drift = wall_clock_elapsed.saturating_sub(self.accumulator.current_tick);
+
+                    if tick_drift > 5 {
+                        warn!(
+                            wall_clock_elapsed_secs = wall_clock_elapsed,
+                            current_tick = self.accumulator.current_tick,
+                            tick_drift_secs = tick_drift,
+                            "Timer significantly behind wall clock"
+                        );
+                    }
+
                     self.record_captures()?;
 
-                    let delta = now.elapsed();
-                    if delta > Duration::from_secs(1) {
-                        warn!("Recording capture took more than 1s (took {delta:?})");
+                    let record_duration = tick_start.elapsed();
+                    if record_duration > Duration::from_secs(1) {
+                        warn!(
+                            duration = ?record_duration,
+                            "Recording capture took more than 1s"
+                        );
                     }
                 },
                 () = &mut shutdown_wait => {
@@ -453,7 +518,11 @@ impl metrics::Recorder for CaptureRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::Duration,
+    };
 
     use crate::json;
 
@@ -576,6 +645,7 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
+                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -595,6 +665,7 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
+                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
@@ -838,5 +909,52 @@ mod tests {
             !unique_fetch_indices.is_empty(),
             "Expected to see at least one unique fetch_index"
         );
+    }
+
+    #[test]
+    fn recorded_at_is_monotonic_across_flushes() {
+        let writer = InMemoryWriter::new();
+        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
+        let (experiment_rx, _experiment_tx) = lading_signal::signal();
+        let (target_rx, target_tx) = lading_signal::signal();
+
+        target_tx.signal();
+
+        let mut manager = CaptureManager::new_with_writer(
+            writer.clone(),
+            PathBuf::from("/tmp/test-capture.json"),
+            shutdown_rx,
+            experiment_rx,
+            target_rx,
+            Duration::from_secs(60),
+        );
+
+        let recorder = CaptureRecorder {
+            registry: Arc::clone(&manager.registry),
+        };
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("test_counter").increment(1);
+        });
+
+        // Run enough flushes to see metrics appear across multiple ticks
+        for _ in 0..(accumulator::INTERVALS + 10) {
+            manager.record_captures().unwrap();
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let lines = writer.parse_lines().unwrap();
+        assert!(!lines.is_empty(), "Expected to see some metrics");
+
+        // Verify recorded_at is monotonically increasing (non-decreasing)
+        let recorded_at_values: Vec<u128> = lines.iter().map(|l| l.recorded_at).collect();
+        for window in recorded_at_values.windows(2) {
+            assert!(
+                window[1] >= window[0],
+                "recorded_at not monotonic: {} > {}",
+                window[0],
+                window[1]
+            );
+        }
     }
 }
