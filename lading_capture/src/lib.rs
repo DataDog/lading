@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use manager::{Counter, CounterValue, Gauge, GaugeValue, HISTORICAL_SENDER, Metric};
-use metrics::Key;
+use ustr::Ustr;
 
 mod accumulator;
 pub mod json;
@@ -20,14 +20,23 @@ pub enum Error {
     ChannelClosed,
 }
 
-/// Send a historical metric to the capture manager.
-async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
-    let sender = HISTORICAL_SENDER.lock().await;
+fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
+    let name_static: &'static str = Ustr::from(name).as_str();
+    let metric_labels: Vec<metrics::Label> = labels
+        .iter()
+        .map(|(k, v)| {
+            let k_static: &'static str = Ustr::from(k).as_str();
+            let v_static: &'static str = Ustr::from(v).as_str();
+            metrics::Label::new(k_static, v_static)
+        })
+        .collect();
+    metrics::Key::from_parts(name_static, metric_labels)
+}
 
-    let metric = match metric {
-        Metric::Counter(c) => Metric::Counter(Counter { timestamp, ..c }),
-        Metric::Gauge(g) => Metric::Gauge(Gauge { timestamp, ..g }),
-    };
+/// Send a historical metric to the capture manager.
+#[inline]
+async fn send_metric(metric: Metric) -> Result<(), Error> {
+    let sender = HISTORICAL_SENDER.lock().await;
 
     sender
         .as_ref()
@@ -43,15 +52,18 @@ async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn counter_incr(key: Key, value: u64, timestamp: Instant) -> Result<(), Error> {
-    send_metric(
-        Metric::Counter(Counter {
-            key,
-            timestamp,
-            value: CounterValue::Increment(value),
-        }),
+pub async fn counter_incr(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: u64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Counter(Counter {
+        key,
         timestamp,
-    )
+        value: CounterValue::Increment(value),
+    }))
     .await
 }
 
@@ -60,15 +72,18 @@ pub async fn counter_incr(key: Key, value: u64, timestamp: Instant) -> Result<()
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn counter_absolute(key: Key, value: u64, timestamp: Instant) -> Result<(), Error> {
-    send_metric(
-        Metric::Counter(Counter {
-            key,
-            timestamp,
-            value: CounterValue::Absolute(value),
-        }),
+pub async fn counter_absolute(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: u64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Counter(Counter {
+        key,
         timestamp,
-    )
+        value: CounterValue::Absolute(value),
+    }))
     .await
 }
 
@@ -77,15 +92,18 @@ pub async fn counter_absolute(key: Key, value: u64, timestamp: Instant) -> Resul
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_increment(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
-    send_metric(
-        Metric::Gauge(Gauge {
-            key,
-            timestamp,
-            value: GaugeValue::Increment(value),
-        }),
+pub async fn gauge_increment(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Gauge(Gauge {
+        key,
         timestamp,
-    )
+        value: GaugeValue::Increment(value),
+    }))
     .await
 }
 
@@ -94,15 +112,18 @@ pub async fn gauge_increment(key: Key, value: f64, timestamp: Instant) -> Result
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_decrement(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
-    send_metric(
-        Metric::Gauge(Gauge {
-            key,
-            timestamp,
-            value: GaugeValue::Decrement(value),
-        }),
+pub async fn gauge_decrement(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Gauge(Gauge {
+        key,
         timestamp,
-    )
+        value: GaugeValue::Decrement(value),
+    }))
     .await
 }
 
@@ -111,14 +132,17 @@ pub async fn gauge_decrement(key: Key, value: f64, timestamp: Instant) -> Result
 /// # Errors
 ///
 /// Returns error if sender not initialized or channel is closed.
-pub async fn gauge_set(key: Key, value: f64, timestamp: Instant) -> Result<(), Error> {
-    send_metric(
-        Metric::Gauge(Gauge {
-            key,
-            timestamp,
-            value: GaugeValue::Set(value),
-        }),
+pub async fn gauge_set(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Gauge(Gauge {
+        key,
         timestamp,
-    )
+        value: GaugeValue::Set(value),
+    }))
     .await
 }
