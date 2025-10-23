@@ -50,6 +50,8 @@ impl std::fmt::Display for LineValue {
 pub struct Line {
     /// The time in milliseconds that this line was written.
     pub time: u128,
+    /// The time in milliseconds when this metric was recorded.
+    pub recorded_at: u128,
     /// The "fetch index". Previous versions of lading scraped prometheus
     /// metrics from their targets and kept an increment index of polls. Now
     /// this records the number of times the internal metrics cache has been
