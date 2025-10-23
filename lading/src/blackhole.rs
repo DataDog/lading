@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 mod common;
 pub mod datadog;
+pub mod datadog_stateful_logs;
 pub mod http;
 pub mod otlp;
 pub mod splunk_hec;
@@ -27,6 +28,9 @@ pub enum Error {
     /// See [`crate::blackhole::datadog::Error`] for details.
     #[error(transparent)]
     Datadog(datadog::Error),
+    /// See [`crate::blackhole::datadog_stateful_logs::Error`] for details.
+    #[error(transparent)]
+    DatadogStatefulLogs(datadog_stateful_logs::Error),
     /// See [`crate::blackhole::http::Error`] for details.
     #[error(transparent)]
     Http(http::Error),
@@ -81,6 +85,8 @@ pub enum Inner {
     Tcp(tcp::Config),
     /// See [`crate::blackhole::datadog::Config`] for details.
     Datadog(datadog::Config),
+    /// See [`crate::blackhole::datadog_stateful_logs::Config`] for details.
+    DatadogStatefulLogs(datadog_stateful_logs::Config),
     /// See [`crate::blackhole::http::Config`] for details.
     Http(http::Config),
     /// See [`crate::blackhole::splunk_hec::Config`] for details.
@@ -107,6 +113,8 @@ pub enum Server {
     Tcp(tcp::Tcp),
     /// See [`crate::blackhole::datadog::Datadog`] for details.
     Datadog(datadog::Datadog),
+    /// See [`crate::blackhole::datadog_stateful_logs::DatadogStatefulLogs`] for details.
+    DatadogStatefulLogs(datadog_stateful_logs::DatadogStatefulLogs),
     /// See [`crate::blackhole::http::Http`] for details.
     Http(http::Http),
     /// See [`crate::blackhole::splunk_hec::SplunkHec`] for details.
@@ -139,6 +147,9 @@ impl Server {
             Inner::Datadog(conf) => {
                 Self::Datadog(datadog::Datadog::new(config.general, conf, shutdown))
             }
+            Inner::DatadogStatefulLogs(conf) => Self::DatadogStatefulLogs(
+                datadog_stateful_logs::DatadogStatefulLogs::new(config.general, conf, shutdown),
+            ),
             Inner::Http(conf) => {
                 Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
             }
@@ -175,6 +186,9 @@ impl Server {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
             Server::Datadog(inner) => inner.run().await.map_err(Error::Datadog),
+            Server::DatadogStatefulLogs(inner) => {
+                inner.run().await.map_err(Error::DatadogStatefulLogs)
+            }
             Server::Http(inner) => inner.run().await.map_err(Error::Http),
             Server::Udp(inner) => Box::pin(inner.run()).await.map_err(Error::Udp),
             Server::UnixStream(inner) => inner.run().await.map_err(Error::UnixStream),
