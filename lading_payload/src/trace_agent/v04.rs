@@ -3,12 +3,7 @@
 //! This module generates payloads compatible with the `/v0.4/traces`
 //! endpoint. Implemented with reference to Agent version
 //! 8cc5eb3e024ee54283efad4614175a065642bd9c.
-use std::{
-    collections::BTreeMap,
-    io::{self, Write},
-    rc::Rc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeMap, io::Write, rc::Rc};
 
 use rand::{Rng, seq::IndexedRandom};
 use rmp_serde::Serializer;
@@ -45,17 +40,11 @@ const STRING_POOL_SIZE: usize = 1_000_000;
 const MAX_TRACE_DEPTH: usize = 8;
 const MAX_CONTEXTS: u32 = 1_000_000;
 
-/// Generate a random duration within the given range
-#[allow(clippy::cast_possible_truncation)] // u128 nanos to u64 safe for reasonable duration ranges
-fn random_duration<R>(rng: &mut R, min: Duration, max: Duration) -> Duration
-where
-    R: Rng + ?Sized,
-{
-    let min_nanos = min.as_nanos() as u64;
-    let max_nanos = max.as_nanos() as u64;
-    let random_nanos = rng.random_range(min_nanos..=max_nanos);
-    Duration::from_nanos(random_nanos)
-}
+/// Minimum valid start timestamp for trace-agent (Year 2000 in nanoseconds
+/// since `UNIX_EPOCH`).
+///
+/// Via datadog-agent/pkg/trace/agent/normalizer.go:39
+const YEAR_2000_NANOS: i64 = 946_684_800_000_000_000;
 
 /// Configuration for v0.4 trace payload generation.
 ///
@@ -320,9 +309,19 @@ impl<'a> Generator<'a> for V04 {
         let template_index = rng.random_range(0..self.templates.len());
         let template = &self.templates[template_index];
 
-        let base_timestamp = UNIX_EPOCH;
+        // Generate random start timestamp that satisfies trace-agent
+        // constraints:
+        //
+        // 1. Must be >= Year 2000 expressed in nanoseconds (946684800000000000)
+        // 2. Must be <= i64::MAX to avoid overflow in Go
+        let root_start_nanos = rng.random_range(YEAR_2000_NANOS..=i64::MAX);
+
+        // Generate random duration that doesn't cause overflow:
+        // start + duration must fit in i64::MAX
+        let max_duration = i64::MAX - root_start_nanos;
+        let root_duration_nanos = rng.random_range(0..=max_duration);
+
         let root_span_id = rng.random();
-        let root_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
 
         let service = self
             .str_pool
@@ -350,9 +349,9 @@ impl<'a> Generator<'a> for V04 {
             trace_id,
             root_span_id,
             0, // Root spans have parent_id = 0
-            base_timestamp,
-            root_duration,
-        )?;
+            root_start_nanos,
+            root_duration_nanos,
+        );
         spans.push(root_span);
 
         // Generate child spans with random timing, allowing for async patterns
@@ -365,9 +364,10 @@ impl<'a> Generator<'a> for V04 {
                 .ok_or(Error::StringGenerate)?;
 
             // Child spans get independent random timing, not constrained by parent.
-            let span_start_offset = random_duration(rng, Duration::ZERO, Duration::MAX);
-            let span_start = base_timestamp + span_start_offset;
-            let span_duration = random_duration(rng, Duration::ZERO, Duration::MAX);
+            // Each span gets its own random start time and duration that satisfy trace-agent bounds.
+            let span_start_nanos = rng.random_range(YEAR_2000_NANOS..=i64::MAX);
+            let max_duration = i64::MAX - span_start_nanos;
+            let span_duration_nanos = rng.random_range(0..=max_duration);
 
             let span_id = rng.random();
             let span = self.create_span(
@@ -379,9 +379,9 @@ impl<'a> Generator<'a> for V04 {
                 trace_id,
                 span_id,
                 parent_id,
-                span_start,
-                span_duration,
-            )?;
+                span_start_nanos,
+                span_duration_nanos,
+            );
 
             // If we aren't past the max trace depth, add as a potential parent.
             if spans.len() < MAX_TRACE_DEPTH {
@@ -407,9 +407,9 @@ impl V04 {
         trace_id: u64,
         span_id: u64,
         parent_id: u64,
-        start_time: SystemTime,
-        duration: Duration,
-    ) -> Result<Span<'a>, Error>
+        start_nanos: i64,
+        duration_nanos: i64,
+    ) -> Span<'a>
     where
         R: Rng + ?Sized,
     {
@@ -434,36 +434,22 @@ impl V04 {
         }
 
         let error = i32::from(rng.random::<f32>() < self.config.error_rate);
-        // SAFETY: 2**63 nanoseconds is ~292 years, which means that since we take
-        // UNIX_EPOCH as time zero we're safe to cast nanos to i64 until the year
-        // 2262.
-        #[allow(clippy::cast_possible_truncation)]
-        Ok(Span {
+
+        Span {
             service,
             name: operation,
             resource,
             trace_id,
             span_id,
             parent_id,
-            start: start_time
-                .duration_since(UNIX_EPOCH)
-                // NOTE we're constrained by the lading_payload::Error via
-                // Serialize, else we'd have a slightly less awkward construction
-                // here.
-                .map_err(|_| {
-                    Error::Io(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Invalid timestamp",
-                    ))
-                })?
-                .as_nanos() as i64,
-            duration: duration.as_nanos() as i64,
+            start: start_nanos,
+            duration: duration_nanos,
             error,
             meta,
             metrics,
             kind: span_type,
             meta_struct: BTreeMap::default(),
-        })
+        }
     }
 }
 
@@ -721,6 +707,10 @@ mod test {
         traces
             .serialize(&mut rmp_serde::Serializer::new(&mut serialized))
             .unwrap();
-        assert_eq!(serialized.len(), 18_234);
+        // NOTE this assertion must be exact. As the payload is updated this
+        // value will need to be modified, but keeping it exact allows us to set
+        // accurate bounds on memory consumption. Do not make this an
+        // inequality.
+        assert_eq!(serialized.len(), 19_525);
     }
 }
