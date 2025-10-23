@@ -398,15 +398,11 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                     match val {
                         Some(Metric::Counter(c)) => {
                             let tick = self.instant_to_tick(c.timestamp);
-                            if let Err(e) = self.accumulator.counter(c, tick) {
-                                warn!("Failed to record counter metric: {e}");
-                            }
+                             let _ = self.accumulator.counter(c, tick);
                         }
                         Some(Metric::Gauge(g)) => {
                             let tick = self.instant_to_tick(g.timestamp);
-                            if let Err(e) = self.accumulator.gauge(g, tick) {
-                                warn!("Failed to record gauge metric: {e}");
-                            }
+                            let _ = self.accumulator.gauge(g, tick);
                         }
                         None => {
                             warn!("Timestamped metrics unexpected transmission shutdown");
