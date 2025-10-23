@@ -57,7 +57,7 @@ async fn send_metric(metric: Metric, timestamp: Instant) -> Result<(), Error> {
     let tick_offset: u128 = timestamp_millis_in_past / 1_000;
     // SAFETY: in max_valid_millis we assert that the maximum valid seconds is
     // within u8.
-    let tick_offset = u8::try_from(tick_offset).expect("catastrophic programming error");
+    let _tick_offset = u8::try_from(tick_offset).expect("catastrophic programming error");
 
     // TODO the naming conventions here are all wrong. We are not calculating
     // the tick_offset we are calculating the absolute `tick`, that is, we are

@@ -33,6 +33,7 @@ const TICK_DURATION_MS: u128 = 1_000;
 
 pub(crate) struct Sender {
     pub(crate) snd: mpsc::Sender<Metric>,
+    pub(crate) start: Instant,
 }
 
 pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
@@ -352,6 +353,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
         // Initialize historical sender - done here in async context
         *HISTORICAL_SENDER.lock().await = Some(Sender {
             snd: self.snd.clone(),
+            start: Instant::now(),
         });
 
         // Installing the recorder immediately on startup. This does _not_ wait

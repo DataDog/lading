@@ -1,0 +1,18 @@
+# Example configuration for testing Datadog stateful logs gRPC blackhole
+
+target:
+  # Example target that would send stateful logs to the blackhole
+  passthru_file:
+    path: /dev/null
+
+blackhole:
+  datadog:
+    stateful_logs:
+      grpc_addr: "127.0.0.1:9092"
+    id: "stateful-logs-blackhole"
+
+observer:
+  prometheus:
+    binding_addr: "127.0.0.1:9090"
+
+
