@@ -111,6 +111,7 @@
 
 use metrics::Key;
 use rustc_hash::FxHashMap;
+use tracing::warn;
 
 use crate::manager;
 
@@ -191,14 +192,30 @@ impl Accumulator {
         }
     }
 
-    pub(crate) fn counter(&mut self, c: manager::Counter) -> Result<(), Error> {
-        if c.tick > self.current_tick {
-            return Err(Error::FutureTick { tick: c.tick });
+    pub(crate) fn counter(&mut self, c: manager::Counter, tick: u64) -> Result<(), Error> {
+        if tick > self.current_tick {
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                delta = tick - self.current_tick,
+                timestamp = ?c.timestamp,
+                key = %c.key.name(),
+                "Counter metric tick is from future"
+            );
+            return Err(Error::FutureTick { tick });
         }
 
-        let tick_offset = self.current_tick - c.tick;
+        let tick_offset = self.current_tick - tick;
         if tick_offset >= INTERVALS as u64 {
-            return Err(Error::TickTooOld { tick: c.tick });
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                tick_offset = tick_offset,
+                timestamp = ?c.timestamp,
+                key = %c.key.name(),
+                "Counter metric tick too old"
+            );
+            return Err(Error::TickTooOld { tick });
         }
 
         let values = self.counters.entry(c.key).or_insert([0; INTERVALS]);
@@ -216,21 +233,35 @@ impl Accumulator {
         Ok(())
     }
 
-    pub(crate) fn gauge(&mut self, g: manager::Gauge) -> Result<(), Error> {
-        if g.tick > self.current_tick {
-            return Err(Error::FutureTick { tick: g.tick });
+    pub(crate) fn gauge(&mut self, g: manager::Gauge, tick: u64) -> Result<(), Error> {
+        if tick > self.current_tick {
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                delta = tick - self.current_tick,
+                timestamp = ?g.timestamp,
+                key = %g.key.name(),
+                "Gauge metric tick is from future"
+            );
+            return Err(Error::FutureTick { tick });
         }
 
-        let tick_offset = self.current_tick - g.tick;
+        let tick_offset = self.current_tick - tick;
         if tick_offset >= INTERVALS as u64 {
-            return Err(Error::TickTooOld { tick: g.tick });
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                tick_offset = tick_offset,
+                timestamp = ?g.timestamp,
+                key = %g.key.name(),
+                "Gauge metric tick too old"
+            );
+            return Err(Error::TickTooOld { tick });
         }
 
         let values = self.gauges.entry(g.key).or_insert([0.0; INTERVALS]);
 
         for offset in 0..=tick_offset {
-            // TODO is this logic right? I'm mapping from absolute time -- tick
-            // -- to relative time -- tick-offset.
             let target_tick = self.current_tick - offset; // always lands within u64 range
             let interval = interval_idx(target_tick);
 
@@ -319,46 +350,72 @@ impl Accumulator {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::time::Instant;
 
-    // Test helpers to reduce duplication
-    fn counter_increment(key: Key, tick: u64, value: u64) -> manager::Counter {
-        manager::Counter {
+    // Test helpers that handle the full counter/gauge operation
+    fn counter_increment(
+        acc: &mut Accumulator,
+        key: Key,
+        tick: u64,
+        value: u64,
+    ) -> Result<(), Error> {
+        let counter = manager::Counter {
             key,
-            tick,
+            timestamp: Instant::now(),
             value: manager::CounterValue::Increment(value),
-        }
+        };
+        acc.counter(counter, tick)
     }
 
-    fn counter_absolute(key: Key, tick: u64, value: u64) -> manager::Counter {
-        manager::Counter {
+    fn counter_absolute(
+        acc: &mut Accumulator,
+        key: Key,
+        tick: u64,
+        value: u64,
+    ) -> Result<(), Error> {
+        let counter = manager::Counter {
             key,
-            tick,
+            timestamp: Instant::now(),
             value: manager::CounterValue::Absolute(value),
-        }
+        };
+        acc.counter(counter, tick)
     }
 
-    fn gauge_set(key: Key, tick: u64, value: f64) -> manager::Gauge {
-        manager::Gauge {
+    fn gauge_set(acc: &mut Accumulator, key: Key, tick: u64, value: f64) -> Result<(), Error> {
+        let gauge = manager::Gauge {
             key,
-            tick,
+            timestamp: Instant::now(),
             value: manager::GaugeValue::Set(value),
-        }
+        };
+        acc.gauge(gauge, tick)
     }
 
-    fn gauge_increment(key: Key, tick: u64, value: f64) -> manager::Gauge {
-        manager::Gauge {
+    fn gauge_increment(
+        acc: &mut Accumulator,
+        key: Key,
+        tick: u64,
+        value: f64,
+    ) -> Result<(), Error> {
+        let gauge = manager::Gauge {
             key,
-            tick,
+            timestamp: Instant::now(),
             value: manager::GaugeValue::Increment(value),
-        }
+        };
+        acc.gauge(gauge, tick)
     }
 
-    fn gauge_decrement(key: Key, tick: u64, value: f64) -> manager::Gauge {
-        manager::Gauge {
+    fn gauge_decrement(
+        acc: &mut Accumulator,
+        key: Key,
+        tick: u64,
+        value: f64,
+    ) -> Result<(), Error> {
+        let gauge = manager::Gauge {
             key,
-            tick,
+            timestamp: Instant::now(),
             value: manager::GaugeValue::Decrement(value),
-        }
+        };
+        acc.gauge(gauge, tick)
     }
 
     #[derive(Debug, Clone)]
@@ -407,19 +464,19 @@ mod tests {
 
                 match op {
                     Op::CounterIncrement(v) => {
-                        let _ = acc.counter(counter_increment(key.clone(), 0, v));
+                        let _ = counter_increment(&mut acc, key.clone(), 0, v);
                     }
                     Op::CounterAbsolute(v) => {
-                        let _ = acc.counter(counter_absolute(key.clone(), 0, v));
+                        let _ = counter_absolute(&mut acc, key.clone(), 0, v);
                     }
                     Op::GaugeIncrement(v) => {
-                        let _ = acc.gauge(gauge_increment(key.clone(), 0, v));
+                        let _ = gauge_increment(&mut acc, key.clone(), 0, v);
                     }
                     Op::GaugeDecrement(v) => {
-                        let _ = acc.gauge(gauge_decrement(key.clone(), 0, v));
+                        let _ = gauge_decrement(&mut acc, key.clone(), 0, v);
                     }
                     Op::GaugeSet(v) => {
-                        let _ = acc.gauge(gauge_set(key.clone(), 0, v));
+                        let _ = gauge_set(&mut acc, key.clone(), 0, v);
                     }
                     Op::AdvanceTick => {
                         acc.advance_tick();
@@ -447,13 +504,13 @@ mod tests {
 
         // [Increment(5), Increment(3)]
         let mut acc1 = Accumulator::new();
-        acc1.counter(counter_increment(key.clone(), 0, 5)).unwrap();
-        acc1.counter(counter_increment(key.clone(), 0, 3)).unwrap();
+        counter_increment(&mut acc1, key.clone(), 0, 5).unwrap();
+        counter_increment(&mut acc1, key.clone(), 0, 3).unwrap();
 
         // [Increment(3), Increment(5)]
         let mut acc2 = Accumulator::new();
-        acc2.counter(counter_increment(key.clone(), 0, 3)).unwrap();
-        acc2.counter(counter_increment(key.clone(), 0, 5)).unwrap();
+        counter_increment(&mut acc2, key.clone(), 0, 3).unwrap();
+        counter_increment(&mut acc2, key.clone(), 0, 5).unwrap();
 
         assert_eq!(
             acc1.get_counter_value(&key, acc1.current_tick),
@@ -469,12 +526,12 @@ mod tests {
 
         // [Absolute(100)]
         let mut acc1 = Accumulator::new();
-        acc1.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
+        counter_absolute(&mut acc1, key.clone(), 0, 100).unwrap();
 
         // [Absolute(100), Absolute(100)]
         let mut acc2 = Accumulator::new();
-        acc2.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
-        acc2.counter(counter_absolute(key.clone(), 0, 100)).unwrap();
+        counter_absolute(&mut acc2, key.clone(), 0, 100).unwrap();
+        counter_absolute(&mut acc2, key.clone(), 0, 100).unwrap();
 
         assert_eq!(
             acc1.get_counter_value(&key, acc1.current_tick),
@@ -490,13 +547,13 @@ mod tests {
 
         // [Increment(10), Absolute(50)]
         let mut acc1 = Accumulator::new();
-        acc1.counter(counter_increment(key.clone(), 0, 10)).unwrap();
-        acc1.counter(counter_absolute(key.clone(), 0, 50)).unwrap();
+        counter_increment(&mut acc1, key.clone(), 0, 10).unwrap();
+        counter_absolute(&mut acc1, key.clone(), 0, 50).unwrap();
 
         // [Absolute(50), Increment(10)]
         let mut acc2 = Accumulator::new();
-        acc2.counter(counter_absolute(key.clone(), 0, 50)).unwrap();
-        acc2.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_absolute(&mut acc2, key.clone(), 0, 50).unwrap();
+        counter_increment(&mut acc2, key.clone(), 0, 10).unwrap();
 
         // Should differ: acc1 is 50, acc2 is 60
         assert_eq!(acc1.get_counter_value(&key, acc1.current_tick), 50);
@@ -514,13 +571,13 @@ mod tests {
 
         // [Increment(10.0), Decrement(3.0)]
         let mut acc1 = Accumulator::new();
-        acc1.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
-        acc1.gauge(gauge_decrement(key.clone(), 0, 3.0)).unwrap();
+        gauge_increment(&mut acc1, key.clone(), 0, 10.0).unwrap();
+        gauge_decrement(&mut acc1, key.clone(), 0, 3.0).unwrap();
 
         // [Decrement(3.0), Increment(10.0)]
         let mut acc2 = Accumulator::new();
-        acc2.gauge(gauge_decrement(key.clone(), 0, 3.0)).unwrap();
-        acc2.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+        gauge_decrement(&mut acc2, key.clone(), 0, 3.0).unwrap();
+        gauge_increment(&mut acc2, key.clone(), 0, 10.0).unwrap();
 
         assert_eq!(
             acc1.get_gauge_value(&key, acc1.current_tick),
@@ -536,12 +593,12 @@ mod tests {
 
         // [Set(50.0)]
         let mut acc1 = Accumulator::new();
-        acc1.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
+        gauge_set(&mut acc1, key.clone(), 0, 50.0).unwrap();
 
         // [Set(50.0), Set(50.0)]
         let mut acc2 = Accumulator::new();
-        acc2.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
-        acc2.gauge(gauge_set(key.clone(), 0, 50.0)).unwrap();
+        gauge_set(&mut acc2, key.clone(), 0, 50.0).unwrap();
+        gauge_set(&mut acc2, key.clone(), 0, 50.0).unwrap();
 
         assert!(
             (acc1.get_gauge_value(&key, acc1.current_tick)
@@ -559,13 +616,13 @@ mod tests {
 
         // [Increment(10.0), Set(25.0)]
         let mut acc1 = Accumulator::new();
-        acc1.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
-        acc1.gauge(gauge_set(key.clone(), 0, 25.0)).unwrap();
+        gauge_increment(&mut acc1, key.clone(), 0, 10.0).unwrap();
+        gauge_set(&mut acc1, key.clone(), 0, 25.0).unwrap();
 
         // [Set(25.0), Increment(10.0)]
         let mut acc2 = Accumulator::new();
-        acc2.gauge(gauge_set(key.clone(), 0, 25.0)).unwrap();
-        acc2.gauge(gauge_increment(key.clone(), 0, 10.0)).unwrap();
+        gauge_set(&mut acc2, key.clone(), 0, 25.0).unwrap();
+        gauge_increment(&mut acc2, key.clone(), 0, 10.0).unwrap();
 
         let v1 = acc1.get_gauge_value(&key, acc1.current_tick);
         let v2 = acc2.get_gauge_value(&key, acc2.current_tick);
@@ -582,7 +639,7 @@ mod tests {
         let key = Key::from_name("test");
         let mut acc = Accumulator::new();
 
-        acc.counter(counter_increment(key.clone(), 0, 42)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 42).unwrap();
         let value_before_advance = acc.get_counter_value(&key, acc.current_tick);
 
         acc.advance_tick();
@@ -600,8 +657,8 @@ mod tests {
         let key2 = Key::from_name("gauge");
         let mut acc = Accumulator::new();
 
-        acc.counter(counter_increment(key1.clone(), 0, 42)).unwrap();
-        acc.gauge(gauge_set(key2.clone(), 0, 3.14)).unwrap();
+        counter_increment(&mut acc, key1.clone(), 0, 42).unwrap();
+        gauge_set(&mut acc, key2.clone(), 0, 3.14).unwrap();
 
         assert!(
             acc.flush().count() == 0,
@@ -650,19 +707,19 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Add data at various ticks
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
 
         for _i in 0..5 {
             acc.advance_tick();
         }
 
-        acc.counter(counter_increment(key.clone(), 0, 20)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 20).unwrap();
 
         for _i in 0..10 {
             acc.advance_tick();
         }
 
-        acc.counter(counter_increment(key.clone(), 0, 30)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 30).unwrap();
 
         // We're now at tick 15. Simulate shutdown pattern:
         // 1. Advance to tick 60 if not there yet
@@ -710,19 +767,19 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Add data at various ticks
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
 
         for _i in 0..5 {
             acc.advance_tick();
         }
 
-        acc.counter(counter_increment(key.clone(), 0, 20)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 20).unwrap();
 
         for _i in 0..10 {
             acc.advance_tick();
         }
 
-        acc.counter(counter_increment(key.clone(), 0, 30)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 30).unwrap();
 
         // Advance to INTERVALS so data becomes flushable
         while acc.current_tick < INTERVALS as u64 {
@@ -783,7 +840,7 @@ mod tests {
         }
 
         // Write event from tick 3, should update intervals at ticks 3, 4, 5
-        acc.counter(counter_increment(key.clone(), 3, 100)).unwrap();
+        counter_increment(&mut acc, key.clone(), 3, 100).unwrap();
 
         assert_eq!(acc.get_counter_value(&key, 5), 100);
         assert_eq!(acc.get_counter_value(&key, 4), 100);
@@ -804,7 +861,7 @@ mod tests {
         assert_eq!(acc.current_tick, 60);
 
         // Try to write to tick 0 (60 ticks ago, exactly at boundary)
-        let result = acc.counter(counter_increment(key, 0, 100));
+        let result = counter_increment(&mut acc, key, 0, 100);
         assert!(matches!(result, Err(Error::TickTooOld { tick: 0 })));
     }
 
@@ -815,14 +872,14 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Current tick is 0, try to write with tick=1 (future)
-        let result = acc.counter(counter_increment(key.clone(), 1, 100));
+        let result = counter_increment(&mut acc, key.clone(), 1, 100);
         assert!(matches!(result, Err(Error::FutureTick { tick: 1 })));
 
         // Advance to tick 5, try tick=6 (future)
         for _ in 0..5 {
             acc.advance_tick();
         }
-        let result = acc.counter(counter_increment(key, 6, 100));
+        let result = counter_increment(&mut acc, key, 6, 100);
         assert!(matches!(result, Err(Error::FutureTick { tick: 6 })));
     }
 
@@ -838,7 +895,7 @@ mod tests {
         }
 
         // Write event from tick 3, should update intervals at ticks 3, 4, 5
-        acc.gauge(gauge_set(key.clone(), 3, 42.0)).unwrap();
+        gauge_set(&mut acc, key.clone(), 3, 42.0).unwrap();
 
         assert!((acc.get_gauge_value(&key, 5) - 42.0).abs() < 1e-10);
         assert!((acc.get_gauge_value(&key, 4) - 42.0).abs() < 1e-10);
@@ -859,7 +916,7 @@ mod tests {
         assert_eq!(acc.current_tick, 60);
 
         // Try to write to tick 0 (60 ticks ago, exactly at boundary)
-        let result = acc.gauge(gauge_set(key, 0, 42.0));
+        let result = gauge_set(&mut acc, key, 0, 42.0);
         assert!(matches!(result, Err(Error::TickTooOld { tick: 0 })));
     }
 
@@ -870,14 +927,14 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Current tick is 0, try to write with tick=1 (future)
-        let result = acc.gauge(gauge_set(key.clone(), 1, 42.0));
+        let result = gauge_set(&mut acc, key.clone(), 1, 42.0);
         assert!(matches!(result, Err(Error::FutureTick { tick: 1 })));
 
         // Advance to tick 5, try tick=6 (future)
         for _ in 0..5 {
             acc.advance_tick();
         }
-        let result = acc.gauge(gauge_set(key, 6, 42.0));
+        let result = gauge_set(&mut acc, key, 6, 42.0);
         assert!(matches!(result, Err(Error::FutureTick { tick: 6 })));
     }
 
@@ -891,10 +948,10 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Write zero and non-zero values
-        acc.counter(counter_absolute(key1.clone(), 0, 0)).unwrap();
-        acc.counter(counter_absolute(key2.clone(), 0, 100)).unwrap();
-        acc.gauge(gauge_set(key3.clone(), 0, 0.0)).unwrap();
-        acc.gauge(gauge_set(key4.clone(), 0, 42.0)).unwrap();
+        counter_absolute(&mut acc, key1.clone(), 0, 0).unwrap();
+        counter_absolute(&mut acc, key2.clone(), 0, 100).unwrap();
+        gauge_set(&mut acc, key3.clone(), 0, 0.0).unwrap();
+        gauge_set(&mut acc, key4.clone(), 0, 42.0).unwrap();
 
         // Advance to INTERVALS so data becomes flushable
         while acc.current_tick < INTERVALS as u64 {
@@ -945,9 +1002,9 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Write to multiple keys
-        acc.counter(counter_increment(key1.clone(), 0, 10)).unwrap();
-        acc.counter(counter_increment(key2.clone(), 0, 20)).unwrap();
-        acc.gauge(gauge_set(key3.clone(), 0, 3.14)).unwrap();
+        counter_increment(&mut acc, key1.clone(), 0, 10).unwrap();
+        counter_increment(&mut acc, key2.clone(), 0, 20).unwrap();
+        gauge_set(&mut acc, key3.clone(), 0, 3.14).unwrap();
 
         // Advance to INTERVALS so data becomes flushable
         while acc.current_tick < INTERVALS as u64 {
@@ -992,7 +1049,7 @@ mod tests {
         let mut acc = Accumulator::new();
 
         // Write at tick 0
-        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 100).unwrap();
 
         // Advance beyond INTERVALS
         for _ in 0..70 {
@@ -1000,7 +1057,7 @@ mod tests {
         }
 
         // Write again at current tick (70) - intervals wrap, so interval[70%60=10] gets reused
-        acc.counter(counter_increment(key.clone(), 70, 50)).unwrap();
+        counter_increment(&mut acc, key.clone(), 70, 50).unwrap();
 
         // Value at current tick should be forwarded value (100) + new increment (50)
         assert_eq!(acc.get_counter_value(&key, acc.current_tick), 150);
@@ -1023,7 +1080,7 @@ mod tests {
         }
 
         // Write absolute value from tick 7
-        acc.counter(counter_absolute(key.clone(), 7, 500)).unwrap();
+        counter_absolute(&mut acc, key.clone(), 7, 500).unwrap();
 
         // Ticks 7, 8, 9, 10 should all have value 500
         assert_eq!(acc.get_counter_value(&key, 10), 500);
@@ -1045,9 +1102,9 @@ mod tests {
         }
 
         // Increment from tick 3
-        acc.gauge(gauge_increment(key.clone(), 3, 10.0)).unwrap();
+        gauge_increment(&mut acc, key.clone(), 3, 10.0).unwrap();
         // Decrement from tick 4
-        acc.gauge(gauge_decrement(key.clone(), 4, 3.0)).unwrap();
+        gauge_decrement(&mut acc, key.clone(), 4, 3.0).unwrap();
 
         // Tick 5: +10.0 -3.0 = 7.0
         assert!((acc.get_gauge_value(&key, 5) - 7.0).abs() < 1e-10);
@@ -1073,11 +1130,11 @@ mod tests {
         assert_eq!(acc.current_tick, 0);
 
         // Increment(k, 0, 10)
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 10);
 
         // Increment(k, 0, 100)
-        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 100).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 110);
     }
 
@@ -1096,7 +1153,7 @@ mod tests {
         assert_eq!(acc.current_tick, 0);
 
         // Increment(k, 0, 10)
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 10);
 
         // TICK
@@ -1106,7 +1163,7 @@ mod tests {
         assert_eq!(acc.get_counter_value(&key, 1), 10);
 
         // Increment(k, 0, 100) - historical write to tick 0
-        acc.counter(counter_increment(key.clone(), 0, 100)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 100).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 110);
         assert_eq!(acc.get_counter_value(&key, 1), 110);
     }
@@ -1127,13 +1184,13 @@ mod tests {
         assert_eq!(acc.current_tick, 2);
 
         // Increment(k, 0, 10) - writes to ticks [0, 1, 2]
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 10);
         assert_eq!(acc.get_counter_value(&key, 1), 10);
         assert_eq!(acc.get_counter_value(&key, 2), 10);
 
         // Absolute(k, 2, 100) - writes to tick [2]
-        acc.counter(counter_absolute(key.clone(), 2, 100)).unwrap();
+        counter_absolute(&mut acc, key.clone(), 2, 100).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 10);
         assert_eq!(acc.get_counter_value(&key, 1), 10);
         assert_eq!(acc.get_counter_value(&key, 2), 100);
@@ -1155,13 +1212,13 @@ mod tests {
         assert_eq!(acc.current_tick, 2);
 
         // Absolute(k, 2, 100) - writes to tick [2]
-        acc.counter(counter_absolute(key.clone(), 2, 100)).unwrap();
+        counter_absolute(&mut acc, key.clone(), 2, 100).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 0);
         assert_eq!(acc.get_counter_value(&key, 1), 0);
         assert_eq!(acc.get_counter_value(&key, 2), 100);
 
         // Increment(k, 0, 10) - writes to ticks [0, 1, 2]
-        acc.counter(counter_increment(key.clone(), 0, 10)).unwrap();
+        counter_increment(&mut acc, key.clone(), 0, 10).unwrap();
         assert_eq!(acc.get_counter_value(&key, 0), 10);
         assert_eq!(acc.get_counter_value(&key, 1), 10);
         assert_eq!(acc.get_counter_value(&key, 2), 110);
