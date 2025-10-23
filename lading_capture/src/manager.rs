@@ -384,15 +384,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             time::sleep(Duration::from_millis(100)).await;
         }
 
-        // Synchronize accumulator logical clock with elapsed wall clock time.k
-        let elapsed_seconds = Instant::now().duration_since(self.start).as_secs();
-        for _ in 0..elapsed_seconds {
-            self.accumulator.advance_tick();
-        }
-
         let mut flush_interval = time::interval(Duration::from_millis(TICK_DURATION_MS as u64));
-        flush_interval.tick().await; // first tick happens immediately
-
         let shutdown_wait = self
             .shutdown
             .take()
@@ -428,11 +420,11 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                     let tick_drift = wall_clock_elapsed.saturating_sub(self.accumulator.current_tick);
 
                     if tick_drift > 0 {
-                        warn!(
+                        debug!(
                             wall_clock_elapsed_secs = wall_clock_elapsed,
                             current_tick = self.accumulator.current_tick,
                             tick_drift_secs = tick_drift,
-                            "Logical time drifted from wall clock, advancing logical time"
+                            "internal logical time drifted from wall clock, advancing logical time"
                         );
                         for _ in 0..tick_drift {
                             self.accumulator.advance_tick();
