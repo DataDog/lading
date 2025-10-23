@@ -427,13 +427,16 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                     let wall_clock_elapsed = tick_start.duration_since(self.start).as_secs();
                     let tick_drift = wall_clock_elapsed.saturating_sub(self.accumulator.current_tick);
 
-                    if tick_drift > 5 {
+                    if tick_drift > 0 {
                         warn!(
                             wall_clock_elapsed_secs = wall_clock_elapsed,
                             current_tick = self.accumulator.current_tick,
                             tick_drift_secs = tick_drift,
-                            "Timer significantly behind wall clock"
+                            "Logical time drifted from wall clock, advancing logical time"
                         );
+                        for _ in 0..tick_drift {
+                            self.accumulator.advance_tick();
+                        }
                     }
 
                     self.record_captures()?;
