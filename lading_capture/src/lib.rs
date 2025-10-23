@@ -1,7 +1,6 @@
 //! Crate regarding Lading's 'capture' files
 
 use std::time::Instant;
-use std::{num::TryFromIntError, time::Duration};
 
 use manager::{Counter, CounterValue, Gauge, GaugeValue, HISTORICAL_SENDER, Metric};
 use ustr::Ustr;
@@ -38,28 +37,6 @@ fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
 #[inline]
 async fn send_metric(metric: Metric) -> Result<(), Error> {
     let sender = HISTORICAL_SENDER.lock().await;
-
-    // Calculate how many seconds ago this metric occurred, guarding against
-    // timestamps that are both too old and too from the future. Any bit of
-    // "from the future" is too much.
-    let now = Instant::now();
-    if timestamp > now {
-        warn!(metric = ?metric,
-              timestamp = ?timestamp,
-              now = ?now,
-              max_valid = ?manager::max_valid(),
-              "historical metric from the future, cannot record");
-        return Ok(());
-    }
-    let timestamp_in_past: Duration = now.duration_since(timestamp);
-    if timestamp_in_past > manager::max_valid() {
-        warn!(metric = ?metric,
-              timestamp = ?timestamp,
-              now = ?now,
-              max_valid = ?manager::max_valid(),
-              "historical metric too old, cannot record");
-        return Ok(());
-    }
 
     sender
         .as_ref()
