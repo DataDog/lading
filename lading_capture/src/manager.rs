@@ -23,7 +23,7 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::LazyLock;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
