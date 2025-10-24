@@ -128,7 +128,6 @@ pub struct CaptureManager<W: Write + Send> {
 impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
-            .field("start", &self.start)
             .field("capture_path", &self.capture_path)
             .field("accumulator", &self.accumulator)
             .field("global_labels", &self.global_labels)
@@ -308,7 +307,7 @@ impl<W: Write + Send> CaptureManager<W> {
             line_count += 1;
         }
 
-        debug!(
+        trace!(
             "Recording {line_count} captures to {path}",
             path = self.capture_path.display()
         );

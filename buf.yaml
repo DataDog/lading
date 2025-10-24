@@ -8,3 +8,4 @@ lint:
     - COMMENTS
   ignore:
     - integration
+    - lading/proto/agent_payload.proto

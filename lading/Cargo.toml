@@ -14,9 +14,6 @@ keywords = ["random_test", "generator"]
 categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
-[package.metadata.cargo-machete]
-ignored = ["prost"]
-
 [dependencies]
 lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
@@ -105,6 +102,9 @@ async-pidfd = "0.1"
 tempfile = "3.23"
 proptest = { workspace = true }
 tower-test = "0.4"
+
+[build-dependencies]
+prost-build = { workspace = true }
 
 [features]
 default = []
