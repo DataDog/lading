@@ -27,8 +27,7 @@ use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
-/// `CaptureManager` polling interval, allows us to calculate `recorded_at` from
-/// ticks.
+/// `CaptureManager` polling interval.
 const TICK_DURATION_MS: u128 = 1_000;
 
 pub(crate) struct Sender {
@@ -224,12 +223,10 @@ impl<W: Write + Send> CaptureManager<W> {
             return Ok(());
         }
 
-        let recorded_at = now_ms.saturating_sub(tick_age_ms);
         let line = match value {
             MetricValue::Counter(val) => json::Line {
                 run_id,
                 time: now_ms,
-                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -239,7 +236,6 @@ impl<W: Write + Send> CaptureManager<W> {
             MetricValue::Gauge(val) => json::Line {
                 run_id,
                 time: now_ms,
-                recorded_at,
                 fetch_index: tick,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
@@ -642,7 +638,6 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
-                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Counter,
@@ -662,7 +657,6 @@ mod tests {
             lines.push(json::Line {
                 run_id: manager.run_id,
                 time: 0,
-                recorded_at: 0,
                 fetch_index: 0,
                 metric_name: key.name().into(),
                 metric_kind: json::MetricKind::Gauge,
@@ -906,52 +900,5 @@ mod tests {
             !unique_fetch_indices.is_empty(),
             "Expected to see at least one unique fetch_index"
         );
-    }
-
-    #[test]
-    fn recorded_at_is_monotonic_across_flushes() {
-        let writer = InMemoryWriter::new();
-        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
-        let (experiment_rx, _experiment_tx) = lading_signal::signal();
-        let (target_rx, target_tx) = lading_signal::signal();
-
-        target_tx.signal();
-
-        let mut manager = CaptureManager::new_with_writer(
-            writer.clone(),
-            PathBuf::from("/tmp/test-capture.json"),
-            shutdown_rx,
-            experiment_rx,
-            target_rx,
-            Duration::from_secs(60),
-        );
-
-        let recorder = CaptureRecorder {
-            registry: Arc::clone(&manager.registry),
-        };
-
-        metrics::with_local_recorder(&recorder, || {
-            metrics::counter!("test_counter").increment(1);
-        });
-
-        // Run enough flushes to see metrics appear across multiple ticks
-        for _ in 0..(accumulator::INTERVALS + 10) {
-            manager.record_captures().unwrap();
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        let lines = writer.parse_lines().unwrap();
-        assert!(!lines.is_empty(), "Expected to see some metrics");
-
-        // Verify recorded_at is monotonically increasing (non-decreasing)
-        let recorded_at_values: Vec<u128> = lines.iter().map(|l| l.recorded_at).collect();
-        for window in recorded_at_values.windows(2) {
-            assert!(
-                window[1] >= window[0],
-                "recorded_at not monotonic: {} > {}",
-                window[0],
-                window[1]
-            );
-        }
     }
 }

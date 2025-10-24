@@ -54,8 +54,6 @@ pub struct Line {
     pub run_id: Uuid,
     /// The time in milliseconds that this line was written.
     pub time: u128,
-    /// The time in milliseconds when this metric was recorded.
-    pub recorded_at: u128,
     /// The "fetch index". Previous versions of lading scraped prometheus
     /// metrics from their targets and kept an increment index of polls. Now
     /// this records the number of times the internal metrics cache has been
@@ -79,5 +77,65 @@ impl Line {
     pub fn seconds_since_epoch(&self) -> u64 {
         let seconds: u128 = self.time / 1_000;
         seconds as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn serialize_deserialize_isomorphism(
+            run_id in any::<[u8; 16]>().prop_map(Uuid::from_bytes),
+            time in any::<u128>(),
+            fetch_index in any::<u64>(),
+            metric_name in "[a-z][a-z0-9_]*",
+            metric_kind in prop_oneof![
+                Just(MetricKind::Counter),
+                Just(MetricKind::Gauge),
+            ],
+            value in prop_oneof![
+                any::<u64>().prop_map(LineValue::Int),
+                any::<f64>().prop_filter("must be finite", |f| f.is_finite()).prop_map(LineValue::Float),
+            ],
+            labels in prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..10),
+        ) {
+            let line = Line {
+                run_id,
+                time,
+                fetch_index,
+                metric_name,
+                metric_kind,
+                value,
+                labels: labels.into_iter().collect(),
+            };
+
+            // Serialize to JSON
+            let serialized = serde_json::to_string(&line)
+                .expect("serialization should succeed");
+
+            // Deserialize back
+            let deserialized: Line = serde_json::from_str(&serialized)
+                .expect("deserialization should succeed");
+
+            // Check that key fields match
+            prop_assert_eq!(line.run_id, deserialized.run_id);
+            prop_assert_eq!(line.time, deserialized.time);
+            prop_assert_eq!(line.fetch_index, deserialized.fetch_index);
+            prop_assert_eq!(line.metric_name, deserialized.metric_name);
+
+            // For values, handle float comparison specially
+            match (line.value, deserialized.value) {
+                (LineValue::Int(a), LineValue::Int(b)) => prop_assert_eq!(a, b),
+                (LineValue::Float(a), LineValue::Float(b)) => {
+                    let diff = (a - b).abs();
+                    prop_assert!(diff < 1e-10 || diff / a.abs().max(b.abs()) < 1e-10,
+                        "floats not approximately equal: {a} vs {b}");
+                }
+                (a, b) => prop_assert!(false, "value types don't match: {a:?} vs {b:?}"),
+            }
+        }
     }
 }
