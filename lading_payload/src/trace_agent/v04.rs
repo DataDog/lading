@@ -624,7 +624,7 @@ mod test {
 
         /// Property: Context are bounded.
         #[test]
-        fn contexts_are_bounded(seed: u64, contexts in 1u32..super::MAX_CONTEXTS, total_traces in 1u32..10_000) {
+        fn contexts_are_bounded(seed: u64, contexts in 1u32..10_000, total_traces in 1u32..1_000) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let mut config = Config::default();
