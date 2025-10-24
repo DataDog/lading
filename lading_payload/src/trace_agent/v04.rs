@@ -714,6 +714,6 @@ mod test {
         // value will need to be modified, but keeping it exact allows us to set
         // accurate bounds on memory consumption. Do not make this an
         // inequality.
-        assert_eq!(serialized.len(), 19_525);
+        assert_eq!(serialized.len(), 20_386);
     }
 }
