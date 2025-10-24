@@ -377,6 +377,7 @@ async fn inner_main(
     // We support two methods to exflitrate telemetry about the target from rig:
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
+    let mut capture_manager_handle: Option<tokio::task::JoinHandle<()>> = None;
     match config.telemetry {
         Telemetry::PrometheusSocket {
             path,
@@ -422,11 +423,13 @@ async fn inner_main(
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
-            tokio::spawn(async {
+            let handle = tokio::spawn(async {
                 capture_manager
                     .start()
+                    .await
                     .expect("failed to start capture manager");
             });
+            capture_manager_handle = Some(handle);
         }
     }
 
@@ -607,7 +610,15 @@ async fn inner_main(
             },
         }
     };
+
     shutdown_broadcast.signal_and_wait().await;
+
+    // Await the capture manager task, if it exists, to ensure all data is
+    // flushed.
+    if let Some(handle) = capture_manager_handle {
+        let _ = handle.await;
+    }
+
     res
 }
 
@@ -713,7 +724,9 @@ generator: []
         )
         .await;
 
-        assert!(exit_code.is_ok());
+        if let Err(e) = exit_code {
+            panic!("inner_main failed: {:?}", e);
+        }
 
         let contents = std::fs::read_to_string(capture_path)
             .expect("File path does not already exist or does not contain valid utf-8");
