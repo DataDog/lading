@@ -88,6 +88,6 @@ case "$MODE" in
         fi
         echo "Running fuzz test: ${CRATE}/${TARGET}..."
         cd "${CRATE}"
-        rustup run nightly cargo fuzz run --jobs 8 --build-std --release "${TARGET}"
+        FUZZ_DEBUG=1 rustup run nightly cargo fuzz run --jobs 8 --build-std --release "${TARGET}"
         ;;
 esac

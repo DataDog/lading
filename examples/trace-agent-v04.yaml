@@ -1,0 +1,61 @@
+generator:
+  - id: "trace_agent_v04"
+    tcp:
+      seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+      addr: "0.0.0.0:8126"
+      variant:
+        trace_agent:
+          version: "v0.4"
+          contexts:
+            inclusive:
+              min: 1000
+              max: 5000
+          spans_per_trace:
+            inclusive:
+              min: 1
+              max: 20
+          tags_per_span:
+            inclusive:
+              min: 0
+              max: 10
+          metrics_per_span:
+            inclusive:
+              min: 0
+              max: 3
+          error_rate: 0.05
+          service_name_length:
+            inclusive:
+              min: 5
+              max: 20
+          operation_name_length:
+            inclusive:
+              min: 5
+              max: 30
+          resource_name_length:
+            inclusive:
+              min: 10
+              max: 50
+          span_type_length:
+            inclusive:
+              min: 3
+              max: 15
+          tag_key_length:
+            inclusive:
+              min: 3
+              max: 25
+          tag_value_length:
+            inclusive:
+              min: 5
+              max: 50
+          metric_key_length:
+            inclusive:
+              min: 3
+              max: 20
+      bytes_per_second: "50 MiB"
+      maximum_block_size: "1 MiB"
+      maximum_prebuild_cache_size_bytes: "256 MiB"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "0.0.0.0:8126"
