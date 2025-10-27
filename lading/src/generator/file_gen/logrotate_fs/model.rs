@@ -15,7 +15,7 @@ pub(crate) type Inode = usize;
 
 /// Model representation of a `File`. Does not actually contain any bytes but
 /// stores sufficient metadata to determine access patterns over time.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct File {
     /// The parent `Node` of this `File`.
     parent: Inode,
@@ -112,16 +112,13 @@ impl FileHandle {
 
 impl File {
     /// Generate a random cache offset based on the total cache size and the random number generator associated with the file.
-    fn generate_cache_offset<R>(rng: &mut R, total_cache_size: u64) -> u64
-    where
-        R: Rng,
-    {
+    fn generate_cache_offset(rng: &mut SmallRng, total_cache_size: u64) -> u64 {
         rng.random_range(0..total_cache_size) as u64
     }
 
     /// Create a new instance of `File`
     pub(crate) fn new(
-        rng: &mut R,
+        rng: &mut SmallRng,
         parent: Inode,
         group_id: u16,
         bytes_per_tick: u64,
@@ -148,7 +145,7 @@ impl File {
             unlinked: false,
             max_offset_observed: 0,
             cache_offset,
-            rng,
+            rng: rng.clone(),
             total_cache_size,
         }
     }
