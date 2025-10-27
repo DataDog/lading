@@ -113,7 +113,7 @@ impl FileHandle {
 impl File {
     /// Generate a random cache offset based on the total cache size and the random number generator associated with the file.
     fn generate_cache_offset(rng: &mut SmallRng, total_cache_size: u64) -> u64 {
-        rng.random_range(0..total_cache_size) as u64
+        rng.random_range(0..total_cache_size)
     }
 
     /// Create a new instance of `File`
@@ -374,6 +374,7 @@ impl State {
     /// Create a new instance of `State`.
     #[tracing::instrument(skip(rng, block_cache))]
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn new<R>(
         rng: &mut R,
         initial_tick: Tick,
@@ -586,6 +587,7 @@ impl State {
     }
 
     #[inline]
+    #[allow(clippy::too_many_lines)]
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
@@ -614,7 +616,7 @@ impl State {
         }
 
         for inode in self.inode_scratch.drain(..) {
-            let (rotated_inode, parent_inode, group_id, ordinal, mut file_rng) = {
+            let (rotated_inode, parent_inode, group_id, ordinal, file_rng) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
                 // pairs.
@@ -669,7 +671,7 @@ impl State {
             // ramp properly.
             let new_file_inode = self.next_inode;
             let mut new_file = File::new(
-                &mut file_rng,
+                file_rng,
                 parent_inode,
                 group_id,
                 bytes_per_tick,
