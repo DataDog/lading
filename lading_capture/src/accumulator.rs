@@ -152,9 +152,11 @@ impl Iterator for DrainIter<'_> {
         }
 
         self.remaining -= 1;
+        // Advance BEFORE flushing to avoid re-flushing the tick that was
+        // just flushed in the last record_captures() call
+        self.accumulator.advance_tick();
         let current_tick = self.accumulator.current_tick;
         let metrics: Vec<_> = self.accumulator.flush().collect();
-        self.accumulator.advance_tick();
 
         Some((current_tick, metrics))
     }
@@ -181,6 +183,9 @@ pub(crate) struct Accumulator {
     counters: FxHashMap<Key, [u64; INTERVALS]>,
     gauges: FxHashMap<Key, [f64; INTERVALS]>,
     pub(crate) current_tick: u64,
+    /// Tracks the last tick that was flushed via `flush()`. Used to assert we
+    /// never flush the same tick twice.
+    last_flushed_tick: Option<u64>,
 }
 
 impl Accumulator {
@@ -189,6 +194,7 @@ impl Accumulator {
             counters: FxHashMap::default(),
             gauges: FxHashMap::default(),
             current_tick: 0,
+            last_flushed_tick: None,
         }
     }
 
@@ -298,7 +304,7 @@ impl Accumulator {
     ///
     /// Returns metrics from the interval that is INTERVALS ticks old. If the
     /// current tick has not yet reached INTERVALS, returns an empty iterator.
-    pub(crate) fn flush(&self) -> impl Iterator<Item = (Key, MetricValue, u64)> + use<> {
+    pub(crate) fn flush(&mut self) -> impl Iterator<Item = (Key, MetricValue, u64)> + use<> {
         let mut metrics = Vec::new();
 
         if self.current_tick < INTERVALS as u64 {
@@ -306,6 +312,15 @@ impl Accumulator {
         }
 
         let flush_tick = self.current_tick - INTERVALS as u64;
+
+        // Assert we never flush the same tick twice
+        if let Some(last_flushed) = self.last_flushed_tick {
+            assert!(
+                flush_tick > last_flushed,
+                "Attempted to flush tick {flush_tick} but already flushed tick {last_flushed}"
+            );
+        }
+
         let flush_interval = interval_idx(flush_tick);
 
         for (key, values) in &self.counters {
@@ -318,14 +333,37 @@ impl Accumulator {
             metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
         }
 
+        self.last_flushed_tick = Some(flush_tick);
         metrics.into_iter()
     }
 
     /// Returns an iterator that drains all accumulated metrics.
+    ///
+    /// Only flushes ticks that haven't been flushed yet. If the most recent
+    /// `flush()` call already wrote tick N, drain will start from tick N+1.
     pub(crate) fn drain(&mut self) -> DrainIter<'_> {
+        // Calculate how many unflushed ticks remain.
+        //
+        // If we have flushed, calculate the unflushed intervals with reference
+        // to the last_flushed tick, capped at INTERVALS. If we have not
+        // flushed, simply flush INTERVALS.
+        let remaining = if let Some(last_flushed) = self.last_flushed_tick {
+            let next_flushable = last_flushed + 1;
+            let last_possible = self.current_tick;
+            let unflushed = last_possible
+                .saturating_sub(next_flushable)
+                .saturating_add(1);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                unflushed.min(INTERVALS as u64) as usize
+            }
+        } else {
+            INTERVALS
+        };
+
         DrainIter {
             accumulator: self,
-            remaining: INTERVALS,
+            remaining,
         }
     }
 
@@ -758,6 +796,49 @@ mod tests {
             !all_results.is_empty(),
             "shutdown pattern should return data"
         );
+    }
+
+    // Test that drain() after normal flushes doesn't re-flush ticks
+    #[test]
+    fn drain_after_normal_flush_no_duplicates() {
+        let key = Key::from_name("test");
+        let mut acc = Accumulator::new();
+
+        // Simulate normal operation: write and flush repeatedly
+        for i in 0..100 {
+            counter_increment(&mut acc, key.clone(), i, i + 1).unwrap();
+            acc.advance_tick();
+
+            // Once we have INTERVALS ticks, start flushing
+            if acc.current_tick >= INTERVALS as u64 {
+                let _ = acc.flush().collect::<Vec<_>>();
+            }
+        }
+
+        // At this point we've flushed many ticks during normal operation
+        // Now simulate shutdown: drain remaining data
+        let mut all_ticks = Vec::new();
+        for (_, metrics) in acc.drain() {
+            for (_, _, tick) in metrics {
+                all_ticks.push(tick);
+            }
+        }
+
+        // Count occurrences - should have no duplicates
+        let mut tick_counts: FxHashMap<u64, usize> = FxHashMap::default();
+        for tick in &all_ticks {
+            *tick_counts.entry(*tick).or_insert(0) += 1;
+        }
+
+        for (tick, count) in &tick_counts {
+            assert_eq!(
+                *count, 1,
+                "tick {tick} appeared {count} times during drain, expected 1 (no re-flushes)"
+            );
+        }
+
+        // Verify we got some data
+        assert!(!all_ticks.is_empty(), "drain should return unflushed data");
     }
 
     // Test drain() iterator drains all data correctly

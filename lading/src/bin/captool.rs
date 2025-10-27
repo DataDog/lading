@@ -1,7 +1,6 @@
 //! Capture analysis tool for lading capture files.
 
 #![allow(clippy::print_stdout)]
-
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
 use std::hash::BuildHasher;
@@ -206,6 +205,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
@@ -240,7 +240,7 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
 
     // Track last seen (time, fetch_index) for each (metric_name, labels) combination
     let mut series_last_state: HashMap<u64, (u128, u64, String)> = HashMap::new();
-    let hash_builder = std::collections::hash_map::RandomState::new();
+    let hash_builder = RandomState::new();
     let mut line_num = 0u128;
     let mut error_count = 0u128;
     let mut fetch_index_errors = 0u128;
@@ -286,16 +286,19 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
         let series_id = format!(
             "{metric}[{labels}]",
             metric = line.metric_name,
-            labels = sorted_labels.iter().cloned().collect::<Vec<String>>().join(",")
+            labels = sorted_labels
+                .iter()
+                .cloned()
+                .collect::<Vec<String>>()
+                .join(",")
         );
 
         // Check per-series invariants
         if let Some((prev_time, prev_fetch_index, _)) = series_last_state.get(&series_key) {
             if time <= *prev_time {
                 if error_count == 0 {
-                    let msg = format!(
-                        "time not strictly increasing: prev={prev_time}, curr={time}"
-                    );
+                    let msg =
+                        format!("time not strictly increasing: prev={prev_time}, curr={time}");
                     error!("Series {series_id} at line {line_num}");
                     error!("  {msg}");
                     first_error = Some((line_num, series_id.clone(), msg));
@@ -319,11 +322,19 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
     }
 
     info!("Validated {line_num} lines");
-    info!("  Unique series: {series_count}", series_count = series_last_state.len());
-    info!("  Unique fetch_index values: {fetch_count}", fetch_count = fetch_index_to_time.len());
+    info!(
+        "  Unique series: {series_count}",
+        series_count = series_last_state.len()
+    );
+    info!(
+        "  Unique fetch_index values: {fetch_count}",
+        fetch_count = fetch_index_to_time.len()
+    );
 
     if fetch_index_errors > 0 {
-        let (line, category, msg) = first_error.as_ref().unwrap();
+        let (line, category, msg) = first_error
+            .as_ref()
+            .expect("first_error must be set when fetch_index_errors > 0");
         error!("Found {fetch_index_errors} fetch_index/time mapping violations");
         error!("First violation at line {line}: {category}");
         error!("  {msg}");
@@ -332,7 +343,9 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
     }
 
     if error_count > 0 {
-        let (line, series, msg) = first_error.as_ref().unwrap();
+        let (line, series, msg) = first_error
+            .as_ref()
+            .expect("first_error must be set when error_count > 0");
         error!("Found {error_count} per-series violations");
         error!("First violation at line {line}: {series}");
         error!("  {msg}");
@@ -340,7 +353,7 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
         return Err(Error::InvalidArgs);
     }
 
-    info!("✓ All invariants satisfied:");
+    info!("All invariants satisfied:");
     info!("  - Each fetch_index maps to exactly one time");
     info!("  - Each series has strictly increasing time");
     info!("  - Each series has strictly increasing fetch_index");
