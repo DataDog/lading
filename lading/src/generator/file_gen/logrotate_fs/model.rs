@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use lading_payload::block;
 use metrics::counter;
-use rand::Rng;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 use tracing::info;
@@ -76,6 +76,17 @@ pub(crate) struct File {
 
     /// The maximual offset observed, maintained by `State`.
     max_offset_observed: u64,
+
+    /// The base offset into the block cache for this file. This is deterministic
+    /// based on a random number generator, ensuring different files (including rotated files) read from different
+    /// starting positions in the cache.
+    cache_offset: u64,
+
+    /// The random number generator used to generate the cache offset.
+    rng: SmallRng,
+
+    /// The total size of the block cache. This is needed in order to determine the cache offset.
+    total_cache_size: u64,
 }
 
 /// Represents an open file handle.
@@ -100,14 +111,25 @@ impl FileHandle {
 }
 
 impl File {
+    /// Generate a random cache offset based on the total cache size and the random number generator associated with the file.
+    fn generate_cache_offset<R>(rng: &mut R, total_cache_size: u64) -> u64
+    where
+        R: Rng,
+    {
+        rng.random_range(0..total_cache_size) as u64
+    }
+
     /// Create a new instance of `File`
     pub(crate) fn new(
+        rng: &mut R,
         parent: Inode,
         group_id: u16,
         bytes_per_tick: u64,
         now: Tick,
         peer: Option<Inode>,
+        total_cache_size: u64,
     ) -> Self {
+        let cache_offset = Self::generate_cache_offset(rng, total_cache_size);
         Self {
             parent,
             bytes_written: 0,
@@ -125,6 +147,9 @@ impl File {
             open_handles: 0,
             unlinked: false,
             max_offset_observed: 0,
+            cache_offset,
+            rng,
+            total_cache_size,
         }
     }
 
@@ -225,9 +250,10 @@ impl File {
         self.ordinal
     }
 
-    /// Increment the ordinal number of this File
+    /// Increment the ordinal number of this File and update its cache offset
     pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
+        self.cache_offset = Self::generate_cache_offset(&mut self.rng, self.total_cache_size);
     }
 }
 
@@ -299,6 +325,7 @@ pub(crate) struct State {
     inode_scratch: Vec<Inode>,
     load_profile: LoadProfile,
     valid_file_handles: FxHashMap<u64, Inode>, // Track valid FileHandle IDs -> Inode
+    total_cache_size: u64,
 }
 
 impl std::fmt::Debug for State {
@@ -375,6 +402,8 @@ impl State {
             },
         );
 
+        let total_cache_size = block_cache.total_size();
+
         let mut state = State {
             nodes,
             root_inode,
@@ -389,6 +418,7 @@ impl State {
             inode_scratch: Vec::with_capacity(concurrent_logs as usize),
             load_profile,
             valid_file_handles: FxHashMap::default(),
+            total_cache_size,
         };
 
         if concurrent_logs == 0 {
@@ -480,7 +510,19 @@ impl State {
             let file_inode = state.next_inode;
             state.next_inode += 1;
 
-            let file = File::new(current_inode, group_id, 0, state.now, None);
+            // Generate a new SmallRng instance from the states rng to be used in deterministic offset generation
+            let child_seed: [u8; 32] = rng.random();
+            let mut child_rng = SmallRng::from_seed(child_seed);
+
+            let file = File::new(
+                &mut child_rng,
+                current_inode,
+                group_id,
+                0,
+                state.now,
+                None,
+                state.total_cache_size,
+            );
             state.nodes.insert(file_inode, Node::File { file });
 
             // Add the file to the directory's children
@@ -575,7 +617,7 @@ impl State {
         }
 
         for inode in self.inode_scratch.drain(..) {
-            let (rotated_inode, parent_inode, group_id, ordinal) = {
+            let (rotated_inode, parent_inode, group_id, ordinal, mut file_rng) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
                 // pairs.
@@ -613,7 +655,13 @@ impl State {
                 file.set_read_only(now);
 
                 // Rotation data needed below.
-                (inode, file.parent, file.group_id, file.ordinal)
+                (
+                    inode,
+                    file.parent,
+                    file.group_id,
+                    file.ordinal,
+                    &mut file.rng,
+                )
             };
 
             // Create our new file, called, well, `new_file`. This will
@@ -624,11 +672,13 @@ impl State {
             // ramp properly.
             let new_file_inode = self.next_inode;
             let mut new_file = File::new(
+                &mut file_rng,
                 parent_inode,
                 group_id,
                 bytes_per_tick,
                 self.now.saturating_sub(1),
                 Some(rotated_inode),
+                self.total_cache_size,
             );
 
             new_file.advance_time(now);
@@ -851,8 +901,10 @@ impl State {
                 let end_offset = offset as u64 + to_read as u64;
                 file.max_offset_observed = file.max_offset_observed.max(end_offset);
 
-                // Get data from block_cache without worrying about blocks
-                let data = self.block_cache.read_at(offset as u64, to_read);
+                // Get data from block_cache, adding the file's cache_offset to ensure
+                // different files read from different positions in the cache
+                let cache_read_offset = file.cache_offset + offset as u64;
+                let data = self.block_cache.read_at(cache_read_offset, to_read);
                 assert!(
                     data.len() == to_read,
                     "Data returned from block_cache is distinct from the read size: {l} != {to_read}",
