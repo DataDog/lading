@@ -106,7 +106,6 @@ pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
     start: Instant,
     expiration: Duration,
     capture_writer: W,
-    capture_path: PathBuf,
     shutdown: Option<lading_signal::Watcher>,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
@@ -123,7 +122,6 @@ impl<W: Write + Send, C: Clock> std::fmt::Debug for CaptureManager<W, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
             .field("start", &self.start)
-            .field("capture_path", &self.capture_path)
             .field("accumulator", &self.accumulator)
             .field("global_labels", &self.global_labels)
             .finish_non_exhaustive()
@@ -134,7 +132,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
     /// Create a new [`CaptureManager`] with a custom writer and clock
     pub fn new_with_writer(
         capture_writer: W,
-        capture_path: PathBuf,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -156,7 +153,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
             start: now,
             expiration,
             capture_writer,
-            capture_path,
             shutdown: Some(shutdown),
             _experiment_started: experiment_started,
             target_running,
@@ -327,10 +323,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
             line_count += 1;
         }
 
-        debug!(
-            "Recording {line_count} captures to {path}",
-            path = self.capture_path.display()
-        );
+        debug!("Recording {line_count} captures",);
 
         let elapsed = now.elapsed();
         if elapsed > Duration::from_secs(1) {
@@ -338,35 +331,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         }
 
         Ok(())
-    }
-}
-
-impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
-    /// Create a new [`CaptureManager`] with file-based writer
-    ///
-    /// # Errors
-    ///
-    /// Function will error if the underlying capture file cannot be opened.
-    pub async fn new(
-        capture_path: PathBuf,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
-        expiration: Duration,
-    ) -> Result<Self, io::Error> {
-        let fp = fs::File::create(&capture_path).await?;
-        let fp = fp.into_std().await;
-        let writer = BufWriter::new(fp);
-
-        Ok(Self::new_with_writer(
-            writer,
-            capture_path,
-            shutdown,
-            experiment_started,
-            target_running,
-            expiration,
-            RealClock,
-        ))
     }
 
     /// Run [`CaptureManager`] to completion
@@ -460,6 +424,34 @@ impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
                 }
             }
         }
+    }
+}
+
+impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
+    /// Create a new [`CaptureManager`] with file-based writer
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the underlying capture file cannot be opened.
+    pub async fn new(
+        capture_path: PathBuf,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, io::Error> {
+        let fp = fs::File::create(&capture_path).await?;
+        let fp = fp.into_std().await;
+        let writer = BufWriter::new(fp);
+
+        Ok(Self::new_with_writer(
+            writer,
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+            RealClock,
+        ))
     }
 }
 
@@ -644,7 +636,6 @@ mod tests {
 
             let mut manager = CaptureManager::new_with_writer(
                 writer.clone(),
-                PathBuf::from("/tmp/test-capture.json"),
                 shutdown_rx,
                 experiment_rx,
                 target_rx,
@@ -711,7 +702,6 @@ mod tests {
 
         let manager = CaptureManager::new_with_writer(
             writer.clone(),
-            PathBuf::from("/tmp/test-capture.json"),
             shutdown_rx,
             experiment_rx,
             target_rx,
@@ -901,7 +891,6 @@ mod tests {
 
         let mut manager = CaptureManager::new_with_writer(
             writer.clone(),
-            PathBuf::from("/tmp/test-capture.json"),
             shutdown_rx,
             experiment_rx,
             target_rx,
@@ -1003,7 +992,6 @@ mod tests {
 
         let mut manager = CaptureManager::new_with_writer(
             writer.clone(),
-            PathBuf::from("/tmp/test-capture.json"),
             shutdown_rx,
             experiment_rx,
             target_rx,
@@ -1063,7 +1051,6 @@ mod tests {
 
         let mut manager = CaptureManager::new_with_writer(
             writer.clone(),
-            PathBuf::from("/tmp/test-capture.json"),
             shutdown_rx,
             experiment_rx,
             target_rx,
