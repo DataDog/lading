@@ -572,6 +572,11 @@ mod tests {
             let mut time = self.time_ms.lock().unwrap();
             *time += millis;
         }
+
+        fn rewind(&self, millis: u128) {
+            let mut time = self.time_ms.lock().unwrap();
+            *time = time.saturating_sub(millis);
+        }
     }
 
     impl Clock for TestClock {
@@ -585,6 +590,7 @@ mod tests {
         WriteCounter { name: String, value: u64 },
         WriteGauge { name: String, value: f64 },
         AdvanceTime { millis: u128 },
+        BackwardTime { millis: u128 },
     }
 
     impl std::fmt::Debug for CaptureOp {
@@ -597,6 +603,7 @@ mod tests {
                     write!(f, "WriteGauge({name:?}, {value})")
                 }
                 Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
+                Self::BackwardTime { millis } => write!(f, "BackwardTime({millis})"),
             }
         }
     }
@@ -615,6 +622,7 @@ mod tests {
                 )
                     .prop_map(|(name, value)| CaptureOp::WriteGauge { name, value }),
                 1 => (0u128..=500u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
+                1 => (0u128..=500u128).prop_map(|millis| CaptureOp::BackwardTime { millis }),
             ]
             .boxed()
         }
@@ -668,6 +676,13 @@ mod tests {
                         while current_time >= next_tick_time {
                             let _ = manager.record_captures();
                             next_tick_time += TICK_DURATION_MS;
+                        }
+                    }
+                    CaptureOp::BackwardTime { millis } => {
+                        clock.rewind(millis);
+                        let current_time = clock.now_ms();
+                        while current_time < next_tick_time.saturating_sub(TICK_DURATION_MS) {
+                            next_tick_time = next_tick_time.saturating_sub(TICK_DURATION_MS);
                         }
                     }
                 }
