@@ -15,8 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with timeout.
 ## Removed
 - Field `run_id` removed from capture files.
-- Added a `recorded_at` to the capture line represenation. Strict parsers will
-  need to be updated.
 
 ## [0.28.0]
 ## Added
