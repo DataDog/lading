@@ -3,8 +3,7 @@
 #![allow(clippy::print_stdout)]
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
-use std::hash::BuildHasher;
-use std::hash::Hasher;
+use std::hash::{BuildHasher, Hasher};
 use std::path;
 
 use async_compression::tokio::bufread::ZstdDecoder;
@@ -205,7 +204,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
@@ -229,124 +227,57 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
         either::Either::Left(LinesStream::new(reader.lines()))
     };
 
-    let mut lines = lines.map(|l| {
+    let mut lines_vec = Vec::new();
+    let mut lines_stream = lines.map(|l| {
         let line_str = l.expect("failed to read line");
         let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
         line
     });
 
-    // Track fetch_index -> time mapping (global invariant)
-    let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
-
-    // Track last seen (time, fetch_index) for each (metric_name, labels) combination
-    let mut series_last_state: HashMap<u64, (u128, u64, String)> = HashMap::new();
-    let hash_builder = RandomState::new();
-    let mut line_num = 0u128;
-    let mut error_count = 0u128;
-    let mut fetch_index_errors = 0u128;
-    let mut first_error: Option<(u128, String, String)> = None;
-
-    while let Some(line) = lines.next().await {
-        line_num += 1;
-        let time = line.time;
-        let fetch_index = line.fetch_index;
-
-        // Check global invariant: each fetch_index maps to exactly one time
-        if let Some(&existing_time) = fetch_index_to_time.get(&fetch_index) {
-            if existing_time != time {
-                if fetch_index_errors == 0 {
-                    let msg = format!(
-                        "fetch_index {fetch_index} appears with multiple times: {existing_time} and {time}"
-                    );
-                    error!("INVARIANT VIOLATION at line {line_num}");
-                    error!("  {msg}");
-                    first_error = Some((line_num, "fetch_index/time mismatch".to_string(), msg));
-                }
-                fetch_index_errors += 1;
-            }
-        } else {
-            fetch_index_to_time.insert(fetch_index, time);
-        }
-
-        // Build a unique key for (metric_name, labels)
-        let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-        for (key, value) in &line.labels {
-            sorted_labels.insert(format!("{key}:{value}"));
-        }
-
-        let mut hasher = hash_builder.build_hasher();
-        hasher.write_usize(line.metric_name.len());
-        hasher.write(line.metric_name.as_bytes());
-        for label in &sorted_labels {
-            hasher.write_usize(label.len());
-            hasher.write(label.as_bytes());
-        }
-        let series_key = hasher.finish();
-
-        let series_id = format!(
-            "{metric}[{labels}]",
-            metric = line.metric_name,
-            labels = sorted_labels
-                .iter()
-                .cloned()
-                .collect::<Vec<String>>()
-                .join(",")
-        );
-
-        // Check per-series invariants
-        if let Some((prev_time, prev_fetch_index, _)) = series_last_state.get(&series_key) {
-            if time <= *prev_time {
-                if error_count == 0 {
-                    let msg =
-                        format!("time not strictly increasing: prev={prev_time}, curr={time}");
-                    error!("Series {series_id} at line {line_num}");
-                    error!("  {msg}");
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-            if fetch_index <= *prev_fetch_index {
-                if error_count == 0 {
-                    let msg = format!(
-                        "fetch_index not strictly increasing: prev={prev_fetch_index}, curr={fetch_index}"
-                    );
-                    error!("Series {series_id} at line {line_num}");
-                    error!("  {msg}");
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-        }
-
-        series_last_state.insert(series_key, (time, fetch_index, series_id));
+    while let Some(line) = lines_stream.next().await {
+        lines_vec.push(line);
     }
 
-    info!("Validated {line_num} lines");
+    // Use the canonical validation logic from lading_capture::validate
+    let result = lading_capture::validate::validate_lines(&lines_vec);
+
+    info!(
+        "Validated {line_count} lines",
+        line_count = result.line_count
+    );
     info!(
         "  Unique series: {series_count}",
-        series_count = series_last_state.len()
+        series_count = result.unique_series
     );
     info!(
         "  Unique fetch_index values: {fetch_count}",
-        fetch_count = fetch_index_to_time.len()
+        fetch_count = result.unique_fetch_indices
     );
 
-    if fetch_index_errors > 0 {
-        let (line, category, msg) = first_error
+    if result.fetch_index_errors > 0 {
+        let (line, category, msg) = result
+            .first_error
             .as_ref()
             .expect("first_error must be set when fetch_index_errors > 0");
-        error!("Found {fetch_index_errors} fetch_index/time mapping violations");
+        error!(
+            "Found {errors} fetch_index/time mapping violations",
+            errors = result.fetch_index_errors
+        );
         error!("First violation at line {line}: {category}");
         error!("  {msg}");
         error!("Each fetch_index MUST map to exactly one time value");
         return Err(Error::InvalidArgs);
     }
 
-    if error_count > 0 {
-        let (line, series, msg) = first_error
+    if result.per_series_errors > 0 {
+        let (line, series, msg) = result
+            .first_error
             .as_ref()
             .expect("first_error must be set when error_count > 0");
-        error!("Found {error_count} per-series violations");
+        error!(
+            "Found {errors} per-series violations",
+            errors = result.per_series_errors
+        );
         error!("First violation at line {line}: {series}");
         error!("  {msg}");
         error!("Each (metric+labels) MUST have strictly increasing time and fetch_index");

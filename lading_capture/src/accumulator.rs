@@ -113,7 +113,7 @@ use metrics::Key;
 use rustc_hash::FxHashMap;
 use tracing::warn;
 
-use crate::manager;
+use crate::metric::{Counter, CounterValue, Gauge, GaugeValue};
 
 pub(crate) const INTERVALS: usize = 60;
 
@@ -198,7 +198,7 @@ impl Accumulator {
         }
     }
 
-    pub(crate) fn counter(&mut self, c: manager::Counter, tick: u64) -> Result<(), Error> {
+    pub(crate) fn counter(&mut self, c: Counter, tick: u64) -> Result<(), Error> {
         if tick > self.current_tick {
             warn!(
                 metric_tick = tick,
@@ -231,15 +231,15 @@ impl Accumulator {
             let interval = interval_idx(target_tick);
 
             match c.value {
-                manager::CounterValue::Absolute(v) => values[interval] = v,
-                manager::CounterValue::Increment(v) => values[interval] += v,
+                CounterValue::Absolute(v) => values[interval] = v,
+                CounterValue::Increment(v) => values[interval] += v,
             }
         }
 
         Ok(())
     }
 
-    pub(crate) fn gauge(&mut self, g: manager::Gauge, tick: u64) -> Result<(), Error> {
+    pub(crate) fn gauge(&mut self, g: Gauge, tick: u64) -> Result<(), Error> {
         if tick > self.current_tick {
             warn!(
                 metric_tick = tick,
@@ -272,9 +272,9 @@ impl Accumulator {
             let interval = interval_idx(target_tick);
 
             match g.value {
-                manager::GaugeValue::Set(v) => values[interval] = v,
-                manager::GaugeValue::Increment(v) => values[interval] += v,
-                manager::GaugeValue::Decrement(v) => values[interval] -= v,
+                GaugeValue::Set(v) => values[interval] = v,
+                GaugeValue::Increment(v) => values[interval] += v,
+                GaugeValue::Decrement(v) => values[interval] -= v,
             }
         }
 
@@ -387,6 +387,7 @@ impl Accumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metric::{Counter, CounterValue, Gauge, GaugeValue};
     use proptest::prelude::*;
     use std::time::Instant;
 
@@ -397,10 +398,10 @@ mod tests {
         tick: u64,
         value: u64,
     ) -> Result<(), Error> {
-        let counter = manager::Counter {
+        let counter = Counter {
             key,
             timestamp: Instant::now(),
-            value: manager::CounterValue::Increment(value),
+            value: CounterValue::Increment(value),
         };
         acc.counter(counter, tick)
     }
@@ -411,19 +412,19 @@ mod tests {
         tick: u64,
         value: u64,
     ) -> Result<(), Error> {
-        let counter = manager::Counter {
+        let counter = Counter {
             key,
             timestamp: Instant::now(),
-            value: manager::CounterValue::Absolute(value),
+            value: CounterValue::Absolute(value),
         };
         acc.counter(counter, tick)
     }
 
     fn gauge_set(acc: &mut Accumulator, key: Key, tick: u64, value: f64) -> Result<(), Error> {
-        let gauge = manager::Gauge {
+        let gauge = Gauge {
             key,
             timestamp: Instant::now(),
-            value: manager::GaugeValue::Set(value),
+            value: GaugeValue::Set(value),
         };
         acc.gauge(gauge, tick)
     }
@@ -434,10 +435,10 @@ mod tests {
         tick: u64,
         value: f64,
     ) -> Result<(), Error> {
-        let gauge = manager::Gauge {
+        let gauge = Gauge {
             key,
             timestamp: Instant::now(),
-            value: manager::GaugeValue::Increment(value),
+            value: GaugeValue::Increment(value),
         };
         acc.gauge(gauge, tick)
     }
@@ -448,10 +449,10 @@ mod tests {
         tick: u64,
         value: f64,
     ) -> Result<(), Error> {
-        let gauge = manager::Gauge {
+        let gauge = Gauge {
             key,
             timestamp: Instant::now(),
-            value: manager::GaugeValue::Decrement(value),
+            value: GaugeValue::Decrement(value),
         };
         acc.gauge(gauge, tick)
     }

@@ -2,12 +2,15 @@
 
 use std::time::Instant;
 
-use manager::{Counter, CounterValue, Gauge, GaugeValue, HISTORICAL_SENDER, Metric};
+use manager::HISTORICAL_SENDER;
+use metric::{Counter, CounterValue, Gauge, GaugeValue, Metric};
 use ustr::Ustr;
 
 mod accumulator;
 pub mod json;
 pub mod manager;
+pub(crate) mod metric;
+pub mod validate;
 
 /// Errors for historical write operations
 #[derive(thiserror::Error, Debug, Copy, Clone)]

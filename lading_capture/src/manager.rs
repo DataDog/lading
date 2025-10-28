@@ -17,8 +17,11 @@ use std::{
 use tokio::sync::Mutex;
 use tokio::{fs, sync::mpsc, time};
 
-use crate::accumulator::{self, Accumulator, MetricValue};
-use crate::json;
+use crate::{
+    accumulator::{self, Accumulator, MetricValue},
+    json,
+    metric::{Counter, CounterValue, Gauge, GaugeValue, Metric},
+};
 use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
@@ -65,39 +68,29 @@ pub enum Error {
     Accumulator(#[from] accumulator::Error),
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum CounterValue {
-    Increment(u64),
-    Absolute(u64),
+/// Clock abstraction for controllable time in tests
+///
+/// Following the pattern from `lading_throttle`, allows production code to
+/// use real system time while tests can inject a controllable clock for
+/// deterministic behavior.
+// NOTE I want to extract both clocks out into a common lading_clock but will do
+// so in a separate thread of work.
+pub trait Clock {
+    /// Returns the current time in milliseconds since `UNIX_EPOCH`
+    fn now_ms(&self) -> u128;
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum GaugeValue {
-    Increment(f64),
-    Decrement(f64),
-    Set(f64),
-}
+/// Production clock implementation using real system time
+#[derive(Debug, Copy, Clone)]
+pub struct RealClock;
 
-#[derive(Debug, Clone)]
-pub(crate) struct Counter {
-    pub key: Key,
-    pub timestamp: Instant,
-    pub value: CounterValue,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Gauge {
-    pub key: Key,
-    pub timestamp: Instant,
-    pub value: GaugeValue,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Metric {
-    /// Counter increment
-    Counter(Counter),
-    /// Gauge set
-    Gauge(Gauge),
+impl Clock for RealClock {
+    fn now_ms(&self) -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before UNIX_EPOCH")
+            .as_millis()
+    }
 }
 
 /// Wrangles internal metrics into capture files
@@ -105,7 +98,7 @@ pub(crate) enum Metric {
 /// This struct is responsible for capturing all internal metrics sent through
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
-pub struct CaptureManager<W: Write + Send> {
+pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
     /// Reference start time used to convert Instant timestamps to logical ticks.
     /// Initialized at `CaptureManager` construction time, before any historical
     /// metrics are sent. This synchronizes with `accumulator.current_tick` which
@@ -123,9 +116,10 @@ pub struct CaptureManager<W: Write + Send> {
     global_labels: FxHashMap<String, String>,
     snd: mpsc::Sender<Metric>,
     recv: mpsc::Receiver<Metric>,
+    clock: C,
 }
 
-impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
+impl<W: Write + Send, C: Clock> std::fmt::Debug for CaptureManager<W, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
             .field("start", &self.start)
@@ -136,8 +130,8 @@ impl<W: Write + Send> std::fmt::Debug for CaptureManager<W> {
     }
 }
 
-impl<W: Write + Send> CaptureManager<W> {
-    /// Create a new [`CaptureManager`] with a custom writer
+impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
+    /// Create a new [`CaptureManager`] with a custom writer and clock
     pub fn new_with_writer(
         capture_writer: W,
         capture_path: PathBuf,
@@ -145,6 +139,7 @@ impl<W: Write + Send> CaptureManager<W> {
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
         expiration: Duration,
+        clock: C,
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
         let run_id = Uuid::new_v4();
@@ -171,6 +166,7 @@ impl<W: Write + Send> CaptureManager<W> {
             global_labels: FxHashMap::default(),
             snd,
             recv,
+            clock,
         }
     }
 
@@ -299,7 +295,7 @@ impl<W: Write + Send> CaptureManager<W> {
             "Advanced accumulator tick"
         );
 
-        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+        let now_ms = self.clock.now_ms();
         let run_id = self.run_id;
 
         let mut line_count = 0;
@@ -322,7 +318,7 @@ impl<W: Write + Send> CaptureManager<W> {
     }
 }
 
-impl CaptureManager<BufWriter<std::fs::File>> {
+impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
     /// Create a new [`CaptureManager`] with file-based writer
     ///
     /// # Errors
@@ -346,6 +342,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
             experiment_started,
             target_running,
             expiration,
+            RealClock,
         ))
     }
 
@@ -436,7 +433,7 @@ impl CaptureManager<BufWriter<std::fs::File>> {
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received, flushing all remaining metrics");
                     let run_id = self.run_id;
-                    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+                    let now_ms = self.clock.now_ms();
 
                     // Drain all remaining data from the accumulator. Collect to
                     // release the mutable borrow so we can call
@@ -511,6 +508,7 @@ impl metrics::Recorder for CaptureRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
@@ -555,9 +553,153 @@ mod tests {
         }
     }
 
+    /// Test clock for deterministic time control
+    #[derive(Clone)]
+    struct TestClock {
+        time_ms: Arc<Mutex<u128>>,
+    }
+
+    impl TestClock {
+        fn new(initial_time_ms: u128) -> Self {
+            Self {
+                time_ms: Arc::new(Mutex::new(initial_time_ms)),
+            }
+        }
+
+        fn advance(&self, millis: u128) {
+            let mut time = self.time_ms.lock().unwrap();
+            *time += millis;
+        }
+    }
+
+    impl Clock for TestClock {
+        fn now_ms(&self) -> u128 {
+            *self.time_ms.lock().unwrap()
+        }
+    }
+
+    #[derive(Clone)]
+    enum CaptureOp {
+        WriteCounter { name: String, value: u64 },
+        WriteGauge { name: String, value: f64 },
+        AdvanceTick,
+        AdvanceTime { millis: u128 },
+    }
+
+    impl std::fmt::Debug for CaptureOp {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::WriteCounter { name, value } => {
+                    write!(f, "WriteCounter({name:?}, {value})")
+                }
+                Self::WriteGauge { name, value } => {
+                    write!(f, "WriteGauge({name:?}, {value})")
+                }
+                Self::AdvanceTick => write!(f, "AdvanceTick"),
+                Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
+            }
+        }
+    }
+
+    impl Arbitrary for CaptureOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                ("[a-z]{1,5}", any::<u64>())
+                    .prop_map(|(name, value)| CaptureOp::WriteCounter { name, value }),
+                (
+                    "[a-z]{1,5}",
+                    any::<f64>().prop_filter("must be finite", |f| f.is_finite())
+                )
+                    .prop_map(|(name, value)| CaptureOp::WriteGauge { name, value }),
+                Just(CaptureOp::AdvanceTick),
+                (0u128..=10_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
+            ]
+            .boxed()
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn capture_output_satisfies_invariants(
+            ops in prop::collection::vec(any::<CaptureOp>(), 10..50)
+        ) {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(1000);
+            let (shutdown_rx, shutdown_tx) = lading_signal::signal();
+            let (experiment_rx, _experiment_tx) = lading_signal::signal();
+            let (target_rx, target_tx) = lading_signal::signal();
+
+            target_tx.signal();
+
+            let mut manager = CaptureManager::new_with_writer(
+                writer.clone(),
+                PathBuf::from("/tmp/test-capture.json"),
+                shutdown_rx,
+                experiment_rx,
+                target_rx,
+                Duration::from_secs(60),
+                clock.clone(),
+            );
+
+            let recorder = CaptureRecorder {
+                registry: Arc::clone(&manager.registry),
+            };
+
+            // Execute operations
+            for op in ops {
+                match op {
+                    CaptureOp::WriteCounter { name, value } => {
+                        metrics::with_local_recorder(&recorder, || {
+                            metrics::counter!(name).increment(value);
+                        });
+                    }
+                    CaptureOp::WriteGauge { name, value } => {
+                        metrics::with_local_recorder(&recorder, || {
+                            metrics::gauge!(name).set(value);
+                        });
+                    }
+                    CaptureOp::AdvanceTick => {
+                        let _ = manager.record_captures();
+                    }
+                    CaptureOp::AdvanceTime { millis } => {
+                        clock.advance(millis);
+                    }
+                }
+            }
+
+            // Simulate shutdown with drain
+            shutdown_tx.signal();
+
+            let run_id = manager.run_id;
+            let now_ms = clock.now_ms();
+
+            let drain: Vec<_> = manager.accumulator.drain().collect();
+            for (_, metrics) in drain {
+                for (key, value, tick) in metrics {
+                    let _ = manager.write_metric_line(&key, &value, tick, now_ms, run_id);
+                }
+            }
+
+            let lines = writer.parse_lines().unwrap();
+            let result = crate::validate::validate_lines(&lines);
+
+            prop_assert!(
+                result.is_valid(),
+                "Invariant violation detected:\n  Line: {line}\n  Series: {series}\n  Message: {msg}",
+                line = result.first_error.as_ref().map(|(l, _, _)| l).unwrap_or(&0),
+                series = result.first_error.as_ref().map(|(_, s, _)| s.as_str()).unwrap_or(""),
+                msg = result.first_error.as_ref().map(|(_, _, m)| m.as_str()).unwrap_or("")
+            );
+        }
+    }
+
     #[test]
     fn metrics_macros_create_capture_lines() {
         let writer = InMemoryWriter::new();
+        let clock = TestClock::new(1000);
         let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
         let (experiment_rx, _experiment_tx) = lading_signal::signal();
         let (target_rx, target_tx) = lading_signal::signal();
@@ -571,6 +713,7 @@ mod tests {
             experiment_rx,
             target_rx,
             Duration::from_secs(60),
+            clock,
         );
 
         let recorder = CaptureRecorder {
@@ -746,6 +889,7 @@ mod tests {
     #[test]
     fn fetch_index_monotonic_and_accumulator_window_enforced() {
         let writer = InMemoryWriter::new();
+        let clock = TestClock::new(1000);
         let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
         let (experiment_rx, _experiment_tx) = lading_signal::signal();
         let (target_rx, target_tx) = lading_signal::signal();
@@ -759,6 +903,7 @@ mod tests {
             experiment_rx,
             target_rx,
             Duration::from_secs(60),
+            clock,
         );
 
         let recorder = CaptureRecorder {
@@ -846,6 +991,7 @@ mod tests {
     #[test]
     fn fetch_index_strictly_increases_across_flushes() {
         let writer = InMemoryWriter::new();
+        let clock = TestClock::new(1000);
         let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
         let (experiment_rx, _experiment_tx) = lading_signal::signal();
         let (target_rx, target_tx) = lading_signal::signal();
@@ -859,6 +1005,7 @@ mod tests {
             experiment_rx,
             target_rx,
             Duration::from_secs(60),
+            clock,
         );
 
         let recorder = CaptureRecorder {
@@ -898,6 +1045,73 @@ mod tests {
         assert!(
             !unique_fetch_indices.is_empty(),
             "Expected to see at least one unique fetch_index"
+        );
+    }
+
+    #[test]
+    fn drain_with_same_timestamp_violates_invariants() {
+        let writer = InMemoryWriter::new();
+        let clock = TestClock::new(1000);
+        let (shutdown_rx, shutdown_tx) = lading_signal::signal();
+        let (experiment_rx, _experiment_tx) = lading_signal::signal();
+        let (target_rx, target_tx) = lading_signal::signal();
+
+        target_tx.signal();
+
+        let mut manager = CaptureManager::new_with_writer(
+            writer.clone(),
+            PathBuf::from("/tmp/test-capture.json"),
+            shutdown_rx,
+            experiment_rx,
+            target_rx,
+            Duration::from_secs(60),
+            clock.clone(),
+        );
+
+        let recorder = CaptureRecorder {
+            registry: Arc::clone(&manager.registry),
+        };
+
+        // Write metrics across multiple ticks
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("test_counter").increment(10);
+        });
+
+        // Advance through several ticks to build up data
+        for _ in 0..(accumulator::INTERVALS + 5) {
+            manager.record_captures().unwrap();
+            metrics::with_local_recorder(&recorder, || {
+                metrics::counter!("test_counter").increment(1);
+            });
+        }
+
+        // Now simulate shutdown drain - this is the bug
+        shutdown_tx.signal();
+
+        let run_id = manager.run_id;
+        let now_ms = clock.now_ms();
+
+        let drain: Vec<_> = manager.accumulator.drain().collect();
+        for (_, metrics) in drain {
+            for (key, value, tick) in metrics {
+                manager
+                    .write_metric_line(&key, &value, tick, now_ms, run_id)
+                    .unwrap();
+            }
+        }
+
+        // Parse and validate using the canonical validation logic
+        let lines = writer.parse_lines().unwrap();
+
+        let result = crate::validate::validate_lines(&lines);
+
+        // Assert that all invariants are satisfied
+        assert!(
+            result.is_valid(),
+            "Invariant violation detected:\n  Line: {:?}\n  Category: {:?}\n  Message: {:?}",
+            result.first_error.as_ref().map(|(l, _, _)| l),
+            result.first_error.as_ref().map(|(_, c, _)| c),
+            result.first_error.as_ref().map(|(_, _, m)| m)
         );
     }
 }
