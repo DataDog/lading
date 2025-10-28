@@ -192,6 +192,29 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         self.global_labels.insert(key.into(), value.into());
     }
 
+    /// Drain all accumulated metrics and write them to the capture file.
+    ///
+    /// Called during shutdown to flush any remaining metrics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing metrics fails.
+    fn drain_and_write(&mut self) -> Result<(), Error> {
+        let run_id = self.run_id;
+        let now_ms = self.clock.now_ms();
+
+        // Drain all remaining data from the accumulator. Collect to
+        // release the mutable borrow so we can call write_metric_line.
+        let drain: Vec<_> = self.accumulator.drain().collect();
+        for (_, metrics) in drain {
+            for (key, value, tick) in metrics {
+                self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Convert an Instant timestamp to `Accumulator` logical tick time.
     #[inline]
     fn instant_to_tick(&self, timestamp: Instant) -> u64 {
@@ -432,20 +455,7 @@ impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
                 },
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received, flushing all remaining metrics");
-                    let run_id = self.run_id;
-                    let now_ms = self.clock.now_ms();
-
-                    // Drain all remaining data from the accumulator. Collect to
-                    // release the mutable borrow so we can call
-                    // write_metric_line, sort of an API / ownership smell but
-                    // the allocation is not on a hot path.
-                    let drain: Vec<_> = self.accumulator.drain().collect();
-                    for (_, metrics) in drain {
-                        for (key, value, tick) in metrics {
-                            self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
-                        }
-                    }
-
+                    self.drain_and_write()?;
                     return Ok(());
                 }
             }
@@ -672,16 +682,7 @@ mod tests {
 
             // Simulate shutdown with drain
             shutdown_tx.signal();
-
-            let run_id = manager.run_id;
-            let now_ms = clock.now_ms();
-
-            let drain: Vec<_> = manager.accumulator.drain().collect();
-            for (_, metrics) in drain {
-                for (key, value, tick) in metrics {
-                    let _ = manager.write_metric_line(&key, &value, tick, now_ms, run_id);
-                }
-            }
+            let _ = manager.drain_and_write();
 
             let lines = writer.parse_lines().unwrap();
             let result = crate::validate::validate_lines(&lines);
@@ -1085,20 +1086,9 @@ mod tests {
             });
         }
 
-        // Now simulate shutdown drain - this is the bug
+        // Now simulate shutdown drain
         shutdown_tx.signal();
-
-        let run_id = manager.run_id;
-        let now_ms = clock.now_ms();
-
-        let drain: Vec<_> = manager.accumulator.drain().collect();
-        for (_, metrics) in drain {
-            for (key, value, tick) in metrics {
-                manager
-                    .write_metric_line(&key, &value, tick, now_ms, run_id)
-                    .unwrap();
-            }
-        }
+        manager.drain_and_write().unwrap();
 
         // Parse and validate using the canonical validation logic
         let lines = writer.parse_lines().unwrap();
