@@ -78,18 +78,38 @@ pub enum Error {
 pub trait Clock {
     /// Returns the current time in milliseconds since `UNIX_EPOCH`
     fn now_ms(&self) -> u128;
+    /// Returns the current time as an Instant
+    fn now(&self) -> Instant;
 }
 
 /// Production clock implementation using real system time
-#[derive(Debug, Copy, Clone)]
-pub struct RealClock;
+#[derive(Debug, Clone, Copy)]
+pub struct RealClock {
+    start_instant: Instant,
+    start_system_time: SystemTime,
+}
+
+impl Default for RealClock {
+    fn default() -> Self {
+        Self {
+            start_instant: Instant::now(),
+            start_system_time: SystemTime::now(),
+        }
+    }
+}
 
 impl Clock for RealClock {
     fn now_ms(&self) -> u128 {
-        SystemTime::now()
+        let now = self.now();
+        let elapsed = now.duration_since(self.start_instant);
+        (self.start_system_time + elapsed)
             .duration_since(UNIX_EPOCH)
             .expect("system time is before UNIX_EPOCH")
             .as_millis()
+    }
+
+    fn now(&self) -> Instant {
+        Instant::now()
     }
 }
 
@@ -281,7 +301,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
     }
 
     fn record_captures(&mut self) -> Result<(), Error> {
-        let now = Instant::now();
+        let now = self.clock.now();
         let tick = self.accumulator.current_tick;
 
         for (k, c) in self.registry.get_counter_handles() {
@@ -391,7 +411,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
                     }
                 }
                 _ = flush_interval.tick() => {
-                    let tick_start = Instant::now();
+                    let tick_start = self.clock.now();
                     let wall_clock_elapsed = tick_start.duration_since(self.start).as_secs();
                     let tick_drift = wall_clock_elapsed.saturating_sub(self.accumulator.current_tick);
 
@@ -409,7 +429,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
 
                     self.record_captures()?;
 
-                    let record_duration = tick_start.elapsed();
+                    let record_duration = self.clock.now().duration_since(tick_start);
                     if record_duration > Duration::from_secs(1) {
                         warn!(
                             duration = ?record_duration,
@@ -450,7 +470,7 @@ impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
             experiment_started,
             target_running,
             expiration,
-            RealClock,
+            RealClock::default(),
         ))
     }
 }
@@ -559,12 +579,14 @@ mod tests {
     #[derive(Clone)]
     struct TestClock {
         time_ms: Arc<Mutex<u128>>,
+        start_instant: Instant,
     }
 
     impl TestClock {
         fn new(initial_time_ms: u128) -> Self {
             Self {
                 time_ms: Arc::new(Mutex::new(initial_time_ms)),
+                start_instant: Instant::now(),
             }
         }
 
@@ -582,6 +604,11 @@ mod tests {
     impl Clock for TestClock {
         fn now_ms(&self) -> u128 {
             *self.time_ms.lock().unwrap()
+        }
+
+        fn now(&self) -> Instant {
+            let time_ms = *self.time_ms.lock().unwrap();
+            self.start_instant + Duration::from_millis(time_ms as u64)
         }
     }
 
