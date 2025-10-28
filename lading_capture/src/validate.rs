@@ -7,7 +7,7 @@
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::hash::{BuildHasher, Hasher};
 
-use crate::json::Line;
+use crate::json::{Line, MetricKind};
 
 /// Result of validating capture invariants
 #[derive(Debug)]
@@ -83,8 +83,8 @@ pub fn validate_lines(lines: &[Line]) -> ValidationResult {
         hasher.write(line.metric_name.as_bytes());
         // Include metric kind to distinguish counter from gauge
         let kind_byte = match line.metric_kind {
-            crate::json::MetricKind::Counter => 0u8,
-            crate::json::MetricKind::Gauge => 1u8,
+            MetricKind::Counter => 0u8,
+            MetricKind::Gauge => 1u8,
         };
         hasher.write_u8(kind_byte);
         for label in &sorted_labels {
@@ -94,8 +94,8 @@ pub fn validate_lines(lines: &[Line]) -> ValidationResult {
         let series_key = hasher.finish();
 
         let kind_str = match line.metric_kind {
-            crate::json::MetricKind::Counter => "counter",
-            crate::json::MetricKind::Gauge => "gauge",
+            MetricKind::Counter => "counter",
+            MetricKind::Gauge => "gauge",
         };
         let series_id = format!(
             "{kind}:{metric}[{labels}]",
