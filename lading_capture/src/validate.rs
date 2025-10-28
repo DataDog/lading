@@ -81,14 +81,25 @@ pub fn validate_lines(lines: &[Line]) -> ValidationResult {
         let mut hasher = hash_builder.build_hasher();
         hasher.write_usize(line.metric_name.len());
         hasher.write(line.metric_name.as_bytes());
+        // Include metric kind to distinguish counter from gauge
+        let kind_byte = match line.metric_kind {
+            crate::json::MetricKind::Counter => 0u8,
+            crate::json::MetricKind::Gauge => 1u8,
+        };
+        hasher.write_u8(kind_byte);
         for label in &sorted_labels {
             hasher.write_usize(label.len());
             hasher.write(label.as_bytes());
         }
         let series_key = hasher.finish();
 
+        let kind_str = match line.metric_kind {
+            crate::json::MetricKind::Counter => "counter",
+            crate::json::MetricKind::Gauge => "gauge",
+        };
         let series_id = format!(
-            "{metric}[{labels}]",
+            "{kind}:{metric}[{labels}]",
+            kind = kind_str,
             metric = line.metric_name,
             labels = sorted_labels
                 .iter()

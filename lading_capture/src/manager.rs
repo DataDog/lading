@@ -592,7 +592,6 @@ mod tests {
     enum CaptureOp {
         WriteCounter { name: String, value: u64 },
         WriteGauge { name: String, value: f64 },
-        AdvanceTick,
         AdvanceTime { millis: u128 },
     }
 
@@ -605,7 +604,6 @@ mod tests {
                 Self::WriteGauge { name, value } => {
                     write!(f, "WriteGauge({name:?}, {value})")
                 }
-                Self::AdvanceTick => write!(f, "AdvanceTick"),
                 Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
             }
         }
@@ -617,21 +615,21 @@ mod tests {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             prop_oneof![
-                ("[a-z]{1,5}", any::<u64>())
+                100 => ("[a-z]{1,5}", any::<u64>())
                     .prop_map(|(name, value)| CaptureOp::WriteCounter { name, value }),
-                (
+                100 => (
                     "[a-z]{1,5}",
                     any::<f64>().prop_filter("must be finite", |f| f.is_finite())
                 )
                     .prop_map(|(name, value)| CaptureOp::WriteGauge { name, value }),
-                Just(CaptureOp::AdvanceTick),
-                (0u128..=10_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
+                1 => (0u128..=500u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
             ]
             .boxed()
         }
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100_000))]
         #[test]
         fn capture_output_satisfies_invariants(
             ops in prop::collection::vec(any::<CaptureOp>(), 10..50)
@@ -658,7 +656,9 @@ mod tests {
                 registry: Arc::clone(&manager.registry),
             };
 
-            // Execute operations
+            // Execute operations.Track next tick boundary to model the real
+            // interval flush timer.
+            let mut next_tick_time = clock.now_ms() + TICK_DURATION_MS;
             for op in ops {
                 match op {
                     CaptureOp::WriteCounter { name, value } => {
@@ -671,11 +671,13 @@ mod tests {
                             metrics::gauge!(name).set(value);
                         });
                     }
-                    CaptureOp::AdvanceTick => {
-                        let _ = manager.record_captures();
-                    }
                     CaptureOp::AdvanceTime { millis } => {
                         clock.advance(millis);
+                        let current_time = clock.now_ms();
+                        while current_time >= next_tick_time {
+                            let _ = manager.record_captures();
+                            next_tick_time += TICK_DURATION_MS;
+                        }
                     }
                 }
             }
