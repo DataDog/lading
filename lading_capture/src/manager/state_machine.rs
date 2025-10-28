@@ -429,10 +429,45 @@ mod tests {
     /// Operations for property testing the state machine
     #[derive(Clone)]
     enum CaptureOp {
-        WriteCounter { name: String, value: u64 },
-        WriteGauge { name: String, value: f64 },
-        AdvanceTime { millis: u128 },
-        BackwardTime { millis: u128 },
+        WriteCounter {
+            name: String,
+            value: u64,
+        },
+        WriteGauge {
+            name: String,
+            value: f64,
+        },
+        HistoricalCounterIncr {
+            name: String,
+            value: u64,
+            tick_offset: u64,
+        },
+        HistoricalCounterAbs {
+            name: String,
+            value: u64,
+            tick_offset: u64,
+        },
+        HistoricalGaugeIncr {
+            name: String,
+            value: f64,
+            tick_offset: u64,
+        },
+        HistoricalGaugeDec {
+            name: String,
+            value: f64,
+            tick_offset: u64,
+        },
+        HistoricalGaugeSet {
+            name: String,
+            value: f64,
+            tick_offset: u64,
+        },
+        AdvanceTime {
+            millis: u128,
+        },
+        BackwardTime {
+            millis: u128,
+        },
     }
 
     impl std::fmt::Debug for CaptureOp {
@@ -443,6 +478,56 @@ mod tests {
                 }
                 Self::WriteGauge { name, value } => {
                     write!(f, "WriteGauge({name:?}, {value})")
+                }
+                Self::HistoricalCounterIncr {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalCounterIncr({name:?}, {value}, tick_offset={tick_offset})"
+                    )
+                }
+                Self::HistoricalCounterAbs {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalCounterAbs({name:?}, {value}, tick_offset={tick_offset})"
+                    )
+                }
+                Self::HistoricalGaugeIncr {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalGaugeIncr({name:?}, {value}, tick_offset={tick_offset})"
+                    )
+                }
+                Self::HistoricalGaugeDec {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalGaugeDec({name:?}, {value}, tick_offset={tick_offset})"
+                    )
+                }
+                Self::HistoricalGaugeSet {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalGaugeSet({name:?}, {value}, tick_offset={tick_offset})"
+                    )
                 }
                 Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
                 Self::BackwardTime { millis } => write!(f, "BackwardTime({millis})"),
@@ -456,14 +541,36 @@ mod tests {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             prop_oneof![
-                100 => ("[a-z]{1,5}", any::<u64>())
+                1_000 => ("[a-z]{1,5}", 1u64..1000u64)
                     .prop_map(|(name, value)| CaptureOp::WriteCounter { name, value }),
-                100 => (
+                1_000 => (
                     "[a-z]{1,5}",
-                    any::<f64>().prop_filter("must be finite", |f| f.is_finite())
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite())
                 )
                     .prop_map(|(name, value)| CaptureOp::WriteGauge { name, value }),
-                1 => (0u128..=500u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
+                200 => ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64)
+                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalCounterIncr { name, value, tick_offset }),
+                200 => ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64)
+                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalCounterAbs { name, value, tick_offset }),
+                200 => (
+                    "[a-z]{1,5}",
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
+                    0u64..=10u64
+                )
+                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeIncr { name, value, tick_offset }),
+                200 => (
+                    "[a-z]{1,5}",
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
+                    0u64..=10u64
+                )
+                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeDec { name, value, tick_offset }),
+                200 => (
+                    "[a-z]{1,5}",
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
+                    0u64..=10u64
+                )
+                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeSet { name, value, tick_offset }),
+                100 => (0u128..=1_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
                 1 => (0u128..=500u128).prop_map(|millis| CaptureOp::BackwardTime { millis }),
             ]
             .boxed()
@@ -513,6 +620,61 @@ mod tests {
                         metrics::with_local_recorder(&recorder, || {
                             metrics::gauge!(name).set(value);
                         });
+                    }
+                    CaptureOp::HistoricalCounterIncr { name, value, tick_offset } => {
+                        let timestamp = clock.now()
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(start);
+                        let counter = Counter {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value: CounterValue::Increment(value),
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Counter(counter)));
+                    }
+                    CaptureOp::HistoricalCounterAbs { name, value, tick_offset } => {
+                        let timestamp = clock.now()
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(start);
+                        let counter = Counter {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value: CounterValue::Absolute(value),
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Counter(counter)));
+                    }
+                    CaptureOp::HistoricalGaugeIncr { name, value, tick_offset } => {
+                        let timestamp = clock.now()
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(start);
+                        let gauge = Gauge {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value: GaugeValue::Increment(value),
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
+                    }
+                    CaptureOp::HistoricalGaugeDec { name, value, tick_offset } => {
+                        let timestamp = clock.now()
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(start);
+                        let gauge = Gauge {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value: GaugeValue::Decrement(value),
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
+                    }
+                    CaptureOp::HistoricalGaugeSet { name, value, tick_offset } => {
+                        let timestamp = clock.now()
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(start);
+                        let gauge = Gauge {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value: GaugeValue::Set(value),
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
                     }
                     CaptureOp::AdvanceTime { millis } => {
                         clock.advance(millis);
