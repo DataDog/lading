@@ -110,15 +110,15 @@ impl FileHandle {
     }
 }
 
-impl File {
-    /// Generate a random cache offset based on the total cache size and the random number generator associated with the file.
-    fn generate_cache_offset(rng: &mut SmallRng, total_cache_size: u64) -> u64 {
-        rng.random_range(0..total_cache_size)
-    }
+/// Generate a random cache offset based on the total cache size and the random number generator associated with the file.
+pub(crate) fn generate_cache_offset(rng: &mut SmallRng, total_cache_size: u64) -> u64 {
+    rng.random_range(0..total_cache_size)
+}
 
+impl File {
     /// Create a new instance of `File`
     pub(crate) fn new(
-        rng: &mut SmallRng,
+        mut rng: SmallRng,
         parent: Inode,
         group_id: u16,
         bytes_per_tick: u64,
@@ -126,7 +126,7 @@ impl File {
         peer: Option<Inode>,
         total_cache_size: u64,
     ) -> Self {
-        let cache_offset = Self::generate_cache_offset(rng, total_cache_size);
+        let cache_offset = generate_cache_offset(&mut rng, total_cache_size);
         Self {
             parent,
             bytes_written: 0,
@@ -145,7 +145,7 @@ impl File {
             unlinked: false,
             max_offset_observed: 0,
             cache_offset,
-            rng: rng.clone(),
+            rng,
             total_cache_size,
         }
     }
@@ -250,7 +250,7 @@ impl File {
     /// Increment the ordinal number of this File and update its cache offset
     pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
-        self.cache_offset = Self::generate_cache_offset(&mut self.rng, self.total_cache_size);
+        self.cache_offset = generate_cache_offset(&mut self.rng, self.total_cache_size);
     }
 }
 
@@ -510,10 +510,10 @@ impl State {
 
             // Generate a new SmallRng instance from the states rng to be used in deterministic offset generation
             let child_seed: [u8; 32] = rng.random();
-            let mut child_rng = SmallRng::from_seed(child_seed);
+            let child_rng = SmallRng::from_seed(child_seed);
 
             let file = File::new(
-                &mut child_rng,
+                child_rng,
                 current_inode,
                 group_id,
                 0,
@@ -659,7 +659,7 @@ impl State {
                     file.parent,
                     file.group_id,
                     file.ordinal,
-                    &mut file.rng,
+                    file.rng.clone(),
                 )
             };
 
