@@ -43,6 +43,7 @@ echo ">>> Running optional checks..."
 # Kani proofs (optional)
 if command -v cargo-kani &> /dev/null; then
     echo ">>> Running kani proofs for each crate..."
+    # shellcheck disable=SC2043
     for crate in lading_throttle; do
         echo ">>> Running kani proofs for $crate..."
         if ! "$CI_DIR/kani" "$crate"; then
