@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds
-const TICK_DURATION_MS: u128 = 1_000;
+pub(crate) const TICK_DURATION_MS: u128 = 1_000;
 
 /// Events that drive the capture manager state machine
 #[derive(Debug)]
@@ -81,6 +81,8 @@ pub enum Error {
 pub(crate) struct StateMachine<W: Write, C: Clock> {
     /// Reference start time for timestamp-to-tick conversion
     start: Instant,
+    /// Start time in milliseconds for deriving metric timestamps from ticks
+    start_ms: u128,
     /// How long metrics can age before being discarded
     expiration: Duration,
     /// Output destination for metrics
@@ -110,8 +112,10 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         global_labels: FxHashMap<String, String>,
         clock: C,
     ) -> Self {
+        let start_ms = clock.now_ms();
         Self {
             start,
+            start_ms,
             expiration,
             capture_writer,
             registry,
@@ -243,12 +247,13 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             "Advanced accumulator tick"
         );
 
-        let now_ms = self.clock.now_ms();
         let run_id = self.run_id;
 
         let mut line_count = 0;
         for (key, value, tick) in self.accumulator.flush() {
-            self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
+            // Calculate time from tick to ensure strictly increasing time values
+            let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+            self.write_metric_line(&key, &value, tick, time_ms, run_id)?;
             line_count += 1;
         }
 
@@ -265,14 +270,15 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     /// Drain all accumulated metrics and write them to the capture file
     fn drain_and_write(&mut self) -> Result<(), Error> {
         let run_id = self.run_id;
-        let now_ms = self.clock.now_ms();
 
         // Drain all remaining data from the accumulator. Collect to release the
         // mutable borrow so we can call write_metric_line.
         let drain: Vec<_> = self.accumulator.drain().collect();
         for (_, metrics) in drain {
             for (key, value, tick) in metrics {
-                self.write_metric_line(&key, &value, tick, now_ms, run_id)?;
+                // Calculate time from tick to ensure strictly increasing time values
+                let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+                self.write_metric_line(&key, &value, tick, time_ms, run_id)?;
             }
         }
 
@@ -468,6 +474,7 @@ mod tests {
         BackwardTime {
             millis: u128,
         },
+        FlushTick,
     }
 
     impl std::fmt::Debug for CaptureOp {
@@ -531,6 +538,7 @@ mod tests {
                 }
                 Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
                 Self::BackwardTime { millis } => write!(f, "BackwardTime({millis})"),
+                Self::FlushTick => write!(f, "FlushTick"),
             }
         }
     }
@@ -541,37 +549,66 @@ mod tests {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             prop_oneof![
-                1_000 => ("[a-z]{1,5}", 1u64..1000u64)
+                ("[a-z]{1,5}", 1u64..1000u64)
                     .prop_map(|(name, value)| CaptureOp::WriteCounter { name, value }),
-                1_000 => (
+                (
                     "[a-z]{1,5}",
                     (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite())
                 )
                     .prop_map(|(name, value)| CaptureOp::WriteGauge { name, value }),
-                200 => ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64)
-                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalCounterIncr { name, value, tick_offset }),
-                200 => ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64)
-                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalCounterAbs { name, value, tick_offset }),
-                200 => (
+                ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64).prop_map(
+                    |(name, value, tick_offset)| CaptureOp::HistoricalCounterIncr {
+                        name,
+                        value,
+                        tick_offset
+                    }
+                ),
+                ("[a-z]{1,5}", 1u64..1000u64, 0u64..=10u64).prop_map(
+                    |(name, value, tick_offset)| CaptureOp::HistoricalCounterAbs {
+                        name,
+                        value,
+                        tick_offset
+                    }
+                ),
+                (
                     "[a-z]{1,5}",
                     (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
                     0u64..=10u64
                 )
-                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeIncr { name, value, tick_offset }),
-                200 => (
+                    .prop_map(|(name, value, tick_offset)| {
+                        CaptureOp::HistoricalGaugeIncr {
+                            name,
+                            value,
+                            tick_offset,
+                        }
+                    }),
+                (
                     "[a-z]{1,5}",
                     (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
                     0u64..=10u64
                 )
-                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeDec { name, value, tick_offset }),
-                200 => (
+                    .prop_map(|(name, value, tick_offset)| {
+                        CaptureOp::HistoricalGaugeDec {
+                            name,
+                            value,
+                            tick_offset,
+                        }
+                    }),
+                (
                     "[a-z]{1,5}",
                     (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
                     0u64..=10u64
                 )
-                    .prop_map(|(name, value, tick_offset)| CaptureOp::HistoricalGaugeSet { name, value, tick_offset }),
-                100 => (0u128..=1_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
-                1 => (0u128..=500u128).prop_map(|millis| CaptureOp::BackwardTime { millis }),
+                    .prop_map(|(name, value, tick_offset)| {
+                        CaptureOp::HistoricalGaugeSet {
+                            name,
+                            value,
+                            tick_offset,
+                        }
+                    }),
+                (0u128..=1_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
+                (0u128..=500u128).prop_map(|millis| CaptureOp::BackwardTime { millis }),
+                Just(CaptureOp::FlushTick),
             ]
             .boxed()
         }
@@ -606,9 +643,9 @@ mod tests {
                 clock.clone(),
             );
 
-            // Execute operations. Track next tick boundary to model the real
-            // interval flush timer behavior.
-            let mut next_tick_time = clock.now_ms() + TICK_DURATION_MS;
+            // Execute operations. FlushTick is independent of time advancement,
+            // allowing us to test scenarios where multiple flushes happen at
+            // the same clock millisecond.
             for op in ops {
                 match op {
                     CaptureOp::WriteCounter { name, value } => {
@@ -678,20 +715,12 @@ mod tests {
                     }
                     CaptureOp::AdvanceTime { millis } => {
                         clock.advance(millis);
-                        let current_time = clock.now_ms();
-                        // Simulate the interval timer firing when time crosses tick boundaries
-                        while current_time >= next_tick_time {
-                            let _ = machine.next(Event::FlushTick);
-                            next_tick_time += TICK_DURATION_MS;
-                        }
                     }
                     CaptureOp::BackwardTime { millis } => {
                         clock.rewind(millis);
-                        let current_time = clock.now_ms();
-                        // Adjust tick boundary backwards if we went back in time
-                        while current_time < next_tick_time.saturating_sub(TICK_DURATION_MS) {
-                            next_tick_time = next_tick_time.saturating_sub(TICK_DURATION_MS);
-                        }
+                    }
+                    CaptureOp::FlushTick => {
+                        let _ = machine.next(Event::FlushTick);
                     }
                 }
             }
