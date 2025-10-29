@@ -84,9 +84,6 @@ pub(crate) struct File {
 
     /// The random number generator used to generate the cache offset.
     rng: SmallRng,
-
-    /// The total size of the block cache. This is needed in order to determine the cache offset.
-    total_cache_size: u64,
 }
 
 /// Represents an open file handle.
@@ -146,7 +143,6 @@ impl File {
             max_offset_observed: 0,
             cache_offset,
             rng,
-            total_cache_size,
         }
     }
 
@@ -247,10 +243,9 @@ impl File {
         self.ordinal
     }
 
-    /// Increment the ordinal number of this File and update its cache offset
+    /// Increment the ordinal number of this File
     pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
-        self.cache_offset = generate_cache_offset(&mut self.rng, self.total_cache_size);
     }
 }
 
