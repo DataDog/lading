@@ -38,7 +38,7 @@ uuid = { version = "1.18", default-features = false, features = [
   "serde",
 ] }
 once_cell = { version = "1.21" }
-proptest = { version = "1.7" }
+proptest = { version = "1.9" }
 proptest-derive = { version = "0.6" }
 
 http = { version = "1.3" }
