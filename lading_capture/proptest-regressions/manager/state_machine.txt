@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7a98abac6c52fb38119dc40c8e051cec5af02a5c17d20490f9c3ab44fa4ddd04 # shrinks to ops = [HistoricalCounterAbs("q", 3836061114605990454, tick_offset=0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), HistoricalCounterIncr("q", 14610682959103561162, tick_offset=0), WriteCounter("a", 0), WriteCounter("a", 0)]
+cc 3da9ebcd9c155b7c17dd00eb3601cf3e7a63bc6e1b5686ea84013d52c466fe30 # shrinks to ops = [FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, WriteCounter("a", 1), WriteCounter("a", 1), FlushTick, FlushTick, WriteCounter("a", 1), FlushTick, WriteCounter("a", 1), WriteCounter("a", 1), WriteCounter("a", 1), WriteCounter("a", 1), FlushTick, FlushTick, FlushTick, FlushTick, FlushTick, WriteCounter("a", 1), FlushTick, FlushTick, FlushTick, WriteCounter("a", 1), WriteCounter("a", 1), FlushTick, FlushTick]
