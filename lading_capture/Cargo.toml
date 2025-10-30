@@ -17,6 +17,7 @@ lading-signal = { version = "0.1", path = "../lading_signal" }
 
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4"] }
 metrics = { workspace = true }
 quanta = { version = "0.12", default-features = false, features = [] }
 serde_json = { workspace = true }
