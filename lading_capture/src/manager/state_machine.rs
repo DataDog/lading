@@ -27,6 +27,18 @@ use uuid::Uuid;
 /// Duration of a single `Accumulator` tick in milliseconds
 pub(crate) const TICK_DURATION_MS: u128 = 1_000;
 
+/// Reserved label names that collide with top-level JSON fields in `json::Line`.
+/// Labels with these names will be filtered out to prevent duplicate field errors
+/// during JSON serialization.
+const RESERVED_LABEL_NAMES: &[&str] = &[
+    "run_id",
+    "time",
+    "fetch_index",
+    "metric_name",
+    "metric_kind",
+    "value",
+];
+
 /// Events that drive the capture manager state machine
 #[derive(Debug)]
 pub(crate) enum Event {
@@ -288,9 +300,29 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         tick: u64,
         now_ms: u128,
     ) -> Result<(), Error> {
+        // Clone global labels and filter out reserved names
         let mut labels = self.global_labels.clone();
+        for reserved in RESERVED_LABEL_NAMES {
+            if labels.remove(*reserved).is_some() {
+                warn!(
+                    label_key = *reserved,
+                    "Filtered out reserved global label that would collide with capture file field"
+                );
+            }
+        }
+
+        // Add metric-specific labels, skipping reserved names
         for lbl in key.labels() {
-            labels.insert(lbl.key().into(), lbl.value().into());
+            let key_str = lbl.key();
+            if RESERVED_LABEL_NAMES.contains(&key_str) {
+                warn!(
+                    label_key = key_str,
+                    metric_name = key.name(),
+                    "Filtered out reserved metric label that would collide with capture file field"
+                );
+            } else {
+                labels.insert(key_str.into(), lbl.value().into());
+            }
         }
 
         // Calculate when this metric was actually recorded based on its tick.
@@ -840,6 +872,132 @@ mod tests {
         let result = machine.next(Event::ShutdownSignaled);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Operation::Exit);
+    }
+
+    #[test]
+    fn reserved_label_names_are_filtered() {
+        let writer = InMemoryWriter::new();
+        let clock = TestClock::new(0);
+        let start = clock.now();
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+
+        // Set up global labels with a reserved name: `run_id`.
+        let mut global_labels = FxHashMap::default();
+        global_labels.insert("run_id".into(), "user-global-value".into());
+        global_labels.insert("safe_label".into(), "safe_value".into());
+
+        let recorder = crate::manager::CaptureRecorder {
+            registry: Arc::clone(&registry),
+        };
+
+        let mut machine = StateMachine::new(
+            start,
+            Duration::from_secs(60),
+            writer.clone(),
+            registry,
+            accumulator,
+            global_labels,
+            clock.clone(),
+        );
+
+        let stock_run_id = machine.run_id;
+
+        clock.advance(1_000);
+        // Write a metrics-rs metric that will receive global labels
+        // Note: the global labels (including run_id) are added in write_metric_line()
+        metrics::with_local_recorder(&recorder, || {
+            metrics::counter!("test_counter", "other_label" => "other_value").increment(1);
+        });
+
+        // Flush to write the metric
+        let _ = machine.next(Event::FlushTick);
+
+        // Advance time again
+        clock.advance(1_000);
+
+        // Write a historical metric with its own reserved label
+        let historical_counter = Counter {
+            key: Key::from_parts(
+                "historical_counter",
+                vec![
+                    metrics::Label::new("run_id", "historical-value"),
+                    metrics::Label::new("valid_label", "valid_value"),
+                ],
+            ),
+            timestamp: start,
+            value: CounterValue::Absolute(42),
+        };
+        let _ = machine.next(Event::MetricReceived(Metric::Counter(historical_counter)));
+        let _ = machine.next(Event::FlushTick);
+        let _ = machine.next(Event::ShutdownSignaled);
+
+        // Parse the output, assert we can find both metrics.
+        let parsed_lines = writer.parse_lines().expect("should parse");
+
+        println!("\n=== Parsed {} lines ===", parsed_lines.len());
+        for line in &parsed_lines {
+            println!("  {}: {:?}", line.metric_name, line.labels);
+        }
+
+        let metrics_rs_line = parsed_lines
+            .iter()
+            .find(|l| l.metric_name == "test_counter")
+            .expect("should find metrics-rs counter");
+
+        let historical_line = parsed_lines
+            .iter()
+            .find(|l| l.metric_name == "historical_counter")
+            .expect("should find historical counter");
+
+        // Verify the run_id field is the stock UUID, not the user value
+        assert_eq!(metrics_rs_line.run_id, stock_run_id);
+        assert_eq!(historical_line.run_id, stock_run_id);
+
+        // Verify the run_id label was filtered out from both metrics
+        assert!(
+            !metrics_rs_line.labels.contains_key("run_id"),
+            "run_id should be filtered from metrics-rs metric"
+        );
+        assert!(
+            !historical_line.labels.contains_key("run_id"),
+            "run_id should be filtered from historical metric"
+        );
+
+        // Verify metrics-rs metric has its own label, global labels
+        assert_eq!(
+            metrics_rs_line.labels.get("other_label"),
+            Some(&"other_value".to_string()),
+            "metrics-rs metric should have its own labels"
+        );
+        assert_eq!(
+            metrics_rs_line.labels.get("safe_label"),
+            Some(&"safe_value".to_string()),
+            "metrics-rs metric should receive global labels"
+        );
+
+        // Verify historical metric has its own label, global labels
+        assert_eq!(
+            historical_line.labels.get("valid_label"),
+            Some(&"valid_value".to_string()),
+            "historical metric should have its own labels"
+        );
+        assert_eq!(
+            historical_line.labels.get("safe_label"),
+            Some(&"safe_value".to_string()),
+            "historical metric should receive global labels"
+        );
+
+        // Verify the JSON doesn't have duplicate fields
+        let buffer = writer.buffer.lock().unwrap();
+        let raw_json = String::from_utf8_lossy(&buffer);
+        for line in raw_json.lines() {
+            let run_id_count = line.matches("\"run_id\"").count();
+            assert_eq!(
+                run_id_count, 1,
+                "Each line should have exactly one run_id field, got {run_id_count} in: {line}"
+            );
+        }
     }
 
     #[test]
