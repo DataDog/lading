@@ -26,7 +26,6 @@ use metrics_util::{
 };
 use rustc_hash::FxHashMap;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 /// Trait for writing capture lines
 ///
@@ -96,7 +95,6 @@ struct Inner {
 /// [`json::Line`].
 pub struct CaptureManager<W: CaptureWriter> {
     fetch_index: u64,
-    run_id: Uuid,
     capture_writer: W,
     capture_path: PathBuf,
     shutdown: lading_signal::Watcher,
@@ -132,7 +130,6 @@ impl CaptureManager<BufWriter<std::fs::File>> {
         };
 
         Ok(Self {
-            run_id: Uuid::new_v4(),
             fetch_index: 0,
             capture_writer: BufWriter::new(fp),
             capture_path,
@@ -165,7 +162,6 @@ impl<W: CaptureWriter + 'static> CaptureManager<W> {
         };
 
         Self {
-            run_id: Uuid::new_v4(),
             fetch_index: 0,
             capture_writer,
             capture_path: PathBuf::from("/tmp/test-capture.json"),
@@ -221,7 +217,6 @@ impl<W: CaptureWriter + 'static> CaptureManager<W> {
             }
             let value: u64 = counter.get_inner().load(Ordering::Relaxed);
             let line = json::Line {
-                run_id: self.run_id,
                 time: now_ms,
                 fetch_index: self.fetch_index,
                 metric_name: key.name().into(),
@@ -250,7 +245,6 @@ impl<W: CaptureWriter + 'static> CaptureManager<W> {
             }
             let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
             let line = json::Line {
-                run_id: self.run_id,
                 time: now_ms,
                 fetch_index: self.fetch_index,
                 metric_name: key.name().into(),

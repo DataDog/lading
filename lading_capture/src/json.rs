@@ -3,7 +3,6 @@
 
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -49,9 +48,6 @@ impl std::fmt::Display for LineValue {
 #[derive(Debug, Serialize, Deserialize)]
 /// The structure of a capture file line.
 pub struct Line {
-    /// An id that is mostly unique to this run, allowing us to distinguish
-    /// duplications of the same observational setup.
-    pub run_id: Uuid,
     /// The time in milliseconds that this line was written.
     pub time: u128,
     /// The "fetch index". Previous versions of lading scraped prometheus
