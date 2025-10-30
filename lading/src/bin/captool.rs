@@ -1,11 +1,9 @@
 //! Capture analysis tool for lading capture files.
 
 #![allow(clippy::print_stdout)]
-
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::ffi::OsStr;
-use std::hash::BuildHasher;
-use std::hash::Hasher;
+use std::hash::{BuildHasher, Hasher};
 use std::path;
 
 use async_compression::tokio::bufread::ZstdDecoder;
@@ -26,6 +24,9 @@ use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    #[clap(subcommand)]
+    command: Option<Command>,
+
     /// list metric names
     #[clap(short, long)]
     list_metrics: bool,
@@ -38,8 +39,17 @@ struct Args {
     #[clap(short, long)]
     dump_values: bool,
 
-    /// Path to line-delimited capture file
-    capture_path: String,
+    /// Path to line-delimited capture file (not used with subcommands)
+    capture_path: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+enum Command {
+    /// Validate that a capture file is well-formed
+    Validate {
+        /// Path to line-delimited capture file
+        capture_path: String,
+    },
 }
 
 /// Errors that can occur while running captool.
@@ -68,9 +78,19 @@ async fn main() -> Result<(), Error> {
     info!("Welcome to captool");
     let args = Args::parse();
 
-    let capture_path = path::Path::new(&args.capture_path);
+    // Handle validate subcommand
+    if let Some(Command::Validate { capture_path }) = args.command {
+        return validate_capture(&capture_path).await;
+    }
+
+    // For non-subcommand usage, capture_path is required
+    let Some(capture_path_str) = &args.capture_path else {
+        error!("capture_path is required (or use 'validate' subcommand)");
+        return Err(Error::InvalidArgs);
+    };
+    let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
-        error!("Capture file {} does not exist", &args.capture_path);
+        error!("Capture file {capture_path_str} does not exist");
         return Err(Error::InvalidArgs);
     }
 
@@ -181,5 +201,93 @@ async fn main() -> Result<(), Error> {
     }
 
     info!("Bye. :)");
+    Ok(())
+}
+
+async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
+    let capture_path = path::Path::new(capture_path_str);
+    if !capture_path.exists() {
+        error!("Capture file {capture_path_str} does not exist");
+        return Err(Error::InvalidArgs);
+    }
+
+    let is_zstd = capture_path
+        .extension()
+        .is_some_and(|ext| ext == OsStr::new("zstd"));
+
+    let file = fs::File::open(capture_path).await?;
+
+    let lines = if is_zstd {
+        let reader = BufReader::new(file);
+        let decoder = ZstdDecoder::new(reader);
+        let reader = BufReader::new(decoder);
+        either::Either::Right(LinesStream::new(reader.lines()))
+    } else {
+        let reader = BufReader::new(file);
+        either::Either::Left(LinesStream::new(reader.lines()))
+    };
+
+    let mut lines_vec = Vec::new();
+    let mut lines_stream = lines.map(|l| {
+        let line_str = l.expect("failed to read line");
+        let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
+        line
+    });
+
+    while let Some(line) = lines_stream.next().await {
+        lines_vec.push(line);
+    }
+
+    // Use the canonical validation logic from lading_capture::validate
+    let result = lading_capture::validate::validate_lines(&lines_vec);
+
+    info!(
+        "Validated {line_count} lines",
+        line_count = result.line_count
+    );
+    info!(
+        "  Unique series: {series_count}",
+        series_count = result.unique_series
+    );
+    info!(
+        "  Unique fetch_index values: {fetch_count}",
+        fetch_count = result.unique_fetch_indices
+    );
+
+    if result.fetch_index_errors > 0 {
+        let (line, category, msg) = result
+            .first_error
+            .as_ref()
+            .expect("first_error must be set when fetch_index_errors > 0");
+        error!(
+            "Found {errors} fetch_index/time mapping violations",
+            errors = result.fetch_index_errors
+        );
+        error!("First violation at line {line}: {category}");
+        error!("  {msg}");
+        error!("Each fetch_index MUST map to exactly one time value");
+        return Err(Error::InvalidArgs);
+    }
+
+    if result.per_series_errors > 0 {
+        let (line, series, msg) = result
+            .first_error
+            .as_ref()
+            .expect("first_error must be set when error_count > 0");
+        error!(
+            "Found {errors} per-series violations",
+            errors = result.per_series_errors
+        );
+        error!("First violation at line {line}: {series}");
+        error!("  {msg}");
+        error!("Each (metric+labels) MUST have strictly increasing time and fetch_index");
+        return Err(Error::InvalidArgs);
+    }
+
+    info!("All invariants satisfied:");
+    info!("  - Each fetch_index maps to exactly one time");
+    info!("  - Each series has strictly increasing time");
+    info!("  - Each series has strictly increasing fetch_index");
+    info!("Capture file is valid");
     Ok(())
 }
