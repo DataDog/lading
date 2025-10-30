@@ -84,7 +84,6 @@ mod tests {
     proptest! {
         #[test]
         fn serialize_deserialize_isomorphism(
-            run_id in any::<[u8; 16]>().prop_map(Uuid::from_bytes),
             time in any::<u128>(),
             fetch_index in any::<u64>(),
             metric_name in "[a-z][a-z0-9_]*",
@@ -99,7 +98,6 @@ mod tests {
             labels in prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..10),
         ) {
             let line = Line {
-                run_id,
                 time,
                 fetch_index,
                 metric_name,
@@ -117,7 +115,6 @@ mod tests {
                 .expect("deserialization should succeed");
 
             // Check that key fields match
-            prop_assert_eq!(line.run_id, deserialized.run_id);
             prop_assert_eq!(line.time, deserialized.time);
             prop_assert_eq!(line.fetch_index, deserialized.fetch_index);
             prop_assert_eq!(line.metric_name, deserialized.metric_name);

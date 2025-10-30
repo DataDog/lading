@@ -22,7 +22,6 @@ use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::atomic::Ordering;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds
 pub(crate) const TICK_DURATION_MS: u128 = 1_000;
@@ -91,8 +90,6 @@ pub(crate) struct StateMachine<W: Write, C: Clock> {
     registry: Arc<Registry<Key, AtomicStorage>>,
     /// Accumulator for windowed metrics
     accumulator: Accumulator,
-    /// Unique ID for this run
-    run_id: Uuid,
     /// Labels attached to all metrics
     global_labels: FxHashMap<String, String>,
     /// Clock for time operations
@@ -108,7 +105,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         capture_writer: W,
         registry: Arc<Registry<Key, AtomicStorage>>,
         accumulator: Accumulator,
-        run_id: Uuid,
         global_labels: FxHashMap<String, String>,
         clock: C,
     ) -> Self {
@@ -120,7 +116,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             capture_writer,
             registry,
             accumulator,
-            run_id,
             global_labels,
             clock,
         }
@@ -247,13 +242,11 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             "Advanced accumulator tick"
         );
 
-        let run_id = self.run_id;
-
         let mut line_count = 0;
         for (key, value, tick) in self.accumulator.flush() {
             // Calculate time from tick to ensure strictly increasing time values
             let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
-            self.write_metric_line(&key, &value, tick, time_ms, run_id)?;
+            self.write_metric_line(&key, &value, tick, time_ms)?;
             line_count += 1;
         }
 
@@ -269,8 +262,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
     /// Drain all accumulated metrics and write them to the capture file
     fn drain_and_write(&mut self) -> Result<(), Error> {
-        let run_id = self.run_id;
-
         // Drain all remaining data from the accumulator. Collect to release the
         // mutable borrow so we can call write_metric_line.
         let drain: Vec<_> = self.accumulator.drain().collect();
@@ -278,7 +269,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             for (key, value, tick) in metrics {
                 // Calculate time from tick to ensure strictly increasing time values
                 let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
-                self.write_metric_line(&key, &value, tick, time_ms, run_id)?;
+                self.write_metric_line(&key, &value, tick, time_ms)?;
             }
         }
 
@@ -291,7 +282,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         value: &MetricValue,
         tick: u64,
         now_ms: u128,
-        run_id: Uuid,
     ) -> Result<(), Error> {
         let mut labels = self.global_labels.clone();
         for lbl in key.labels() {
@@ -308,7 +298,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
         let line = match value {
             MetricValue::Counter(val) => json::Line {
-                run_id,
                 time: now_ms,
                 fetch_index: tick,
                 metric_name: key.name().into(),
@@ -317,7 +306,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
                 labels,
             },
             MetricValue::Gauge(val) => json::Line {
-                run_id,
                 time: now_ms,
                 fetch_index: tick,
                 metric_name: key.name().into(),
@@ -625,7 +613,6 @@ mod tests {
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
-            let run_id = Uuid::new_v4();
             let labels = FxHashMap::default();
 
             let recorder = crate::manager::CaptureRecorder {
@@ -638,7 +625,6 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                run_id,
                 labels,
                 clock.clone(),
             );
@@ -749,7 +735,6 @@ mod tests {
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
-        let run_id = Uuid::new_v4();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
@@ -758,7 +743,6 @@ mod tests {
             writer,
             registry,
             accumulator,
-            run_id,
             labels,
             clock.clone(),
         );
@@ -781,7 +765,6 @@ mod tests {
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
-        let run_id = Uuid::new_v4();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
@@ -790,7 +773,6 @@ mod tests {
             writer,
             registry,
             accumulator,
-            run_id,
             labels,
             clock,
         );
@@ -807,7 +789,6 @@ mod tests {
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
-        let run_id = Uuid::new_v4();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
@@ -816,7 +797,6 @@ mod tests {
             writer,
             registry,
             accumulator,
-            run_id,
             labels,
             clock.clone(),
         );
@@ -838,7 +818,6 @@ mod tests {
         let start = Instant::now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
-        let run_id = Uuid::new_v4();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
@@ -847,7 +826,6 @@ mod tests {
             writer,
             registry,
             accumulator,
-            run_id,
             labels,
             clock,
         );
@@ -864,7 +842,6 @@ mod tests {
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
-        let run_id = Uuid::new_v4();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
@@ -873,7 +850,6 @@ mod tests {
             writer,
             registry,
             accumulator,
-            run_id,
             labels,
             clock.clone(),
         );

@@ -26,7 +26,6 @@ use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
 use std::sync::LazyLock;
 use tracing::info;
-use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
 /// `CaptureManager` polling interval.
@@ -133,7 +132,6 @@ pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
     target_running: lading_signal::Watcher,
     registry: Arc<Registry<Key, AtomicStorage>>,
     accumulator: Accumulator,
-    run_id: Uuid,
     global_labels: FxHashMap<String, String>,
     snd: mpsc::Sender<Metric>,
     recv: mpsc::Receiver<Metric>,
@@ -161,7 +159,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         clock: C,
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
-        let run_id = Uuid::new_v4();
 
         // Capture start time for timestamp-to-tick conversion. This is the
         // reference point for all historical metrics: accumulator.current_tick
@@ -180,7 +177,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
             target_running,
             registry,
             accumulator,
-            run_id,
             global_labels: FxHashMap::default(),
             snd,
             recv,
@@ -256,7 +252,6 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
             self.capture_writer,
             self.registry,
             self.accumulator,
-            self.run_id,
             self.global_labels,
             self.clock,
         );
