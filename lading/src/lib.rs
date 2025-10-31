@@ -18,6 +18,7 @@ pub mod config;
 pub mod generator;
 pub mod inspector;
 pub mod observer;
+pub(crate) mod proto;
 pub mod target;
 pub mod target_metrics;
 
