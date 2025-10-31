@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2018daaf39aec0b0be403f21375a7bd6ff38932e4824927d605f1e490c43c07c # shrinks to run_id = 00000000-0000-0000-0000-000000000000, time = 0, recorded_at = 0, fetch_index = 0, metric_name = "a", metric_kind = Counter, value = Float(-3.8800685012272795e184), labels = {}
