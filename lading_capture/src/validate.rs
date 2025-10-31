@@ -22,6 +22,8 @@ pub struct ValidationResult {
     pub fetch_index_errors: u128,
     /// Per-series violations (time or `fetch_index` not strictly increasing)
     pub per_series_errors: u128,
+    /// Minimum seconds violations (when `min_seconds` is specified)
+    pub min_seconds_errors: u128,
     /// First error encountered (line number, series id, message)
     pub first_error: Option<(u128, String, String)>,
 }
@@ -30,7 +32,7 @@ impl ValidationResult {
     /// Returns true if validation passed with no errors
     #[must_use]
     pub fn is_valid(&self) -> bool {
-        self.fetch_index_errors == 0 && self.per_series_errors == 0
+        self.fetch_index_errors == 0 && self.per_series_errors == 0 && self.min_seconds_errors == 0
     }
 }
 
@@ -41,10 +43,12 @@ impl ValidationResult {
 /// - Each `fetch_index` maps to exactly one time value (globally)
 /// - Each series (`metric_name` + labels) has strictly increasing time
 /// - Each series (`metric_name` + labels) has strictly increasing `fetch_index`
+/// - If `min_seconds` is specified, capture must contain >= `min_seconds` unique timestamps
 ///
 /// This is the canonical validation logic used by captool and tests.
 #[must_use]
-pub fn validate_lines(lines: &[Line]) -> ValidationResult {
+#[allow(clippy::too_many_lines)]
+pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationResult {
     let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
     let mut series_last_state: HashMap<u64, (u128, u64, String)> = HashMap::new();
     let hash_builder = RandomState::new();
@@ -132,12 +136,39 @@ pub fn validate_lines(lines: &[Line]) -> ValidationResult {
         series_last_state.insert(series_key, (time, fetch_index, series_id));
     }
 
+    // Check minimum seconds requirement if specified
+    let mut min_seconds_errors = 0u128;
+    if let Some(min_secs) = min_seconds {
+        #[allow(clippy::cast_possible_truncation)]
+        let unique_seconds = fetch_index_to_time.len() as u64;
+        if unique_seconds < min_secs {
+            if first_error.is_none() {
+                let msg = format!(
+                    "Insufficient timestamps: expected >= {min_secs} unique timestamps for {min_secs}s experiment, got {unique_seconds}"
+                );
+                first_error = Some((0, "min_seconds".to_string(), msg));
+            }
+            min_seconds_errors = 1;
+        }
+        if unique_seconds > (min_secs + 5) {
+            if first_error.is_none() {
+                let msg = format!(
+                    "Invalid experiment duration, expected < {max} unique timestamps for {min_secs}s experiment, got {unique_seconds}",
+                    max = min_secs + 5,
+                );
+                first_error = Some((0, "min_seconds".to_string(), msg));
+            }
+            min_seconds_errors = 1;
+        }
+    }
+
     ValidationResult {
         line_count: lines.len() as u128,
         unique_series: series_last_state.len(),
         unique_fetch_indices: fetch_index_to_time.len(),
         fetch_index_errors,
         per_series_errors: error_count,
+        min_seconds_errors,
         first_error,
     }
 }

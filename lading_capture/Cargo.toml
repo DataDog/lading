@@ -20,7 +20,7 @@ serde = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 metrics = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["fs", "macros", "time", "sync"] }
+tokio = { workspace = true, features = ["fs", "macros", "time", "sync", "test-util"] }
 thiserror = { workspace = true }
 metrics-util = { workspace = true }
 tracing = { workspace = true }
@@ -32,6 +32,33 @@ doctest = false
 [dev-dependencies]
 proptest = { workspace = true }
 rand = { workspace = true }
+
+[features]
+fuzz = ["dep:arbitrary", "dep:lading-fuzz", "dep:rand", "dep:anyhow"]
+
+[dependencies.arbitrary]
+version = "1"
+features = ["derive"]
+optional = true
+
+[dependencies.lading-fuzz]
+path = "../lading_fuzz"
+optional = true
+
+[dependencies.rand]
+version = "0.9"
+default-features = false
+features = ["small_rng", "std"]
+optional = true
+
+[dependencies.anyhow]
+workspace = true
+optional = true
+
+[[bin]]
+name = "fuzz_capture_harness"
+path = "src/bin/fuzz_capture_harness.rs"
+required-features = ["fuzz"]
 
 [lints]
 workspace = true

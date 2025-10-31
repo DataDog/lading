@@ -448,7 +448,47 @@ mod tests {
         }
     }
 
+    /// Test interval for state machine tests
+    struct TestInterval {
+        clock: TestClock,
+        interval_ms: u128,
+        next_tick_ms: Arc<Mutex<u128>>,
+    }
+
+    impl TestInterval {
+        fn new(clock: TestClock, interval_ms: u128) -> Self {
+            let next_tick_ms = Arc::new(Mutex::new(clock.now_ms() + interval_ms));
+            Self {
+                clock,
+                interval_ms,
+                next_tick_ms,
+            }
+        }
+    }
+
+    impl crate::manager::TickInterval for TestInterval {
+        async fn tick(&mut self) {
+            // Wait until clock time >= next tick deadline
+            loop {
+                let current_ms = self.clock.now_ms();
+                let next = *self.next_tick_ms.lock().unwrap();
+
+                if current_ms >= next {
+                    // Deadline reached, update next tick and return
+                    let mut next_tick = self.next_tick_ms.lock().unwrap();
+                    *next_tick = current_ms + self.interval_ms;
+                    return;
+                }
+
+                // Not ready yet, yield to other tasks
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+
     impl Clock for TestClock {
+        type Interval = TestInterval;
+
         fn now_ms(&self) -> u128 {
             *self.time_ms.lock().unwrap()
         }
@@ -456,6 +496,14 @@ mod tests {
         fn now(&self) -> Instant {
             let time_ms = *self.time_ms.lock().unwrap();
             self.start_instant + Duration::from_millis(time_ms as u64)
+        }
+
+        async fn sleep(&self, duration: Duration) {
+            self.advance(duration.as_millis());
+        }
+
+        fn interval(&self, duration: Duration) -> Self::Interval {
+            TestInterval::new(self.clone(), duration.as_millis())
         }
     }
 
@@ -755,7 +803,7 @@ mod tests {
 
             // Parse the output and validate it satisfies all invariants
             let lines = writer.parse_lines().unwrap();
-            let result = crate::validate::validate_lines(&lines);
+            let result = crate::validate::validate_lines(&lines, None);
 
             prop_assert!(
                 result.is_valid(),
