@@ -69,6 +69,12 @@ pub enum Error {
     StateMachine(#[from] state_machine::Error),
 }
 
+/// Interval abstraction for tick-based operations
+pub trait TickInterval: Send {
+    /// Wait for the next tick
+    fn tick(&mut self) -> impl std::future::Future<Output = ()> + Send;
+}
+
 /// Clock abstraction for controllable time in tests
 ///
 /// Following the pattern from `lading_throttle`, allows production code to
@@ -76,11 +82,34 @@ pub enum Error {
 /// deterministic behavior.
 // NOTE I want to extract both clocks out into a common lading_clock but will do
 // so in a separate thread of work.
-pub trait Clock {
+pub trait Clock: Send + Sync {
+    /// Interval type for this clock
+    type Interval: TickInterval;
     /// Returns the current time in milliseconds since `UNIX_EPOCH`
     fn now_ms(&self) -> u128;
     /// Returns the current time as an Instant
     fn now(&self) -> Instant;
+    /// Sleep for the given duration
+    fn sleep(&self, duration: Duration) -> impl std::future::Future<Output = ()> + Send;
+    /// Create an interval that ticks every duration
+    fn interval(&self, duration: Duration) -> Self::Interval;
+}
+
+/// Real-time interval implementation
+pub struct RealInterval {
+    inner: time::Interval,
+}
+
+impl std::fmt::Debug for RealInterval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealInterval").finish_non_exhaustive()
+    }
+}
+
+impl TickInterval for RealInterval {
+    async fn tick(&mut self) {
+        self.inner.tick().await;
+    }
 }
 
 /// Production clock implementation using real system time
@@ -100,6 +129,8 @@ impl Default for RealClock {
 }
 
 impl Clock for RealClock {
+    type Interval = RealInterval;
+
     fn now_ms(&self) -> u128 {
         let now = self.now();
         let elapsed = now.duration_since(self.start_instant);
@@ -111,6 +142,16 @@ impl Clock for RealClock {
 
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        time::sleep(duration).await;
+    }
+
+    fn interval(&self, duration: Duration) -> Self::Interval {
+        RealInterval {
+            inner: time::interval(duration),
+        }
     }
 }
 
@@ -234,10 +275,12 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         info!("Capture manager installed, recording to capture file.");
 
         while let Ok(false) = self.target_running.try_recv() {
-            time::sleep(Duration::from_millis(100)).await;
+            self.clock.sleep(Duration::from_millis(100)).await;
         }
 
-        let mut flush_interval = time::interval(Duration::from_millis(TICK_DURATION_MS as u64));
+        let mut flush_interval = self
+            .clock
+            .interval(Duration::from_millis(TICK_DURATION_MS as u64));
         let shutdown_wait = self
             .shutdown
             .take()
@@ -265,7 +308,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
                         None => Event::ChannelClosed,
                     }
                 }
-                _ = flush_interval.tick() => Event::FlushTick,
+                () = flush_interval.tick() => Event::FlushTick,
                 () = &mut shutdown_wait => Event::ShutdownSignaled,
             };
 
@@ -305,8 +348,17 @@ impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
     }
 }
 
-pub(crate) struct CaptureRecorder {
-    pub(crate) registry: Arc<Registry<Key, AtomicStorage>>,
+/// Recorder that captures metrics into a registry for later export
+#[derive(Clone)]
+pub struct CaptureRecorder {
+    /// Registry storing metric values
+    pub registry: Arc<Registry<Key, AtomicStorage>>,
+}
+
+impl std::fmt::Debug for CaptureRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureRecorder").finish_non_exhaustive()
+    }
 }
 
 impl metrics::Recorder for CaptureRecorder {

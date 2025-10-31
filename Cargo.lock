@@ -1630,6 +1630,9 @@ dependencies = [
 name = "lading-capture"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
+ "arbitrary",
+ "lading-fuzz",
  "lading-signal",
  "metrics",
  "metrics-util",

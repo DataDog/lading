@@ -246,7 +246,7 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
     }
 
     // Use the canonical validation logic from lading_capture::validate
-    let result = lading_capture::validate::validate_lines(&lines_vec);
+    let result = lading_capture::validate::validate_lines(&lines_vec, min_seconds);
 
     info!(
         "Validated {line_count} lines",
@@ -261,60 +261,43 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
         fetch_count = result.unique_fetch_indices
     );
 
-    if result.fetch_index_errors > 0 {
+    if !result.is_valid() {
         let (line, category, msg) = result
             .first_error
             .as_ref()
-            .expect("first_error must be set when fetch_index_errors > 0");
-        error!(
-            "Found {errors} fetch_index/time mapping violations",
-            errors = result.fetch_index_errors
-        );
-        error!("First violation at line {line}: {category}");
-        error!("  {msg}");
-        error!("Each fetch_index MUST map to exactly one time value");
-        return Err(Error::InvalidArgs);
-    }
+            .expect("first_error must be set when invalid");
 
-    if result.per_series_errors > 0 {
-        let (line, series, msg) = result
-            .first_error
-            .as_ref()
-            .expect("first_error must be set when error_count > 0");
-        error!(
-            "Found {errors} per-series violations",
-            errors = result.per_series_errors
-        );
-        error!("First violation at line {line}: {series}");
-        error!("  {msg}");
-        error!("Each (metric+labels) MUST have strictly increasing time and fetch_index");
-        return Err(Error::InvalidArgs);
-    }
-
-    // Check minimum seconds requirement if specified
-    if let Some(min_secs) = min_seconds {
-        #[allow(clippy::cast_possible_truncation)]
-        let unique_seconds = result.unique_fetch_indices as u64;
-        if unique_seconds < min_secs {
+        if result.fetch_index_errors > 0 {
             error!(
-                "Insufficient timestamps: expected >= {min_secs} unique timestamps for {min_secs}s experiment, got {actual}",
-                min_secs = min_secs,
-                actual = unique_seconds
+                "Found {errors} fetch_index/time mapping violations",
+                errors = result.fetch_index_errors
             );
-            error!("Capture file must contain at least {min_secs} seconds of data");
-            return Err(Error::InvalidArgs);
+            error!("First violation at line {line}: {category}");
+            error!("  {msg}");
+            error!("Each fetch_index MUST map to exactly one time value");
+        } else if result.per_series_errors > 0 {
+            error!(
+                "Found {errors} per-series violations",
+                errors = result.per_series_errors
+            );
+            error!("First violation at line {line}: {category}");
+            error!("  {msg}");
+            error!("Each (metric+labels) MUST have strictly increasing time and fetch_index");
+        } else if result.min_seconds_errors > 0 {
+            error!("Minimum seconds requirement failed");
+            error!("  {msg}");
         }
-        info!(
-            "Minimum seconds requirement satisfied: {actual} >= {min_secs}",
-            actual = unique_seconds,
-            min_secs = min_secs
-        );
+
+        return Err(Error::InvalidArgs);
     }
 
     info!("All invariants satisfied:");
     info!("  - Each fetch_index maps to exactly one time");
     info!("  - Each series has strictly increasing time");
     info!("  - Each series has strictly increasing fetch_index");
+    if let Some(min_secs) = min_seconds {
+        info!("  - Contains at least {min_secs} unique timestamps");
+    }
     info!("Capture file is valid");
     Ok(())
 }
