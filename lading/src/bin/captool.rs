@@ -49,6 +49,9 @@ enum Command {
     Validate {
         /// Path to line-delimited capture file
         capture_path: String,
+        /// Minimum number of seconds (unique timestamps) that must be present in the capture file
+        #[clap(long)]
+        min_seconds: Option<u64>,
     },
 }
 
@@ -79,8 +82,12 @@ async fn main() -> Result<(), Error> {
     let args = Args::parse();
 
     // Handle validate subcommand
-    if let Some(Command::Validate { capture_path }) = args.command {
-        return validate_capture(&capture_path).await;
+    if let Some(Command::Validate {
+        capture_path,
+        min_seconds,
+    }) = args.command
+    {
+        return validate_capture(&capture_path, min_seconds).await;
     }
 
     // For non-subcommand usage, capture_path is required
@@ -204,7 +211,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
+async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> Result<(), Error> {
     let capture_path = path::Path::new(capture_path_str);
     if !capture_path.exists() {
         error!("Capture file {capture_path_str} does not exist");
@@ -282,6 +289,26 @@ async fn validate_capture(capture_path_str: &str) -> Result<(), Error> {
         error!("  {msg}");
         error!("Each (metric+labels) MUST have strictly increasing time and fetch_index");
         return Err(Error::InvalidArgs);
+    }
+
+    // Check minimum seconds requirement if specified
+    if let Some(min_secs) = min_seconds {
+        #[allow(clippy::cast_possible_truncation)]
+        let unique_seconds = result.unique_fetch_indices as u64;
+        if unique_seconds < min_secs {
+            error!(
+                "Insufficient timestamps: expected >= {min_secs} unique timestamps for {min_secs}s experiment, got {actual}",
+                min_secs = min_secs,
+                actual = unique_seconds
+            );
+            error!("Capture file must contain at least {min_secs} seconds of data");
+            return Err(Error::InvalidArgs);
+        }
+        info!(
+            "Minimum seconds requirement satisfied: {actual} >= {min_secs}",
+            actual = unique_seconds,
+            min_secs = min_secs
+        );
     }
 
     info!("All invariants satisfied:");
