@@ -385,6 +385,16 @@ impl Cache {
         Handle { idx: 0 }
     }
 
+    /// Get the total size of the cache in bytes.
+    #[must_use]
+    pub fn total_size(&self) -> u64 {
+        match self {
+            Self::Fixed {
+                total_cycle_size, ..
+            } => *total_cycle_size,
+        }
+    }
+
     /// Get the total bytes of the next block without advancing.
     #[must_use]
     pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
