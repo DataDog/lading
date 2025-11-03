@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Stable throttle now has a 'timeout' configuration parameter to model IO done
   with timeout.
+- Added a `patterned` variant to the file generator that replays deterministic
+  log sequences with realistic request/job/database patterns.
 
 ## [0.28.0]
 ## Added

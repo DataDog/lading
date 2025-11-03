@@ -69,6 +69,35 @@ throughput, although the target might not be able to cope with that load and
 `lading` will consume 256 MiB of RAM to accommodate pre-build payloads. The
 blackhole in this configuration responds with an empty body 200 OK.
 
+### Patterned file generator
+
+For scenarios where the target benefits from realistic log lifecycles `lading`
+now exposes a patterned variant of the file generator. This option precomputes a
+deterministic cycle of common sequences (HTTP successes, transient API
+failures, background jobs, and slow database queries) to avoid purely random log
+lines while remaining repeatable. A minimal configuration looks like:
+
+```yaml
+generator:
+  - file_gen:
+      patterned:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        path_template: "/tmp/lading-patterned/log-%NNN%.log"
+        duplicates: 2
+        maximum_bytes_per_file: 256MiB
+        maximum_prebuild_cache_size_bytes: 64MiB
+        rotate: true
+        distribution:
+          http_success: 70
+          http_error: 15
+          background_job: 10
+          database_slow: 5
+```
+
+See [`examples/lading-patterned-filegen.yaml`](examples/lading-patterned-filegen.yaml)
+for a complete example including throttling.
+
 `lading` supports three types of targets, binary launch mode, PID watch mode,
 and container watch mode.
 
