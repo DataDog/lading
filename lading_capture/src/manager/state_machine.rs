@@ -159,37 +159,16 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     fn handle_metric_received(&mut self, metric: Metric) -> Result<Operation, Error> {
         match metric {
             Metric::Counter(c) => {
-                // Skip metrics with timestamps before capture start to avoid
-                // collapsing multiple historical metrics to the same tick
-                if let Some(tick) = self.instant_to_tick_checked(c.timestamp) {
-                    self.accumulator.counter(c, tick)?;
-                } else {
-                    warn!(
-                        timestamp = ?c.timestamp,
-                        capture_start = ?self.start,
-                        key = %c.key.name(),
-                        "Dropping counter metric with timestamp before capture start"
-                    );
-                }
+                let tick = self.instant_to_tick_checked(c.timestamp).unwrap();
+                self.accumulator.counter(c, tick)?;
             }
             Metric::Gauge(g) => {
-                // Skip metrics with timestamps before capture start to avoid
-                // collapsing multiple historical metrics to the same tick
-                if let Some(tick) = self.instant_to_tick_checked(g.timestamp) {
-                    self.accumulator.gauge(g, tick)?;
-                } else {
-                    warn!(
-                        timestamp = ?g.timestamp,
-                        capture_start = ?self.start,
-                        key = %g.key.name(),
-                        "Dropping gauge metric with timestamp before capture start"
-                    );
-                }
+                let tick = self.instant_to_tick_checked(g.timestamp).unwrap();
+                self.accumulator.gauge(g, tick)?;
             }
         }
         Ok(Operation::Continue)
     }
-
     fn handle_channel_closed() -> Operation {
         warn!("Timestamped metrics unexpected transmission shutdown");
         Operation::Exit
@@ -238,15 +217,11 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
     /// Convert an Instant timestamp to `Accumulator` logical tick time.
     ///
-    /// Returns `None` if the timestamp is earlier than the capture start time,
-    /// as these historical metrics cannot be accurately represented in the
-    /// tick-based system and would cause timestamp ordering issues if collapsed
-    /// to tick 0.
-    #[inline]
     fn instant_to_tick_checked(&self, timestamp: Instant) -> Option<u64> {
         timestamp
             .checked_duration_since(self.start)
             .map(|d| d.as_secs())
+            .or(Some(0))
     }
 
     /// Record all current metrics from the registry and flush mature data
@@ -1142,9 +1117,12 @@ mod tests {
         // Before the fix, this would panic with:
         // "duration_since: supplied instant is later than self"
         let result = machine.next(Event::MetricReceived(counter));
-        assert!(result.is_ok(), "Should handle historical timestamps without panicking");
+        assert!(
+            result.is_ok(),
+            "Should handle historical timestamps without panicking"
+        );
         assert_eq!(result.unwrap(), Operation::Continue);
-        
+
         // The metric should be dropped (not panic), so we just verify OK/Continue was returned
     }
 }
