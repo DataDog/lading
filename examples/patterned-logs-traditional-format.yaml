@@ -1,0 +1,33 @@
+# Example configuration for patterned log generation with traditional syslog-style format
+#
+# This demonstrates using a traditional log format similar to syslog,
+# which is simpler and easier to read but less structured.
+#
+# Run with: lading --config-path examples/patterned-logs-traditional-format.yaml
+
+generator:
+  - file_gen:
+      traditional:
+        seed: [99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99]
+        path_template: "/tmp/patterned-traditional-%NNN%.log"
+        duplicates: 1
+        maximum_bytes_per_file: "25 MB"
+        bytes_per_second: "1 MB"
+        maximum_prebuild_cache_size_bytes: "25 MB"
+        maximum_block_size: "256 KB"
+        rotate: true
+        variant:
+          patterned:
+            service_count: 8
+            host_count: 15
+            user_count: 75
+            format: traditional
+            include_trace_ids: false
+
+blackhole:
+  - log_target:
+      path: "/tmp/patterned-traditional-blackhole.log"
+
+target:
+  type: "no-op"
+

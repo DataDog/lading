@@ -15,6 +15,7 @@ description = "A tool for load testing daemons."
 [dependencies]
 bytes = { workspace = true }
 byte-unit = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 opentelemetry-proto = { version = "0.30.0", features = [
   "trace",
   "metrics",

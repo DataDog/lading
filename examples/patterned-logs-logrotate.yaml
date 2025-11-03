@@ -1,0 +1,35 @@
+# Example configuration for patterned log generation using logrotate file generator
+#
+# This configuration uses the logrotate generator which mimics how logrotate
+# operates in production environments, providing more realistic file rotation
+# behavior.
+#
+# Run with: lading --config-path examples/patterned-logs-logrotate.yaml
+
+generator:
+  - file_gen:
+      logrotate:
+        seed: [13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
+        root: "/tmp/patterned-logs"
+        concurrent_logs: 5
+        maximum_bytes_per_log: "50 MB"
+        total_rotations: 3
+        max_depth: 2
+        bytes_per_second: "5 MB"
+        maximum_prebuild_cache_size_bytes: "100 MB"
+        maximum_block_size: "1 MB"
+        variant:
+          patterned:
+            service_count: 15
+            host_count: 30
+            user_count: 200
+            format: json
+            include_trace_ids: true
+
+blackhole:
+  - log_target:
+      path: "/tmp/patterned-blackhole.log"
+
+target:
+  type: "no-op"
+

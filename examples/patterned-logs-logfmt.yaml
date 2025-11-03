@@ -1,0 +1,33 @@
+# Example configuration for patterned log generation with logfmt format
+#
+# This demonstrates using the logfmt key=value format which is popular
+# with tools like Logrus, Heroku, and others.
+#
+# Run with: lading --config-path examples/patterned-logs-logfmt.yaml
+
+generator:
+  - file_gen:
+      traditional:
+        seed: [42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
+        path_template: "/tmp/patterned-logfmt-%NNN%.log"
+        duplicates: 2
+        maximum_bytes_per_file: "50 MB"
+        bytes_per_second: "2 MB"
+        maximum_prebuild_cache_size_bytes: "50 MB"
+        maximum_block_size: "512 KB"
+        rotate: true
+        variant:
+          patterned:
+            service_count: 5
+            host_count: 10
+            user_count: 50
+            format: logfmt
+            include_trace_ids: false
+
+blackhole:
+  - log_target:
+      path: "/tmp/patterned-logfmt-blackhole.log"
+
+target:
+  type: "no-op"
+
