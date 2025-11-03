@@ -12,11 +12,11 @@ pub(crate) mod state_machine;
 use std::{
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use tokio::sync::Mutex;
+use arc_swap::ArcSwap;
 use tokio::{fs, sync::mpsc, time};
 
 use crate::{accumulator, accumulator::Accumulator, metric::Metric};
@@ -24,7 +24,6 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
-use std::sync::LazyLock;
 use tracing::info;
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
@@ -35,8 +34,8 @@ pub(crate) struct Sender {
     pub(crate) snd: mpsc::Sender<Metric>,
 }
 
-pub(crate) static HISTORICAL_SENDER: LazyLock<Mutex<Option<Sender>>> =
-    LazyLock::new(|| Mutex::new(None));
+pub(crate) static HISTORICAL_SENDER: LazyLock<ArcSwap<Option<Arc<Sender>>>> =
+    LazyLock::new(|| ArcSwap::new(Arc::new(None)));
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -258,9 +257,9 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         // Initialize historical sender to allow generators to send metrics with
         // Instant timestamps. Manager converts these to ticks using self.start
         // as the reference point synchronized with accumulator.current_tick.
-        *HISTORICAL_SENDER.lock().await = Some(Sender {
+        HISTORICAL_SENDER.store(Arc::new(Some(Arc::new(Sender {
             snd: self.snd.clone(),
-        });
+        }))));
 
         // Installing the recorder immediately on startup. This does _not_ wait
         // on experiment_started signal, so warmup data will be included in the

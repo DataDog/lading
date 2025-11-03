@@ -39,11 +39,13 @@ fn make_key(name: &str, labels: &[(&str, &str)]) -> metrics::Key {
 /// Send a historical metric to the capture manager.
 #[inline]
 async fn send_metric(metric: Metric) -> Result<(), Error> {
-    let sender = HISTORICAL_SENDER.lock().await;
+    let sender_guard = HISTORICAL_SENDER.load();
+    let sender = sender_guard
+        .as_ref()
+        .as_ref()
+        .ok_or(Error::NotInitialized)?;
 
     sender
-        .as_ref()
-        .ok_or(Error::NotInitialized)?
         .snd
         .send(metric)
         .await

@@ -15,6 +15,7 @@ description = "A tool for load testing daemons."
 [dependencies]
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
+arc-swap = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }

@@ -12,6 +12,7 @@ members = [
 
 [workspace.dependencies]
 anyhow = { version = "1.0" }
+arc-swap = { version = "1.7" }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
 sha2 = { version = "0.10", default-features = false }
