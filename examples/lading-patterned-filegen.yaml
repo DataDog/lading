@@ -1,0 +1,21 @@
+generator:
+  - file_gen:
+      patterned:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        path_template: "/tmp/lading-patterned/log-%NNN%.log"
+        duplicates: 2
+        maximum_bytes_per_file: 256MiB
+        bytes_per_second: 12MiB
+        maximum_prebuild_cache_size_bytes: 64MiB
+        maximum_line_size: 8KiB
+        rotate: true
+        distribution:
+          http_success: 70
+          http_error: 15
+          background_job: 10
+          database_slow: 5
+
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:10514"
