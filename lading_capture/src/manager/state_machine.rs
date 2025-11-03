@@ -1074,4 +1074,129 @@ mod tests {
         // Should have caught up: 5 ticks for drift + 1 for the flush
         assert_eq!(machine.accumulator.current_tick, initial_tick + 6);
     }
+
+    /// Test that strictly increasing counter and gauge values per interval
+    /// produce strictly monotonic output in both flush and drain operations.
+    ///
+    /// Runs for 600 intervals, incrementing metrics each tick, and verifies
+    /// the JSON output has strictly increasing values throughout.
+    #[test]
+    fn strictly_increasing_values_remain_monotonic() {
+        let writer = InMemoryWriter::new();
+        let clock = TestClock::new(0);
+        let start = clock.now();
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+        let labels = FxHashMap::default();
+
+        let mut machine = StateMachine::new(
+            start,
+            Duration::from_secs(3600),
+            writer.clone(),
+            registry.clone(),
+            accumulator,
+            labels,
+            clock.clone(),
+        );
+
+        let counter_key = Key::from_static_name("monotonic_counter");
+        let gauge_key = Key::from_static_name("monotonic_gauge");
+
+        // Run for 600 intervals. Increment the counter, advance time by 1
+        // second each iteration and trigger a flush. Then, shutdown.
+        for _ in 0..600 {
+            registry
+                .get_or_create_counter(&counter_key, |c| metrics::Counter::from_arc(c.clone()))
+                .increment(1);
+            registry
+                .get_or_create_gauge(&gauge_key, |g| metrics::Gauge::from_arc(g.clone()))
+                .increment(1.0);
+
+            clock.advance(TICK_DURATION_MS);
+
+            machine.next(Event::FlushTick).unwrap();
+        }
+
+        // Track how many lines were written during normal operation (before shutdown)
+        let lines_before_shutdown = writer.parse_lines().unwrap().len();
+        println!("Lines written during normal flush operations: {lines_before_shutdown}");
+
+        machine.next(Event::ShutdownSignaled).unwrap();
+
+        // Parse output and verify strictly increasing values
+        let lines = writer.parse_lines().unwrap();
+        println!("Total lines written (including drain): {}", lines.len());
+        println!("Lines written during drain: {}", lines.len() - lines_before_shutdown);
+
+        let mut last_counter_value: Option<f64> = None;
+        let mut last_gauge_value: Option<f64> = None;
+        let mut counter_line_number = 0;
+        let mut gauge_line_number = 0;
+
+        // Check flush phase
+        for line in &lines[..lines_before_shutdown] {
+            if line.metric_name == "monotonic_counter" {
+                let value = line.value.as_f64();
+                if let Some(last) = last_counter_value {
+                    if value <= last {
+                        println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
+                        println!("Counter line #{counter_line_number}");
+                        println!("Current value: {value}, Previous: {last}");
+                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                        panic!("Counter not strictly increasing during FLUSH: {value} <= {last}");
+                    }
+                }
+                last_counter_value = Some(value);
+                counter_line_number += 1;
+            } else if line.metric_name == "monotonic_gauge" {
+                let value = line.value.as_f64();
+                if let Some(last) = last_gauge_value {
+                    if value <= last {
+                        println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
+                        println!("Gauge line #{gauge_line_number}");
+                        println!("Current value: {value}, Previous: {last}");
+                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                        panic!("Gauge not strictly increasing during FLUSH: {value} <= {last}");
+                    }
+                }
+                last_gauge_value = Some(value);
+                gauge_line_number += 1;
+            }
+        }
+
+        // Check drain phase
+        for line in &lines[lines_before_shutdown..] {
+            if line.metric_name == "monotonic_counter" {
+                let value = line.value.as_f64();
+                if let Some(last) = last_counter_value {
+                    if value <= last {
+                        println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
+                        println!("Counter line #{counter_line_number}");
+                        println!("Current value: {value}, Previous: {last}");
+                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                        panic!("Counter not strictly increasing during DRAIN: {value} <= {last}");
+                    }
+                }
+                last_counter_value = Some(value);
+                counter_line_number += 1;
+            } else if line.metric_name == "monotonic_gauge" {
+                let value = line.value.as_f64();
+                if let Some(last) = last_gauge_value {
+                    if value <= last {
+                        println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
+                        println!("Gauge line #{gauge_line_number}");
+                        println!("Current value: {value}, Previous: {last}");
+                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                        panic!("Gauge not strictly increasing during DRAIN: {value} <= {last}");
+                    }
+                }
+                last_gauge_value = Some(value);
+                gauge_line_number += 1;
+            }
+        }
+
+        // Verify we actually produced output
+        assert!(last_counter_value.is_some(), "No counter values in output");
+        assert!(last_gauge_value.is_some(), "No gauge values in output");
+    }
 }
