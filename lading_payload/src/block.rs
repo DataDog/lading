@@ -309,6 +309,17 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
+            crate::Config::PatternedLog(config) => {
+                let mut serializer = crate::PatternedLog::new(*config)?;
+                let span = span!(Level::INFO, "fixed", payload = "patterned-log");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
             crate::Config::Json => {
                 let span = span!(Level::INFO, "fixed", payload = "json");
                 let _guard = span.enter();
