@@ -159,11 +159,15 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     fn handle_metric_received(&mut self, metric: Metric) -> Result<Operation, Error> {
         match metric {
             Metric::Counter(c) => {
-                let tick = self.instant_to_tick_checked(c.timestamp).unwrap();
+                let tick = self
+                    .instant_to_tick_checked(c.timestamp)
+                    .unwrap_or(self.accumulator.current_tick);
                 self.accumulator.counter(c, tick)?;
             }
             Metric::Gauge(g) => {
-                let tick = self.instant_to_tick_checked(g.timestamp).unwrap();
+                let tick = self
+                    .instant_to_tick_checked(g.timestamp)
+                    .unwrap_or(self.accumulator.current_tick);
                 self.accumulator.gauge(g, tick)?;
             }
         }
