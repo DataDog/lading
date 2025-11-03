@@ -381,18 +381,14 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
     let writer = InMemoryWriter::new();
 
     // Create signal watchers for CaptureManager
-    let (shutdown_watcher, shutdown_bc) = lading_signal::signal();
-    let (exp_watcher, exp_bc) = lading_signal::signal();
-    let (target_watcher, target_bc) = lading_signal::signal();
-
-    // Signal that experiment and target are running
-    exp_bc.signal();
-    target_bc.signal();
+    let (shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
+    let (experiment_watcher, experiment_broadcast) = lading_signal::signal();
+    let (target_watcher, target_broadcast) = lading_signal::signal();
 
     let manager = CaptureManager::new_with_writer(
         writer.clone(),
         shutdown_watcher,
-        exp_watcher,
+        experiment_watcher,
         target_watcher,
         Duration::from_secs(3600),
         RealClock::default(),
@@ -400,6 +396,18 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
 
     let start = Instant::now();
     let manager_handle = tokio::spawn(async move { manager.start().await });
+
+    // Add random delays between signals to simulate real-world conditions
+    // where experiment and target startup timing varies
+    let mut rng = SmallRng::seed_from_u64(config.seed);
+    let experiment_delay_ms = rng.random_range(0..60_000);
+    let target_delay_ms = rng.random_range(0..60_000);
+
+    tokio::time::advance(Duration::from_millis(experiment_delay_ms)).await;
+    experiment_broadcast.signal();
+
+    tokio::time::advance(Duration::from_millis(target_delay_ms)).await;
+    target_broadcast.signal();
 
     let runtime_ms = u64::from(config.runtime_secs) * 1000;
     let mut elapsed_ms = 0u64;
@@ -416,7 +424,7 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
     }
 
     // Shutdown
-    shutdown_bc.signal();
+    shutdown_broadcast.signal();
     manager_handle.await??;
 
     Ok(writer)
