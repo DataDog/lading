@@ -498,10 +498,6 @@ mod tests {
             self.start_instant + Duration::from_millis(time_ms as u64)
         }
 
-        async fn sleep(&self, duration: Duration) {
-            self.advance(duration.as_millis());
-        }
-
         fn interval(&self, duration: Duration) -> Self::Interval {
             TestInterval::new(self.clone(), duration.as_millis())
         }

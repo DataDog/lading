@@ -25,7 +25,7 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use std::sync::LazyLock;
 use tokio::{
-    runtime::Builder,
+    runtime::{Builder, Handle},
     signal,
     sync::broadcast,
     task,
@@ -423,10 +423,9 @@ async fn inner_main(
             for (k, v) in global_labels {
                 capture_manager.add_global_label(k, v);
             }
-            let handle = tokio::spawn(async {
-                capture_manager
-                    .start()
-                    .await
+            let handle = tokio::task::spawn_blocking(move || {
+                Handle::current()
+                    .block_on(capture_manager.start())
                     .expect("failed to start capture manager");
             });
             capture_manager_handle = Some(handle);
