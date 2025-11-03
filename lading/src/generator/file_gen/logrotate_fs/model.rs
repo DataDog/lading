@@ -611,7 +611,7 @@ impl State {
         }
 
         for inode in self.inode_scratch.drain(..) {
-            let (rotated_inode, parent_inode, group_id, ordinal, file_rng) = {
+            let (rotated_inode, parent_inode, group_id, ordinal, file_rng, cache_offset) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
                 // pairs.
@@ -655,6 +655,7 @@ impl State {
                     file.group_id,
                     file.ordinal,
                     file.rng.clone(),
+                    file.cache_offset,
                 )
             };
 
@@ -674,6 +675,14 @@ impl State {
                 Some(rotated_inode),
                 self.total_cache_size,
             );
+
+            let new_file_cache_offset = new_file.cache_offset;
+            if new_file_cache_offset == cache_offset {
+                info!(
+                    "Cache offset is the same as the old offset for file with group ID {group_id}. This is a very rare event but it should be logged.",
+                    group_id = group_id,
+                );
+            }
 
             new_file.advance_time(now);
             self.next_inode = self.next_inode.saturating_add(1);
