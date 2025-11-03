@@ -159,12 +159,32 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     fn handle_metric_received(&mut self, metric: Metric) -> Result<Operation, Error> {
         match metric {
             Metric::Counter(c) => {
-                let tick = self.instant_to_tick(c.timestamp);
-                self.accumulator.counter(c, tick)?;
+                // Skip metrics with timestamps before capture start to avoid
+                // collapsing multiple historical metrics to the same tick
+                if let Some(tick) = self.instant_to_tick_checked(c.timestamp) {
+                    self.accumulator.counter(c, tick)?;
+                } else {
+                    warn!(
+                        timestamp = ?c.timestamp,
+                        capture_start = ?self.start,
+                        key = %c.key.name(),
+                        "Dropping counter metric with timestamp before capture start"
+                    );
+                }
             }
             Metric::Gauge(g) => {
-                let tick = self.instant_to_tick(g.timestamp);
-                self.accumulator.gauge(g, tick)?;
+                // Skip metrics with timestamps before capture start to avoid
+                // collapsing multiple historical metrics to the same tick
+                if let Some(tick) = self.instant_to_tick_checked(g.timestamp) {
+                    self.accumulator.gauge(g, tick)?;
+                } else {
+                    warn!(
+                        timestamp = ?g.timestamp,
+                        capture_start = ?self.start,
+                        key = %g.key.name(),
+                        "Dropping gauge metric with timestamp before capture start"
+                    );
+                }
             }
         }
         Ok(Operation::Continue)
@@ -217,9 +237,16 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     }
 
     /// Convert an Instant timestamp to `Accumulator` logical tick time.
+    ///
+    /// Returns `None` if the timestamp is earlier than the capture start time,
+    /// as these historical metrics cannot be accurately represented in the
+    /// tick-based system and would cause timestamp ordering issues if collapsed
+    /// to tick 0.
     #[inline]
-    fn instant_to_tick(&self, timestamp: Instant) -> u64 {
-        timestamp.duration_since(self.start).as_secs()
+    fn instant_to_tick_checked(&self, timestamp: Instant) -> Option<u64> {
+        timestamp
+            .checked_duration_since(self.start)
+            .map(|d| d.as_secs())
     }
 
     /// Record all current metrics from the registry and flush mature data
@@ -261,8 +288,9 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
         let mut line_count = 0;
         for (key, value, tick) in self.accumulator.flush() {
-            // Calculate time from tick to ensure strictly increasing time values
-            let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+            // Calculate time from tick, adding line_count to ensure strictly increasing time values
+            // Multiple metrics in the same tick get incrementing timestamps
+            let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS) + line_count;
             self.write_metric_line(&key, &value, tick, time_ms)?;
             line_count += 1;
         }
@@ -282,11 +310,14 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         // Drain all remaining data from the accumulator. Collect to release the
         // mutable borrow so we can call write_metric_line.
         let drain: Vec<_> = self.accumulator.drain().collect();
+        let mut line_count: u128 = 0;
         for (_, metrics) in drain {
             for (key, value, tick) in metrics {
-                // Calculate time from tick to ensure strictly increasing time values
-                let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+                // Calculate time from tick, adding line_count to ensure strictly increasing time values
+                // Multiple metrics in the same tick get incrementing timestamps
+                let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS) + line_count;
                 self.write_metric_line(&key, &value, tick, time_ms)?;
+                line_count += 1;
             }
         }
 
@@ -1077,5 +1108,43 @@ mod tests {
 
         // Should have caught up: 5 ticks for drift + 1 for the flush
         assert_eq!(machine.accumulator.current_tick, initial_tick + 6);
+    }
+
+    #[test]
+    fn historical_timestamps_dropped() {
+        let writer = InMemoryWriter::new();
+        let clock = TestClock::new(10_000); // Start at 10 seconds
+        let start = clock.now();
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+        let labels = FxHashMap::default();
+
+        let mut machine = StateMachine::new(
+            start,
+            Duration::from_secs(60),
+            writer,
+            registry,
+            accumulator,
+            labels,
+            clock.clone(),
+        );
+
+        // Create a metric with a timestamp 5 seconds BEFORE the capture start
+        // This simulates the Datadog agent sending historical metrics
+        let historical_timestamp = start - Duration::from_secs(5);
+        let counter = Metric::Counter(Counter {
+            key: Key::from_name("test.counter"),
+            timestamp: historical_timestamp,
+            value: CounterValue::Absolute(42),
+        });
+
+        // This should not panic and should drop the metric with a warning
+        // Before the fix, this would panic with:
+        // "duration_since: supplied instant is later than self"
+        let result = machine.next(Event::MetricReceived(counter));
+        assert!(result.is_ok(), "Should handle historical timestamps without panicking");
+        assert_eq!(result.unwrap(), Operation::Continue);
+        
+        // The metric should be dropped (not panic), so we just verify OK/Continue was returned
     }
 }

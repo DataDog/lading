@@ -365,6 +365,17 @@ impl Cache {
 
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
+            crate::Config::Patterned(config) => {
+                let mut pyld = crate::Patterned::new(&mut rng, *config);
+                let span = span!(Level::INFO, "fixed", payload = "patterned");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut pyld,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
         };
 
         let total_cycle_size = blocks

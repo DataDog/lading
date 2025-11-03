@@ -1,0 +1,36 @@
+# Example configuration for patterned log generation using traditional file generator
+#
+# This configuration generates realistic logs with common patterns including:
+# - Repeated service names, hostnames, and user IDs
+# - HTTP request patterns with realistic status code distributions
+# - Trace IDs for correlation
+# - JSON structured logging format
+#
+# Run with: lading --config-path examples/patterned-logs-traditional.yaml
+
+generator:
+  - file_gen:
+      traditional:
+        seed: [13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
+        path_template: "/tmp/patterned-logs-%NNN%.log"
+        duplicates: 3
+        maximum_bytes_per_file: "100 MB"
+        bytes_per_second: "10 MB"
+        maximum_prebuild_cache_size_bytes: "100 MB"
+        maximum_block_size: "1 MB"
+        rotate: true
+        variant:
+          patterned:
+            service_count: 10
+            host_count: 20
+            user_count: 100
+            format: json
+            include_trace_ids: true
+
+blackhole:
+  - log_target:
+      path: "/tmp/patterned-logs.log"
+
+target:
+  type: "no-op"
+
