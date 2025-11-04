@@ -203,9 +203,9 @@ pub(crate) enum MetricValue {
 ///
 /// # Critical Design Constraints
 ///
-/// This accumulator uses a circular buffer with BUFFER_SIZE (61) slots to store
-/// INTERVALS (60) ticks worth of data. The extra slot prevents overwrite when
-/// exactly INTERVALS ticks are unflushed.
+/// This accumulator uses a circular buffer with `BUFFER_SIZE` (61) slots to
+/// store INTERVALS (60) ticks worth of data. The extra slot prevents overwrite
+/// when exactly INTERVALS ticks are unflushed.
 ///
 /// This means:
 /// - Only the most recent 60 ticks of data can be stored at any time.
@@ -243,7 +243,7 @@ impl Accumulator {
             return Err(Error::FutureTick { tick });
         }
 
-        let tick_offset = self.current_tick - tick;
+        let tick_offset = self.current_tick.saturating_sub(tick);
         if tick_offset >= INTERVALS as u64 {
             warn!(
                 metric_tick = tick,
@@ -284,7 +284,7 @@ impl Accumulator {
             return Err(Error::FutureTick { tick });
         }
 
-        let tick_offset = self.current_tick - tick;
+        let tick_offset = self.current_tick.saturating_sub(tick);
         if tick_offset >= INTERVALS as u64 {
             warn!(
                 metric_tick = tick,

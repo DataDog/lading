@@ -21,7 +21,7 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::atomic::Ordering;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds
@@ -184,7 +184,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         let tick_drift = wall_clock_elapsed.saturating_sub(self.accumulator.current_tick);
 
         if tick_drift > 0 {
-            debug!(
+            warn!(
                 wall_clock_elapsed_secs = wall_clock_elapsed,
                 current_tick = self.accumulator.current_tick,
                 tick_drift_secs = tick_drift,
@@ -224,7 +224,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
     /// Record all current metrics from the registry and flush mature data
     fn record_captures(&mut self) -> Result<(), Error> {
-        let now = self.clock.now();
+        let now = self.clock.now(); // TODO why a clock here again?
         let tick = self.accumulator.current_tick;
 
         // Capture all counter values from the registry
@@ -253,7 +253,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
         let old_tick = self.accumulator.current_tick;
         self.accumulator.advance_tick();
-        tracing::trace!(
+        trace!(
             old_tick = old_tick,
             new_tick = self.accumulator.current_tick,
             "Advanced accumulator tick"
@@ -271,7 +271,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
         let elapsed = now.elapsed();
         if elapsed > Duration::from_secs(1) {
-            tracing::error!("record_captures took {elapsed:?}, exceeded 1 second budget");
+            error!("record_captures took {elapsed:?}, exceeded 1 second budget");
         }
 
         Ok(())
@@ -1203,5 +1203,258 @@ mod tests {
         // Verify we actually produced output
         assert!(last_counter_value.is_some(), "No counter values in output");
         assert!(last_gauge_value.is_some(), "No gauge values in output");
+    }
+
+    // Test that verifies the number of points to drain based on run duration.
+    // For runs shorter than INTERVALS (60 seconds), we drain all N ticks. For
+    // runs >= INTERVALS, we drain the unflushed window (up to INTERVALS ticks).
+    #[test]
+    fn drain_points_based_on_run_duration() {
+        // Test case 1: Short run (30 seconds)
+        {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(0);
+            let start = clock.now();
+            let registry = Arc::new(Registry::new(AtomicStorage));
+            let accumulator = Accumulator::new();
+            let labels = FxHashMap::default();
+
+            let recorder = crate::manager::CaptureRecorder {
+                registry: Arc::clone(&registry),
+            };
+
+            let mut machine = StateMachine::new(
+                start,
+                Duration::from_secs(3600),
+                writer.clone(),
+                registry,
+                accumulator,
+                labels,
+                clock.clone(),
+            );
+
+            // Simulate 30 seconds of operation with metrics
+            for _ in 0..30 {
+                metrics::with_local_recorder(&recorder, || {
+                    metrics::counter!("test_counter").increment(1);
+                });
+                clock.advance(1000); // Advance 1 second
+                let _ = machine.next(Event::FlushTick);
+            }
+
+            // Shutdown and count drain output
+            let _ = machine.next(Event::ShutdownSignaled);
+            let lines = writer.parse_lines().expect("should parse");
+            let unique_ticks: std::collections::HashSet<u64> =
+                lines.iter().map(|l| l.fetch_index).collect();
+
+            // We start at tick 0 and advance 30 times, so we have ticks 0-30 (31 total)
+            assert_eq!(
+                unique_ticks.len(),
+                31,
+                "30-second run should drain 31 unique ticks (0-30)"
+            );
+        }
+
+        // Test case 2: Exactly INTERVALS seconds (60 seconds)
+        {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(0);
+            let start = clock.now();
+            let registry = Arc::new(Registry::new(AtomicStorage));
+            let accumulator = Accumulator::new();
+            let labels = FxHashMap::default();
+
+            let recorder = crate::manager::CaptureRecorder {
+                registry: Arc::clone(&registry),
+            };
+
+            let mut machine = StateMachine::new(
+                start,
+                Duration::from_secs(3600),
+                writer.clone(),
+                registry,
+                accumulator,
+                labels,
+                clock.clone(),
+            );
+
+            // Simulate 60 seconds with normal flush pattern
+            for _ in 0..60 {
+                metrics::with_local_recorder(&recorder, || {
+                    metrics::counter!("test_counter").increment(1);
+                });
+                clock.advance(1000); // Advance 1 second
+                let _ = machine.next(Event::FlushTick);
+            }
+
+            // Shutdown and count drain output
+            let _ = machine.next(Event::ShutdownSignaled);
+            let lines = writer.parse_lines().expect("should parse");
+            let unique_ticks: std::collections::HashSet<u64> =
+                lines.iter().map(|l| l.fetch_index).collect();
+
+            // After 60 FlushTick events, we have:
+            //
+            // - Advanced to tick 60
+            // - Flushed tick 0 (when we reached tick 60)
+            // - Written metrics for ticks 0-60
+            //
+            // Total output includes both the flushed tick 0 and drained ticks
+            // 1-60 (61 ticks total).
+            assert_eq!(
+                unique_ticks.len(),
+                61,
+                "60-second run should output 61 unique ticks total (0-60)"
+            );
+        }
+
+        // Test case 3: Run for 120 seconds
+        {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(0);
+            let start = clock.now();
+            let registry = Arc::new(Registry::new(AtomicStorage));
+            let accumulator = Accumulator::new();
+            let labels = FxHashMap::default();
+
+            let recorder = crate::manager::CaptureRecorder {
+                registry: Arc::clone(&registry),
+            };
+
+            let mut machine = StateMachine::new(
+                start,
+                Duration::from_secs(3600),
+                writer.clone(),
+                registry,
+                accumulator,
+                labels,
+                clock.clone(),
+            );
+
+            // Simulate 120 seconds with normal flush pattern
+            for _ in 0..120 {
+                metrics::with_local_recorder(&recorder, || {
+                    metrics::counter!("test_counter").increment(1);
+                });
+                clock.advance(1000); // Advance 1 second
+                let _ = machine.next(Event::FlushTick);
+            }
+
+            // Shutdown and count drain output
+            let _ = machine.next(Event::ShutdownSignaled);
+            let lines = writer.parse_lines().expect("should parse");
+
+            // Get unique ticks from drain (should be the unflushed window)
+            let drain_ticks: std::collections::HashSet<u64> = lines
+                .iter()
+                .filter(|l| l.fetch_index >= 61) // Only count the drain output
+                .map(|l| l.fetch_index)
+                .collect();
+
+            // After 120 ticks, we've flushed ticks 0-60, drain outputs ticks 61-120 (60 ticks)
+            assert_eq!(
+                drain_ticks.len(),
+                60,
+                "120-second run should drain 60 unique ticks (61-120)"
+            );
+        }
+
+        // Test case 4: Run for 180 seconds
+        {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(0);
+            let start = clock.now();
+            let registry = Arc::new(Registry::new(AtomicStorage));
+            let accumulator = Accumulator::new();
+            let labels = FxHashMap::default();
+
+            let recorder = crate::manager::CaptureRecorder {
+                registry: Arc::clone(&registry),
+            };
+
+            let mut machine = StateMachine::new(
+                start,
+                Duration::from_secs(3600),
+                writer.clone(),
+                registry,
+                accumulator,
+                labels,
+                clock.clone(),
+            );
+
+            // Simulate 180 seconds with normal flush pattern
+            for _ in 0..180 {
+                metrics::with_local_recorder(&recorder, || {
+                    metrics::counter!("test_counter").increment(1);
+                });
+                clock.advance(1000); // Advance 1 second
+                let _ = machine.next(Event::FlushTick);
+            }
+
+            // Shutdown and count drain output
+            let _ = machine.next(Event::ShutdownSignaled);
+            let lines = writer.parse_lines().expect("should parse");
+
+            // Get unique ticks from drain (should be the unflushed window)
+            let drain_ticks: std::collections::HashSet<u64> = lines
+                .iter()
+                .filter(|l| l.fetch_index >= 121) // Only count the drain output
+                .map(|l| l.fetch_index)
+                .collect();
+
+            // After 180 ticks, we've flushed ticks 0-120, drain outputs ticks 121-180 (60 ticks)
+            assert_eq!(
+                drain_ticks.len(),
+                60,
+                "180-second run should drain 60 unique ticks (121-180)"
+            );
+        }
+
+        // Test case 5: Run with minimal flushes
+        {
+            let writer = InMemoryWriter::new();
+            let clock = TestClock::new(0);
+            let start = clock.now();
+            let registry = Arc::new(Registry::new(AtomicStorage));
+            let accumulator = Accumulator::new();
+            let labels = FxHashMap::default();
+
+            let recorder = crate::manager::CaptureRecorder {
+                registry: Arc::clone(&registry),
+            };
+
+            let mut machine = StateMachine::new(
+                start,
+                Duration::from_secs(3600),
+                writer.clone(),
+                registry,
+                accumulator,
+                labels,
+                clock.clone(),
+            );
+
+            // Write a metric and do one flush to get it into the accumulator
+            metrics::with_local_recorder(&recorder, || {
+                metrics::counter!("test_counter").increment(1);
+            });
+
+            // One FlushTick to record the metric at tick 0 and advance to tick 1
+            let _ = machine.next(Event::FlushTick);
+
+            // Shutdown immediately
+            let _ = machine.next(Event::ShutdownSignaled);
+            let lines = writer.parse_lines().expect("should parse");
+
+            // Should have tick 0 from the single flush/advance
+            let unique_ticks: std::collections::HashSet<u64> =
+                lines.iter().map(|l| l.fetch_index).collect();
+
+            assert_eq!(
+                unique_ticks.len(),
+                1,
+                "Run with single FlushTick should drain tick 0"
+            );
+        }
     }
 }

@@ -43,7 +43,7 @@ impl ValidationResult {
 /// - Each `fetch_index` maps to exactly one time value (globally)
 /// - Each series (`metric_name` + labels) has strictly increasing time
 /// - Each series (`metric_name` + labels) has strictly increasing `fetch_index`
-/// - If `min_seconds` is specified, capture must contain >= `min_seconds` unique timestamps
+/// - If `min_seconds` is specified, capture must contain >= `min_seconds` unique timestamps TODO make this a tighter inequality
 ///
 /// This is the canonical validation logic used by captool and tests.
 #[must_use]
