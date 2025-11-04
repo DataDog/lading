@@ -340,7 +340,7 @@ impl Accumulator {
     /// Returns metrics from the interval that is INTERVALS ticks old. If the
     /// current tick has not yet reached INTERVALS, returns an empty iterator.
     pub(crate) fn flush(&mut self) -> impl Iterator<Item = (Key, MetricValue, u64)> + use<> {
-        let mut metrics = Vec::new();
+        let mut metrics = Vec::with_capacity(self.counters.len() + self.gauges.len());
 
         if self.current_tick < INTERVALS as u64 {
             return metrics.into_iter();
@@ -348,13 +348,12 @@ impl Accumulator {
 
         let flush_tick = self.current_tick - INTERVALS as u64;
 
-        // Assert we never flush the same tick twice
-        if let Some(last_flushed) = self.last_flushed_tick {
-            assert!(
-                flush_tick > last_flushed,
-                "Attempted to flush tick {flush_tick} but already flushed tick {last_flushed}"
-            );
-        }
+        // Debug check to catch misuse during development
+        debug_assert!(
+            self.last_flushed_tick.map_or(true, |last| flush_tick > last),
+            "flush_tick {flush_tick} should be > last_flushed {:?}",
+            self.last_flushed_tick
+        );
 
         let flush_interval = interval_idx(flush_tick);
 
