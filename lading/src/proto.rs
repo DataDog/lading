@@ -12,5 +12,15 @@ pub(crate) mod datadog {
             #![allow(dead_code)]
             include!("proto/datadog.agentpayload.rs");
         }
+
+        /// Stateful logs intake via gRPC
+        pub(crate) mod stateful {
+            #![allow(clippy::pedantic)]
+            #![allow(missing_docs)]
+            #![allow(unreachable_pub)]
+            #![allow(dead_code)]
+            #![allow(clippy::unwrap_used)]
+            include!("proto/intake.rs");
+        }
     }
 }
