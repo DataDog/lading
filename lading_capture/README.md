@@ -30,7 +30,7 @@ mkdir -p seeds
 
 Seed format (10 bytes):
 - 8 bytes: seed (u64, little-endian) - seeds the RNG for operation generation
-- 2 bytes: `runtime_secs` (u16, little-endian, 1-300) - how long to run the test
+- 2 bytes: `runtime_secs` (u16, little-endian, 1-150) - how long to run the test
 
 Examples:
 
