@@ -297,11 +297,12 @@ async fn handle_v2_protobuf(
                     continue;
                 }
 
-                // Parse Datadog tags (format: "key:value") into label pairs
+                // Parse Datadog tags (format: "key:value" or "key") into label pairs.
+                // Key-only tags are represented with an empty value.
                 let tag_pairs: Vec<(&str, &str)> = series
                     .tags
                     .iter()
-                    .filter_map(|tag| tag.split_once(':'))
+                    .map(|tag| tag.split_once(':').unwrap_or((tag.as_str(), "")))
                     .collect();
 
                 // Metric types from the agent_payload.proto:
