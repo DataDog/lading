@@ -24,7 +24,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
-use lading_capture::{counter_absolute, gauge_set};
+use lading_capture::{counter_incr, gauge_set};
 use metrics::counter;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -307,25 +307,29 @@ async fn handle_v2_protobuf(
 
                 // Metric types from the agent_payload.proto:
                 //
-                // - COUNT (1): Monotonic cumulative counter value
-                // - RATE (2): Already computed per-second rate (not cumulative)
+                // - COUNT (1): Delta count over the interval
+                // - RATE (2): Already computed per-second rate
                 // - GAUGE (3): Point-in-time value
                 //
-                // For COUNT we use counter_absolute, for RATE/GAUGE we use
+                // For COUNT we use counter_incr, for RATE/GAUGE we use
                 // gauge_set. Timestamps are Unix epoch.
                 for point in &series.points {
                     let timestamp = unix_to_instant(point.timestamp);
 
                     let metrics_res = match series.r#type {
                         1 => {
-                            // COUNT - use counter_absolute
+                            // COUNT
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let value = point.value.round() as u64;
-                            counter_absolute(&series.metric, &tag_pairs, value, timestamp).await
+                            counter_incr(&series.metric, &tag_pairs, value, timestamp).await
                         }
-                        _ => {
-                            // RATE (2) or GAUGE (3) or UNSPECIFIED (0) - use gauge_set
+                        2 | 3 => {
+                            // RATE | GAUGE
                             gauge_set(&series.metric, &tag_pairs, point.value, timestamp).await
+                        }
+                        i => {
+                            warn!("Unknown metric type, skipping: {i}");
+                            Ok(())
                         }
                     };
                     if let Err(e) = metrics_res {
