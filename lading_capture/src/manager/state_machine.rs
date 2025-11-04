@@ -196,7 +196,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         }
 
         // Record current metrics from registry and flush mature data
-        self.record_captures()?;
+        self.record_captures(tick_start)?;
 
         // Performance check
         let record_duration = self.clock.now().duration_since(tick_start);
@@ -223,8 +223,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
     }
 
     /// Record all current metrics from the registry and flush mature data
-    fn record_captures(&mut self) -> Result<(), Error> {
-        let now = self.clock.now(); // TODO why a clock here again?
+    fn record_captures(&mut self, now: Instant) -> Result<(), Error> {
         let tick = self.accumulator.current_tick;
 
         // Capture all counter values from the registry
@@ -268,12 +267,6 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         }
 
         debug!("Recording {line_count} captures",);
-
-        let elapsed = now.elapsed();
-        if elapsed > Duration::from_secs(1) {
-            error!("record_captures took {elapsed:?}, exceeded 1 second budget");
-        }
-
         Ok(())
     }
 
