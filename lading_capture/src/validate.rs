@@ -150,6 +150,7 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
             }
             min_seconds_errors = 1;
         }
+        // NOTE 5 seconds is arbitrary, "large enough, but not too large".
         if unique_seconds > (min_secs + 5) {
             if first_error.is_none() {
                 let msg = format!(
