@@ -120,16 +120,15 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
         capture_writer: W,
         registry: Arc<Registry<Key, AtomicStorage>>,
         accumulator: Accumulator,
-        global_labels: &FxHashMap<String, String>,
+        mut global_labels: FxHashMap<String, String>,
         clock: C,
     ) -> Self {
         let start_ms = clock.now_ms();
         let run_id = Uuid::new_v4();
 
-        // Pre-filter global labels to remove reserved names
-        let mut filtered_global_labels = global_labels.clone();
+        // Filter out reserved names from global labels in place
         for reserved in RESERVED_LABEL_NAMES {
-            if filtered_global_labels.remove(*reserved).is_some() {
+            if global_labels.remove(*reserved).is_some() {
                 warn!(
                     label_key = *reserved,
                     "Filtered out reserved global label that would collide with capture file field"
@@ -145,7 +144,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             capture_writer,
             registry,
             accumulator,
-            filtered_global_labels,
+            filtered_global_labels: global_labels,
             clock,
         }
     }
@@ -674,7 +673,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 
@@ -792,7 +791,7 @@ mod tests {
             writer,
             registry,
             accumulator,
-            &labels,
+            labels,
             clock.clone(),
         );
 
@@ -822,7 +821,7 @@ mod tests {
             writer,
             registry,
             accumulator,
-            &labels,
+            labels,
             clock,
         );
 
@@ -846,7 +845,7 @@ mod tests {
             writer,
             registry,
             accumulator,
-            &labels,
+            labels,
             clock.clone(),
         );
 
@@ -875,7 +874,7 @@ mod tests {
             writer,
             registry,
             accumulator,
-            &labels,
+            labels,
             clock,
         );
 
@@ -907,7 +906,7 @@ mod tests {
             writer.clone(),
             registry,
             accumulator,
-            &global_labels,
+            global_labels,
             clock.clone(),
         );
 
@@ -1024,7 +1023,7 @@ mod tests {
             writer,
             registry,
             accumulator,
-            &labels,
+            labels,
             clock.clone(),
         );
 
@@ -1060,7 +1059,7 @@ mod tests {
             writer.clone(),
             registry.clone(),
             accumulator,
-            &labels,
+            labels,
             clock.clone(),
         );
 
@@ -1191,7 +1190,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 
@@ -1237,7 +1236,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 
@@ -1290,7 +1289,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 
@@ -1341,7 +1340,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 
@@ -1392,7 +1391,7 @@ mod tests {
                 writer.clone(),
                 registry,
                 accumulator,
-                &labels,
+                labels,
                 clock.clone(),
             );
 

@@ -286,7 +286,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
             self.capture_writer,
             self.registry,
             self.accumulator,
-            &self.global_labels,
+            self.global_labels,
             self.clock,
         );
 
