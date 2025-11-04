@@ -116,11 +116,16 @@ use tracing::warn;
 use crate::metric::{Counter, CounterValue, Gauge, GaugeValue};
 
 pub(crate) const INTERVALS: usize = 60;
+// The actual buffer size is INTERVALS + 1 to prevent accidental overwrite when
+// we have exactly INTERVALS unflushed ticks. This extra slot acts as a guard to
+// prevent the write-advance-flush pattern from overwriting unflushed data.
+const BUFFER_SIZE: usize = INTERVALS + 1;
 
 #[inline]
 #[allow(clippy::cast_possible_truncation)]
 fn interval_idx(tick: u64) -> usize {
-    (tick % (INTERVALS as u64)) as usize
+    // Use BUFFER_SIZE for modulo to utilize the extra guard slot
+    (tick % (BUFFER_SIZE as u64)) as usize
 }
 
 /// Errors produced by [`Accumulator`]
@@ -138,27 +143,44 @@ pub enum Error {
 ///
 /// Each iteration flushes metrics from a single interval until no intervals
 /// remain.
-pub(crate) struct DrainIter<'a> {
-    accumulator: &'a mut Accumulator,
+pub(crate) struct DrainIter {
+    accumulator: Accumulator,
     remaining: usize,
 }
 
-impl Iterator for DrainIter<'_> {
-    type Item = (u64, Vec<(Key, MetricValue, u64)>);
+impl Iterator for DrainIter {
+    type Item = Vec<(Key, MetricValue, u64)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
             return None;
         }
-
         self.remaining -= 1;
-        // Advance BEFORE flushing to avoid re-flushing the tick that was
-        // just flushed in the last record_captures() call
-        self.accumulator.advance_tick();
-        let current_tick = self.accumulator.current_tick;
-        let metrics: Vec<_> = self.accumulator.flush().collect();
 
-        Some((current_tick, metrics))
+        // Calculate which tick to flush based on what's already been flushed
+        let tick_to_flush = if let Some(last) = self.accumulator.last_flushed_tick {
+            last + 1
+        } else {
+            0
+        };
+
+        // Directly gather metrics from the tick's interval without going
+        // through flush(). flush/advance_tick are intended as a pair of
+        // operations and one should not be used without the other.
+        let mut metrics = Vec::new();
+        let interval = interval_idx(tick_to_flush);
+
+        for (key, values) in &self.accumulator.counters {
+            let value = values[interval];
+            metrics.push((key.clone(), MetricValue::Counter(value), tick_to_flush));
+        }
+        for (key, values) in &self.accumulator.gauges {
+            let value = values[interval];
+            metrics.push((key.clone(), MetricValue::Gauge(value), tick_to_flush));
+        }
+
+        self.accumulator.last_flushed_tick = Some(tick_to_flush);
+        Some(metrics)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -166,7 +188,7 @@ impl Iterator for DrainIter<'_> {
     }
 }
 
-impl ExactSizeIterator for DrainIter<'_> {}
+impl ExactSizeIterator for DrainIter {}
 
 /// Represents a metric value (counter or gauge)
 #[derive(Debug, Clone)]
@@ -178,13 +200,23 @@ pub(crate) enum MetricValue {
 }
 
 /// Accumulator with 60-interval rolling window for metrics
+///
+/// # Critical Design Constraints
+///
+/// This accumulator uses a circular buffer with BUFFER_SIZE (61) slots to store
+/// INTERVALS (60) ticks worth of data. The extra slot prevents overwrite when
+/// exactly INTERVALS ticks are unflushed.
+///
+/// This means:
+/// - Only the most recent 60 ticks of data can be stored at any time.
+/// - When tick N is written, it goes to slot N % 61.
+/// - The extra slot ensures the write-advance-flush pattern doesn't overwrite
+///   data.
 #[derive(Debug)]
 pub(crate) struct Accumulator {
-    counters: FxHashMap<Key, [u64; INTERVALS]>,
-    gauges: FxHashMap<Key, [f64; INTERVALS]>,
+    counters: FxHashMap<Key, [u64; BUFFER_SIZE]>,
+    gauges: FxHashMap<Key, [f64; BUFFER_SIZE]>,
     pub(crate) current_tick: u64,
-    /// Tracks the last tick that was flushed via `flush()`. Used to assert we
-    /// never flush the same tick twice.
     last_flushed_tick: Option<u64>,
 }
 
@@ -224,7 +256,7 @@ impl Accumulator {
             return Err(Error::TickTooOld { tick });
         }
 
-        let values = self.counters.entry(c.key).or_insert([0; INTERVALS]);
+        let values = self.counters.entry(c.key).or_insert([0; BUFFER_SIZE]);
 
         for offset in 0..=tick_offset {
             let target_tick = self.current_tick - offset; // always lands within u64 range
@@ -265,7 +297,7 @@ impl Accumulator {
             return Err(Error::TickTooOld { tick });
         }
 
-        let values = self.gauges.entry(g.key).or_insert([0.0; INTERVALS]);
+        let values = self.gauges.entry(g.key).or_insert([0.0; BUFFER_SIZE]);
 
         for offset in 0..=tick_offset {
             let target_tick = self.current_tick - offset; // always lands within u64 range
@@ -282,6 +314,9 @@ impl Accumulator {
     }
 
     /// Advance tick and copy forward values
+    ///
+    /// This function is intended to be paired with calls to `flush`. It WILL
+    /// overwrite data if data is not flushed in a timely fashion.
     pub(crate) fn advance_tick(&mut self) {
         let old_interval = interval_idx(self.current_tick);
         // WARNING: When we hit u64::MAX whether this wrapping_add is correct or
@@ -341,24 +376,34 @@ impl Accumulator {
     ///
     /// Only flushes ticks that haven't been flushed yet. If the most recent
     /// `flush()` call already wrote tick N, drain will start from tick N+1.
-    pub(crate) fn drain(&mut self) -> DrainIter<'_> {
+    pub(crate) fn drain(self) -> DrainIter {
         // Calculate how many unflushed ticks remain.
         //
-        // If we have flushed, calculate the unflushed intervals with reference
-        // to the last_flushed tick, capped at INTERVALS. If we have not
-        // flushed, simply flush INTERVALS.
+        // After normal operation, current_tick points to the next tick that would
+        // be written to. All ticks from 0 to (current_tick - 1) have data.
         let remaining = if let Some(last_flushed) = self.last_flushed_tick {
-            let next_flushable = last_flushed + 1;
-            let last_possible = self.current_tick;
-            let unflushed = last_possible
-                .saturating_sub(next_flushable)
-                .saturating_add(1);
-            #[allow(clippy::cast_possible_truncation)]
-            {
-                unflushed.min(INTERVALS as u64) as usize
+            // We need to flush from (last_flushed + 1) to (current_tick - 1)
+            let next_to_flush = last_flushed + 1;
+            let last_with_data = self.current_tick.saturating_sub(1);
+
+            if next_to_flush > last_with_data {
+                // All ticks have been flushed
+                0
+            } else {
+                // Number of ticks to flush
+                let to_flush = last_with_data - next_to_flush + 1;
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    to_flush.min(INTERVALS as u64) as usize
+                }
             }
         } else {
-            INTERVALS
+            // No flushes yet. We can flush all ticks that have data (0 to current_tick-1)
+            // Capped at INTERVALS since that's all we can store
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                self.current_tick.min(INTERVALS as u64) as usize
+            }
         };
 
         DrainIter {
@@ -819,7 +864,7 @@ mod tests {
         // At this point we've flushed many ticks during normal operation
         // Now simulate shutdown: drain remaining data
         let mut all_ticks = Vec::new();
-        for (_, metrics) in acc.drain() {
+        for metrics in acc.drain() {
             for (_, _, tick) in metrics {
                 all_ticks.push(tick);
             }
@@ -874,14 +919,14 @@ mod tests {
 
         // Collect all drained data
         let mut all_results = Vec::new();
-        for (current_tick, metrics) in drain_iter {
+        for metrics in drain_iter {
             for (key, value, tick) in metrics {
-                all_results.push((key, value, tick, current_tick));
+                all_results.push((key, value, tick));
             }
         }
 
         // Extract ticks from results
-        let ticks: Vec<u64> = all_results.iter().map(|(_, _, tick, _)| *tick).collect();
+        let ticks: Vec<u64> = all_results.iter().map(|(_, _, tick)| *tick).collect();
 
         // Count occurrences of each tick
         let mut tick_counts: FxHashMap<u64, usize> = FxHashMap::default();
@@ -899,15 +944,6 @@ mod tests {
 
         // Verify we got data
         assert!(!all_results.is_empty(), "drain should return data");
-
-        // Verify current_tick increases monotonically in the results
-        let current_ticks: Vec<u64> = all_results.iter().map(|(_, _, _, ct)| *ct).collect();
-        for window in current_ticks.windows(2) {
-            assert!(
-                window[1] >= window[0],
-                "current_tick should increase monotonically"
-            );
-        }
     }
 
     // Test tick_offset > 0 propagates to multiple intervals for counter
@@ -1138,16 +1174,17 @@ mod tests {
             acc.advance_tick();
         }
 
-        // Write again at current tick (70) - intervals wrap, so interval[70%60=10] gets reused
+        // Write again at current tick (70) - intervals wrap, so interval[70%61=9] gets reused
         counter_increment(&mut acc, key.clone(), 70, 50).unwrap();
 
         // Value at current tick should be forwarded value (100) + new increment (50)
         assert_eq!(acc.get_counter_value(&key, acc.current_tick), 150);
 
-        // Verify interval_idx wraps correctly
-        assert_eq!(interval_idx(0), interval_idx(60));
-        assert_eq!(interval_idx(1), interval_idx(61));
-        assert_eq!(interval_idx(59), interval_idx(119));
+        // Verify interval_idx wraps correctly with 61-slot buffer
+        // Now indices wrap at 61, not 60
+        assert_eq!(interval_idx(0), interval_idx(61));
+        assert_eq!(interval_idx(1), interval_idx(62));
+        assert_eq!(interval_idx(60), interval_idx(121));
     }
 
     // Test absolute counter write to historical tick

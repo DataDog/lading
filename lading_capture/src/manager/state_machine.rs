@@ -279,10 +279,13 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 
     /// Drain all accumulated metrics and write them to the capture file
     fn drain_and_write(&mut self) -> Result<(), Error> {
-        // Drain all remaining data from the accumulator. Collect to release the
-        // mutable borrow so we can call write_metric_line.
-        let drain: Vec<_> = self.accumulator.drain().collect();
-        for (_, metrics) in drain {
+        // Replace the accumulator with a new one and consume the old one for draining
+        // This is only called during shutdown, so we don't need the accumulator anymore
+        let accumulator = std::mem::replace(&mut self.accumulator, Accumulator::new());
+
+        // Drain all remaining data from the accumulator
+        // Process each tick's metrics immediately to maintain order
+        for metrics in accumulator.drain() {
             for (key, value, tick) in metrics {
                 // Calculate time from tick to ensure strictly increasing time values
                 let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
@@ -1113,7 +1116,6 @@ mod tests {
                 .increment(1.0);
 
             clock.advance(TICK_DURATION_MS);
-
             machine.next(Event::FlushTick).unwrap();
         }
 
@@ -1126,7 +1128,10 @@ mod tests {
         // Parse output and verify strictly increasing values
         let lines = writer.parse_lines().unwrap();
         println!("Total lines written (including drain): {}", lines.len());
-        println!("Lines written during drain: {}", lines.len() - lines_before_shutdown);
+        println!(
+            "Lines written during drain: {}",
+            lines.len() - lines_before_shutdown
+        );
 
         let mut last_counter_value: Option<f64> = None;
         let mut last_gauge_value: Option<f64> = None;
