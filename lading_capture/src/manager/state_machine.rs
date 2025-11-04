@@ -379,48 +379,13 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::writer::InMemoryWriter;
     use metrics_util::registry::{AtomicStorage, Registry};
     use proptest::prelude::*;
     use std::{
-        io,
         sync::{Arc, Mutex},
         time::Duration,
     };
-
-    /// In-memory writer for testing
-    #[derive(Clone)]
-    struct InMemoryWriter {
-        buffer: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl InMemoryWriter {
-        fn new() -> Self {
-            Self {
-                buffer: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn parse_lines(&self) -> Result<Vec<json::Line>, serde_json::Error> {
-            let buffer = self.buffer.lock().unwrap();
-            let content_str = String::from_utf8_lossy(&buffer);
-            content_str
-                .lines()
-                .filter(|line| !line.is_empty())
-                .map(serde_json::from_str)
-                .collect()
-        }
-    }
-
-    impl Write for InMemoryWriter {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.buffer.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
 
     /// Test clock for deterministic time control
     #[derive(Clone)]
@@ -1034,8 +999,7 @@ mod tests {
         );
 
         // Verify the JSON doesn't have duplicate fields
-        let buffer = writer.buffer.lock().unwrap();
-        let raw_json = String::from_utf8_lossy(&buffer);
+        let raw_json = writer.get_string();
         for line in raw_json.lines() {
             let run_id_count = line.matches("\"run_id\"").count();
             assert_eq!(

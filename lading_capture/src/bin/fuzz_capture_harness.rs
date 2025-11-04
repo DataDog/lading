@@ -10,48 +10,15 @@
 
 use anyhow::{Context, Result};
 use arbitrary::Arbitrary;
-use lading_capture::{json::Line, manager::CaptureManager, manager::RealClock, validate};
+use lading_capture::{
+    json::Line, manager::CaptureManager, manager::RealClock, test::writer::InMemoryWriter, validate,
+};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const MAX_RUNTIME_SECS: u16 = 150;
-
-// TODO this is duplicated in a few places in this test code, ought to make test
-// utilities section.
-/// In-memory writer
-#[derive(Clone)]
-struct InMemoryWriter {
-    buffer: Arc<Mutex<Vec<u8>>>,
-}
-
-impl InMemoryWriter {
-    fn new() -> Self {
-        Self {
-            buffer: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    fn get_bytes(&self) -> Vec<u8> {
-        self.buffer.lock().expect("mutex poisoned").clone()
-    }
-}
-
-impl Write for InMemoryWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.buffer
-            .lock()
-            .expect("mutex poisoned")
-            .extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 
 /// Simple string pool for generating random metric names and label values,
 /// taken from the payloads, should be shared common.

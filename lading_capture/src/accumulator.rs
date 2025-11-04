@@ -350,7 +350,7 @@ impl Accumulator {
 
         // Debug check to catch misuse during development
         debug_assert!(
-            self.last_flushed_tick.map_or(true, |last| flush_tick > last),
+            self.last_flushed_tick.is_none_or(|last| flush_tick > last),
             "flush_tick {flush_tick} should be > last_flushed {:?}",
             self.last_flushed_tick
         );

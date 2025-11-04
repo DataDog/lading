@@ -12,6 +12,9 @@ pub mod manager;
 pub(crate) mod metric;
 pub mod validate;
 
+#[cfg(any(test, feature = "fuzz"))]
+pub mod test;
+
 /// Errors for historical write operations
 #[derive(thiserror::Error, Debug, Copy, Clone)]
 pub enum Error {
