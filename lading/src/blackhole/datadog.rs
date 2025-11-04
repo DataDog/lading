@@ -1,7 +1,7 @@
 //! The Datadog intake API blackhole.
 //!
 //! This blackhole mimics the Datadog agent V2 metrics intake API, accepting
-//! protobuf-encoded metric payloads.
+//! protobuf-encoded metric payloads. Only POST is supported.
 //!
 //! All other endpoints return `202 Accepted` without processing.
 //!
@@ -175,6 +175,7 @@ async fn handle_request(
     let headers = headers.clone();
 
     if method != Method::POST {
+        warn!("Received other than POST method: {method}");
         return Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .body(Full::new(Bytes::new()));
