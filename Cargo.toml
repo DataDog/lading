@@ -83,12 +83,9 @@ missing_docs = "deny"
 warnings = "deny"
 
 [profile.release]
-# lto = true        # Optimize our binary at link stage.
-# codegen-units = 1 # Increases compile time but improves optimization alternatives.
-# opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
-lto = false        # Optimize our binary at link stage.
-codegen-units = 8 # Increases compile time but improves optimization alternatives.
-opt-level = 's'     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
+lto = true        # Optimize our binary at link stage.
+codegen-units = 1 # Increases compile time but improves optimization alternatives.
+opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
 debug = 2                       # keep symbols in release too
 split-debuginfo = "unpacked"
