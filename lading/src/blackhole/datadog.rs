@@ -326,8 +326,16 @@ async fn handle_v2_protobuf(
                         }
                         2 => {
                             // RATE
+                            let interval = series.interval;
+                            if interval <= 0 {
+                                warn!(
+                                    "RATE with non-positive interval for {metric}, ignoring",
+                                    metric = series.metric
+                                );
+                                continue;
+                            }
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            let val = (point.value * series.interval.max(1) as f64).round() as u64;
+                            let val = (point.value * interval as f64).round() as u64;
                             counter_incr(&series.metric, &tag_pairs, val, timestamp).await
                         }
                         3 => {
