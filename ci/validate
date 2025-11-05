@@ -34,8 +34,12 @@ run_check "$CI_DIR/custom_lints" "project-specific lints"
 run_check "$CI_DIR/clippy" "cargo clippy"
 run_check "$CI_DIR/deny" "cargo deny"
 run_check "$CI_DIR/test" "cargo nextest"
-run_check "$CI_DIR/integration-test" "integration tests"
-run_check "$CI_DIR/fingerprint" "payload fingerprint verification"
+
+# NOTE: These we run only in CI, leaving this note here to allow for as-needed
+# local validation.
+
+# run_check "$CI_DIR/integration-test" "integration tests"
+# run_check "$CI_DIR/fingerprint" "payload fingerprint verification"
 
 # Optional checks (don't fail if tools aren't available)
 echo ">>> Running optional checks..."
