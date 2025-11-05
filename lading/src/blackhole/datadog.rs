@@ -308,10 +308,11 @@ async fn handle_v2_protobuf(
                 // Metric types from the agent_payload.proto:
                 //
                 // - COUNT (1): Delta count over the interval
-                // - RATE (2): Already computed per-second rate
+                // - RATE (2): Per-second rate, converted into a counter by
+                //   multiplication with the interval.
                 // - GAUGE (3): Point-in-time value
                 //
-                // For COUNT we use counter_incr, for RATE/GAUGE we use
+                // For COUNT/RATE we use counter_incr, for GAUGE we use
                 // gauge_set. Timestamps are Unix epoch.
                 for point in &series.points {
                     let timestamp = unix_to_instant(point.timestamp);
@@ -323,8 +324,14 @@ async fn handle_v2_protobuf(
                             let value = point.value.round() as u64;
                             counter_incr(&series.metric, &tag_pairs, value, timestamp).await
                         }
-                        2 | 3 => {
-                            // RATE | GAUGE
+                        2 => {
+                            // RATE
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            let val = (point.value * series.interval.max(1) as f64).round() as u64;
+                            counter_incr(&series.metric, &tag_pairs, val, timestamp).await
+                        }
+                        3 => {
+                            // GAUGE
                             gauge_set(&series.metric, &tag_pairs, point.value, timestamp).await
                         }
                         i => {
