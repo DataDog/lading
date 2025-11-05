@@ -29,6 +29,7 @@ pub use splunk_hec::SplunkHec;
 pub use statik::Static;
 pub use syslog::Syslog5424;
 pub use trace_agent::TraceAgent;
+pub use patterned_log::PatternedLog;
 
 pub mod apache_common;
 pub mod ascii;
@@ -38,6 +39,7 @@ pub mod dogstatsd;
 pub mod fluent;
 pub mod json;
 pub mod opentelemetry;
+pub mod patterned_log;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod statik;
@@ -147,6 +149,8 @@ pub enum Config {
     DogStatsD(crate::dogstatsd::Config),
     /// Generates `TraceAgent` payloads in `MsgPack` format
     TraceAgent,
+    /// Generates patterned Datadog style logs
+    PatternedLog(crate::patterned_log::Config),
 }
 
 /// Unified payload type for all serializers
@@ -179,6 +183,8 @@ pub enum Payload {
     DogStatsdD(DogStatsD),
     /// Datadog Trace Agent format
     TraceAgent(TraceAgent),
+    /// Pattern driven Datadog log format
+    PatternedLog(patterned_log::PatternedLog),
 }
 
 impl Serialize for Payload {
@@ -201,6 +207,7 @@ impl Serialize for Payload {
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::PatternedLog(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 
