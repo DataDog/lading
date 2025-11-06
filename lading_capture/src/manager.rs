@@ -7,56 +7,35 @@
 //! their [`metrics`] integration while [`CaptureManager`] need only hook into
 //! that same crate.
 
+pub(crate) mod state_machine;
+
 use std::{
-    ffi::OsStr,
     io::{self, BufWriter, Write},
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
-    thread,
+    sync::{Arc, LazyLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use tokio::fs;
+use arc_swap::ArcSwap;
+use tokio::{fs, sync::mpsc, time};
 
-use crate::json;
+use crate::{accumulator, accumulator::Accumulator, metric::Metric};
 use metrics::Key;
-use metrics_util::{
-    MetricKindMask,
-    registry::{AtomicStorage, GenerationalAtomicStorage, GenerationalStorage, Recency, Registry},
-};
+use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use state_machine::{Event, Operation, StateMachine};
+use tracing::info;
 
-/// Trait for writing capture lines
-///
-/// This trait abstracts the writing of capture lines, allowing for both
-/// file-based and in-memory implementations for testing.
-pub trait CaptureWriter: Send {
-    /// Write bytes to the capture destination
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the write operation fails.
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()>;
+/// Duration of a single `Accumulator` tick in milliseconds, drives the
+/// `CaptureManager` polling interval.
+const TICK_DURATION_MS: u128 = 1_000;
 
-    /// Flush any buffered data
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the flush operation fails.
-    fn flush(&mut self) -> io::Result<()>;
+pub(crate) struct Sender {
+    pub(crate) snd: mpsc::Sender<Metric>,
 }
 
-impl CaptureWriter for BufWriter<std::fs::File> {
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        Write::write_all(self, buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Write::flush(self)
-    }
-}
+pub(crate) static HISTORICAL_SENDER: LazyLock<ArcSwap<Option<Arc<Sender>>>> =
+    LazyLock::new(|| ArcSwap::new(Arc::new(None)));
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -81,99 +60,161 @@ pub enum Error {
     /// Error used for invalid capture path
     #[error("Invalid capture path")]
     CapturePath,
+    /// Accumulator errors
+    #[error(transparent)]
+    Accumulator(#[from] accumulator::Error),
+    /// State machine errors
+    #[error(transparent)]
+    StateMachine(#[from] state_machine::Error),
 }
 
-struct Inner {
-    registry: Registry<Key, GenerationalAtomicStorage>,
-    recency: Recency<Key>,
+/// Interval abstraction for tick-based operations
+pub trait TickInterval: Send {
+    /// Wait for the next tick
+    fn tick(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
-#[allow(missing_debug_implementations)]
+/// Clock abstraction for controllable time in tests
+///
+/// Following the pattern from `lading_throttle`, allows production code to
+/// use real system time while tests can inject a controllable clock for
+/// deterministic behavior.
+// NOTE I want to extract both clocks out into a common lading_clock but will do
+// so in a separate thread of work.
+pub trait Clock: Send + Sync {
+    /// Interval type for this clock
+    type Interval: TickInterval;
+    /// Returns the current time in milliseconds since `UNIX_EPOCH`
+    fn now_ms(&self) -> u128;
+    /// Returns the current time as an Instant
+    fn now(&self) -> Instant;
+    /// Create an interval that ticks every duration
+    fn interval(&self, duration: Duration) -> Self::Interval;
+}
+
+/// Real-time interval implementation
+pub struct RealInterval {
+    inner: time::Interval,
+}
+
+impl std::fmt::Debug for RealInterval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealInterval").finish_non_exhaustive()
+    }
+}
+
+impl TickInterval for RealInterval {
+    async fn tick(&mut self) {
+        self.inner.tick().await;
+    }
+}
+
+/// Production clock implementation using real system time
+#[derive(Debug, Clone, Copy)]
+pub struct RealClock {
+    start_instant: Instant,
+    start_system_time: SystemTime,
+}
+
+impl Default for RealClock {
+    fn default() -> Self {
+        Self {
+            start_instant: Instant::now(),
+            start_system_time: SystemTime::now(),
+        }
+    }
+}
+
+impl Clock for RealClock {
+    type Interval = RealInterval;
+
+    fn now_ms(&self) -> u128 {
+        let now = self.now();
+        let elapsed = now.duration_since(self.start_instant);
+        (self.start_system_time + elapsed)
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before UNIX_EPOCH")
+            .as_millis()
+    }
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn interval(&self, duration: Duration) -> Self::Interval {
+        RealInterval {
+            inner: time::interval(duration),
+        }
+    }
+}
+
 /// Wrangles internal metrics into capture files
 ///
 /// This struct is responsible for capturing all internal metrics sent through
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
-pub struct CaptureManager<W: CaptureWriter> {
-    fetch_index: u64,
-    run_id: Uuid,
+pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
+    /// Reference start time used to convert Instant timestamps to logical ticks.
+    /// Initialized at `CaptureManager` construction time, before any historical
+    /// metrics are sent. This synchronizes with `accumulator.current_tick` which
+    /// begins at 0 and advances every `TICK_DURATION_MS`.
+    start: Instant,
+    expiration: Duration,
     capture_writer: W,
-    capture_path: PathBuf,
-    shutdown: lading_signal::Watcher,
+    shutdown: Option<lading_signal::Watcher>,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
-    inner: Arc<Inner>,
+    registry: Arc<Registry<Key, AtomicStorage>>,
+    accumulator: Accumulator,
     global_labels: FxHashMap<String, String>,
+    snd: mpsc::Sender<Metric>,
+    recv: mpsc::Receiver<Metric>,
+    clock: C,
 }
 
-impl CaptureManager<BufWriter<std::fs::File>> {
-    /// Create a new [`CaptureManager`] with file-based writer
-    ///
-    /// # Errors
-    ///
-    /// Function will error if the underlying capture file cannot be opened.
-    pub async fn new(
-        capture_path: PathBuf,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
-        expiration: Duration,
-    ) -> Result<Self, io::Error> {
-        let fp = fs::File::create(&capture_path).await?;
-        let fp = fp.into_std().await;
-
-        let inner = Inner {
-            registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
-            recency: Recency::new(
-                quanta::Clock::new(),
-                MetricKindMask::GAUGE | MetricKindMask::COUNTER,
-                Some(expiration),
-            ),
-        };
-
-        Ok(Self {
-            run_id: Uuid::new_v4(),
-            fetch_index: 0,
-            capture_writer: BufWriter::new(fp),
-            capture_path,
-            shutdown,
-            _experiment_started: experiment_started,
-            target_running,
-            inner: Arc::new(inner),
-            global_labels: FxHashMap::default(),
-        })
+impl<W: Write + Send, C: Clock> std::fmt::Debug for CaptureManager<W, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureManager")
+            .field("start", &self.start)
+            .field("accumulator", &self.accumulator)
+            .field("global_labels", &self.global_labels)
+            .finish_non_exhaustive()
     }
 }
 
-impl<W: CaptureWriter + 'static> CaptureManager<W> {
-    /// Create a new [`CaptureManager`] with a custom writer for testing
-    #[cfg(test)]
+impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
+    /// Create a new [`CaptureManager`] with a custom writer and clock
     pub fn new_with_writer(
         capture_writer: W,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
         expiration: Duration,
+        clock: C,
     ) -> Self {
-        let inner = Inner {
-            registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
-            recency: Recency::new(
-                quanta::Clock::new(),
-                MetricKindMask::GAUGE | MetricKindMask::COUNTER,
-                Some(expiration),
-            ),
-        };
+        let registry = Arc::new(Registry::new(AtomicStorage));
+
+        // Capture start time for timestamp-to-tick conversion. This is the
+        // reference point for all historical metrics: accumulator.current_tick
+        // begins at 0 and this Instant represents tick 0 in real time.
+        let now = Instant::now();
+
+        let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
+        let accumulator = Accumulator::new();
 
         Self {
-            run_id: Uuid::new_v4(),
-            fetch_index: 0,
+            start: now,
+            expiration,
             capture_writer,
-            capture_path: PathBuf::from("/tmp/test-capture.json"),
-            shutdown,
+            shutdown: Some(shutdown),
             _experiment_started: experiment_started,
             target_running,
-            inner: Arc::new(inner),
+            registry,
+            accumulator,
             global_labels: FxHashMap::default(),
+            snd,
+            recv,
+            clock,
         }
     }
 
@@ -184,7 +225,7 @@ impl<W: CaptureWriter + 'static> CaptureManager<W> {
     /// Returns an error if there is already a global recorder set.
     pub fn install(&self) -> Result<(), Error> {
         let recorder = CaptureRecorder {
-            inner: Arc::clone(&self.inner),
+            registry: Arc::clone(&self.registry),
         };
         metrics::set_global_recorder(recorder).map_err(|_| Error::SetRecorderError)?;
         Ok(())
@@ -199,153 +240,116 @@ impl<W: CaptureWriter + 'static> CaptureManager<W> {
         self.global_labels.insert(key.into(), value.into());
     }
 
-    fn record_captures(&mut self) -> Result<(), Error> {
-        let now_ms: u128 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let mut lines = Vec::new();
-
-        let counter_handles = self.inner.registry.get_counter_handles();
-        for (key, counter) in counter_handles {
-            let g = counter.get_generation();
-            if !self
-                .inner
-                .recency
-                .should_store_counter(&key, g, &self.inner.registry)
-            {
-                continue;
-            }
-
-            let mut labels = self.global_labels.clone();
-            for lbl in key.labels() {
-                // TODO we're allocating the same small strings over and over most likely
-                labels.insert(lbl.key().into(), lbl.value().into());
-            }
-            let value: u64 = counter.get_inner().load(Ordering::Relaxed);
-            let line = json::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: self.fetch_index,
-                metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Counter,
-                value: json::LineValue::Int(value),
-                labels,
-            };
-            lines.push(line);
-        }
-
-        let gauge_handles = self.inner.registry.get_gauge_handles();
-        for (key, gauge) in gauge_handles {
-            let g = gauge.get_generation();
-            if !self
-                .inner
-                .recency
-                .should_store_gauge(&key, g, &self.inner.registry)
-            {
-                continue;
-            }
-
-            let mut labels = self.global_labels.clone();
-            for lbl in key.labels() {
-                // TODO we're allocating the same small strings over and over most likely
-                labels.insert(lbl.key().into(), lbl.value().into());
-            }
-            let value: f64 = f64::from_bits(gauge.get_inner().load(Ordering::Relaxed));
-            let line = json::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: self.fetch_index,
-                metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Gauge,
-                value: json::LineValue::Float(value),
-                labels,
-            };
-            lines.push(line);
-        }
-
-        debug!(
-            "Recording {} captures to {}",
-            lines.len(),
-            self.capture_path
-                .file_name()
-                .and_then(OsStr::to_str)
-                .ok_or(Error::CapturePath)?
-        );
-        for line in lines.drain(..) {
-            let pyld = serde_json::to_string(&line)?;
-            self.capture_writer
-                .write_all(pyld.as_bytes())
-                .map_err(|err| Error::Io {
-                    context: "payload write",
-                    err,
-                })?;
-            self.capture_writer
-                .write_all(b"\n")
-                .map_err(|err| Error::Io {
-                    context: "newline write",
-                    err,
-                })?;
-            self.capture_writer.flush().map_err(|err| Error::Io {
-                context: "flush",
-                err,
-            })?;
-        }
-
-        Ok(())
-    }
-
     /// Run [`CaptureManager`] to completion
     ///
     /// Once a second any metrics produced by this program are flushed to disk.
     /// This function only exits once a shutdown signal is received.
+    ///
     /// # Panics
-    /// None known.
+    ///
+    /// Does not intentionally panic.
+    ///
     /// # Errors
-    /// Will return 'error' if there is already a global recorder set
-    pub fn start(mut self) -> Result<(), Error> {
-        // Installing the recorder immediately on startup.
-        // This does _not_ wait on experiment_started signal, so
-        // warmup data will be included in the capture.
+    ///
+    /// Will return an error if there is already a global recorder set.
+    #[allow(clippy::cast_possible_truncation)]
+    pub async fn start(mut self) -> Result<(), Error> {
+        // Initialize historical sender to allow generators to send metrics with
+        // Instant timestamps. Manager converts these to ticks using self.start
+        // as the reference point synchronized with accumulator.current_tick.
+        HISTORICAL_SENDER.store(Arc::new(Some(Arc::new(Sender {
+            snd: self.snd.clone(),
+        }))));
+
+        // Installing the recorder immediately on startup. This does _not_ wait
+        // on experiment_started signal, so warmup data will be included in the
+        // capture.
         self.install()?;
         info!("Capture manager installed, recording to capture file.");
 
-        thread::Builder::new()
-            .name("capture-manager".into())
-            .spawn(move || {
-                while let Ok(false) = self.target_running.try_recv() {
-                    std::thread::sleep(Duration::from_millis(100));
+        self.target_running.recv().await;
+
+        let mut flush_interval = self
+            .clock
+            .interval(Duration::from_millis(TICK_DURATION_MS as u64));
+        let shutdown_wait = self
+            .shutdown
+            .take()
+            .expect("shutdown watcher must be present")
+            .recv();
+        tokio::pin!(shutdown_wait);
+
+        // Create state machine with owned state
+        let mut state_machine = StateMachine::new(
+            self.start,
+            self.expiration,
+            self.capture_writer,
+            self.registry,
+            self.accumulator,
+            self.global_labels,
+            self.clock,
+        );
+
+        // Event loop: tokio select produces Events, state machine processes them
+        loop {
+            let event = tokio::select! {
+                val = self.recv.recv() => {
+                    match val {
+                        Some(metric) => Event::MetricReceived(metric),
+                        None => Event::ChannelClosed,
+                    }
                 }
-                loop {
-                    if self.shutdown.try_recv().expect("polled after signal") {
-                        info!("shutdown signal received");
-                        return;
-                    }
-                    let now = Instant::now();
-                    if let Err(e) = self.record_captures() {
-                        warn!(
-                            "failed to record captures for idx {idx}: {e}",
-                            idx = self.fetch_index
-                        );
-                    }
-                    self.fetch_index += 1;
-                    // Sleep for 1 second minus however long we just spent recording captures
-                    // assumption here is that the time spent recording captures is consistent
-                    let delta = now.elapsed();
-                    if delta > Duration::from_secs(1) {
-                        warn!("Recording capture took more than 1s (took {delta:?})");
-                        continue;
-                    }
-                    std::thread::sleep(Duration::from_secs(1).saturating_sub(delta));
-                }
-            })
-            .map_err(|err| Error::Io {
-                context: "thread building",
-                err,
-            })?;
-        Ok(())
+                () = flush_interval.tick() => Event::FlushTick,
+                () = &mut shutdown_wait => Event::ShutdownSignaled,
+            };
+
+            match state_machine.next(event)? {
+                Operation::Continue => {}
+                Operation::Exit => return Ok(()),
+            }
+        }
     }
 }
 
-struct CaptureRecorder {
-    inner: Arc<Inner>,
+impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
+    /// Create a new [`CaptureManager`] with file-based writer
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the underlying capture file cannot be opened.
+    pub async fn new(
+        capture_path: PathBuf,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, io::Error> {
+        let fp = fs::File::create(&capture_path).await?;
+        let fp = fp.into_std().await;
+        let writer = BufWriter::new(fp);
+
+        Ok(Self::new_with_writer(
+            writer,
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+            RealClock::default(),
+        ))
+    }
+}
+
+/// Recorder that captures metrics into a registry for later export
+#[derive(Clone)]
+pub struct CaptureRecorder {
+    /// Registry storing metric values
+    pub registry: Arc<Registry<Key, AtomicStorage>>,
+}
+
+impl std::fmt::Debug for CaptureRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureRecorder").finish_non_exhaustive()
+    }
 }
 
 impl metrics::Recorder for CaptureRecorder {
@@ -377,15 +381,13 @@ impl metrics::Recorder for CaptureRecorder {
     }
 
     fn register_counter(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Counter {
-        self.inner
-            .registry
-            .get_or_create_counter(key, |c| c.clone().into())
+        self.registry
+            .get_or_create_counter(key, |c| metrics::Counter::from_arc(c.clone()))
     }
 
     fn register_gauge(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
-        self.inner
-            .registry
-            .get_or_create_gauge(key, |c| c.clone().into())
+        self.registry
+            .get_or_create_gauge(key, |c| metrics::Gauge::from_arc(c.clone()))
     }
 
     fn register_histogram(
@@ -395,165 +397,5 @@ impl metrics::Recorder for CaptureRecorder {
     ) -> metrics::Histogram {
         // nothing, intentionally
         unimplemented!()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    /// In-memory writer for testing
-    ///
-    /// Captures all writes to a buffer that can be inspected after the test.
-    #[derive(Clone)]
-    struct InMemoryWriter {
-        buffer: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl InMemoryWriter {
-        fn new() -> Self {
-            Self {
-                buffer: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn get_content(&self) -> Vec<u8> {
-            self.buffer.lock().unwrap().clone()
-        }
-
-        fn parse_lines(&self) -> Result<Vec<json::Line>, serde_json::Error> {
-            let content = self.get_content();
-            let content_str = String::from_utf8_lossy(&content);
-            content_str
-                .lines()
-                .filter(|line| !line.is_empty())
-                .map(serde_json::from_str)
-                .collect()
-        }
-    }
-
-    impl CaptureWriter for InMemoryWriter {
-        fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-            self.buffer.lock().unwrap().extend_from_slice(buf);
-            Ok(())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn metrics_macros_create_capture_lines() {
-        let writer = InMemoryWriter::new();
-        let (shutdown_rx, _shutdown_tx) = lading_signal::signal();
-        let (experiment_rx, _experiment_tx) = lading_signal::signal();
-        let (target_rx, target_tx) = lading_signal::signal();
-
-        target_tx.signal();
-
-        let mut manager = CaptureManager::new_with_writer(
-            writer.clone(),
-            shutdown_rx,
-            experiment_rx,
-            target_rx,
-            Duration::from_secs(60),
-        );
-
-        let recorder = CaptureRecorder {
-            inner: Arc::clone(&manager.inner),
-        };
-
-        let mut expected_counters: Vec<(String, FxHashMap<String, String>, u64)> = Vec::new();
-        let mut expected_gauges: Vec<(String, FxHashMap<String, String>, f64)> = Vec::new();
-
-        metrics::with_local_recorder(&recorder, || {
-            metrics::counter!("counter_increment").increment(10);
-            metrics::counter!("counter_increment").increment(20);
-            expected_counters.push(("counter_increment".to_string(), FxHashMap::default(), 30));
-
-            metrics::counter!("counter_absolute").absolute(18);
-            metrics::counter!("counter_absolute").absolute(42);
-            expected_counters.push(("counter_absolute".to_string(), FxHashMap::default(), 42));
-
-            metrics::counter!("counter_with_labels", "env" => "test", "region" => "us-east")
-                .increment(100);
-            let mut labels = FxHashMap::default();
-            labels.insert("env".to_string(), "test".to_string());
-            labels.insert("region".to_string(), "us-east".to_string());
-            expected_counters.push(("counter_with_labels".to_string(), labels, 100));
-
-            metrics::gauge!("gauge_set").set(3.14);
-            expected_gauges.push(("gauge_set".to_string(), FxHashMap::default(), 3.14));
-
-            metrics::gauge!("gauge_increment").set(10.0);
-            metrics::gauge!("gauge_increment").increment(5.0);
-            expected_gauges.push(("gauge_increment".to_string(), FxHashMap::default(), 15.0));
-
-            metrics::gauge!("gauge_decrement").set(10.0);
-            metrics::gauge!("gauge_decrement").decrement(3.0);
-            expected_gauges.push(("gauge_decrement".to_string(), FxHashMap::default(), 7.0));
-
-            metrics::gauge!("gauge_with_labels", "service" => "api", "host" => "server1").set(99.9);
-            let mut labels = FxHashMap::default();
-            labels.insert("service".to_string(), "api".to_string());
-            labels.insert("host".to_string(), "server1".to_string());
-            expected_gauges.push(("gauge_with_labels".to_string(), labels, 99.9));
-        });
-
-        manager.record_captures().unwrap();
-        let lines = writer.parse_lines().unwrap();
-
-        for (name, labels, expected_value) in &expected_counters {
-            let line = lines.iter().find(|line| {
-                line.metric_name == *name
-                    && matches!(line.metric_kind, json::MetricKind::Counter)
-                    && line.labels == *labels
-            });
-
-            assert!(
-                line.is_some(),
-                "Expected to find counter '{name}' with labels {labels:?}"
-            );
-
-            let line = line.unwrap();
-
-            let val = match line.value {
-                json::LineValue::Int(val) => val,
-                json::LineValue::Float(_) => {
-                    assert!(false, "Expected Int value for counter {name}, got Float");
-                    return;
-                }
-            };
-
-            assert_eq!(val, *expected_value, "Counter {name} value mismatch");
-        }
-
-        for (name, labels, expected_value) in &expected_gauges {
-            let line = lines.iter().find(|line| {
-                line.metric_name == *name
-                    && matches!(line.metric_kind, json::MetricKind::Gauge)
-                    && line.labels == *labels
-            });
-
-            assert!(
-                line.is_some(),
-                "Expected to find gauge '{name}' with labels {labels:?}"
-            );
-
-            let line = line.unwrap();
-
-            let val = match line.value {
-                json::LineValue::Float(val) => val,
-                json::LineValue::Int(_) => {
-                    assert!(false, "Expected Float value for gauge {name}, got Int");
-                    return;
-                }
-            };
-
-            let diff = (val - expected_value).abs();
-            assert!(diff < 0.0001, "Gauge {name} value mismatch");
-        }
     }
 }

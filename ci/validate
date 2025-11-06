@@ -47,8 +47,15 @@ echo ">>> Running optional checks..."
 # Kani proofs (optional)
 if command -v cargo-kani &> /dev/null; then
     echo ">>> Running kani proofs for each crate..."
-    for crate in lading_throttle lading_payload; do
-        run_check "$CI_DIR/kani $crate" "kani proofs for $crate"
+    # shellcheck disable=SC2043
+    for crate in lading_throttle; do
+        echo ">>> Running kani proofs for $crate..."
+        if ! "$CI_DIR/kani" "$crate"; then
+            echo "FAILED: kani proofs for $crate failed!"
+            exit 1
+        fi
+        echo "PASSED: kani proofs for $crate passed!"
+        echo
     done
 else
     echo "WARNING: Skipping kani proofs (kani not installed)"

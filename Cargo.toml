@@ -12,6 +12,7 @@ members = [
 
 [workspace.dependencies]
 anyhow = { version = "1.0" }
+arc-swap = { version = "1.7" }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
 sha2 = { version = "0.10", default-features = false }
@@ -33,6 +34,7 @@ tokio = { version = "1.47" }
 tonic = { version = "0.13", default-features = false, features = ["server", "transport", "router", "codegen", "prost"] }
 tower = { version = "0.5", default-features = false }
 tracing = { version = "0.1" }
+ustr = { version = "1.1" }
 uuid = { version = "1.18", default-features = false, features = [
   "v4",
   "serde",

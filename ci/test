@@ -10,6 +10,6 @@ if ! command -v cargo-nextest &> /dev/null; then
 fi
 
 echo "Running cargo nextest..."
-cargo nextest run --all-features
+cargo nextest run --all-features "$@"
 
 echo "Tests passed!"

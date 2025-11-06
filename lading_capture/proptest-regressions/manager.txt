@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1aeb4f7061779c388cb41f6fbb9b86ad1ece257bd43a435310c140089c02b207 # shrinks to ops = [WriteCounter { name: "c", value: 0 }, WriteGauge { name: "c", value: 0.0 }, WriteCounter { name: "a", value: 0 }, AdvanceTick, WriteCounter { name: "a", value: 0 }, WriteCounter { name: "a", value: 0 }, WriteCounter { name: "a", value: 0 }, WriteCounter { name: "a", value: 0 }, WriteCounter { name: "a", value: 0 }, WriteCounter { name: "a", value: 0 }]
+cc 431e1cda40cd8720df08fdbf3b4d88d35a6c2421e5099ca9979d203a91b75337 # shrinks to ops = [WriteCounter("i", 0), WriteGauge("i", 0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0), AdvanceTick, WriteCounter("a", 0), WriteCounter("a", 0), WriteCounter("a", 0)]
