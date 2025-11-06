@@ -22,7 +22,8 @@ metrics-exporter-prometheus = { version = "0.15", default-features = false, feat
   "http-listener",
   "uds-listener",
 ] }
-prost = "0.13"
+prost = { version = "0.13" }
+prost-build = { version = "0.13" }
 rand = { version = "0.9", default-features = false }
 rustc-hash = { version = "1.1" }
 serde = { version = "1.0", features = ["std", "derive"] }
