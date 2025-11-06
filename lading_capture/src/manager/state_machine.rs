@@ -6,13 +6,13 @@
 //! a single `next()` method that processes events and returns operations.
 
 use std::{
-    io::Write,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use crate::{
     accumulator::{self, Accumulator, MetricValue},
+    formats::{self, OutputFormat},
     json,
     manager::Clock,
     metric::{Counter, CounterValue, Gauge, GaugeValue, Metric},
@@ -21,7 +21,7 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use std::sync::atomic::Ordering;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 /// Duration of a single `Accumulator` tick in milliseconds
@@ -63,17 +63,9 @@ pub(crate) enum Operation {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Wrapper around [`std::io::Error`].
-    #[error("[{context}] Io error: {err}")]
-    Io {
-        /// The context for the error, simple tag
-        context: &'static str,
-        /// The underlying error
-        err: std::io::Error,
-    },
-    /// Wrapper around [`serde_json::Error`].
-    #[error("Json serialization error: {0}")]
-    Json(#[from] serde_json::Error),
+    /// Format-related errors (IO, serialization, etc.)
+    #[error(transparent)]
+    Format(#[from] formats::Error),
     /// Accumulator errors
     #[error(transparent)]
     Accumulator(#[from] accumulator::Error),
@@ -90,7 +82,7 @@ pub enum Error {
 /// This struct owns all the state needed to process metrics, flush them to disk,
 /// and handle shutdown. Following the kubernetes generator pattern, all state
 /// lives here rather than being passed as parameters.
-pub(crate) struct StateMachine<W: Write, C: Clock> {
+pub(crate) struct StateMachine<F: OutputFormat, C: Clock> {
     /// Unique run instance ID for this `StateMachine`
     run_id: Uuid,
     /// Reference start time for timestamp-to-tick conversion
@@ -99,8 +91,8 @@ pub(crate) struct StateMachine<W: Write, C: Clock> {
     start_ms: u128,
     /// How long metrics can age before being discarded
     expiration: Duration,
-    /// Output destination for metrics
-    capture_writer: W,
+    /// Output format for writing metrics
+    format: F,
     /// Registry containing current metric values
     registry: Arc<Registry<Key, AtomicStorage>>,
     /// Accumulator for windowed metrics
@@ -111,13 +103,13 @@ pub(crate) struct StateMachine<W: Write, C: Clock> {
     clock: C,
 }
 
-impl<W: Write, C: Clock> StateMachine<W, C> {
+impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     /// Create a new state machine
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         start: Instant,
         expiration: Duration,
-        capture_writer: W,
+        format: F,
         registry: Arc<Registry<Key, AtomicStorage>>,
         accumulator: Accumulator,
         mut global_labels: FxHashMap<String, String>,
@@ -141,7 +133,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             start,
             start_ms,
             expiration,
-            capture_writer,
+            format,
             registry,
             accumulator,
             filtered_global_labels: global_labels,
@@ -276,6 +268,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             self.write_metric_line(&key, &value, tick, time_ms)?;
             line_count += 1;
         }
+        self.format.flush()?;
 
         debug!("Recording {line_count} captures",);
         Ok(())
@@ -296,6 +289,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
                 self.write_metric_line(&key, &value, tick, time_ms)?;
             }
         }
+        self.format.flush()?;
 
         Ok(())
     }
@@ -353,24 +347,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
             },
         };
 
-        let pyld = serde_json::to_string(&line)?;
-        self.capture_writer
-            .write_all(pyld.as_bytes())
-            .map_err(|err| Error::Io {
-                context: "payload write",
-                err,
-            })?;
-        self.capture_writer
-            .write_all(b"\n")
-            .map_err(|err| Error::Io {
-                context: "newline write",
-                err,
-            })?;
-        self.capture_writer.flush().map_err(|err| Error::Io {
-            context: "flush",
-            err,
-        })?;
-
+        self.format.write_metric(&line)?;
         Ok(())
     }
 }
@@ -378,7 +355,7 @@ impl<W: Write, C: Clock> StateMachine<W, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::writer::InMemoryWriter;
+    use crate::{formats::jsonl, test::writer::InMemoryWriter};
     use metrics_util::registry::{AtomicStorage, Registry};
     use proptest::prelude::*;
     use std::{
@@ -657,6 +634,7 @@ mod tests {
             ops in prop::collection::vec(any::<CaptureOp>(), 10..50)
         ) {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(1000);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -670,7 +648,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(60),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,
@@ -779,6 +757,7 @@ mod tests {
     #[test]
     fn metric_received_adds_to_accumulator() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -788,7 +767,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer,
+            format,
             registry,
             accumulator,
             labels,
@@ -809,6 +788,7 @@ mod tests {
     #[test]
     fn channel_closed_returns_exit() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -818,7 +798,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer,
+            format,
             registry,
             accumulator,
             labels,
@@ -833,6 +813,7 @@ mod tests {
     #[test]
     fn flush_tick_advances_accumulator() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -842,7 +823,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer,
+            format,
             registry,
             accumulator,
             labels,
@@ -862,6 +843,7 @@ mod tests {
     #[test]
     fn shutdown_returns_exit() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
         let start = Instant::now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -871,7 +853,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer,
+            format,
             registry,
             accumulator,
             labels,
@@ -886,6 +868,7 @@ mod tests {
     #[test]
     fn reserved_label_names_are_filtered() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer.clone());
         let clock = TestClock::new(0);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -903,7 +886,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer.clone(),
+            format,
             registry,
             accumulator,
             global_labels,
@@ -1011,6 +994,7 @@ mod tests {
     #[test]
     fn drift_correction_advances_multiple_ticks() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1020,7 +1004,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(60),
-            writer,
+            format,
             registry,
             accumulator,
             labels,
@@ -1047,6 +1031,7 @@ mod tests {
     #[test]
     fn strictly_increasing_values_remain_monotonic() {
         let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer.clone());
         let clock = TestClock::new(0);
         let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1056,7 +1041,7 @@ mod tests {
         let mut machine = StateMachine::new(
             start,
             Duration::from_secs(3600),
-            writer.clone(),
+            format,
             registry.clone(),
             accumulator,
             labels,
@@ -1174,6 +1159,7 @@ mod tests {
         // Test case 1: Short run (30 seconds)
         {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1187,7 +1173,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(3600),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,
@@ -1220,6 +1206,7 @@ mod tests {
         // Test case 2: Exactly INTERVALS seconds (60 seconds)
         {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1233,7 +1220,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(3600),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,
@@ -1273,6 +1260,7 @@ mod tests {
         // Test case 3: Run for 120 seconds
         {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1286,7 +1274,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(3600),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,
@@ -1324,6 +1312,7 @@ mod tests {
         // Test case 4: Run for 180 seconds
         {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1337,7 +1326,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(3600),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,
@@ -1375,6 +1364,7 @@ mod tests {
         // Test case 5: Run with minimal flushes
         {
             let writer = InMemoryWriter::new();
+            let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
             let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
@@ -1388,7 +1378,7 @@ mod tests {
             let mut machine = StateMachine::new(
                 start,
                 Duration::from_secs(3600),
-                writer.clone(),
+                format,
                 registry,
                 accumulator,
                 labels,

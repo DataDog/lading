@@ -10,7 +10,7 @@
 pub(crate) mod state_machine;
 
 use std::{
-    io::{self, BufWriter, Write},
+    io::{self, BufWriter},
     path::PathBuf,
     sync::{Arc, LazyLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -19,7 +19,12 @@ use std::{
 use arc_swap::ArcSwap;
 use tokio::{fs, sync::mpsc, time};
 
-use crate::{accumulator, accumulator::Accumulator, metric::Metric};
+use crate::{
+    accumulator,
+    accumulator::Accumulator,
+    formats::{self, OutputFormat, jsonl},
+    metric::Metric,
+};
 use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
@@ -153,14 +158,14 @@ impl Clock for RealClock {
 /// This struct is responsible for capturing all internal metrics sent through
 /// [`metrics`] and periodically writing them to disk with format
 /// [`json::Line`].
-pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
+pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
     /// Reference start time used to convert Instant timestamps to logical ticks.
     /// Initialized at `CaptureManager` construction time, before any historical
     /// metrics are sent. This synchronizes with `accumulator.current_tick` which
     /// begins at 0 and advances every `TICK_DURATION_MS`.
     start: Instant,
     expiration: Duration,
-    capture_writer: W,
+    format: F,
     shutdown: Option<lading_signal::Watcher>,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
@@ -172,7 +177,7 @@ pub struct CaptureManager<W: Write + Send, C: Clock = RealClock> {
     clock: C,
 }
 
-impl<W: Write + Send, C: Clock> std::fmt::Debug for CaptureManager<W, C> {
+impl<F: OutputFormat, C: Clock> std::fmt::Debug for CaptureManager<F, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
             .field("start", &self.start)
@@ -182,10 +187,10 @@ impl<W: Write + Send, C: Clock> std::fmt::Debug for CaptureManager<W, C> {
     }
 }
 
-impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
-    /// Create a new [`CaptureManager`] with a custom writer and clock
-    pub fn new_with_writer(
-        capture_writer: W,
+impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
+    /// Create a new [`CaptureManager`] with a custom format and clock
+    pub fn new_with_format(
+        format: F,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -205,7 +210,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         Self {
             start: now,
             expiration,
-            capture_writer,
+            format,
             shutdown: Some(shutdown),
             _experiment_started: experiment_started,
             target_running,
@@ -283,7 +288,7 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
         let mut state_machine = StateMachine::new(
             self.start,
             self.expiration,
-            self.capture_writer,
+            self.format,
             self.registry,
             self.accumulator,
             self.global_labels,
@@ -311,8 +316,8 @@ impl<W: Write + Send, C: Clock> CaptureManager<W, C> {
     }
 }
 
-impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
-    /// Create a new [`CaptureManager`] with file-based writer
+impl CaptureManager<formats::jsonl::Format<BufWriter<std::fs::File>>, RealClock> {
+    /// Create a new [`CaptureManager`] with file-based JSONL writer
     ///
     /// # Errors
     ///
@@ -327,9 +332,10 @@ impl CaptureManager<BufWriter<std::fs::File>, RealClock> {
         let fp = fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
         let writer = BufWriter::new(fp);
+        let format = jsonl::Format::new(writer);
 
-        Ok(Self::new_with_writer(
-            writer,
+        Ok(Self::new_with_format(
+            format,
             shutdown,
             experiment_started,
             target_running,
