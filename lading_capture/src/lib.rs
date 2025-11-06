@@ -8,7 +8,7 @@ use ustr::Ustr;
 
 mod accumulator;
 pub mod formats;
-pub mod json;
+pub mod line;
 pub mod manager;
 pub(crate) mod metric;
 pub mod validate;

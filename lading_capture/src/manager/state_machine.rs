@@ -13,7 +13,7 @@ use std::{
 use crate::{
     accumulator::{self, Accumulator, MetricValue},
     formats::{self, OutputFormat},
-    json,
+    line,
     manager::Clock,
     metric::{Counter, CounterValue, Gauge, GaugeValue, Metric},
 };
@@ -327,22 +327,22 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         }
 
         let line = match value {
-            MetricValue::Counter(val) => json::Line {
+            MetricValue::Counter(val) => line::Line {
                 run_id: self.run_id,
                 time: now_ms,
                 fetch_index: tick,
                 metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Counter,
-                value: json::LineValue::Int(*val),
+                metric_kind: line::MetricKind::Counter,
+                value: line::LineValue::Int(*val),
                 labels,
             },
-            MetricValue::Gauge(val) => json::Line {
+            MetricValue::Gauge(val) => line::Line {
                 run_id: self.run_id,
                 time: now_ms,
                 fetch_index: tick,
                 metric_name: key.name().into(),
-                metric_kind: json::MetricKind::Gauge,
-                value: json::LineValue::Float(*val),
+                metric_kind: line::MetricKind::Gauge,
+                value: line::LineValue::Float(*val),
                 labels,
             },
         };

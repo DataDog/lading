@@ -1,5 +1,8 @@
-//! JSON form of a Lading capture Line, meant to be read line by line from a
-//! file.
+//! Canonical representation of a capture file line
+//!
+//! This module defines the core data structures for representing a single
+//! metric observation. These structures are format-agnostic and used by all
+//! output formats (JSONL, Parquet, etc.).
 
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};

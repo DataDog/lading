@@ -157,7 +157,7 @@ impl Clock for RealClock {
 ///
 /// This struct is responsible for capturing all internal metrics sent through
 /// [`metrics`] and periodically writing them to disk with format
-/// [`json::Line`].
+/// [`line::Line`].
 pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
     /// Reference start time used to convert Instant timestamps to logical ticks.
     /// Initialized at `CaptureManager` construction time, before any historical

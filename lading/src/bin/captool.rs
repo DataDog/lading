@@ -10,7 +10,7 @@ use async_compression::tokio::bufread::ZstdDecoder;
 use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
-use lading_capture::json::{Line, MetricKind};
+use lading_capture::line::{Line, MetricKind};
 use tokio::{
     fs,
     io::{AsyncBufReadExt, BufReader},
