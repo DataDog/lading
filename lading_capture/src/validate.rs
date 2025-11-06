@@ -7,7 +7,7 @@
 use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
 use std::hash::{BuildHasher, Hasher};
 
-use crate::json::{Line, MetricKind};
+use crate::line::{Line, MetricKind};
 
 /// Result of validating capture invariants
 #[derive(Debug)]

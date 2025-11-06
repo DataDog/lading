@@ -53,7 +53,7 @@ impl InMemoryWriter {
     /// # Panics
     ///
     /// Panics if the mutex is poisoned
-    pub fn parse_lines(&self) -> Result<Vec<crate::json::Line>, serde_json::Error> {
+    pub fn parse_lines(&self) -> Result<Vec<crate::line::Line>, serde_json::Error> {
         let buffer = self.buffer.lock().expect("mutex poisoned");
         let content_str = String::from_utf8_lossy(&buffer);
         content_str

@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use arbitrary::Arbitrary;
 use lading_capture::{
-    formats::jsonl, json::Line, manager::CaptureManager, manager::RealClock,
+    formats::jsonl, line::Line, manager::CaptureManager, manager::RealClock,
     test::writer::InMemoryWriter, validate,
 };
 use rand::{Rng, SeedableRng, rngs::SmallRng};

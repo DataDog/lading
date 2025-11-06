@@ -3,7 +3,7 @@
 //! This module provides a trait-based abstraction for capture output
 //! formats. Only JSONL is supported now.
 
-use crate::json;
+use crate::line;
 
 pub mod jsonl;
 
@@ -29,7 +29,7 @@ pub trait OutputFormat {
     /// # Errors
     ///
     /// Returns an error if serialization or writing fails.
-    fn write_metric(&mut self, line: &json::Line) -> Result<(), Error>;
+    fn write_metric(&mut self, line: &line::Line) -> Result<(), Error>;
 
     /// Flush any buffered data to disk
     ///

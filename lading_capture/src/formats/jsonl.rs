@@ -5,7 +5,7 @@
 
 use std::io::Write;
 
-use crate::{formats, json};
+use crate::{formats, line};
 
 /// JSONL format writer
 #[derive(Debug)]
@@ -22,7 +22,7 @@ impl<W: Write> Format<W> {
 }
 
 impl<W: Write> formats::OutputFormat for Format<W> {
-    fn write_metric(&mut self, line: &json::Line) -> Result<(), formats::Error> {
+    fn write_metric(&mut self, line: &line::Line) -> Result<(), formats::Error> {
         let payload = serde_json::to_string(line)?;
         self.writer.write_all(payload.as_bytes())?;
         self.writer.write_all(b"\n")?;
@@ -40,7 +40,7 @@ mod tests {
     use super::*;
     use crate::{
         formats::OutputFormat,
-        json::{Line, LineValue, MetricKind},
+        line::{Line, LineValue, MetricKind},
     };
     use rustc_hash::FxHashMap;
     use uuid::Uuid;
