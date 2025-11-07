@@ -13,6 +13,9 @@ members = [
 [workspace.dependencies]
 anyhow = { version = "1.0" }
 arc-swap = { version = "1.7" }
+arrow-array = { version = "57.0", default-features = false }
+arrow-buffer = { version = "57.0", default-features = false }
+arrow-schema = { version = "57.0", default-features = false }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
 sha2 = { version = "0.10", default-features = false }
@@ -42,7 +45,7 @@ uuid = { version = "1.18", default-features = false, features = [
 ] }
 once_cell = { version = "1.21" }
 arrow = { version = "57.0", default-features = false }
-parquet = { version = "57.0", default-features = false, features = ["arrow", "zstd"] }
+parquet = { version = "57.0", default-features = false }
 proptest = { version = "1.9" }
 proptest-derive = { version = "0.6" }
 

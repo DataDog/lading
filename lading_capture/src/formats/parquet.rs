@@ -9,14 +9,12 @@ use std::{
     sync::Arc,
 };
 
-use arrow::{
-    array::{
-        ArrayRef, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-        TimestampMillisecondArray, UInt64Array,
-    },
-    buffer::OffsetBuffer,
-    datatypes::{DataType, Field, Fields, Schema, TimeUnit},
+use arrow_array::{
+    ArrayRef, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
+    TimestampMillisecondArray, UInt64Array,
 };
+use arrow_buffer::OffsetBuffer;
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, TimeUnit};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
@@ -33,7 +31,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     /// Arrow errors
     #[error("Arrow error: {0}")]
-    Arrow(#[from] arrow::error::ArrowError),
+    Arrow(#[from] ArrowError),
     /// Parquet errors
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
@@ -297,6 +295,26 @@ impl<W: Write + Seek + Send> Format<W> {
         self.write_parquet()?;
         Ok(())
     }
+
+    /// Close and finalize the Parquet file
+    ///
+    /// This method MUST be called to properly finalize the Parquet file. It
+    /// writes any remaining buffered data and the Parquet file footer which
+    /// contains critical metadata. Without calling `close()`, the file will be
+    /// incomplete and unreadable.
+    ///
+    /// Consumes the format as it can no longer be used after closing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing or closing fails
+    pub fn close(mut self) -> Result<(), Error> {
+        // Write any remaining buffered data as a final row group
+        self.write_parquet()?;
+        // Close the ArrowWriter which consumes it
+        self.writer.close()?;
+        Ok(())
+    }
 }
 
 impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
@@ -306,6 +324,10 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 
     fn flush(&mut self) -> Result<(), crate::formats::Error> {
         self.flush().map_err(Into::into)
+    }
+
+    fn close(self) -> Result<(), crate::formats::Error> {
+        self.close().map_err(Into::into)
     }
 }
 

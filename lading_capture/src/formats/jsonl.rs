@@ -54,6 +54,20 @@ impl<W: Write> Format<W> {
         self.writer.flush()?;
         Ok(())
     }
+
+    /// Close and finalize the JSONL output
+    ///
+    /// For JSONL format, this just ensures all buffered data is written.
+    ///
+    /// Consumes the format as it can no longer be used after closing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing fails
+    pub fn close(mut self) -> Result<(), Error> {
+        self.writer.flush()?;
+        Ok(())
+    }
 }
 
 impl<W: Write> crate::formats::OutputFormat for Format<W> {
@@ -63,6 +77,10 @@ impl<W: Write> crate::formats::OutputFormat for Format<W> {
 
     fn flush(&mut self) -> Result<(), crate::formats::Error> {
         self.flush().map_err(Into::into)
+    }
+
+    fn close(self) -> Result<(), crate::formats::Error> {
+        self.close().map_err(Into::into)
     }
 }
 

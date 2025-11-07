@@ -41,4 +41,17 @@ pub trait OutputFormat {
     ///
     /// Returns an error if flushing fails.
     fn flush(&mut self) -> Result<(), Error>;
+
+    /// Close and finalize the output format
+    ///
+    /// This method must be called to properly finalize the output file. For
+    /// formats like Parquet, this writes critical metadata (file footer). For
+    /// simpler formats like JSONL, this ensures all buffered data is written.
+    ///
+    /// Consumes the format as it can no longer be used after closing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if closing fails.
+    fn close(self) -> Result<(), Error>;
 }
