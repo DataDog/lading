@@ -270,7 +270,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         }
         self.format.flush()?;
 
-        debug!("Recording {line_count} captures",);
+        debug!(tick = ?tick, flushed_captures = line_count, "Flushed mature captures",);
         Ok(())
     }
 
