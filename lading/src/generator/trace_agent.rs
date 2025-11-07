@@ -442,7 +442,11 @@ async fn handle_request(
                         info!("Received {status_code} response, will attempt to retry.",);
                         if let Some(()) = backoff.wait().await {
                         } else {
-                            info!("Retries exceeded.",);
+                            info!(
+                                status = status_code,
+                                endpoint = %trace_endpoint,
+                                "Retries exceeded.",
+                            );
                             counter!("request_failure", &status_labels).increment(1);
                             return;
                         }
