@@ -1,21 +1,25 @@
 //! Output format abstraction for capture files
 //!
 //! This module provides a trait-based abstraction for capture output
-//! formats. Only JSONL is supported now.
+//! formats.
 
 use crate::line;
 
 pub mod jsonl;
+pub mod parquet;
 
 /// Format operation errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// JSONL format errors
+    #[error("JSONL format error: {0}")]
+    Jsonl(#[from] jsonl::Error),
+    /// Parquet format errors
+    #[error("Parquet format error: {0}")]
+    Parquet(#[from] parquet::Error),
     /// IO errors during write operations
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    /// JSON serialization errors (for JSONL format)
-    #[error("JSON serialization error: {0}")]
-    Json(#[from] serde_json::Error),
 }
 
 /// Trait for output format implementations

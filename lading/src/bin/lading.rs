@@ -4,7 +4,7 @@ use std::{
     env,
     fmt::{self, Display},
     fs,
-    io::Read,
+    io::{self, Read},
     num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
@@ -13,7 +13,7 @@ use std::{
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use lading::{
     blackhole,
-    config::{Config, Telemetry},
+    config::{self, Config, Telemetry},
     generator, inspector, observer,
     target::{self, Behavior, Output},
     target_metrics,
@@ -337,6 +337,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
             expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
+            format: config::CaptureFormat::default(),
         };
     } else {
         match config.telemetry {
@@ -411,25 +412,54 @@ async fn inner_main(
             path,
             global_labels,
             expiration,
-        } => {
-            let mut capture_manager = CaptureManager::new(
-                path,
-                shutdown_watcher.register()?,
-                experiment_started_watcher.clone(),
-                target_running_watcher.clone(),
-                expiration,
-            )
-            .await?;
-            for (k, v) in global_labels {
-                capture_manager.add_global_label(k, v);
+            format,
+        } => match format {
+            config::CaptureFormat::Jsonl { flush_seconds } => {
+                let mut capture_manager = CaptureManager::new_jsonl(
+                    path,
+                    flush_seconds,
+                    shutdown_watcher.register()?,
+                    experiment_started_watcher.clone(),
+                    target_running_watcher.clone(),
+                    expiration,
+                )
+                .await?;
+                for (k, v) in global_labels {
+                    capture_manager.add_global_label(k, v);
+                }
+                let handle = tokio::task::spawn_blocking(move || {
+                    Handle::current()
+                        .block_on(capture_manager.start())
+                        .expect("failed to start capture manager");
+                });
+                capture_manager_handle = Some(handle);
             }
-            let handle = tokio::task::spawn_blocking(move || {
-                Handle::current()
-                    .block_on(capture_manager.start())
-                    .expect("failed to start capture manager");
-            });
-            capture_manager_handle = Some(handle);
-        }
+            config::CaptureFormat::Parquet {
+                flush_seconds,
+                compression_level,
+            } => {
+                let mut capture_manager = CaptureManager::new_parquet(
+                    path,
+                    flush_seconds,
+                    compression_level,
+                    shutdown_watcher.register()?,
+                    experiment_started_watcher.clone(),
+                    target_running_watcher.clone(),
+                    expiration,
+                )
+                .await
+                .map_err(io::Error::other)?;
+                for (k, v) in global_labels {
+                    capture_manager.add_global_label(k, v);
+                }
+                let handle = tokio::task::spawn_blocking(move || {
+                    Handle::current()
+                        .block_on(capture_manager.start())
+                        .expect("failed to start capture manager");
+                });
+                capture_manager_handle = Some(handle);
+            }
+        },
     }
 
     // Set up the application servers. These are, depending on configuration:

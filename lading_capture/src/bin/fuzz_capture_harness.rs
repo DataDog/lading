@@ -356,6 +356,7 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
     let format = jsonl::Format::new(writer.clone());
     let manager = CaptureManager::new_with_format(
         format,
+        1,
         shutdown_watcher,
         experiment_watcher,
         target_watcher,

@@ -93,6 +93,10 @@ pub(crate) struct StateMachine<F: OutputFormat, C: Clock> {
     expiration: Duration,
     /// Output format for writing metrics
     format: F,
+    /// Number of intervals between flush calls
+    flush_interval: u64,
+    /// Last tick when we flushed
+    last_flush_tick: u64,
     /// Registry containing current metric values
     registry: Arc<Registry<Key, AtomicStorage>>,
     /// Accumulator for windowed metrics
@@ -110,6 +114,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         start: Instant,
         expiration: Duration,
         format: F,
+        flush_interval: u64,
         registry: Arc<Registry<Key, AtomicStorage>>,
         accumulator: Accumulator,
         mut global_labels: FxHashMap<String, String>,
@@ -134,6 +139,8 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
             start_ms,
             expiration,
             format,
+            flush_interval,
+            last_flush_tick: 0,
             registry,
             accumulator,
             filtered_global_labels: global_labels,
@@ -268,7 +275,13 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
             self.write_metric_line(&key, &value, tick, time_ms)?;
             line_count += 1;
         }
-        self.format.flush()?;
+
+        // Flush if flush_interval has elapsed
+        let current_tick = self.accumulator.current_tick;
+        if current_tick - self.last_flush_tick >= self.flush_interval {
+            self.format.flush()?;
+            self.last_flush_tick = current_tick;
+        }
 
         debug!(tick = ?tick, flushed_captures = line_count, "Flushed mature captures",);
         Ok(())
@@ -649,6 +662,7 @@ mod tests {
                 start,
                 Duration::from_secs(60),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
@@ -768,6 +782,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             labels,
@@ -799,6 +814,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             labels,
@@ -824,6 +840,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             labels,
@@ -854,6 +871,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             labels,
@@ -887,6 +905,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             global_labels,
@@ -1005,6 +1024,7 @@ mod tests {
             start,
             Duration::from_secs(60),
             format,
+            1,
             registry,
             accumulator,
             labels,
@@ -1042,6 +1062,7 @@ mod tests {
             start,
             Duration::from_secs(3600),
             format,
+            1,
             registry.clone(),
             accumulator,
             labels,
@@ -1174,6 +1195,7 @@ mod tests {
                 start,
                 Duration::from_secs(3600),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
@@ -1221,6 +1243,7 @@ mod tests {
                 start,
                 Duration::from_secs(3600),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
@@ -1275,6 +1298,7 @@ mod tests {
                 start,
                 Duration::from_secs(3600),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
@@ -1327,6 +1351,7 @@ mod tests {
                 start,
                 Duration::from_secs(3600),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
@@ -1379,6 +1404,7 @@ mod tests {
                 start,
                 Duration::from_secs(3600),
                 format,
+                1,
                 registry,
                 accumulator,
                 labels,
