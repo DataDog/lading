@@ -1,11 +1,13 @@
 generator:
   - id: "trace_agent_v04"
-    tcp:
+    trace_agent:
       seed: [2, 3, 5, 7, 11, 13, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
-      addr: "0.0.0.0:8126"
+      target_uri: "http://localhost:8126"
+      backoff_behavior:
+        obey:
+          max_retries: 3
       variant:
-        trace_agent:
-          version: "v0.4"
+        v0.4:
           contexts:
             inclusive:
               min: 1000

@@ -254,6 +254,19 @@ fn check_generator(
             }
             unimplemented!("Kubernetes not supported")
         }
+        generator::Inner::TraceAgent(g) => {
+            let total_bytes =
+                generator::trace_agent::validate_cache_size(g.maximum_prebuild_cache_size_bytes)
+                    .map_err(|e| anyhow::anyhow!("Cache size validation failed: {e}"))?;
+            let conf = lading_payload::Config::TraceAgent(g.variant);
+            generate_and_check(
+                &conf,
+                g.seed,
+                total_bytes,
+                g.maximum_block_size,
+                compute_fingerprint,
+            )
+        }
     }
 }
 
