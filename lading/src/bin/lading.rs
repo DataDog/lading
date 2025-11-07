@@ -58,6 +58,8 @@ enum Error {
     CapturePath,
     #[error("Invalid path for prometheus socket")]
     PrometheusPath,
+    #[error("Invalid capture format, must be 'jsonl' or 'parquet'")]
+    InvalidCaptureFormat,
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
 }
@@ -202,6 +204,15 @@ struct LadingArgs {
     /// time that capture metrics will expire by if they are not seen again, only useful when capture-path is set
     #[clap(long)]
     capture_expiriation_seconds: Option<u64>,
+    /// capture file format: jsonl or parquet (default: jsonl)
+    #[clap(long, default_value = "jsonl")]
+    capture_format: String,
+    /// number of seconds to buffer before flushing capture file (default: 60)
+    #[clap(long, default_value_t = 60)]
+    capture_flush_seconds: u64,
+    /// parquet compression level (1-22, default: 3), only used when capture-format=parquet
+    #[clap(long, default_value_t = 3)]
+    capture_compression_level: i32,
     /// address to bind prometheus exporter to, exclusive of prometheus-path and
     /// promtheus-addr
     #[clap(long)]
@@ -333,11 +344,22 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             global_labels: options_global_labels.inner,
         };
     } else if let Some(ref capture_path) = args.capture_path {
+        let format = match args.capture_format.as_str() {
+            "jsonl" => config::CaptureFormat::Jsonl {
+                flush_seconds: args.capture_flush_seconds,
+            },
+            "parquet" => config::CaptureFormat::Parquet {
+                flush_seconds: args.capture_flush_seconds,
+                compression_level: args.capture_compression_level,
+            },
+            _ => return Err(Error::InvalidCaptureFormat),
+        };
+
         config.telemetry = Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
             expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
-            format: config::CaptureFormat::default(),
+            format,
         };
     } else {
         match config.telemetry {
