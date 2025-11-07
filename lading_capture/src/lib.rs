@@ -7,6 +7,7 @@ use metric::{Counter, CounterValue, Gauge, GaugeValue, Metric};
 use ustr::Ustr;
 
 mod accumulator;
+pub mod format;
 pub mod formats;
 pub mod line;
 pub mod manager;

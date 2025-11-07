@@ -772,7 +772,7 @@ mod tests {
 
             // Parse the output and validate it satisfies all invariants
             let lines = writer.parse_lines().unwrap();
-            let result = crate::validate::validate_lines(&lines, None);
+            let result = crate::validate::jsonl::validate_lines(&lines, None);
 
             prop_assert!(
                 result.is_valid(),

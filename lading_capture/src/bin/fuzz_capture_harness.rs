@@ -415,7 +415,7 @@ fn validate_capture(writer: &InMemoryWriter, min_seconds: u16) -> Result<()> {
     }
 
     // Validate using canonical validation logic with min_seconds check
-    let result = validate::validate_lines(&lines, Some(u64::from(min_seconds)));
+    let result = validate::jsonl::validate_lines(&lines, Some(u64::from(min_seconds)));
 
     // Check all invariants
     if !result.is_valid() {

@@ -4,10 +4,8 @@
 //! files. All validation - in captool, tests - must use this module to ensure
 //! consistency.
 
-use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
-use std::hash::{BuildHasher, Hasher};
-
-use crate::line::{Line, MetricKind};
+pub mod jsonl;
+pub mod parquet;
 
 /// Result of validating capture invariants
 #[derive(Debug)]
@@ -36,140 +34,231 @@ impl ValidationResult {
     }
 }
 
-/// Validates capture lines satisfy all required invariants.
-///
-/// Invariants:
-///
-/// - Each `fetch_index` maps to exactly one time value (globally)
-/// - Each series (`metric_name` + labels) has strictly increasing time
-/// - Each series (`metric_name` + labels) has strictly increasing `fetch_index`
-/// - If `min_seconds` is specified, capture must contain >= `min_seconds` unique timestamps TODO make this a tighter inequality
-///
-/// This is the canonical validation logic used by captool and tests.
-#[must_use]
-#[allow(clippy::too_many_lines)]
-pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationResult {
-    let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
-    let mut series_last_state: HashMap<u64, (u128, u64, String)> = HashMap::new();
-    let hash_builder = RandomState::new();
-    let mut error_count = 0u128;
-    let mut fetch_index_errors = 0u128;
-    let mut first_error: Option<(u128, String, String)> = None;
+#[cfg(test)]
+mod tests {
+    use rustc_hash::FxHashMap;
+    use tempfile::NamedTempFile;
+    use uuid::Uuid;
 
-    for (line_num, line) in lines.iter().enumerate() {
-        let line_num = line_num as u128 + 1;
-        let time = line.time;
-        let fetch_index = line.fetch_index;
+    use crate::formats::parquet;
+    use crate::line::{Line, LineValue, MetricKind};
+    use crate::validate::jsonl::validate_lines;
+    use crate::validate::parquet::validate_parquet;
 
-        // Check global invariant: each fetch_index maps to exactly one time
-        if let Some(&existing_time) = fetch_index_to_time.get(&fetch_index) {
-            if existing_time != time {
-                if fetch_index_errors == 0 {
-                    let msg = format!(
-                        "fetch_index {fetch_index} appears with multiple times: {existing_time} and {time}"
-                    );
-                    first_error = Some((line_num, "fetch_index/time mismatch".to_string(), msg));
-                }
-                fetch_index_errors += 1;
+    /// Helper to create test lines with various patterns
+    fn create_test_lines() -> Vec<Line> {
+        let run_id = Uuid::new_v4();
+        vec![
+            Line {
+                run_id,
+                time: 1000,
+                fetch_index: 0,
+                metric_name: "test.counter".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(100),
+                labels: FxHashMap::default(),
+            },
+            Line {
+                run_id,
+                time: 2000,
+                fetch_index: 1,
+                metric_name: "test.counter".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(200),
+                labels: FxHashMap::default(),
+            },
+            Line {
+                run_id,
+                time: 3000,
+                fetch_index: 2,
+                metric_name: "test.gauge".to_string(),
+                metric_kind: MetricKind::Gauge,
+                value: LineValue::Float(42.5),
+                labels: {
+                    let mut map = FxHashMap::default();
+                    map.insert("env".to_string(), "prod".to_string());
+                    map
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn jsonl_and_parquet_validation_equivalent_for_valid_data() {
+        let lines = create_test_lines();
+
+        // Write to parquet
+        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        {
+            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
+                .expect("create parquet writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write to parquet");
             }
-        } else {
-            fetch_index_to_time.insert(fetch_index, time);
+            writer.flush().expect("flush parquet");
+            writer.close().expect("close parquet");
         }
 
-        // Build a unique key for (metric_name, labels)
-        let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-        for (key, value) in &line.labels {
-            sorted_labels.insert(format!("{key}:{value}"));
-        }
+        // Validate with both paths
+        let jsonl_result = validate_lines(&lines, None);
+        let parquet_result =
+            validate_parquet(parquet_file.path(), None).expect("parquet validation");
 
-        let mut hasher = hash_builder.build_hasher();
-        hasher.write_usize(line.metric_name.len());
-        hasher.write(line.metric_name.as_bytes());
-        // Include metric kind to distinguish counter from gauge
-        let kind_byte = match line.metric_kind {
-            MetricKind::Counter => 0u8,
-            MetricKind::Gauge => 1u8,
-        };
-        hasher.write_u8(kind_byte);
-        for label in &sorted_labels {
-            hasher.write_usize(label.len());
-            hasher.write(label.as_bytes());
-        }
-        let series_key = hasher.finish();
-
-        let kind_str = match line.metric_kind {
-            MetricKind::Counter => "counter",
-            MetricKind::Gauge => "gauge",
-        };
-        let series_id = format!(
-            "{kind}:{metric}[{labels}]",
-            kind = kind_str,
-            metric = line.metric_name,
-            labels = sorted_labels
-                .iter()
-                .cloned()
-                .collect::<Vec<String>>()
-                .join(",")
+        // Results should be identical
+        assert_eq!(jsonl_result.line_count, parquet_result.line_count);
+        assert_eq!(jsonl_result.unique_series, parquet_result.unique_series);
+        assert_eq!(
+            jsonl_result.unique_fetch_indices,
+            parquet_result.unique_fetch_indices
         );
-
-        // Check per-series invariants
-        if let Some((prev_time, prev_fetch_index, _)) = series_last_state.get(&series_key) {
-            if time <= *prev_time {
-                if error_count == 0 {
-                    let msg =
-                        format!("time not strictly increasing: prev={prev_time}, curr={time}");
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-            if fetch_index <= *prev_fetch_index {
-                if error_count == 0 {
-                    let msg = format!(
-                        "fetch_index not strictly increasing: prev={prev_fetch_index}, curr={fetch_index}"
-                    );
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-        }
-
-        series_last_state.insert(series_key, (time, fetch_index, series_id));
+        assert_eq!(
+            jsonl_result.fetch_index_errors,
+            parquet_result.fetch_index_errors
+        );
+        assert_eq!(
+            jsonl_result.per_series_errors,
+            parquet_result.per_series_errors
+        );
+        assert_eq!(
+            jsonl_result.min_seconds_errors,
+            parquet_result.min_seconds_errors
+        );
+        assert_eq!(jsonl_result.is_valid(), parquet_result.is_valid());
+        assert!(jsonl_result.is_valid(), "Data should be valid");
     }
 
-    // Check minimum seconds requirement if specified
-    let mut min_seconds_errors = 0u128;
-    if let Some(min_secs) = min_seconds {
-        #[allow(clippy::cast_possible_truncation)]
-        let unique_seconds = fetch_index_to_time.len() as u64;
-        if unique_seconds < min_secs {
-            if first_error.is_none() {
-                let msg = format!(
-                    "Insufficient timestamps: expected >= {min_secs} unique timestamps for {min_secs}s experiment, got {unique_seconds}"
-                );
-                first_error = Some((0, "min_seconds".to_string(), msg));
+    #[test]
+    fn jsonl_and_parquet_validation_equivalent_for_fetch_index_violation() {
+        let run_id = Uuid::new_v4();
+        let lines = vec![
+            Line {
+                run_id,
+                time: 1000,
+                fetch_index: 0,
+                metric_name: "test".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(1),
+                labels: FxHashMap::default(),
+            },
+            Line {
+                run_id,
+                time: 2000,     // Different time!
+                fetch_index: 0, // Same fetch_index - VIOLATION
+                metric_name: "test".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(2),
+                labels: FxHashMap::default(),
+            },
+        ];
+
+        // Write to parquet
+        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        {
+            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
+                .expect("create parquet writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write to parquet");
             }
-            min_seconds_errors = 1;
+            writer.flush().expect("flush parquet");
+            writer.close().expect("close parquet");
         }
-        // NOTE 5 seconds is arbitrary, "large enough, but not too large".
-        if unique_seconds > (min_secs + 5) {
-            if first_error.is_none() {
-                let msg = format!(
-                    "Invalid experiment duration, expected < {max} unique timestamps for {min_secs}s experiment, got {unique_seconds}",
-                    max = min_secs + 5,
-                );
-                first_error = Some((0, "min_seconds".to_string(), msg));
-            }
-            min_seconds_errors = 1;
-        }
+
+        let jsonl_result = validate_lines(&lines, None);
+        let parquet_result =
+            validate_parquet(parquet_file.path(), None).expect("parquet validation");
+
+        // Both should detect the same error
+        assert_eq!(jsonl_result.fetch_index_errors, 1);
+        assert_eq!(parquet_result.fetch_index_errors, 1);
+        assert_eq!(jsonl_result.is_valid(), parquet_result.is_valid());
+        assert!(!jsonl_result.is_valid());
     }
 
-    ValidationResult {
-        line_count: lines.len() as u128,
-        unique_series: series_last_state.len(),
-        unique_fetch_indices: fetch_index_to_time.len(),
-        fetch_index_errors,
-        per_series_errors: error_count,
-        min_seconds_errors,
-        first_error,
+    #[test]
+    fn jsonl_and_parquet_validation_equivalent_for_time_not_increasing() {
+        let run_id = Uuid::new_v4();
+        let lines = vec![
+            Line {
+                run_id,
+                time: 2000,
+                fetch_index: 0,
+                metric_name: "test".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(1),
+                labels: FxHashMap::default(),
+            },
+            Line {
+                run_id,
+                time: 1000, // Time goes backward - VIOLATION
+                fetch_index: 1,
+                metric_name: "test".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(2),
+                labels: FxHashMap::default(),
+            },
+        ];
+
+        // Write to parquet
+        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        {
+            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
+                .expect("create parquet writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write to parquet");
+            }
+            writer.flush().expect("flush parquet");
+            writer.close().expect("close parquet");
+        }
+
+        let jsonl_result = validate_lines(&lines, None);
+        let parquet_result =
+            validate_parquet(parquet_file.path(), None).expect("parquet validation");
+
+        // Both should detect the same per-series error
+        assert_eq!(jsonl_result.per_series_errors, 1);
+        assert_eq!(parquet_result.per_series_errors, 1);
+        assert_eq!(jsonl_result.is_valid(), parquet_result.is_valid());
+        assert!(!jsonl_result.is_valid());
+    }
+
+    #[test]
+    fn jsonl_and_parquet_validation_equivalent_with_min_seconds() {
+        let run_id = Uuid::new_v4();
+        let mut lines = Vec::new();
+
+        // Create 30 lines with unique timestamps (need 60)
+        for i in 0..30 {
+            lines.push(Line {
+                run_id,
+                time: (i * 1000) as u128,
+                fetch_index: i,
+                metric_name: "test".to_string(),
+                metric_kind: MetricKind::Counter,
+                value: LineValue::Int(i),
+                labels: FxHashMap::default(),
+            });
+        }
+
+        // Write to parquet
+        let parquet_file = NamedTempFile::new().expect("create temp parquet file");
+        {
+            let mut writer = parquet::Format::new(parquet_file.reopen().expect("reopen"), 3)
+                .expect("create parquet writer");
+            for line in &lines {
+                writer.write_metric(line).expect("write to parquet");
+            }
+            writer.flush().expect("flush parquet");
+            writer.close().expect("close parquet");
+        }
+
+        let jsonl_result = validate_lines(&lines, Some(60));
+        let parquet_result =
+            validate_parquet(parquet_file.path(), Some(60)).expect("parquet validation");
+
+        // Both should detect min_seconds violation
+        assert_eq!(jsonl_result.min_seconds_errors, 1);
+        assert_eq!(parquet_result.min_seconds_errors, 1);
+        assert_eq!(jsonl_result.is_valid(), parquet_result.is_valid());
+        assert!(!jsonl_result.is_valid());
     }
 }
