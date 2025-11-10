@@ -30,6 +30,6 @@ pub(crate) struct SeriesStats {
     pub(crate) mean: f64,
     /// Whether values are monotonically increasing
     pub(crate) is_monotonic: bool,
-    /// All values (for dump_values)
+    /// All values (for `dump_values`)
     pub(crate) values: Vec<(u64, f64)>, // (fetch_index, value)
 }

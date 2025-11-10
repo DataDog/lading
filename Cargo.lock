@@ -358,16 +358,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "average"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75aacce61912644dbb732271789748142bc4bf7ce6382d67bb26850516b7a391"
-dependencies = [
- "float-ord",
- "num-traits",
-]
-
-[[package]]
 name = "axum"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1019,12 +1009,6 @@ dependencies = [
  "crc32fast",
  "miniz_oxide",
 ]
-
-[[package]]
-name = "float-ord"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ce81f49ae8a0482e4c55ea62ebbd7e5a686af544c00b9d090bba3ff9be97b3d"
 
 [[package]]
 name = "fnv"
@@ -1795,9 +1779,10 @@ name = "lading"
 version = "0.28.0"
 dependencies = [
  "anyhow",
+ "arrow-array",
+ "arrow-schema",
  "async-compression",
  "async-pidfd",
- "average",
  "bollard",
  "byte-unit",
  "bytes",
