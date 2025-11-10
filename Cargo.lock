@@ -483,7 +483,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serde_urlencoded",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tower-service",
@@ -1033,6 +1033,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1271,6 +1277,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash 0.8.12",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "foldhash",
 ]
 
 [[package]]
@@ -1711,7 +1726,7 @@ dependencies = [
  "pest_derive",
  "regex",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror",
 ]
 
 [[package]]
@@ -1765,7 +1780,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tower",
@@ -1787,7 +1802,7 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror",
 ]
 
 [[package]]
@@ -1819,9 +1834,9 @@ dependencies = [
  "lading-payload",
  "lading-signal",
  "lading-throttle",
- "metrics",
+ "metrics 0.23.1",
  "metrics-exporter-prometheus",
- "metrics-util",
+ "metrics-util 0.17.0",
  "nix 0.30.1",
  "num-traits",
  "num_cpus",
@@ -1843,7 +1858,7 @@ dependencies = [
  "sha2",
  "sysinfo",
  "tempfile",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -1867,8 +1882,8 @@ dependencies = [
  "arrow-schema",
  "lading-fuzz",
  "lading-signal",
- "metrics",
- "metrics-util",
+ "metrics 0.23.1",
+ "metrics-util 0.17.0",
  "parquet",
  "proptest",
  "rand 0.9.2",
@@ -1876,7 +1891,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
  "tracing",
  "ustr",
@@ -1904,7 +1919,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tuple",
- "thiserror 2.0.17",
+ "thiserror",
  "time",
  "tokio",
  "tracing",
@@ -1915,7 +1930,7 @@ name = "lading-signal"
 version = "0.1.0"
 dependencies = [
  "loom",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -1927,7 +1942,7 @@ dependencies = [
  "async-trait",
  "proptest",
  "serde",
- "thiserror 2.0.17",
+ "thiserror",
  "tokio",
 ]
 
@@ -2081,10 +2096,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-exporter-prometheus"
-version = "0.15.3"
+name = "metrics"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4f0c8427b39666bf970460908b213ec09b3b350f20c0c2eabcbba51704a08e6"
+checksum = "25dea7ac8057892855ec285c440160265225438c3c45072613c25a4b26e98ef5"
+dependencies = [
+ "ahash 0.8.12",
+ "portable-atomic",
+]
+
+[[package]]
+name = "metrics-exporter-prometheus"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b166dea96003ee2531cf14833efedced545751d800f03535801d833313f8c15"
 dependencies = [
  "base64",
  "http-body-util",
@@ -2092,10 +2117,10 @@ dependencies = [
  "hyper-util",
  "indexmap 2.12.0",
  "ipnet",
- "metrics",
- "metrics-util",
+ "metrics 0.24.2",
+ "metrics-util 0.20.0",
  "quanta",
- "thiserror 1.0.69",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -2111,12 +2136,28 @@ dependencies = [
  "crossbeam-utils",
  "hashbrown 0.14.5",
  "indexmap 2.12.0",
- "metrics",
+ "metrics 0.23.1",
  "num_cpus",
  "ordered-float 4.6.0",
  "quanta",
  "radix_trie",
  "sketches-ddsketch 0.2.2",
+]
+
+[[package]]
+name = "metrics-util"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe8db7a05415d0f919ffb905afa37784f71901c9a773188876984b4f769ab986"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "hashbrown 0.15.5",
+ "metrics 0.24.2",
+ "quanta",
+ "rand 0.9.2",
+ "rand_xoshiro",
+ "sketches-ddsketch 0.3.0",
 ]
 
 [[package]]
@@ -2359,7 +2400,7 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror 2.0.17",
+ "thiserror",
  "tracing",
 ]
 
@@ -2391,7 +2432,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.2",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror",
 ]
 
 [[package]]
@@ -2937,6 +2978,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_xoshiro"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
+dependencies = [
+ "rand_core 0.9.3",
+]
+
+[[package]]
 name = "raw-cpuid"
 version = "11.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3426,7 +3476,7 @@ checksum = "f3faaf9e727533a19351a43cc5a8de957372163c7d35cc48c90b75cdda13c352"
 dependencies = [
  "percent-encoding",
  "serde",
- "thiserror 2.0.17",
+ "thiserror",
 ]
 
 [[package]]
@@ -3717,31 +3767,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
-dependencies = [
- "thiserror-impl 1.0.69",
-]
-
-[[package]]
-name = "thiserror"
 version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
- "thiserror-impl 2.0.17",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.108",
+ "thiserror-impl",
 ]
 
 [[package]]
