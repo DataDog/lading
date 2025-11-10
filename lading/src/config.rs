@@ -61,6 +61,48 @@ pub fn default_expiration() -> Duration {
     Duration::MAX
 }
 
+/// Default value for flush seconds
+#[must_use]
+pub fn default_flush_seconds() -> u64 {
+    60
+}
+
+/// Default value for zstd compression level
+#[must_use]
+pub fn default_compression_level() -> i32 {
+    3
+}
+
+#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+/// Output format for capture files
+pub enum CaptureFormat {
+    /// JSON Lines format - one JSON object per line
+    Jsonl {
+        /// Number of seconds to buffer before flushing to disk
+        #[serde(default = "default_flush_seconds")]
+        flush_seconds: u64,
+    },
+    /// Apache Parquet columnar format
+    Parquet {
+        /// Number of seconds to buffer before writing row group
+        #[serde(default = "default_flush_seconds")]
+        flush_seconds: u64,
+        /// Zstd compression level (1-22, default: 3)
+        #[serde(default = "default_compression_level")]
+        compression_level: i32,
+    },
+}
+
+impl Default for CaptureFormat {
+    fn default() -> Self {
+        Self::Jsonl {
+            flush_seconds: default_flush_seconds(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -93,6 +135,9 @@ pub enum Telemetry {
         /// The time metrics that have not been written to will take to expire.
         #[serde(default = "default_expiration")]
         expiration: Duration,
+        /// Output format for the capture file
+        #[serde(default)]
+        format: CaptureFormat,
     },
 }
 

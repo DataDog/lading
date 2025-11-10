@@ -16,10 +16,14 @@ description = "A tool for load testing daemons."
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
 arc-swap = { workspace = true }
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-schema = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 metrics = { workspace = true }
+parquet = { workspace = true, features = ["arrow", "zstd"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "time", "sync", "test-util"] }
 thiserror = { workspace = true }

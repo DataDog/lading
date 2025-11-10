@@ -49,7 +49,7 @@ impl std::fmt::Display for LineValue {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// The structure of a capture file line.
 pub struct Line {
     /// An id that is mostly unique to this run, allowing us to distinguish

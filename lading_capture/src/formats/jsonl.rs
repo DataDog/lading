@@ -5,7 +5,18 @@
 
 use std::io::Write;
 
-use crate::{formats, line};
+use crate::line;
+
+/// JSONL format errors
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// IO errors during write operations
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// JSON serialization errors
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+}
 
 /// JSONL format writer
 #[derive(Debug)]
@@ -21,27 +32,62 @@ impl<W: Write> Format<W> {
     }
 }
 
-impl<W: Write> formats::OutputFormat for Format<W> {
-    fn write_metric(&mut self, line: &line::Line) -> Result<(), formats::Error> {
+impl<W: Write> Format<W> {
+    /// Write a single metric line to the output
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or writing fails
+    pub fn write_metric(&mut self, line: &line::Line) -> Result<(), Error> {
         let payload = serde_json::to_string(line)?;
         self.writer.write_all(payload.as_bytes())?;
         self.writer.write_all(b"\n")?;
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), formats::Error> {
+    /// Flush any buffered data to disk
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing fails
+    pub fn flush(&mut self) -> Result<(), Error> {
         self.writer.flush()?;
         Ok(())
+    }
+
+    /// Close and finalize the JSONL output
+    ///
+    /// For JSONL format, this just ensures all buffered data is written.
+    ///
+    /// Consumes the format as it can no longer be used after closing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing fails
+    pub fn close(mut self) -> Result<(), Error> {
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+impl<W: Write> crate::formats::OutputFormat for Format<W> {
+    fn write_metric(&mut self, line: &line::Line) -> Result<(), crate::formats::Error> {
+        self.write_metric(line).map_err(Into::into)
+    }
+
+    fn flush(&mut self) -> Result<(), crate::formats::Error> {
+        self.flush().map_err(Into::into)
+    }
+
+    fn close(self) -> Result<(), crate::formats::Error> {
+        self.close().map_err(Into::into)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        formats::OutputFormat,
-        line::{Line, LineValue, MetricKind},
-    };
+    use crate::line::{Line, LineValue, MetricKind};
     use rustc_hash::FxHashMap;
     use uuid::Uuid;
 

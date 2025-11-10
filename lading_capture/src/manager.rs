@@ -22,7 +22,7 @@ use tokio::{fs, sync::mpsc, time};
 use crate::{
     accumulator,
     accumulator::Accumulator,
-    formats::{self, OutputFormat, jsonl},
+    formats::{self, OutputFormat, jsonl, parquet},
     metric::Metric,
 };
 use metrics::Key;
@@ -166,6 +166,7 @@ pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
     start: Instant,
     expiration: Duration,
     format: F,
+    flush_seconds: u64,
     shutdown: Option<lading_signal::Watcher>,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
@@ -191,6 +192,7 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
     /// Create a new [`CaptureManager`] with a custom format and clock
     pub fn new_with_format(
         format: F,
+        flush_seconds: u64,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -211,6 +213,7 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
             start: now,
             expiration,
             format,
+            flush_seconds,
             shutdown: Some(shutdown),
             _experiment_started: experiment_started,
             target_running,
@@ -289,6 +292,7 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
             self.start,
             self.expiration,
             self.format,
+            self.flush_seconds,
             self.registry,
             self.accumulator,
             self.global_labels,
@@ -322,8 +326,9 @@ impl CaptureManager<formats::jsonl::Format<BufWriter<std::fs::File>>, RealClock>
     /// # Errors
     ///
     /// Function will error if the underlying capture file cannot be opened.
-    pub async fn new(
+    pub async fn new_jsonl(
         capture_path: PathBuf,
+        flush_seconds: u64,
         shutdown: lading_signal::Watcher,
         experiment_started: lading_signal::Watcher,
         target_running: lading_signal::Watcher,
@@ -336,6 +341,42 @@ impl CaptureManager<formats::jsonl::Format<BufWriter<std::fs::File>>, RealClock>
 
         Ok(Self::new_with_format(
             format,
+            flush_seconds,
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+            RealClock::default(),
+        ))
+    }
+}
+
+impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealClock> {
+    /// Create a new [`CaptureManager`] with file-based Parquet writer
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the underlying capture file cannot be opened or
+    /// if Parquet writer creation fails.
+    pub async fn new_parquet(
+        capture_path: PathBuf,
+        flush_seconds: u64,
+        compression_level: i32,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, formats::Error> {
+        let fp = fs::File::create(&capture_path)
+            .await
+            .map_err(formats::Error::Io)?;
+        let fp = fp.into_std().await;
+        let writer = BufWriter::new(fp);
+        let format = parquet::Format::new(writer, compression_level)?;
+
+        Ok(Self::new_with_format(
+            format,
+            flush_seconds,
             shutdown,
             experiment_started,
             target_running,
