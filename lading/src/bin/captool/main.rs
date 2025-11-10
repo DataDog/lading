@@ -1,17 +1,16 @@
 //! Capture analysis tool for lading capture files.
 
 #![allow(clippy::print_stdout)]
-use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
-use std::ffi::OsStr;
-use std::hash::{BuildHasher, Hasher};
+
+mod analyze;
+
 use std::path;
 
 use async_compression::tokio::bufread::ZstdDecoder;
-use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
 use lading_capture::format::{CaptureFormat, detect_format};
-use lading_capture::line::{Line, MetricKind};
+use lading_capture::line::Line;
 use lading_capture::validate::{jsonl, parquet};
 use tokio::{
     fs,
@@ -103,108 +102,123 @@ async fn main() -> Result<(), Error> {
         return Err(Error::InvalidArgs);
     }
 
-    let is_zstd = capture_path
-        .extension()
-        .is_some_and(|ext| ext == OsStr::new("zstd"));
+    let format = detect_format(capture_path).map_err(|e| {
+        error!("Failed to detect capture format: {e}");
+        Error::InvalidArgs
+    })?;
 
-    let file = fs::File::open(capture_path).await?;
-
-    let lines = if is_zstd {
-        let reader = BufReader::new(file);
-        let decoder = ZstdDecoder::new(reader);
-        let reader = BufReader::new(decoder);
-        either::Either::Right(LinesStream::new(reader.lines()))
-    } else {
-        let reader = BufReader::new(file);
-        either::Either::Left(LinesStream::new(reader.lines()))
-    };
-
-    let lines = lines.map(|l| {
-        let line_str = l.expect("failed to read line");
-        let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
-        line
-    });
-
-    // Print out available metrics if user asked for it
-    // or if they didn't specify a specific metric
+    // List metrics
     if args.list_metrics || args.metric.is_none() {
-        let mut names: Vec<(String, String)> = lines
-            .map(|line| {
-                (
-                    line.metric_name.clone(),
-                    match line.metric_kind {
-                        MetricKind::Counter => "c".to_owned(),
-                        MetricKind::Gauge => "g".to_owned(),
-                    },
-                )
-            })
-            .collect()
-            .await;
-        names.sort();
-        names.dedup();
-        for (name, kind) in names {
-            println!("{kind}: {name}");
+        let metrics = match format {
+            CaptureFormat::Parquet => {
+                let path_str = capture_path_str.to_owned();
+                tokio::task::spawn_blocking(move || analyze::parquet::list_metrics(&path_str))
+                    .await
+                    .expect("list_metrics task panicked")
+                    .map_err(|e| {
+                        error!("Failed to list metrics: {e}");
+                        Error::InvalidArgs
+                    })?
+            }
+            CaptureFormat::Jsonl { compressed } => {
+                let file = fs::File::open(capture_path).await?;
+                let lines = if compressed {
+                    let reader = BufReader::new(file);
+                    let decoder = ZstdDecoder::new(reader);
+                    let reader = BufReader::new(decoder);
+                    either::Either::Right(LinesStream::new(reader.lines()))
+                } else {
+                    let reader = BufReader::new(file);
+                    either::Either::Left(LinesStream::new(reader.lines()))
+                };
+
+                let lines_vec: Vec<Line> = lines
+                    .map(|l| {
+                        let line_str = l.expect("failed to read line");
+                        serde_json::from_str(&line_str).expect("failed to deserialize line")
+                    })
+                    .collect()
+                    .await;
+
+                analyze::jsonl::list_metrics(&lines_vec)
+            }
+        };
+
+        for metric in metrics {
+            let kind_char = match metric.kind.as_str() {
+                "counter" => "c",
+                "gauge" => "g",
+                _ => "?",
+            };
+            println!("{kind_char}: {}", metric.name);
         }
         return Ok(());
     }
 
-    if let Some(metric) = &args.metric {
-        // key is hash of the metric name and all the sorted, concatenated labels
-        // value is a tuple of
-        // - hashset of "key:value" strings (aka, concatenated labels)
-        // - vec of data points
-        let mut context_map: HashMap<u64, (BTreeSet<String>, Vec<f64>)> = HashMap::new();
-        let hash_builder = RandomState::new();
-        info!("Metric: {metric}");
+    // Analyze specific metric
+    if let Some(metric_name) = &args.metric {
+        info!("Metric: {metric_name}");
 
-        // Use a BTreeSet to ensure that the tags are sorted
-        let filtered: Vec<_> = lines
-            .filter(|line| &line.metric_name == metric)
-            .collect()
-            .await;
+        let series_stats = match format {
+            CaptureFormat::Parquet => {
+                let path_str = capture_path_str.to_owned();
+                let metric_clone = metric_name.clone();
+                tokio::task::spawn_blocking(move || {
+                    analyze::parquet::analyze_metric(&path_str, &metric_clone)
+                })
+                .await
+                .expect("analyze_metric task panicked")
+                .map_err(|e| {
+                    error!("Failed to analyze metric: {e}");
+                    Error::InvalidArgs
+                })?
+            }
+            CaptureFormat::Jsonl { compressed } => {
+                let file = fs::File::open(capture_path).await?;
+                let lines = if compressed {
+                    let reader = BufReader::new(file);
+                    let decoder = ZstdDecoder::new(reader);
+                    let reader = BufReader::new(decoder);
+                    either::Either::Right(LinesStream::new(reader.lines()))
+                } else {
+                    let reader = BufReader::new(file);
+                    either::Either::Left(LinesStream::new(reader.lines()))
+                };
 
-        if let Some(point) = filtered.first() {
-            info!("Metric kind: {:?}", point.metric_kind);
+                let lines_vec: Vec<Line> = lines
+                    .map(|l| {
+                        let line_str = l.expect("failed to read line");
+                        serde_json::from_str(&line_str).expect("failed to deserialize line")
+                    })
+                    .collect()
+                    .await;
+
+                analyze::jsonl::analyze_metric(&lines_vec, metric_name)
+            }
+        };
+
+        if series_stats.is_empty() {
+            error!("No data found for metric {metric_name}");
         } else {
-            error!("No data found for metric {}", metric);
-        }
-
-        for line in &filtered {
-            let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-            for (key, value) in &line.labels {
-                let tag = format!("{key}:{value}");
-                sorted_labels.insert(tag);
+            for stats in series_stats.values() {
+                let labels_str = stats
+                    .labels
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<String>>()
+                    .join(",");
+                info!(
+                    "{metric_name}[{labels_str}]: min: {}, mean: {}, max: {}, is_monotonic: {}",
+                    stats.min, stats.mean, stats.max, stats.is_monotonic
+                );
             }
-            let mut context_key = hash_builder.build_hasher();
-            context_key.write_usize(metric.len());
-            context_key.write(metric.as_bytes());
-            for label in &sorted_labels {
-                context_key.write_usize(label.len());
-                context_key.write(label.as_bytes());
-            }
-            let entry = context_map.entry(context_key.finish()).or_default();
-            entry.0 = sorted_labels;
-            entry.1.push(line.value.as_f64());
-        }
 
-        concatenate!(Estimator, [Variance, mean], [Max, max], [Min, min]);
-        let is_monotonic = |v: &Vec<_>| v.windows(2).all(|w| w[0] <= w[1]);
-
-        for (labels, values) in context_map.values() {
-            let s: Estimator = values.iter().copied().collect();
-            info!(
-                "{metric}[{labels}]: min: {}, mean: {}, max: {}, is_monotonic: {}",
-                s.min(),
-                s.mean(),
-                s.max(),
-                is_monotonic(values),
-                labels = labels.iter().cloned().collect::<Vec<String>>().join(",")
-            );
-        }
-
-        if args.dump_values {
-            for line in &filtered {
-                println!("{}: {}", line.fetch_index, line.value);
+            if args.dump_values {
+                for stats in series_stats.values() {
+                    for (fetch_index, value) in &stats.values {
+                        println!("{fetch_index}: {value}");
+                    }
+                }
             }
         }
     }
