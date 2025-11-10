@@ -958,6 +958,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1196,6 +1202,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash 0.8.12",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "foldhash",
 ]
 
 [[package]]
@@ -1744,9 +1759,9 @@ dependencies = [
  "lading-payload",
  "lading-signal",
  "lading-throttle",
- "metrics",
+ "metrics 0.23.1",
  "metrics-exporter-prometheus",
- "metrics-util",
+ "metrics-util 0.20.0",
  "nix 0.30.1",
  "num-traits",
  "num_cpus",
@@ -1790,8 +1805,8 @@ dependencies = [
  "arrow-schema",
  "lading-fuzz",
  "lading-signal",
- "metrics",
- "metrics-util",
+ "metrics 0.23.1",
+ "metrics-util 0.20.0",
  "parquet",
  "proptest",
  "rand 0.9.2",
@@ -2003,6 +2018,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25dea7ac8057892855ec285c440160265225438c3c45072613c25a4b26e98ef5"
+dependencies = [
+ "ahash 0.8.12",
+ "portable-atomic",
+]
+
+[[package]]
 name = "metrics-exporter-prometheus"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2014,8 +2039,8 @@ dependencies = [
  "hyper-util",
  "indexmap 2.12.0",
  "ipnet",
- "metrics",
- "metrics-util",
+ "metrics 0.23.1",
+ "metrics-util 0.17.0",
  "quanta",
  "thiserror 1.0.69",
  "tokio",
@@ -2028,17 +2053,33 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
 dependencies = [
- "aho-corasick",
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.14.5",
- "indexmap 2.12.0",
- "metrics",
+ "metrics 0.23.1",
  "num_cpus",
+ "quanta",
+ "sketches-ddsketch 0.2.2",
+]
+
+[[package]]
+name = "metrics-util"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe8db7a05415d0f919ffb905afa37784f71901c9a773188876984b4f769ab986"
+dependencies = [
+ "aho-corasick",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "hashbrown 0.15.5",
+ "indexmap 2.12.0",
+ "metrics 0.24.2",
  "ordered-float 4.6.0",
  "quanta",
  "radix_trie",
- "sketches-ddsketch 0.2.2",
+ "rand 0.9.2",
+ "rand_xoshiro",
+ "sketches-ddsketch 0.3.0",
 ]
 
 [[package]]
@@ -2854,6 +2895,15 @@ name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core 0.9.3",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
 dependencies = [
  "rand_core 0.9.3",
 ]
