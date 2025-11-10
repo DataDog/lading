@@ -1795,9 +1795,6 @@ name = "lading"
 version = "0.28.0"
 dependencies = [
  "anyhow",
- "arrow",
- "arrow-array",
- "arrow-schema",
  "async-compression",
  "async-pidfd",
  "average",
