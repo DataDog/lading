@@ -24,6 +24,7 @@ anyhow = { workspace = true }
 async-compression = { version = "0.4.32", features = ["tokio", "zstd"] }
 average = { version = "0.16", default-features = false, features = [] }
 bollard = { version = "0.19", default-features = false, features = ["pipe", "http"] }
+parquet = { workspace = true, features = ["arrow"] }
 byte-unit = { workspace = true, features = ["std"] }
 bytes = { workspace = true, features = ["std"] }
 clap = { version = "4.5", default-features = false, features = [

@@ -16,6 +16,7 @@ description = "A tool for load testing daemons."
 lading-signal = { version = "0.1", path = "../lading_signal" }
 
 arc-swap = { workspace = true }
+arrow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-buffer = { workspace = true }
 arrow-schema = { workspace = true }
@@ -37,6 +38,7 @@ doctest = false
 [dev-dependencies]
 proptest = { workspace = true }
 rand = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 fuzz = ["dep:arbitrary", "dep:lading-fuzz", "dep:rand", "dep:anyhow"]

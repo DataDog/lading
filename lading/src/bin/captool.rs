@@ -10,7 +10,9 @@ use async_compression::tokio::bufread::ZstdDecoder;
 use average::{Estimate, Max, Min, Variance, concatenate};
 use clap::Parser;
 use futures::io;
+use lading_capture::format::{CaptureFormat, detect_format};
 use lading_capture::line::{Line, MetricKind};
+use lading_capture::validate::{jsonl, parquet};
 use tokio::{
     fs,
     io::{AsyncBufReadExt, BufReader},
@@ -218,36 +220,59 @@ async fn validate_capture(capture_path_str: &str, min_seconds: Option<u64>) -> R
         return Err(Error::InvalidArgs);
     }
 
-    let is_zstd = capture_path
-        .extension()
-        .is_some_and(|ext| ext == OsStr::new("zstd"));
+    let format = detect_format(capture_path).map_err(|e| {
+        error!("Failed to detect capture format: {e}");
+        Error::InvalidArgs
+    })?;
 
-    let file = fs::File::open(capture_path).await?;
+    let result = match format {
+        CaptureFormat::Parquet => {
+            info!("Detected parquet format, using columnar validation");
+            let path_str = capture_path_str.to_owned();
+            tokio::task::spawn_blocking(move || parquet::validate_parquet(&path_str, min_seconds))
+                .await
+                .expect("validation task panicked")
+                .map_err(|e| {
+                    error!("Parquet validation failed: {e}");
+                    Error::InvalidArgs
+                })?
+        }
+        CaptureFormat::Jsonl { compressed } => {
+            let file = fs::File::open(capture_path).await?;
 
-    let lines = if is_zstd {
-        let reader = BufReader::new(file);
-        let decoder = ZstdDecoder::new(reader);
-        let reader = BufReader::new(decoder);
-        either::Either::Right(LinesStream::new(reader.lines()))
-    } else {
-        let reader = BufReader::new(file);
-        either::Either::Left(LinesStream::new(reader.lines()))
+            let lines = if compressed {
+                let reader = BufReader::new(file);
+                let decoder = ZstdDecoder::new(reader);
+                let reader = BufReader::new(decoder);
+                either::Either::Right(LinesStream::new(reader.lines()))
+            } else {
+                let reader = BufReader::new(file);
+                either::Either::Left(LinesStream::new(reader.lines()))
+            };
+
+            let mut lines_vec = Vec::new();
+            let mut lines_stream = lines.map(|l| {
+                let line_str = l.expect("failed to read line");
+                let line: Line =
+                    serde_json::from_str(&line_str).expect("failed to deserialize line");
+                line
+            });
+
+            while let Some(line) = lines_stream.next().await {
+                lines_vec.push(line);
+            }
+
+            jsonl::validate_lines(&lines_vec, min_seconds)
+        }
     };
 
-    let mut lines_vec = Vec::new();
-    let mut lines_stream = lines.map(|l| {
-        let line_str = l.expect("failed to read line");
-        let line: Line = serde_json::from_str(&line_str).expect("failed to deserialize line");
-        line
-    });
+    report_validation_result(&result, min_seconds)
+}
 
-    while let Some(line) = lines_stream.next().await {
-        lines_vec.push(line);
-    }
-
-    // Use the canonical validation logic from lading_capture::validate
-    let result = lading_capture::validate::validate_lines(&lines_vec, min_seconds);
-
+fn report_validation_result(
+    result: &lading_capture::validate::ValidationResult,
+    min_seconds: Option<u64>,
+) -> Result<(), Error> {
     info!(
         "Validated {line_count} lines",
         line_count = result.line_count
