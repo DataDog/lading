@@ -12,21 +12,30 @@ use crate::validate::ValidationResult;
 
 /// Validates capture lines satisfy all required invariants.
 ///
-/// Invariants:
+/// This function uses a two-phase validation approach:
 ///
-/// - Each `fetch_index` maps to exactly one time value (globally)
-/// - Each series (`metric_name` + labels) has strictly increasing time
-/// - Each series (`metric_name` + labels) has strictly increasing `fetch_index`
-/// - If `min_seconds` is specified, capture must contain >= `min_seconds` unique timestamps
+/// **Phase 1 (Streaming):** Validates global invariants that can fail fast:
+/// - Each `fetch_index` maps to exactly one time value (1:1 mapping globally)
+///
+/// **Phase 2 (After collection):** Validates per-series invariants after sorting by `fetch_index`:
+/// - Within each series: `fetch_index` values are strictly increasing (no duplicates)
+/// - Within each series: `time` values are strictly increasing
+/// - If `min_seconds` specified: time span meets requirements
+///
+/// **Physical line order does not matter.** Lines can arrive in any order.
+/// Validation is based on logical ordering after sorting by `fetch_index` within each series.
+///
+/// A series is defined by: `metric_name` + `metric_kind` + labels.
 ///
 /// This is the canonical validation logic used by captool and tests.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationResult {
+    // Phase 1: Streaming assertions
     let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
-    let mut series_last_state: HashMap<u64, (u128, u64, String)> = HashMap::new();
+    // Collect (fetch_index, time) pairs for each series
+    let mut series_data: HashMap<u64, (Vec<(u64, u128)>, String)> = HashMap::new();
     let hash_builder = RandomState::new();
-    let mut error_count = 0u128;
     let mut fetch_index_errors = 0u128;
     let mut first_error: Option<(u128, String, String)> = None;
 
@@ -86,49 +95,75 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
                 .join(",")
         );
 
-        // Check per-series invariants
-        if let Some((prev_time, prev_fetch_index, _)) = series_last_state.get(&series_key) {
-            if time <= *prev_time {
-                if error_count == 0 {
-                    let msg =
-                        format!("time not strictly increasing: prev={prev_time}, curr={time}");
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-            if fetch_index <= *prev_fetch_index {
-                if error_count == 0 {
-                    let msg = format!(
-                        "fetch_index not strictly increasing: prev={prev_fetch_index}, curr={fetch_index}"
-                    );
-                    first_error = Some((line_num, series_id.clone(), msg));
-                }
-                error_count += 1;
-            }
-        }
-
-        series_last_state.insert(series_key, (time, fetch_index, series_id));
+        // Collect (fetch_index, time) pair for this series
+        series_data
+            .entry(series_key)
+            .or_insert_with(|| (Vec::new(), series_id))
+            .0
+            .push((fetch_index, time));
     }
 
-    // Check minimum seconds requirement if specified
+    // Phase 2: Verify per-series invariants after sorting
+    let mut per_series_errors = 0u128;
+    let num_series = series_data.len();
+    for (_series_key, (mut data, series_id)) in series_data {
+        // Sort by fetch_index
+        data.sort_unstable_by_key(|(fetch_idx, _)| *fetch_idx);
+
+        // Check for duplicate fetch_index values and time monotonicity
+        for window in data.windows(2) {
+            let (prev_fetch_idx, prev_time) = window[0];
+            let (curr_fetch_idx, curr_time) = window[1];
+
+            // Check fetch_index strictly increasing (no duplicates)
+            if curr_fetch_idx <= prev_fetch_idx {
+                if per_series_errors == 0 && first_error.is_none() {
+                    let msg = format!(
+                        "fetch_index not strictly increasing: prev={prev_fetch_idx}, curr={curr_fetch_idx}"
+                    );
+                    first_error = Some((0, series_id.clone(), msg));
+                }
+                per_series_errors += 1;
+            }
+
+            // Check time strictly increasing
+            if curr_time <= prev_time {
+                if per_series_errors == 0 && first_error.is_none() {
+                    let msg =
+                        format!("time not strictly increasing: prev={prev_time}, curr={curr_time}");
+                    first_error = Some((0, series_id.clone(), msg));
+                }
+                per_series_errors += 1;
+            }
+        }
+    }
+
+    // Check minimum seconds requirement by computing actual time span from timestamps
     let mut min_seconds_errors = 0u128;
-    if let Some(min_secs) = min_seconds {
+    if let Some(min_secs) = min_seconds
+        && let (Some(&min_time), Some(&max_time)) = (
+            fetch_index_to_time.values().min(),
+            fetch_index_to_time.values().max(),
+        )
+    {
+        // Convert milliseconds to seconds
         #[allow(clippy::cast_possible_truncation)]
-        let unique_seconds = fetch_index_to_time.len() as u64;
-        if unique_seconds < min_secs {
+        let time_span_seconds = ((max_time - min_time) / 1000) as u64;
+
+        if time_span_seconds < min_secs {
             if first_error.is_none() {
                 let msg = format!(
-                    "Insufficient timestamps: expected >= {min_secs} unique timestamps for {min_secs}s experiment, got {unique_seconds}"
+                    "Insufficient time span: expected >= {min_secs}s, got {time_span_seconds}s"
                 );
                 first_error = Some((0, "min_seconds".to_string(), msg));
             }
             min_seconds_errors = 1;
         }
         // NOTE 5 seconds is arbitrary, "large enough, but not too large".
-        if unique_seconds > (min_secs + 5) {
+        if time_span_seconds > (min_secs + 5) {
             if first_error.is_none() {
                 let msg = format!(
-                    "Invalid experiment duration, expected < {max} unique timestamps for {min_secs}s experiment, got {unique_seconds}",
+                    "Invalid experiment duration, expected < {max}s, got {time_span_seconds}s",
                     max = min_secs + 5,
                 );
                 first_error = Some((0, "min_seconds".to_string(), msg));
@@ -139,10 +174,10 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
 
     ValidationResult {
         line_count: lines.len() as u128,
-        unique_series: series_last_state.len(),
+        unique_series: num_series,
         unique_fetch_indices: fetch_index_to_time.len(),
         fetch_index_errors,
-        per_series_errors: error_count,
+        per_series_errors,
         min_seconds_errors,
         first_error,
     }
