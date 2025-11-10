@@ -18,7 +18,8 @@ use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, TimeUnit};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
-    file::properties::WriterProperties,
+    file::properties::{WriterProperties, WriterVersion},
+    schema::types::ColumnPath,
 };
 
 use crate::line;
@@ -188,8 +189,21 @@ impl<W: Write + Seek + Send> Format<W> {
             ),
         ]));
 
+        // Use Parquet v2 format for better encodings and compression:
+        //
+        // - DELTA_BINARY_PACKED encoding for integers (timestamps, fetch_index)
+        // - DELTA_LENGTH_BYTE_ARRAY encoding for strings (run_id, metric_name)
+        // - More efficient page-level statistics for query optimization
+        //
+        // Dictionary encoding for low-cardinality columns:
+        //
+        // - metric_kind: only 2 values ("counter", "gauge")
+        // - run_id: one UUID per run
         let props = WriterProperties::builder()
+            .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression_level)?))
+            .set_column_dictionary_enabled(ColumnPath::from("metric_kind"), true)
+            .set_column_dictionary_enabled(ColumnPath::from("run_id"), true)
             .build();
 
         let arrow_writer = ArrowWriter::try_new(writer, schema.clone(), Some(props))?;
