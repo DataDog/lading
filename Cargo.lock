@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "lading"
-version = "0.29.0-rc1"
+version = "0.29.0-rc2"
 dependencies = [
  "anyhow",
  "arrow-array",
