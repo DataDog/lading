@@ -31,11 +31,46 @@ pub enum Error {
     Linux(#[from] linux::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
-pub struct Config {}
+pub enum Inner {
+    /// A Linux observer. See [`crate::observer::linux::Config`] for details.
+    Linux(linux::Config),
+}
+
+/// Temporary implementation to foreshadow how observer config will be exposed in
+/// `lading.yaml`. This scaffolding will be removed once the
+/// `#[serde(skip_deserializing)]` decorator is removed from
+/// [`crate::config::Config`].
+impl Default for Inner {
+    fn default() -> Self {
+        Self::Linux(linux::Config::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+/// Configuration for [`Server`]
+pub struct Config {
+    /// The generator config
+    #[serde(flatten)]
+    pub inner: Inner,
+}
+
+/// Temporary implementation to foreshadow how observer config will be exposed in
+/// `lading.yaml`. This scaffolding will be removed once the
+/// `#[serde(skip_deserializing)]` decorator is removed from
+/// [`crate::config::Config`].
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            inner: Inner::default(),
+        }
+    }
+}
 
 #[derive(Debug)]
 /// The inspector sub-process server.

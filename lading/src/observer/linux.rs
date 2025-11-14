@@ -9,7 +9,14 @@ mod procfs;
 mod utils;
 mod wss;
 
+use serde::Deserialize;
 use tracing::{error, warn};
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+/// Configuration for Linux observer
+pub struct Config {}
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
