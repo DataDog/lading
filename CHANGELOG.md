@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a 'Datadog Intake' blackhole, supporting only the v2 metrics protobuf
   protocol for now. This captures metrics submitted into capture files.
 - Added the ability for lading to write capture files in parquet format.
+- Added a 'Datadog Stateful Logs' blackhole for a new protocol we are testing with the agent.
 
 ## [0.28.0]
 ## Added
