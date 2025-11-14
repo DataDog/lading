@@ -1,3 +1,9 @@
+//! Linux observer
+//!
+//! On Linux, this observer looks up the target process in procfs and writes
+//! out key details about memory and CPU consumption into the capture data. On
+//! non-Linux systems the observer, if enabled, will emit a warning.
+
 mod cgroup;
 mod procfs;
 mod utils;

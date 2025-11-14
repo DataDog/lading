@@ -1,12 +1,12 @@
 //! Manage the target observer
 //!
-//! The interogation that lading does of the target sub-process is intentionally
-//! limited to in-process concerns, for the most part. The 'inspector' does
-//! allow for a sub-process to do out-of-band inspection of the target but
-//! cannot incorporate whatever it's doing into the capture data that lading
-//! produces. This observer, on Linux, looks up the target process in procfs and
-//! writes out key details about memory and CPU consumption into the capture
-//! data. On non-Linux systems the observer, if enabled, will emit a warning.
+//! The interrogation that lading does of the target sub-process is
+//! intentionally limited to in-process concerns, for the most part. The
+//! 'inspector' does allow for a sub-process to do out-of-band inspection of the
+//! target but cannot incorporate whatever it's doing into the capture data that
+//! lading produces. In contrast, an observer does out-of-band inspection of the
+//! target that incorporates information it collects into capture data that
+//! lading produces.
 
 use std::io;
 
