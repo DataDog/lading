@@ -112,7 +112,6 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     /// Create a new state machine
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        start: Instant,
         expiration: Duration,
         format: F,
         flush_interval: u64,
@@ -121,6 +120,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         mut global_labels: FxHashMap<String, String>,
         clock: C,
     ) -> Self {
+        let start = clock.start();
         let start_ms = clock.now_ms();
         let run_id = Uuid::new_v4();
 
@@ -397,6 +397,7 @@ mod tests {
     struct TestClock {
         time_ms: Arc<Mutex<u128>>,
         start_instant: Instant,
+        start_time_ms: Arc<Mutex<u128>>,
     }
 
     impl TestClock {
@@ -404,6 +405,7 @@ mod tests {
             Self {
                 time_ms: Arc::new(Mutex::new(initial_time_ms)),
                 start_instant: Instant::now(),
+                start_time_ms: Arc::new(Mutex::new(initial_time_ms)),
             }
         }
 
@@ -471,6 +473,16 @@ mod tests {
 
         fn interval(&self, duration: Duration) -> Self::Interval {
             TestInterval::new(self.clone(), duration.as_millis())
+        }
+
+        fn start(&self) -> Instant {
+            let start_time_ms = *self.start_time_ms.lock().unwrap();
+            self.start_instant + Duration::from_millis(start_time_ms as u64)
+        }
+
+        fn mark_start(&mut self) {
+            let current_time_ms = *self.time_ms.lock().unwrap();
+            *self.start_time_ms.lock().unwrap() = current_time_ms;
         }
     }
 
@@ -665,7 +677,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(1000);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -675,7 +686,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(60),
                 format,
                 1,
@@ -703,7 +713,7 @@ mod tests {
                     CaptureOp::HistoricalCounterIncr { name, value, tick_offset } => {
                         let timestamp = clock.now()
                             .checked_sub(Duration::from_secs(tick_offset))
-                            .unwrap_or(start);
+                            .unwrap_or(clock.start());
                         let counter = Counter {
                             key: Key::from_name(name),
                             timestamp,
@@ -714,7 +724,7 @@ mod tests {
                     CaptureOp::HistoricalCounterAbs { name, value, tick_offset } => {
                         let timestamp = clock.now()
                             .checked_sub(Duration::from_secs(tick_offset))
-                            .unwrap_or(start);
+                            .unwrap_or(clock.start());
                         let counter = Counter {
                             key: Key::from_name(name),
                             timestamp,
@@ -725,7 +735,7 @@ mod tests {
                     CaptureOp::HistoricalGaugeIncr { name, value, tick_offset } => {
                         let timestamp = clock.now()
                             .checked_sub(Duration::from_secs(tick_offset))
-                            .unwrap_or(start);
+                            .unwrap_or(clock.start());
                         let gauge = Gauge {
                             key: Key::from_name(name),
                             timestamp,
@@ -736,7 +746,7 @@ mod tests {
                     CaptureOp::HistoricalGaugeDec { name, value, tick_offset } => {
                         let timestamp = clock.now()
                             .checked_sub(Duration::from_secs(tick_offset))
-                            .unwrap_or(start);
+                            .unwrap_or(clock.start());
                         let gauge = Gauge {
                             key: Key::from_name(name),
                             timestamp,
@@ -747,7 +757,7 @@ mod tests {
                     CaptureOp::HistoricalGaugeSet { name, value, tick_offset } => {
                         let timestamp = clock.now()
                             .checked_sub(Duration::from_secs(tick_offset))
-                            .unwrap_or(start);
+                            .unwrap_or(clock.start());
                         let gauge = Gauge {
                             key: Key::from_name(name),
                             timestamp,
@@ -789,13 +799,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -807,7 +815,7 @@ mod tests {
 
         let counter = Metric::Counter(Counter {
             key: Key::from_name("test_counter"),
-            timestamp: start,
+            timestamp: clock.start(),
             value: CounterValue::Absolute(42),
         });
 
@@ -821,13 +829,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -847,13 +853,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -878,13 +882,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
-        let start = Instant::now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -904,7 +906,6 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer.clone());
         let clock = TestClock::new(0);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
 
@@ -918,7 +919,6 @@ mod tests {
         };
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -952,7 +952,7 @@ mod tests {
                     metrics::Label::new("valid_label", "valid_value"),
                 ],
             ),
-            timestamp: start,
+            timestamp: clock.start(),
             value: CounterValue::Absolute(42),
         };
         let _ = machine.next(Event::MetricReceived(Metric::Counter(historical_counter)));
@@ -1031,13 +1031,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer);
         let clock = TestClock::new(1000);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(60),
             format,
             1,
@@ -1069,13 +1067,11 @@ mod tests {
         let writer = InMemoryWriter::new();
         let format = jsonl::Format::new(writer.clone());
         let clock = TestClock::new(0);
-        let start = clock.now();
         let registry = Arc::new(Registry::new(AtomicStorage));
         let accumulator = Accumulator::new();
         let labels = FxHashMap::default();
 
         let mut machine = StateMachine::new(
-            start,
             Duration::from_secs(3600),
             format,
             1,
@@ -1198,7 +1194,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -1208,7 +1203,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(3600),
                 format,
                 1,
@@ -1246,7 +1240,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -1256,7 +1249,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(3600),
                 format,
                 1,
@@ -1301,7 +1293,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -1311,7 +1302,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(3600),
                 format,
                 1,
@@ -1354,7 +1344,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -1364,7 +1353,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(3600),
                 format,
                 1,
@@ -1407,7 +1395,6 @@ mod tests {
             let writer = InMemoryWriter::new();
             let format = jsonl::Format::new(writer.clone());
             let clock = TestClock::new(0);
-            let start = clock.now();
             let registry = Arc::new(Registry::new(AtomicStorage));
             let accumulator = Accumulator::new();
             let labels = FxHashMap::default();
@@ -1417,7 +1404,6 @@ mod tests {
             };
 
             let mut machine = StateMachine::new(
-                start,
                 Duration::from_secs(3600),
                 format,
                 1,
