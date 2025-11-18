@@ -84,8 +84,6 @@ pub trait TickInterval: Send {
 /// Following the pattern from `lading_throttle`, allows production code to
 /// use real system time while tests can inject a controllable clock for
 /// deterministic behavior.
-// NOTE I want to extract both clocks out into a common lading_clock but will do
-// so in a separate thread of work.
 pub trait Clock: Send + Sync {
     /// Interval type for this clock
     type Interval: TickInterval;
@@ -95,6 +93,11 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Instant;
     /// Create an interval that ticks every duration
     fn interval(&self, duration: Duration) -> Self::Interval;
+    /// Returns the time-zero instant, used to convert between real timestamps
+    /// and logical ticks within the capture manager.
+    fn start(&self) -> Instant;
+    /// Sets time-zero to the current instant
+    fn mark_start(&mut self);
 }
 
 /// Real-time interval implementation
@@ -151,6 +154,15 @@ impl Clock for RealClock {
             inner: time::interval(duration),
         }
     }
+
+    fn start(&self) -> Instant {
+        self.start_instant
+    }
+
+    fn mark_start(&mut self) {
+        self.start_instant = Instant::now();
+        self.start_system_time = SystemTime::now();
+    }
 }
 
 /// Wrangles internal metrics into capture files
@@ -159,11 +171,6 @@ impl Clock for RealClock {
 /// [`metrics`] and periodically writing them to disk with format
 /// [`line::Line`].
 pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
-    /// Reference start time used to convert Instant timestamps to logical ticks.
-    /// Initialized at `CaptureManager` construction time, before any historical
-    /// metrics are sent. This synchronizes with `accumulator.current_tick` which
-    /// begins at 0 and advances every `TICK_DURATION_MS`.
-    start: Instant,
     expiration: Duration,
     format: F,
     flush_seconds: u64,
@@ -181,7 +188,6 @@ pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
 impl<F: OutputFormat, C: Clock> std::fmt::Debug for CaptureManager<F, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CaptureManager")
-            .field("start", &self.start)
             .field("accumulator", &self.accumulator)
             .field("global_labels", &self.global_labels)
             .finish_non_exhaustive()
@@ -201,16 +207,10 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
     ) -> Self {
         let registry = Arc::new(Registry::new(AtomicStorage));
 
-        // Capture start time for timestamp-to-tick conversion. This is the
-        // reference point for all historical metrics: accumulator.current_tick
-        // begins at 0 and this Instant represents tick 0 in real time.
-        let now = Instant::now();
-
         let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
         let accumulator = Accumulator::new();
 
         Self {
-            start: now,
             expiration,
             format,
             flush_seconds,
@@ -263,7 +263,7 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start(mut self) -> Result<(), Error> {
         // Initialize historical sender to allow generators to send metrics with
-        // Instant timestamps. Manager converts these to ticks using self.start
+        // Instant timestamps. Manager converts these to ticks using clock.start()
         // as the reference point synchronized with accumulator.current_tick.
         HISTORICAL_SENDER.store(Arc::new(Some(Arc::new(Sender {
             snd: self.snd.clone(),
@@ -275,7 +275,10 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
         self.install()?;
         info!("Capture manager installed, recording to capture file.");
 
+        // Wait until the target is running then mark time-zero to this
+        // event. Clock has started.
         self.target_running.recv().await;
+        self.clock.mark_start();
 
         let mut flush_interval = self
             .clock
@@ -289,7 +292,6 @@ impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
 
         // Create state machine with owned state
         let mut state_machine = StateMachine::new(
-            self.start,
             self.expiration,
             self.format,
             self.flush_seconds,

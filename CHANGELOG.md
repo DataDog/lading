@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+## Fixed
+- Adjust capture manager time syncrhonization to _after_ target is running,
+  maintaining consistency with 0.28 and earlier behavior.
+
 ## [0.29.0]
 ## Changed
 - Kubernetes generator maximum lifetime seconds now expressed in `u32`, not
