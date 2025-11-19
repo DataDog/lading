@@ -6,6 +6,7 @@
 use crate::line;
 
 pub mod jsonl;
+pub mod multi;
 pub mod parquet;
 
 /// Format operation errors
@@ -14,6 +15,9 @@ pub enum Error {
     /// JSONL format errors
     #[error("JSONL format error: {0}")]
     Jsonl(#[from] jsonl::Error),
+    /// Multi format errors
+    #[error("Multi format error: {0}")]
+    Multi(#[from] multi::Error),
     /// Parquet format errors
     #[error("Parquet format error: {0}")]
     Parquet(#[from] parquet::Error),

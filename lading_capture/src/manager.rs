@@ -22,7 +22,7 @@ use tokio::{fs, sync::mpsc, time};
 use crate::{
     accumulator,
     accumulator::Accumulator,
-    formats::{self, OutputFormat, jsonl, parquet},
+    formats::{self, OutputFormat, jsonl, multi, parquet},
     metric::Metric,
 };
 use metrics::Key;
@@ -375,6 +375,62 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         let fp = fp.into_std().await;
         let writer = BufWriter::new(fp);
         let format = parquet::Format::new(writer, compression_level)?;
+
+        Ok(Self::new_with_format(
+            format,
+            flush_seconds,
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+            RealClock::default(),
+        ))
+    }
+}
+
+impl
+    CaptureManager<
+        formats::multi::Format<BufWriter<std::fs::File>, BufWriter<std::fs::File>>,
+        RealClock,
+    >
+{
+    /// Create a new [`CaptureManager`] with file-based multi-format writer
+    ///
+    /// Writes to both JSONL and Parquet formats simultaneously. The base path
+    /// is used to generate two output files: `{base_path}.jsonl` and
+    /// `{base_path}.parquet`.
+    ///
+    /// # Errors
+    ///
+    /// Function will error if either capture file cannot be opened or if
+    /// format creation fails.
+    pub async fn new_multi(
+        base_path: PathBuf,
+        flush_seconds: u64,
+        compression_level: i32,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, formats::Error> {
+        let jsonl_path = base_path.with_extension("jsonl");
+        let parquet_path = base_path.with_extension("parquet");
+
+        let jsonl_file = fs::File::create(&jsonl_path)
+            .await
+            .map_err(formats::Error::Io)?;
+        let jsonl_file = jsonl_file.into_std().await;
+        let jsonl_writer = BufWriter::new(jsonl_file);
+        let jsonl_format = jsonl::Format::new(jsonl_writer);
+
+        let parquet_file = fs::File::create(&parquet_path)
+            .await
+            .map_err(formats::Error::Io)?;
+        let parquet_file = parquet_file.into_std().await;
+        let parquet_writer = BufWriter::new(parquet_file);
+        let parquet_format = parquet::Format::new(parquet_writer, compression_level)?;
+
+        let format = multi::Format::new(jsonl_format, parquet_format);
 
         Ok(Self::new_with_format(
             format,
