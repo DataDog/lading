@@ -61,8 +61,8 @@ jobs:
           fi
 
           # Extract just the tag portion (after the colon)
-          TAG_ONLY=$(echo "$GHCR_FINAL_TAG" | sed 's/.*://')
-          SHA_TAG_ONLY=$(echo "$SHA_TAG" | sed 's/.*://')
+          TAG_ONLY="${GHCR_FINAL_TAG##*:}"
+          SHA_TAG_ONLY="${SHA_TAG##*:}"
 
           # Create ECR tags using AWS account ID secret
           ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com"
