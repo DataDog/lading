@@ -9,3 +9,4 @@ lint:
   ignore:
     - integration
     - lading/proto/agent_payload.proto
+    - lading/proto/stateful_encoding.proto

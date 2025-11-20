@@ -107,6 +107,7 @@ tower-test = "0.4"
 
 [build-dependencies]
 prost-build = { workspace = true }
+tonic-build = "0.13"
 
 [features]
 default = []
