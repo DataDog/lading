@@ -4,8 +4,10 @@ on:
   push:
 
 env:
-  REGISTRY: ghcr.io
+  GHCR_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  ECR_REPOSITORY: lading
+  ECR_REGION: us-west-2
 
 jobs:
   tagging:
@@ -15,14 +17,16 @@ jobs:
       contents: read
       packages: read
     outputs:
-      FINAL_TAG: ${{ steps.tags.outputs.FINAL_TAG }}
-      SHA_TAG: ${{ steps.tags.outputs.SHA_TAG }}
+      GHCR_FINAL_TAG: ${{ steps.tags.outputs.GHCR_FINAL_TAG }}
+      GHCR_SHA_TAG: ${{ steps.tags.outputs.GHCR_SHA_TAG }}
+      ECR_FINAL_TAG: ${{ steps.tags.outputs.ECR_FINAL_TAG }}
+      ECR_SHA_TAG: ${{ steps.tags.outputs.ECR_SHA_TAG }}
 
     steps:
       - name: Log in to Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -33,7 +37,7 @@ jobs:
         uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         id: meta
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             # Tag event produce a semver tag. This will capture tags that begin
             # vX.Y.Z and X.Y.Z.
@@ -43,24 +47,39 @@ jobs:
 
       - name: Determine Final Tag
         id: tags
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
           ALL_TAGS="${{ steps.meta.outputs.tags }}"
           SEMVER_TAG=$(echo "$ALL_TAGS" | grep -E '^ghcr.io/.+:[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?' || true)
           SHA_TAG=$(echo "$ALL_TAGS" | grep sha- || true)
 
           if [ -n "$SEMVER_TAG" ]; then
-            FINAL_TAG="$SEMVER_TAG"
+            GHCR_FINAL_TAG="$SEMVER_TAG"
           else
-            FINAL_TAG="$SHA_TAG"
+            GHCR_FINAL_TAG="$SHA_TAG"
           fi
 
-          echo "SHA_TAG=$SHA_TAG" >> $GITHUB_OUTPUT
-          echo "FINAL_TAG=$FINAL_TAG" >> $GITHUB_OUTPUT
+          # Extract just the tag portion (after the colon)
+          TAG_ONLY=$(echo "$GHCR_FINAL_TAG" | sed 's/.*://')
+          SHA_TAG_ONLY=$(echo "$SHA_TAG" | sed 's/.*://')
+
+          # Create ECR tags using AWS account ID secret
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com"
+          ECR_FINAL_TAG="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${TAG_ONLY}"
+          ECR_SHA_TAG="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${SHA_TAG_ONLY}"
+
+          echo "GHCR_SHA_TAG=$SHA_TAG" >> $GITHUB_OUTPUT
+          echo "GHCR_FINAL_TAG=$GHCR_FINAL_TAG" >> $GITHUB_OUTPUT
+          echo "ECR_SHA_TAG=$ECR_SHA_TAG" >> $GITHUB_OUTPUT
+          echo "ECR_FINAL_TAG=$ECR_FINAL_TAG" >> $GITHUB_OUTPUT
 
       - name: Debug Tags
         run: |
-          echo "SHA_TAG: ${{ steps.tags.outputs.SHA_TAG }}"
-          echo "FINAL_TAG: ${{ steps.tags.outputs.FINAL_TAG }}"
+          echo "GHCR_SHA_TAG: ${{ steps.tags.outputs.GHCR_SHA_TAG }}"
+          echo "GHCR_FINAL_TAG: ${{ steps.tags.outputs.GHCR_FINAL_TAG }}"
+          echo "ECR_SHA_TAG: ${{ steps.tags.outputs.ECR_SHA_TAG }}"
+          echo "ECR_FINAL_TAG: ${{ steps.tags.outputs.ECR_FINAL_TAG }}"
 
   build:
     needs: tagging
@@ -85,30 +104,46 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - name: Log in to the Container registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to AWS ECR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Extract metadata for Docker
         uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         id: meta
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,format=long
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image to GHCR
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           file: Dockerfile
-          tags: ${{ needs.tagging.outputs.SHA_TAG }}-${{ matrix.arch }}
+          tags: ${{ needs.tagging.outputs.GHCR_SHA_TAG }}-${{ matrix.arch }}
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
           cache-to: type=registry,ref=ghcr.io/datadog/lading:cache,mode=max
+
+      - name: Build and push Docker image to ECR
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          file: Dockerfile
+          tags: ${{ needs.tagging.outputs.ECR_SHA_TAG }}-${{ matrix.arch }}
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
 
   manifest:
     name: Create Multi-Arch Manifest
@@ -121,19 +156,33 @@ jobs:
       packages: write
 
     steps:
-      - name: Log in to Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to AWS ECR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - name: Create and Push Multiarch Manifest
+      - name: Create and Push GHCR Multiarch Manifest
         run: |
           docker buildx imagetools create \
-            --tag "${{ needs.tagging.outputs.FINAL_TAG }}" \
-            "${{ needs.tagging.outputs.SHA_TAG }}-amd64" \
-            "${{ needs.tagging.outputs.SHA_TAG }}-arm64"
+            --tag "${{ needs.tagging.outputs.GHCR_FINAL_TAG }}" \
+            "${{ needs.tagging.outputs.GHCR_SHA_TAG }}-amd64" \
+            "${{ needs.tagging.outputs.GHCR_SHA_TAG }}-arm64"
+
+      - name: Create and Push ECR Multiarch Manifest
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ needs.tagging.outputs.ECR_FINAL_TAG }}" \
+            "${{ needs.tagging.outputs.ECR_SHA_TAG }}-amd64" \
+            "${{ needs.tagging.outputs.ECR_SHA_TAG }}-arm64"
