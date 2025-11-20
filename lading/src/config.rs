@@ -84,6 +84,15 @@ pub enum CaptureFormat {
         #[serde(default = "default_flush_seconds")]
         flush_seconds: u64,
     },
+    /// Multiple formats simultaneously, currently JSONL and Parquet
+    Multi {
+        /// Number of seconds to buffer before flushing both formats
+        #[serde(default = "default_flush_seconds")]
+        flush_seconds: u64,
+        /// Zstd compression level for Parquet (1-22, default: 3)
+        #[serde(default = "default_compression_level")]
+        compression_level: i32,
+    },
     /// Apache Parquet columnar format
     Parquet {
         /// Number of seconds to buffer before writing row group

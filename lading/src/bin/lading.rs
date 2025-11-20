@@ -456,6 +456,31 @@ async fn inner_main(
                 });
                 capture_manager_handle = Some(handle);
             }
+            config::CaptureFormat::Multi {
+                flush_seconds,
+                compression_level,
+            } => {
+                let mut capture_manager = CaptureManager::new_multi(
+                    path,
+                    flush_seconds,
+                    compression_level,
+                    shutdown_watcher.register()?,
+                    experiment_started_watcher.clone(),
+                    target_running_watcher.clone(),
+                    expiration,
+                )
+                .await
+                .map_err(io::Error::other)?;
+                for (k, v) in global_labels {
+                    capture_manager.add_global_label(k, v);
+                }
+                let handle = tokio::task::spawn_blocking(move || {
+                    Handle::current()
+                        .block_on(capture_manager.start())
+                        .expect("failed to start capture manager");
+                });
+                capture_manager_handle = Some(handle);
+            }
             config::CaptureFormat::Parquet {
                 flush_seconds,
                 compression_level,
