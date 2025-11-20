@@ -8,22 +8,16 @@ env:
 
 jobs:
   build:
+    name: Build ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         arch: [amd64, arm64]
-        registry: [ghcr, ecr]
         include:
           - arch: amd64
             runner: ubuntu-24.04
           - arch: arm64
             runner: arm-4core-linux-ubuntu24.04
-          - registry: ghcr
-            registry_url: ghcr.io
-            image_name: datadog/lading
-          - registry: ecr
-            registry_url_template: "{account}.dkr.ecr.us-west-2.amazonaws.com"
-            image_name: lading
     permissions:
       contents: read
       packages: write
@@ -37,41 +31,22 @@ jobs:
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
       - name: Log in to GitHub Container Registry
-        if: matrix.registry == 'ghcr'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to AWS ECR
-        if: matrix.registry == 'ecr'
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-        with:
-          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
-          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      - name: Set registry URL for ECR
-        if: matrix.registry == 'ecr'
-        id: registry
-        run: echo "url=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com" >> $GITHUB_OUTPUT
-
-      - name: Set registry URL for GHCR
-        if: matrix.registry == 'ghcr'
-        id: registry_ghcr
-        run: echo "url=ghcr.io" >> $GITHUB_OUTPUT
-
       - name: Extract metadata
         uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
         id: meta
         with:
-          images: ${{ steps.registry.outputs.url || steps.registry_ghcr.outputs.url }}/${{ matrix.image_name }}
+          images: ghcr.io/datadog/lading
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
 
-      - name: Build and push
+      - name: Build and push to GHCR
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           file: Dockerfile
@@ -79,17 +54,70 @@ jobs:
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
-          cache-to: ${{ matrix.registry == 'ghcr' && 'type=registry,ref=ghcr.io/datadog/lading:cache,mode=max' || '' }}
+          cache-to: type=registry,ref=ghcr.io/datadog/lading:cache,mode=max
+
+  copy-to-ecr:
+    name: Copy ${{ matrix.arch }} to ECR
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to AWS ECR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Extract metadata
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        id: meta
+        with:
+          images: ghcr.io/datadog/lading
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=sha,format=long
+
+      - name: Copy to ECR
+        run: |
+          ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com"
+          TAGS="${{ steps.meta.outputs.tags }}"
+
+          for GHCR_TAG in $TAGS; do
+            TAG_NAME="${GHCR_TAG##*:}"
+            ECR_TAG="${ECR_REGISTRY}/lading:${TAG_NAME}"
+
+            echo "Copying ${GHCR_TAG}-${{ matrix.arch }} to ${ECR_TAG}-${{ matrix.arch }}"
+            docker buildx imagetools create \
+              --tag "${ECR_TAG}-${{ matrix.arch }}" \
+              "${GHCR_TAG}-${{ matrix.arch }}"
+          done
 
   manifest:
-    name: Create Multi-Arch Manifest
-    needs: build
+    name: Create ${{ matrix.registry }} manifest
+    needs: [build, copy-to-ecr]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         registry: [ghcr, ecr]
         include:
           - registry: ghcr
+            registry_url: ghcr.io
             image_name: datadog/lading
           - registry: ecr
             image_name: lading
@@ -117,21 +145,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - name: Set registry URL for ECR
-        if: matrix.registry == 'ecr'
+      - name: Set registry URL
         id: registry
-        run: echo "url=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com" >> $GITHUB_OUTPUT
-
-      - name: Set registry URL for GHCR
-        if: matrix.registry == 'ghcr'
-        id: registry_ghcr
-        run: echo "url=ghcr.io" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ matrix.registry }}" = "ghcr" ]; then
+            echo "url=ghcr.io" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Extract metadata
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         id: meta
         with:
-          images: ${{ steps.registry.outputs.url || steps.registry_ghcr.outputs.url }}/${{ matrix.image_name }}
+          images: ${{ steps.registry.outputs.url }}/${{ matrix.image_name }}
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -140,8 +167,9 @@ jobs:
         run: |
           TAGS="${{ steps.meta.outputs.tags }}"
           for TAG in $TAGS; do
+            echo "Creating manifest for ${TAG}"
             docker buildx imagetools create \
-              --tag "$TAG" \
-              "$TAG-amd64" \
-              "$TAG-arm64"
+              --tag "${TAG}" \
+              "${TAG}-amd64" \
+              "${TAG}-arm64"
           done
