@@ -43,6 +43,9 @@ jobs:
         id: meta
         with:
           images: ghcr.io/datadog/lading
+          flavor: |
+            suffix=-${{ matrix.arch }}
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -51,7 +54,7 @@ jobs:
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           file: Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.arch }}
+          tags: ${{ steps.meta.outputs.tags }}
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
@@ -95,6 +98,9 @@ jobs:
         id: meta
         with:
           images: ghcr.io/datadog/lading
+          flavor: |
+            suffix=-${{ matrix.arch }}
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -108,10 +114,10 @@ jobs:
             TAG_NAME="${GHCR_TAG##*:}"
             ECR_TAG="${ECR_REGISTRY}/lading:${TAG_NAME}"
 
-            echo "Copying ${GHCR_TAG}-${{ matrix.arch }} to ${ECR_TAG}-${{ matrix.arch }}"
+            echo "Copying ${GHCR_TAG} to ${ECR_TAG}"
             docker buildx imagetools create \
-              --tag "${ECR_TAG}-${{ matrix.arch }}" \
-              "${GHCR_TAG}-${{ matrix.arch }}"
+              --tag "${ECR_TAG}" \
+              "${GHCR_TAG}"
           done
 
   manifest:
@@ -171,6 +177,8 @@ jobs:
         id: meta
         with:
           images: ${{ steps.registry.outputs.url }}/${{ matrix.image_name }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
