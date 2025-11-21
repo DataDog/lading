@@ -43,6 +43,8 @@ jobs:
         id: meta
         with:
           images: ghcr.io/datadog/lading
+          flavor: |
+            suffix=-${{ matrix.arch }}
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -51,7 +53,7 @@ jobs:
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           file: Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.arch }}
+          tags: ${{ steps.meta.outputs.tags }}
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/datadog/lading:cache
@@ -95,6 +97,8 @@ jobs:
         id: meta
         with:
           images: ghcr.io/datadog/lading
+          flavor: |
+            suffix=-${{ matrix.arch }}
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
