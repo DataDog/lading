@@ -45,6 +45,7 @@ jobs:
           images: ghcr.io/datadog/lading
           flavor: |
             suffix=-${{ matrix.arch }}
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -99,6 +100,7 @@ jobs:
           images: ghcr.io/datadog/lading
           flavor: |
             suffix=-${{ matrix.arch }}
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
@@ -175,6 +177,8 @@ jobs:
         id: meta
         with:
           images: ${{ steps.registry.outputs.url }}/${{ matrix.image_name }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}},event=tag
             type=sha,format=long
