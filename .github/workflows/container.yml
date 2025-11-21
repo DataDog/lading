@@ -112,10 +112,10 @@ jobs:
             TAG_NAME="${GHCR_TAG##*:}"
             ECR_TAG="${ECR_REGISTRY}/lading:${TAG_NAME}"
 
-            echo "Copying ${GHCR_TAG}-${{ matrix.arch }} to ${ECR_TAG}-${{ matrix.arch }}"
+            echo "Copying ${GHCR_TAG} to ${ECR_TAG}"
             docker buildx imagetools create \
-              --tag "${ECR_TAG}-${{ matrix.arch }}" \
-              "${GHCR_TAG}-${{ matrix.arch }}"
+              --tag "${ECR_TAG}" \
+              "${GHCR_TAG}"
           done
 
   manifest:
