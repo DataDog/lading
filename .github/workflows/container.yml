@@ -5,6 +5,7 @@ on:
 
 env:
   ECR_REGION: us-west-2
+  AWS_ACCOUNT_ID: "850406765696"
 
 jobs:
   build:
@@ -78,13 +79,13 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lading-container-publisher-oidc
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lading-container-publisher-oidc
           aws-region: ${{ env.ECR_REGION }}
 
       - name: Log in to AWS ECR
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
-          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
+          registry: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
@@ -100,7 +101,7 @@ jobs:
 
       - name: Copy to ECR
         run: |
-          ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com"
+          ECR_REGISTRY="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com"
           TAGS="${{ steps.meta.outputs.tags }}"
 
           for GHCR_TAG in $TAGS; do
@@ -144,14 +145,14 @@ jobs:
         if: matrix.registry == 'ecr'
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lading-container-publisher-oidc
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/lading-container-publisher-oidc
           aws-region: ${{ env.ECR_REGION }}
 
       - name: Log in to AWS ECR
         if: matrix.registry == 'ecr'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
-          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
+          registry: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
@@ -162,7 +163,7 @@ jobs:
           if [ "${{ matrix.registry }}" = "ghcr" ]; then
             echo "url=ghcr.io" >> "$GITHUB_OUTPUT"
           else
-            echo "url=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com" >> "$GITHUB_OUTPUT"
+            echo "url=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.ECR_REGION }}.amazonaws.com" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract metadata
