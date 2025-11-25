@@ -294,10 +294,14 @@ impl Config {
         base.blackhole.extend(overlay.blackhole);
         check_duplicate_blackhole_ids(&base.blackhole)?;
 
-        // Merge target_metrics
+        // Merge target_metrics, deduplicating entries
         if let Some(overlay_metrics) = overlay.target_metrics {
             if let Some(ref mut existing) = base.target_metrics {
-                existing.extend(overlay_metrics);
+                for metric in overlay_metrics {
+                    if !existing.contains(&metric) {
+                        existing.push(metric);
+                    }
+                }
             } else {
                 base.target_metrics = Some(overlay_metrics);
             }
@@ -1102,7 +1106,7 @@ generator:
         }
 
         #[test]
-        fn target_metrics_merge_concatenates(
+        fn target_metrics_merge_unique_entries(
             num_a in 1_usize..4,
             num_b in 1_usize..4,
         ) {
@@ -1120,9 +1124,41 @@ generator:
             let merged = Config::merge_partial(partial_a, partial_b)
                 .expect("merge should succeed");
 
-            // target_metrics should be concatenated
+            // Unique target_metrics should all be present
             let target_metrics = merged.target_metrics.expect("should have target_metrics");
             prop_assert_eq!(target_metrics.len(), num_a + num_b);
+        }
+
+        #[test]
+        fn target_metrics_merge_deduplicates(
+            num_unique in 1_usize..4,
+            num_duplicates in 1_usize..4,
+        ) {
+            // Create metrics that exist in both partials (duplicates)
+            let shared_metrics: Vec<_> = (0..num_unique)
+                .map(|i| make_prometheus_target_metrics(&format!("http://localhost:{}/metrics", 9000 + i)))
+                .collect();
+
+            // partial_a has the shared metrics
+            let partial_a = make_partial_with_target_metrics(shared_metrics.clone());
+
+            // partial_b has duplicates of some shared metrics
+            let duplicate_metrics: Vec<_> = (0..num_duplicates)
+                .map(|i| make_prometheus_target_metrics(&format!("http://localhost:{}/metrics", 9000 + (i % num_unique))))
+                .collect();
+            let partial_b = make_partial_with_target_metrics(duplicate_metrics);
+
+            let merged = Config::merge_partial(partial_a, partial_b)
+                .expect("merge should succeed");
+
+            // Should only have unique metrics, duplicates removed
+            let target_metrics = merged.target_metrics.expect("should have target_metrics");
+            prop_assert_eq!(target_metrics.len(), num_unique);
+
+            // Verify all original metrics are present
+            for metric in &shared_metrics {
+                prop_assert!(target_metrics.contains(metric));
+            }
         }
 
         #[test]
