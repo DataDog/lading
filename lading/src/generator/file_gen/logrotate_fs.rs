@@ -30,7 +30,7 @@ mod model;
 
 const TTL: Duration = Duration::from_secs(1); // Attribute cache timeout
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
 pub struct Config {

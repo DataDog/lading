@@ -26,17 +26,17 @@ pub enum Error {
     EarlyShutdown,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for collecting Prometheus based target metrics
 pub struct Config {
     /// URI to scrape
-    uri: String,
+    pub(crate) uri: String,
     /// Metric names to scrape. Leave unset to scrape all metrics.
-    metrics: Option<Vec<String>>,
+    pub(crate) metrics: Option<Vec<String>>,
     /// Optional additional tags to label target metrics
-    tags: Option<FxHashMap<String, String>>,
+    pub(crate) tags: Option<FxHashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

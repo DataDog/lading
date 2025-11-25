@@ -27,7 +27,7 @@ use crate::generator::common::{
     BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
 };
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

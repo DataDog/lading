@@ -72,7 +72,7 @@ impl From<tonic::Status> for Error {
 }
 
 /// Config for [`Grpc`]
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The gRPC URI. Looks like `http://<host>/<service path>/<endpoint>`

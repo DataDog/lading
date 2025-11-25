@@ -46,7 +46,7 @@ pub enum Error {
     Recv(#[from] broadcast::error::RecvError),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]

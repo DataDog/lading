@@ -38,7 +38,7 @@ fn default_copy_from_host() -> Vec<PathBuf> {
     ]
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 /// Configuration of [`Procfs`]
 pub struct Config {
     /// Seed for random operations against this target

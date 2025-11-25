@@ -34,7 +34,7 @@ fn default_parallel_connections() -> u16 {
     1
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

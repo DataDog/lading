@@ -148,7 +148,7 @@ impl fmt::Display for Version {
 }
 
 /// Configuration of the trace-agent generator.
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target
