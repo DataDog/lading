@@ -19,7 +19,7 @@ pub enum Error {
     EarlyShutdown,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "snake_case")]
 /// Configuration for collecting Go Expvar based target metrics

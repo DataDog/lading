@@ -82,7 +82,7 @@ pub enum Error {
     TraceAgent(#[from] trace_agent::Error),
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
@@ -95,7 +95,7 @@ pub struct Config {
     pub inner: Inner,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configurations common to all [`Server`] variants
@@ -104,7 +104,7 @@ pub struct General {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]

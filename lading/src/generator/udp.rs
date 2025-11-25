@@ -45,7 +45,7 @@ fn maximum_block_size() -> Byte {
     Byte::from_u64_with_unit(65_507, Unit::B).expect("catastrophic programming bug")
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

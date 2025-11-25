@@ -37,7 +37,7 @@ use crate::generator::common::{
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
 
 /// The HTTP method to be used in requests
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum Method {
@@ -53,7 +53,7 @@ pub enum Method {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of this generator.
 pub struct Config {

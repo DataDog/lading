@@ -2,7 +2,7 @@ use std::{fmt, fs, path::PathBuf, process::Stdio, str};
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Defines how sub-process stderr and stdout are handled.
 pub struct Output {

@@ -66,7 +66,7 @@ pub struct AckSettings {
 }
 
 /// Configuration for [`SplunkHec`]
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The seed for random operations against this target

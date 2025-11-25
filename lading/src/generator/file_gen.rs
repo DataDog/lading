@@ -39,7 +39,7 @@ pub enum Error {
 }
 
 /// Configuration of [`FileGen`]
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum Config {

@@ -3,10 +3,9 @@
 use std::{
     env,
     fmt::{self, Display},
-    fs,
-    io::{self, Read},
+    io,
     num::NonZeroU32,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -48,6 +47,8 @@ enum Error {
     LadingInspector(#[from] lading::inspector::Error),
     #[error("Lading observer returned an error: {0}")]
     LadingObserver(#[from] lading::observer::Error),
+    #[error("Failed to load or parse configuration: {0}")]
+    Config(config::Error),
     #[error("Failed to deserialize Lading config: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
     #[error("Lading failed to sync servers {0}")]
@@ -58,7 +59,7 @@ enum Error {
     CapturePath,
     #[error("Invalid path for prometheus socket")]
     PrometheusPath,
-    #[error("Invalid capture format, must be 'jsonl' or 'parquet'")]
+    #[error("Invalid capture format, must be 'jsonl', 'parquet', or 'multi'")]
     InvalidCaptureFormat,
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
@@ -163,7 +164,7 @@ struct CliFlatLegacy {
            .args(&["experiment_duration_seconds", "experiment_duration_infinite"]),
 ))]
 struct LadingArgs {
-    /// path on disk to the configuration file
+    /// path on disk to a configuration file or directory containing config files
     #[clap(long, default_value_t = default_config_path())]
     config_path: String,
     /// additional labels to apply to all captures, format KEY=VAL,KEY2=VAL
@@ -204,7 +205,7 @@ struct LadingArgs {
     /// time that capture metrics will expire by if they are not seen again, only useful when capture-path is set
     #[clap(long)]
     capture_expiriation_seconds: Option<u64>,
-    /// capture file format: jsonl or parquet (default: jsonl)
+    /// capture file format: jsonl, parquet, or multi (default: jsonl)
     #[clap(long, default_value = "jsonl")]
     capture_format: String,
     /// number of seconds to buffer before flushing capture file (default: 60)
@@ -255,28 +256,9 @@ struct RunCommand {
 
 #[derive(Args)]
 struct ConfigCheckCommand {
-    /// path on disk to the configuration file
+    /// path on disk to a configuration file or directory containing config files
     #[clap(long, default_value_t = default_config_path())]
     config_path: String,
-}
-
-fn load_config_contents(config_path: &str) -> Result<String, Error> {
-    if let Ok(env_var_value) = env::var("LADING_CONFIG") {
-        debug!("Using config from env var 'LADING_CONFIG'");
-        Ok(env_var_value)
-    } else {
-        debug!("Attempting to open configuration file at: {}", config_path);
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .open(config_path)
-            .map_err(|err| {
-                error!("Could not read config file '{}': {}", config_path, err);
-                err
-            })?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok(contents)
-    }
 }
 
 fn parse_config(contents: &str) -> Result<Config, Error> {
@@ -287,20 +269,32 @@ fn parse_config(contents: &str) -> Result<Config, Error> {
 }
 
 fn validate_config(config_path: &str) -> Result<Config, Error> {
-    let contents = load_config_contents(config_path)?;
-    let config = parse_config(&contents)?;
-    info!("Configuration file is valid");
-    Ok(config)
+    // Check if config is provided via environment variable
+    if let Ok(env_var_value) = env::var("LADING_CONFIG") {
+        debug!("Using config from env var 'LADING_CONFIG'");
+        let config = parse_config(&env_var_value)?;
+        info!("Configuration file is valid");
+        Ok(config)
+    } else {
+        // Load from path (file or directory)
+        debug!("Attempting to load configuration from: {config_path}");
+        let config = config::load_config_from_path(Path::new(config_path)).map_err(|err| {
+            error!("Could not load config from '{config_path}': {err}");
+            Error::Config(err)
+        })?;
+        info!("Configuration file is valid");
+        Ok(config)
+    }
 }
 
 fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error> {
-    let contents = if let Some(config) = config {
-        config
+    let mut config = if let Some(contents) = config {
+        // Config provided via environment variable - parse as single file
+        parse_config(&contents)?
     } else {
-        load_config_contents(&args.config_path)?
+        // Load from path (auto-detect file or directory)
+        config::load_config_from_path(Path::new(&args.config_path)).map_err(Error::Config)?
     };
-
-    let mut config = parse_config(&contents)?;
 
     let target = if args.no_target {
         None
@@ -349,6 +343,10 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
                 flush_seconds: args.capture_flush_seconds,
             },
             "parquet" => config::CaptureFormat::Parquet {
+                flush_seconds: args.capture_flush_seconds,
+                compression_level: args.capture_compression_level,
+            },
+            "multi" => config::CaptureFormat::Multi {
                 flush_seconds: args.capture_flush_seconds,
                 compression_level: args.capture_compression_level,
             },
@@ -548,16 +546,14 @@ async fn inner_main(
     //
     // BLACKHOLE
     //
-    if let Some(cfgs) = config.blackhole {
-        for cfg in cfgs {
-            let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
-            let _bsrv = tokio::spawn(async {
-                match blackhole_server.run().await {
-                    Ok(()) => debug!("blackhole shut down successfully"),
-                    Err(err) => warn!("blackhole failed with {:?}", err),
-                }
-            });
-        }
+    for cfg in config.blackhole {
+        let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
+        let _bsrv = tokio::spawn(async {
+            match blackhole_server.run().await {
+                Ok(()) => debug!("blackhole shut down successfully"),
+                Err(err) => warn!("blackhole failed with {:?}", err),
+            }
+        });
     }
 
     //
