@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
 use crate::{blackhole, generator, inspector, observer, target, target_metrics};
@@ -73,7 +73,7 @@ pub struct Config {
     /// The blackhole to supply for the target
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
-    pub blackhole: Option<Vec<blackhole::Config>>,
+    pub blackhole: Vec<blackhole::Config>,
     /// The `target_metrics` to scrape from the target
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
@@ -100,7 +100,7 @@ pub struct PartialConfig {
     /// The blackhole to supply for the target.
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
-    pub blackhole: Option<Vec<blackhole::Config>>,
+    pub blackhole: Vec<blackhole::Config>,
     /// The `target_metrics` to scrape from the target.
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
@@ -226,9 +226,7 @@ impl Config {
         check_duplicate_generator_ids(&partial.generator)?;
 
         // Check for duplicate IDs in blackholes
-        if let Some(ref blackholes) = partial.blackhole {
-            check_duplicate_blackhole_ids(blackholes)?;
-        }
+        check_duplicate_blackhole_ids(&partial.blackhole)?;
 
         Ok(Self {
             telemetry: partial.telemetry.unwrap_or_default(),
@@ -293,15 +291,8 @@ impl Config {
         check_duplicate_generator_ids(&base.generator)?;
 
         // Merge blackholes
-        if let Some(overlay_blackholes) = overlay.blackhole {
-            if let Some(ref mut existing) = base.blackhole {
-                existing.extend(overlay_blackholes);
-                check_duplicate_blackhole_ids(existing)?;
-            } else {
-                check_duplicate_blackhole_ids(&overlay_blackholes)?;
-                base.blackhole = Some(overlay_blackholes);
-            }
-        }
+        base.blackhole.extend(overlay.blackhole);
+        check_duplicate_blackhole_ids(&base.blackhole)?;
 
         // Merge target_metrics
         if let Some(overlay_metrics) = overlay.target_metrics {
@@ -318,7 +309,7 @@ impl Config {
 
 /// Check for duplicate IDs in generator configs
 fn check_duplicate_generator_ids(generators: &[generator::Config]) -> Result<(), Error> {
-    let mut seen_ids = rustc_hash::FxHashSet::default();
+    let mut seen_ids = FxHashSet::default();
     for generator_config in generators {
         if let Some(ref id) = generator_config.general.id
             && !seen_ids.insert(id.clone())
@@ -331,7 +322,7 @@ fn check_duplicate_generator_ids(generators: &[generator::Config]) -> Result<(),
 
 /// Check for duplicate IDs in blackhole configs
 fn check_duplicate_blackhole_ids(blackholes: &[blackhole::Config]) -> Result<(), Error> {
-    let mut seen_ids = rustc_hash::FxHashSet::default();
+    let mut seen_ids = FxHashSet::default();
     for bh in blackholes {
         if let Some(ref id) = bh.general.id
             && !seen_ids.insert(id.clone())
@@ -483,7 +474,7 @@ mod tests {
             telemetry: None,
             generator: generators,
             sample_period_milliseconds: None,
-            blackhole: None,
+            blackhole: vec![],
             target_metrics: None,
             inspector: None,
         }
@@ -495,7 +486,7 @@ mod tests {
             telemetry: None,
             generator: vec![],
             sample_period_milliseconds: None,
-            blackhole: Some(blackholes),
+            blackhole: blackholes,
             target_metrics: None,
             inspector: None,
         }
@@ -507,7 +498,7 @@ mod tests {
             telemetry: None,
             generator: vec![],
             sample_period_milliseconds: None,
-            blackhole: None,
+            blackhole: vec![],
             target_metrics: Some(metrics),
             inspector: None,
         }
@@ -576,7 +567,7 @@ blackhole:
                         throttle: None,
                     }),
                 }],
-                blackhole: Some(vec![
+                blackhole: vec![
                     blackhole::Config {
                         general: blackhole::General {
                             id: Some(String::from("Data in"))
@@ -591,7 +582,7 @@ blackhole:
                             binding_addr: SocketAddr::from_str("127.0.0.1:1001")?,
                         })
                     },
-                ]),
+                ],
                 target: Option::default(),
                 telemetry: crate::config::Telemetry::default(),
                 observer: observer::Config::default(),
@@ -802,14 +793,14 @@ blackhole:
         file2.write_all(config2_content.as_bytes())?;
 
         let config = load_config_from_path(temp_dir.path())?;
-        let blackholes = config
-            .blackhole
-            .as_ref()
-            .expect("blackholes present after merging two files with blackholes");
-        assert_eq!(blackholes.len(), 2);
+        assert_eq!(config.blackhole.len(), 2);
 
         // Extract IDs - order doesn't matter with strict composition
-        let ids: Vec<Option<String>> = blackholes.iter().map(|b| b.general.id.clone()).collect();
+        let ids: Vec<Option<String>> = config
+            .blackhole
+            .iter()
+            .map(|b| b.general.id.clone())
+            .collect();
 
         assert!(ids.contains(&Some("bh1".to_string())));
         assert!(ids.contains(&Some("bh2".to_string())));
@@ -823,14 +814,14 @@ blackhole:
         let overlay = make_partial_with_blackholes(vec![make_tcp_blackhole(Some("bh2"), 9001)]);
 
         let merged = Config::merge_partial(base_partial, overlay)?;
-        let blackholes = merged
-            .blackhole
-            .as_ref()
-            .expect("blackholes present after merging two configs with blackholes");
-        assert_eq!(blackholes.len(), 2);
+        assert_eq!(merged.blackhole.len(), 2);
 
         // Extract IDs - verify both blackholes are present without assuming order
-        let ids: Vec<Option<String>> = blackholes.iter().map(|b| b.general.id.clone()).collect();
+        let ids: Vec<Option<String>> = merged
+            .blackhole
+            .iter()
+            .map(|b| b.general.id.clone())
+            .collect();
 
         assert!(ids.contains(&Some("bh1".to_string())));
         assert!(ids.contains(&Some("bh2".to_string())));
