@@ -23,6 +23,12 @@ pub enum SpinError {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// Static line-rate payload creation error
+    #[error(transparent)]
+    StaticLinesPerSecond(#[from] crate::statik_line_rate::Error),
+    /// Static second-grouped payload creation error
+    #[error(transparent)]
+    StaticSecond(#[from] crate::statik_second::Error),
     /// rng slice is Empty
     #[error("RNG slice is empty")]
     EmptyRng,
@@ -55,6 +61,12 @@ pub enum Error {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// Static line-rate payload creation error
+    #[error(transparent)]
+    StaticLinesPerSecond(#[from] crate::statik_line_rate::Error),
+    /// Static second-grouped payload creation error
+    #[error(transparent)]
+    StaticSecond(#[from] crate::statik_second::Error),
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
@@ -333,6 +345,37 @@ impl Cache {
                 construct_block_cache_inner(
                     &mut rng,
                     &mut static_serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
+            crate::Config::StaticLinesPerSecond {
+                static_path,
+                lines_per_second,
+            } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-lines-per-second");
+                let _guard = span.enter();
+                let mut serializer =
+                    crate::StaticLinesPerSecond::new(static_path, *lines_per_second)?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
+            crate::Config::StaticSecond {
+                static_path,
+                timestamp_format,
+                emit_placeholder,
+            } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-second");
+                let _guard = span.enter();
+                let mut serializer =
+                    crate::StaticSecond::new(static_path, &timestamp_format, *emit_placeholder)?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?

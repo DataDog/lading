@@ -30,6 +30,7 @@ use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
     task::{JoinError, JoinSet},
+    time::{Duration, Instant},
 };
 use tracing::{error, info};
 
@@ -120,6 +121,13 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     pub throttle: Option<BytesThrottleConfig>,
+    /// Optional fixed interval between blocks. When set, the generator waits
+    /// this duration before emitting the next block, regardless of byte size.
+    pub block_interval_millis: Option<u64>,
+    /// Flush after each block. Useful when block intervals are large and the
+    /// buffered writer would otherwise delay writes to disk.
+    #[serde(default)]
+    pub flush_each_block: bool,
 }
 
 #[derive(Debug)]
@@ -195,6 +203,10 @@ impl Server {
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
+                block_interval: config
+                    .block_interval_millis
+                    .map(Duration::from_millis),
+                flush_each_block: config.flush_each_block,
             };
 
             handles.spawn(child.spin());
@@ -269,6 +281,8 @@ struct Child {
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
+    block_interval: Option<Duration>,
+    flush_each_block: bool,
 }
 
 impl Child {
@@ -303,6 +317,10 @@ impl Child {
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut next_tick = self
+            .block_interval
+            .as_ref()
+            .map(|dur| Instant::now() + *dur);
         loop {
             let total_bytes = self.block_cache.peek_next_size(&handle);
 
@@ -310,6 +328,22 @@ impl Child {
                 result = self.throttle.wait_for(total_bytes) => {
                     match result {
                         Ok(()) => {
+                            if let Some(dur) = self.block_interval {
+                                if let Some(deadline) = next_tick {
+                                    tokio::select! {
+                                        _ = tokio::time::sleep_until(deadline) => {},
+                                        () = &mut shutdown_wait => {
+                                            fp.flush().await?;
+                                            info!("shutdown signal received");
+                                            return Ok(());
+                                        },
+                                    }
+                                    next_tick = Some(deadline + dur);
+                                } else {
+                                    next_tick = Some(Instant::now() + dur);
+                                }
+                            }
+
                             let block = self.block_cache.advance(&mut handle);
                             let total_bytes = u64::from(total_bytes.get());
 
@@ -317,6 +351,9 @@ impl Child {
                                 fp.write_all(&block.bytes).await?;
                                 counter!("bytes_written").increment(total_bytes);
                                 total_bytes_written += total_bytes;
+                            }
+                            if self.flush_each_block {
+                                fp.flush().await?;
                             }
 
                             if total_bytes_written > maximum_bytes_per_file {

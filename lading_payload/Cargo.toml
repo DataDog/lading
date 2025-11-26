@@ -28,6 +28,7 @@ rand = { workspace = true, features = [
   "std",
   "std_rng",
 ] }
+chrono = { version = "0.4", default-features = true, features = ["std"] }
 rmp-serde = { version = "1.1", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
