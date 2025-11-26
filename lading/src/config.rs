@@ -55,8 +55,7 @@ fn default_sample_period() -> u64 {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The method by which to express telemetry
-    #[serde(default)]
-    pub telemetry: Telemetry,
+    pub telemetry: Option<Telemetry>,
     /// The generator to apply to the target in-rig
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
@@ -229,7 +228,7 @@ impl Config {
         check_duplicate_blackhole_ids(&partial.blackhole)?;
 
         Ok(Self {
-            telemetry: partial.telemetry.unwrap_or_default(),
+            telemetry: partial.telemetry,
             generator: partial.generator,
             observer: observer::Config::default(),
             sample_period_milliseconds: partial
@@ -588,7 +587,7 @@ blackhole:
                     },
                 ],
                 target: Option::default(),
-                telemetry: crate::config::Telemetry::default(),
+                telemetry: None,
                 observer: observer::Config::default(),
                 inspector: Option::default(),
                 target_metrics: Option::default(),
