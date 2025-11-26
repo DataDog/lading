@@ -27,6 +27,8 @@ pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
 pub use statik::Static;
+pub use statik_line_rate::StaticLinesPerSecond;
+pub use statik_second::StaticSecond;
 pub use syslog::Syslog5424;
 
 pub mod apache_common;
@@ -40,6 +42,8 @@ pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod statik;
+pub mod statik_line_rate;
+pub mod statik_second;
 pub mod syslog;
 pub mod trace_agent;
 
@@ -129,6 +133,31 @@ pub enum Config {
         /// assumed to be line-oriented but no other claim is made on the file.
         static_path: PathBuf,
     },
+    /// Generates static data but limits the number of lines emitted per block
+    StaticLinesPerSecond {
+        /// Defines the file path to read static variant data from. Content is
+        /// assumed to be line-oriented but no other claim is made on the file.
+        static_path: PathBuf,
+        /// Number of lines to emit in each generated block
+        lines_per_second: u32,
+    },
+    /// Generates static data grouped by second; each block contains one
+    /// second's worth of logs as determined by a parsed timestamp prefix.
+    StaticSecond {
+        /// Defines the file path to read static variant data from. Content is
+        /// assumed to be line-oriented.
+        static_path: PathBuf,
+        /// Chrono-compatible timestamp format string used to parse the leading
+        /// timestamp in each line.
+        timestamp_format: String,
+        /// Emit a minimal placeholder block (single newline) for seconds with
+        /// no lines. When false, empty seconds are skipped.
+        #[serde(default)]
+        emit_placeholder: bool,
+        /// Optional starting line offset; lines before this index are skipped.
+        #[serde(default)]
+        start_line_index: Option<u64>,
+    },
     /// Generates a line of printable ascii characters
     Ascii,
     /// Generates a json encoded line
@@ -167,6 +196,10 @@ pub enum Payload {
     SplunkHec(splunk_hec::SplunkHec),
     /// Static file content
     Static(Static),
+    /// Static file content with a fixed number of lines emitted per block
+    StaticLinesPerSecond(StaticLinesPerSecond),
+    /// Static file content grouped into one-second blocks based on timestamps
+    StaticSecond(StaticSecond),
     /// Syslog RFC 5424 format
     Syslog(Syslog5424),
     /// OpenTelemetry traces
@@ -195,6 +228,8 @@ impl Serialize for Payload {
             Payload::Json(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::SplunkHec(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Static(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::StaticLinesPerSecond(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::StaticSecond(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Syslog(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
@@ -207,6 +242,8 @@ impl Serialize for Payload {
     fn data_points_generated(&self) -> Option<u64> {
         match self {
             Payload::OtelMetrics(ser) => ser.data_points_generated(),
+            Payload::StaticLinesPerSecond(ser) => ser.data_points_generated(),
+            Payload::StaticSecond(ser) => ser.data_points_generated(),
             // Other implementations use the default None
             _ => None,
         }

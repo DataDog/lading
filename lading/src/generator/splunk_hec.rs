@@ -45,7 +45,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -93,7 +93,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -152,7 +152,7 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
@@ -288,10 +288,9 @@ impl SplunkHec {
                 .next()
                 .expect("channel should never be empty")
                 .clone();
-            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let client = client.clone();
@@ -319,6 +318,7 @@ impl SplunkHec {
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
