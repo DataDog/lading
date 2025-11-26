@@ -108,7 +108,7 @@ pub struct PartialConfig {
     pub inspector: Option<inspector::Config>,
 }
 
-/// Default value for [`Telemetry::Log::expiration`]
+/// Default value for [`Telemetry::Log`] expiration
 #[must_use]
 pub fn default_expiration() -> Duration {
     Duration::MAX
@@ -166,8 +166,6 @@ impl Default for CaptureFormat {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
-#[serde(rename_all = "snake_case")]
-#[serde(deny_unknown_fields)]
 #[serde(untagged)]
 /// Defines the manner of lading's telemetry.
 pub enum Telemetry {
@@ -177,14 +175,7 @@ pub enum Telemetry {
         /// Address and port for prometheus exporter
         addr: SocketAddr,
         /// Additional labels to include in every metric
-        global_labels: FxHashMap<String, String>,
-    },
-    /// In prometheus socket mode lading will emit its internal telemetry for
-    /// scraping on a unix socket.
-    PrometheusSocket {
-        /// Path of the socket for the prometheus exporter
-        path: PathBuf,
-        /// Additional labels to include in every metric
+        #[serde(default)]
         global_labels: FxHashMap<String, String>,
     },
     /// In log mode lading will emit its internal telemetry to a structured log
@@ -193,6 +184,7 @@ pub enum Telemetry {
         /// Location on disk to write captures
         path: PathBuf,
         /// Additional labels to include in every metric
+        #[serde(default)]
         global_labels: FxHashMap<String, String>,
         /// The time metrics that have not been written to will take to expire.
         #[serde(default = "default_expiration")]
@@ -200,6 +192,15 @@ pub enum Telemetry {
         /// Output format for the capture file
         #[serde(default)]
         format: CaptureFormat,
+    },
+    /// In prometheus socket mode lading will emit its internal telemetry for
+    /// scraping on a unix socket.
+    PrometheusSocket {
+        /// Path of the socket for the prometheus exporter
+        path: PathBuf,
+        /// Additional labels to include in every metric
+        #[serde(default)]
+        global_labels: FxHashMap<String, String>,
     },
 }
 
