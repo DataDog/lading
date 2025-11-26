@@ -888,7 +888,9 @@ telemetry:
 
         let tmp_dir = tempfile::tempdir().expect("directory could not be created");
         let config_path = tmp_dir.path().join("config.yaml");
-        std::fs::write(&config_path, contents).expect("Failed to write config file");
+        tokio::fs::write(&config_path, contents)
+            .await
+            .expect("Failed to write config file");
 
         let args = vec![
             "lading",
