@@ -17,7 +17,7 @@ use opentelemetry_proto::tonic::{
 };
 use opentelemetry_proto::tonic::{resource::v1::Resource, trace::v1};
 use prost::Message;
-use rand::{Rng, seq::IndexedRandom as _};
+use rand::{Rng, seq::IndexedRandom};
 use std::{io::Write, rc::Rc};
 
 use crate::Generator;

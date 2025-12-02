@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discovered to be a directory lading will merge all .yaml files in that
   directory. Configuration files must be disjoint, else parsing will fail and
   lading will not start up.
+  
+## Changed
+- Updated OpenTelemetry trace generator to generate more realistic traces: resource,
+  scope, and attributes are populated, along with nested child spans.
 
 ## [0.29.2]
 ## Added
