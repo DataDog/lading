@@ -136,7 +136,7 @@ pub enum Config {
     /// Generates a Apache Common log lines
     ApacheCommon,
     /// Generates OpenTelemetry traces
-    OpentelemetryTraces,
+    OpentelemetryTraces(crate::opentelemetry::trace::Config),
     /// Generates OpenTelemetry logs
     OpentelemetryLogs(crate::opentelemetry::log::Config),
     /// Generates OpenTelemetry metrics
