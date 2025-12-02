@@ -61,6 +61,10 @@ enum Error {
     PrometheusPath,
     #[error("Invalid capture format, must be 'jsonl', 'parquet', or 'multi'")]
     InvalidCaptureFormat,
+    #[error(
+        "Telemetry must be configured either via command-line flags (--capture-path, --prometheus-addr, or --prometheus-path) or in the configuration file"
+    )]
+    MissingTelemetry,
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
 }
@@ -155,7 +159,7 @@ struct CliFlatLegacy {
 ))]
 #[clap(group(
     ArgGroup::new("telemetry")
-        .required(true)
+        .required(false)
         .args(&["capture_path", "prometheus_addr", "prometheus_path"]),
 ))]
 #[clap(group(
@@ -328,15 +332,15 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
 
     let options_global_labels = args.global_labels.clone().unwrap_or_default();
     if let Some(ref prom_addr) = args.prometheus_addr {
-        config.telemetry = Telemetry::Prometheus {
+        config.telemetry = Some(Telemetry::Prometheus {
             addr: prom_addr.parse()?,
             global_labels: options_global_labels.inner,
-        };
+        });
     } else if let Some(ref prom_path) = args.prometheus_path {
-        config.telemetry = Telemetry::PrometheusSocket {
+        config.telemetry = Some(Telemetry::PrometheusSocket {
             path: prom_path.parse().map_err(|_| Error::PrometheusPath)?,
             global_labels: options_global_labels.inner,
-        };
+        });
     } else if let Some(ref capture_path) = args.capture_path {
         let format = match args.capture_format.as_str() {
             "jsonl" => config::CaptureFormat::Jsonl {
@@ -353,32 +357,30 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
             _ => return Err(Error::InvalidCaptureFormat),
         };
 
-        config.telemetry = Telemetry::Log {
+        config.telemetry = Some(Telemetry::Log {
             path: capture_path.parse().map_err(|_| Error::CapturePath)?,
             global_labels: options_global_labels.inner,
             expiration: Duration::from_secs(args.capture_expiriation_seconds.unwrap_or(u64::MAX)),
             format,
-        };
-    } else {
-        match config.telemetry {
-            Telemetry::Prometheus {
-                ref mut global_labels,
-                ..
-            }
-            | Telemetry::PrometheusSocket {
-                ref mut global_labels,
-                ..
-            }
-            | Telemetry::Log {
-                ref mut global_labels,
-                ..
-            } => {
+        });
+    } else if let Some(ref mut telemetry) = config.telemetry {
+        // Telemetry was configured in YAML, merge in global_labels from CLI if any
+        match telemetry {
+            Telemetry::Prometheus { global_labels, .. }
+            | Telemetry::PrometheusSocket { global_labels, .. }
+            | Telemetry::Log { global_labels, .. } => {
                 for (k, v) in options_global_labels.inner {
                     global_labels.insert(k, v);
                 }
             }
         }
     }
+
+    // Validate that telemetry was configured somewhere
+    if config.telemetry.is_none() {
+        return Err(Error::MissingTelemetry);
+    }
+
     Ok(config)
 }
 
@@ -399,7 +401,10 @@ async fn inner_main(
     // a passive prometheus export and an active log file. Only one can be
     // active at a time.
     let mut capture_manager_handle: Option<tokio::task::JoinHandle<()>> = None;
-    match config.telemetry {
+    match config
+        .telemetry
+        .expect("telemetry should be validated in get_config")
+    {
         Telemetry::PrometheusSocket {
             path,
             global_labels,
@@ -869,5 +874,65 @@ generator: []
                 .expect("DD_TAGS is not a valid key for the map"),
             "uqhwd:b2xiyw,hf9gy:uwcy04"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn yaml_only_telemetry_configuration_works() {
+        // Test that telemetry can be configured in YAML without CLI flags
+        let contents = r#"
+generator: []
+telemetry:
+  addr: "0.0.0.0:9876"
+  global_labels: {}
+"#;
+
+        let tmp_dir = tempfile::tempdir().expect("directory could not be created");
+        let config_path = tmp_dir.path().join("config.yaml");
+        tokio::fs::write(&config_path, contents)
+            .await
+            .expect("Failed to write config file");
+
+        let args = vec![
+            "lading",
+            "--no-target",
+            "--config-path",
+            config_path.to_str().unwrap(),
+        ];
+        let legacy_cli = CliFlatLegacy::parse_from(args);
+        let config =
+            get_config(&legacy_cli.args, None).expect("Failed to get config with YAML telemetry");
+
+        // Verify telemetry was loaded from YAML
+        assert!(
+            config.telemetry.is_some(),
+            "Telemetry should be loaded from YAML"
+        );
+        match config.telemetry.unwrap() {
+            Telemetry::Prometheus { addr, .. } => {
+                assert_eq!(addr.to_string(), "0.0.0.0:9876");
+            }
+            _ => panic!("Expected Prometheus telemetry"),
+        }
+    }
+
+    #[test]
+    fn missing_telemetry_returns_error() {
+        // Test that missing telemetry (no CLI flags, no YAML) returns an error
+        let contents = r#"
+generator: []
+"#;
+
+        let args = vec!["lading", "--no-target"];
+        let legacy_cli = CliFlatLegacy::parse_from(args);
+        let result = get_config(&legacy_cli.args, Some(contents.to_string()));
+
+        assert!(
+            result.is_err(),
+            "Should return error when telemetry is not configured"
+        );
+        match result.unwrap_err() {
+            Error::MissingTelemetry => {} // Expected error
+            other => panic!("Expected MissingTelemetry error, got: {:?}", other),
+        }
     }
 }
