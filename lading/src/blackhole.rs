@@ -8,7 +8,6 @@
 use serde::{Deserialize, Serialize};
 
 mod common;
-pub mod datadog;
 pub mod datadog_stateful_logs;
 pub mod http;
 pub mod otlp;
@@ -25,9 +24,6 @@ pub enum Error {
     /// See [`crate::blackhole::tcp::Error`] for details.
     #[error(transparent)]
     Tcp(tcp::Error),
-    /// See [`crate::blackhole::datadog::Error`] for details.
-    #[error(transparent)]
-    Datadog(datadog::Error),
     /// See [`crate::blackhole::datadog_stateful_logs::Error`] for details.
     #[error(transparent)]
     DatadogStatefulLogs(datadog_stateful_logs::Error),
@@ -83,8 +79,6 @@ pub struct General {
 pub enum Inner {
     /// See [`crate::blackhole::tcp::Config`] for details.
     Tcp(tcp::Config),
-    /// See [`crate::blackhole::datadog::Config`] for details.
-    Datadog(datadog::Config),
     /// See [`crate::blackhole::datadog_stateful_logs::Config`] for details.
     DatadogStatefulLogs(datadog_stateful_logs::Config),
     /// See [`crate::blackhole::http::Config`] for details.
@@ -111,8 +105,6 @@ pub enum Inner {
 pub enum Server {
     /// See [`crate::blackhole::tcp::Tcp`] for details.
     Tcp(tcp::Tcp),
-    /// See [`crate::blackhole::datadog::Datadog`] for details.
-    Datadog(datadog::Datadog),
     /// See [`crate::blackhole::datadog_stateful_logs::DatadogStatefulLogs`] for details.
     DatadogStatefulLogs(datadog_stateful_logs::DatadogStatefulLogs),
     /// See [`crate::blackhole::http::Http`] for details.
@@ -144,9 +136,6 @@ impl Server {
     pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
-            Inner::Datadog(conf) => {
-                Self::Datadog(datadog::Datadog::new(config.general, conf, shutdown))
-            }
             Inner::DatadogStatefulLogs(conf) => Self::DatadogStatefulLogs(
                 datadog_stateful_logs::DatadogStatefulLogs::new(config.general, conf, shutdown),
             ),
@@ -185,7 +174,6 @@ impl Server {
     pub async fn run(self) -> Result<(), Error> {
         match self {
             Server::Tcp(inner) => inner.run().await.map_err(Error::Tcp),
-            Server::Datadog(inner) => inner.run().await.map_err(Error::Datadog),
             Server::DatadogStatefulLogs(inner) => {
                 inner.run().await.map_err(Error::DatadogStatefulLogs)
             }

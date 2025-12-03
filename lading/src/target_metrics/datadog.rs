@@ -1,6 +1,6 @@
-//! The Datadog intake API blackhole.
+//! Datadog Intake API target metrics receiver
 //!
-//! This blackhole mimics the Datadog agent V2 metrics intake API, accepting
+//! This module mimics the Datadog agent V2 metrics intake API, accepting
 //! protobuf-encoded metric payloads. Only POST is supported.
 //!
 //! All other endpoints return `202 Accepted` without processing.
@@ -11,10 +11,9 @@
 //!
 //! # Historical Metrics
 //!
-//! This blackhole records metrics with their original timestamps from the
-//! agent using lading's historical metrics capture system. Metrics are
-//! recorded at the time indicated by their timestamp field, not when the
-//! payload arrives.
+//! This module records metrics with their original timestamps from the agent
+//! using lading's historical metrics capture system. Metrics are recorded at
+//! the time indicated by their timestamp field, not when the payload arrives.
 
 use bytes::Bytes;
 use flate2::read::{GzDecoder, ZlibDecoder};
@@ -38,7 +37,6 @@ use std::{
 use tokio::net::TcpListener;
 use tracing::{debug, error, info, trace, warn};
 
-use super::General;
 use crate::proto::datadog::intake::metrics::MetricPayload;
 
 #[derive(thiserror::Error, Debug)]
@@ -76,30 +74,34 @@ pub struct Config {
     pub variant: Variant,
 }
 
+#[derive(Clone)]
+struct AppState {
+    metric_labels: Arc<[(String, String)]>,
+}
+
+/// The `Datadog` intake target metrics receiver.
 #[derive(Debug)]
-/// The Datadog intake blackhole.
 pub struct Datadog {
     binding_addr: SocketAddr,
     shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
 }
 
-#[derive(Clone)]
-struct AppState {
-    metric_labels: Arc<[(String, String)]>,
-}
-
 impl Datadog {
-    /// Create a new [`Datadog`] server instance
-    #[must_use]
-    pub fn new(general: General, config: Config, shutdown: lading_signal::Watcher) -> Self {
-        let mut metric_labels = vec![
-            ("component".to_string(), "blackhole".to_string()),
+    /// Create a new [`Datadog`] instance
+    ///
+    /// This is responsible for accepting metrics from the target process in the
+    /// Datadog V2 protobuf format.
+    ///
+    pub(crate) fn new(
+        config: Config,
+        shutdown: lading_signal::Watcher,
+        _sample_period: Duration,
+    ) -> Self {
+        let metric_labels = vec![
+            ("component".to_string(), "target_metrics".to_string()),
             ("component_name".to_string(), "datadog".to_string()),
         ];
-        if let Some(id) = general.id {
-            metric_labels.push(("id".to_string(), id));
-        }
 
         let binding_addr = match config.variant {
             Variant::V2 { binding_addr } => binding_addr,
@@ -114,21 +116,18 @@ impl Datadog {
 
     /// Run [`Datadog`] to completion
     ///
-    /// This function runs the HTTP server forever, unless a shutdown signal is
-    /// received or an unrecoverable error is encountered.
+    /// This function runs the intake server forever, unless a shutdown signal
+    /// is received or an unrecoverable error is encountered.
     ///
     /// # Errors
     ///
     /// Function will return an error if the server fails to start.
-    pub async fn run(self) -> Result<(), Error> {
+    pub(crate) async fn run(self) -> Result<(), Error> {
         let metric_labels: Arc<[(String, String)]> = Arc::from(self.metric_labels);
         let state = Arc::new(AppState { metric_labels });
 
         let listener = TcpListener::bind(self.binding_addr).await?;
-        info!(
-            "Datadog intake blackhole listening on {}",
-            self.binding_addr
-        );
+        info!("Datadog intake server listening on {}", self.binding_addr);
 
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);

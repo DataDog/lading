@@ -7,12 +7,15 @@
 use serde::Deserialize;
 use tokio::time::Duration;
 
+pub mod datadog;
 pub mod expvar;
 pub mod prometheus;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 /// Errors produced by [`Server`]
 pub enum Error {
+    /// See [`crate::target_metrics::datadog::Error`] for details.
+    Datadog(datadog::Error),
     /// See [`crate::target_metrics::expvar::Error`] for details.
     Expvar(expvar::Error),
     /// See [`crate::target_metrics::prometheus::Error`] for details.
@@ -24,6 +27,8 @@ pub enum Error {
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
 pub enum Config {
+    /// See [`crate::target_metrics::datadog::Config`] for details.
+    Datadog(datadog::Config),
     /// See [`crate::target_metrics::expvar::Config`] for details.
     Expvar(expvar::Config),
     /// See [`crate::target_metrics::prometheus::Config`] for details.
@@ -33,6 +38,8 @@ pub enum Config {
 /// The `target_metrics` server.
 #[derive(Debug)]
 pub enum Server {
+    /// See [`crate::target_metrics::datadog::Datadog`] for details.
+    Datadog(datadog::Datadog),
     /// See [`crate::target_metrics::expvar::Expvar`] for details.
     Expvar(expvar::Expvar),
     /// See [`crate::target_metrics::prometheus::Prometheus`] for details.
@@ -53,6 +60,9 @@ impl Server {
         sample_period: Duration,
     ) -> Self {
         match config {
+            Config::Datadog(conf) => {
+                Self::Datadog(datadog::Datadog::new(conf, shutdown, sample_period))
+            }
             Config::Expvar(conf) => Self::Expvar(expvar::Expvar::new(
                 conf,
                 shutdown,
@@ -83,6 +93,7 @@ impl Server {
     /// None are known.
     pub async fn run(self) -> Result<(), Error> {
         match self {
+            Server::Datadog(inner) => inner.run().await.map_err(Error::Datadog),
             Server::Expvar(inner) => inner.run().await.map_err(Error::Expvar),
             Server::Prometheus(inner) => inner.run().await.map_err(Error::Prometheus),
         }
