@@ -10,6 +10,6 @@ if ! command -v cargo-nextest &> /dev/null; then
 fi
 
 echo "Running cargo nextest..."
-cargo nextest run --all-features --exclude sheepdog "$@"
+cargo nextest run --workspace --all-features --exclude sheepdog "$@"
 
 echo "Tests passed!"
