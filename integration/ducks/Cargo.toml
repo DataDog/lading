@@ -30,7 +30,6 @@ tokio = { workspace = true, features = [
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true, default-features = false, features = [
   "transport",
-  "prost",
   "router",
 ] }
 tracing = { version = "0.1", features = ["std", "attributes"] }
