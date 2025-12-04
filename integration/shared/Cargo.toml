@@ -8,7 +8,7 @@ description = "Shared code for lading integration tests"
 publish = false
 
 [package.metadata.cargo-machete]
-ignored = ["prost"]
+ignored = ["prost", "tonic-prost"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
