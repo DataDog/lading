@@ -8,18 +8,18 @@ description = "Shared code for lading integration tests"
 publish = false
 
 [package.metadata.cargo-machete]
-ignored = ["prost"]
+ignored = ["prost", "tonic-prost"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 tonic = { workspace = true, default-features = false, features = [
   "codegen",
-  "prost",
   "transport",
   "router",
 ] }
-prost = "0.13"
+tonic-prost = { workspace = true }
+prost = { workspace = true }
 serde_json = "1.0"
 
 [build-dependencies]
-tonic-build = { version = "0.13" }
+tonic-prost-build = { workspace = true }

@@ -60,7 +60,7 @@ nix = { version = "0.30", default-features = false, features = [
 num_cpus = { version = "1.17" }
 num-traits = { version = "0.2", default-features = false }
 once_cell = { workspace = true }
-opentelemetry-proto = { version = "0.30.0", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
+opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true, default-features = false, features = [
   "small_rng",
@@ -92,6 +92,7 @@ tokio = { workspace = true, features = [
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 zstd = "0.13.3"
@@ -107,7 +108,7 @@ tower-test = "0.4"
 
 [build-dependencies]
 prost-build = { workspace = true }
-tonic-build = "0.13"
+tonic-prost-build = { workspace = true }
 
 [features]
 default = []

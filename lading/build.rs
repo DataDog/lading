@@ -11,7 +11,7 @@ fn main() -> std::io::Result<()> {
         .compile_protos(&["proto/agent_payload.proto"], &includes)?;
 
     // Compile stateful_encoding.proto with gRPC services
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .out_dir("src/proto/")
         .compile_protos(&["proto/stateful_encoding.proto"], &includes)?;
 

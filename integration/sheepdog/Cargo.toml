@@ -24,7 +24,6 @@ tokio = { version = "1.47", features = [
 ] }
 tonic = { workspace = true, default-features = false, features = [
   "transport",
-  "prost",
 ] }
 hyper-util = { workspace = true }
 tower = { workspace = true, features = [

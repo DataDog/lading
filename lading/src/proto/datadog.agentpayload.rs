@@ -14,7 +14,7 @@ pub struct CommonMetadata {
     #[prost(string, tag = "6")]
     pub api_key: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Origin {
     #[prost(uint32, tag = "4")]
     pub origin_product: u32,
@@ -24,7 +24,7 @@ pub struct Origin {
     pub origin_service: u32,
 }
 /// Metadata is used in both the MetricSeries and Sketch messages defined below.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Metadata {
     #[prost(message, optional, tag = "1")]
     pub origin: ::core::option::Option<Origin>,
@@ -45,7 +45,7 @@ pub mod metric_payload {
         #[prost(int64, tag = "2")]
         pub timestamp: i64,
     }
-    #[derive(Clone, PartialEq, ::prost::Message)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
     pub struct Resource {
         #[prost(string, tag = "1")]
         pub r#type: ::prost::alloc::string::String,
@@ -135,7 +135,7 @@ pub struct EventsPayload {
 }
 /// Nested message and enum types in `EventsPayload`.
 pub mod events_payload {
-    #[derive(Clone, PartialEq, ::prost::Message)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
     pub struct Event {
         #[prost(string, tag = "1")]
         pub title: ::prost::alloc::string::String,
