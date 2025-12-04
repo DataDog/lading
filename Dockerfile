@@ -11,6 +11,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM docker.io/rust:1.90.0-slim-bookworm AS cacher
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
+    pkg-config=1.8.1-1 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
@@ -24,6 +25,7 @@ RUN cargo chef cook --release --locked --features logrotate_fs --recipe-path rec
 FROM docker.io/rust:1.90.0-slim-bookworm AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
+    pkg-config=1.8.1-1 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
