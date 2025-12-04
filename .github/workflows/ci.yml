@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+permissions:
+  actions: read
+  contents: read
+  id-token: write  # Required for OIDC authentication with AWS
+
 jobs:
   shellcheck:
     name: Shellcheck
@@ -38,11 +43,26 @@ jobs:
             fuse: true
             components: "clippy"
             command: ci/clippy
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
         with:
           components: ${{matrix.components}}
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         if: matrix.protobuf
         uses: ./.github/actions/install-protobuf
@@ -66,9 +86,24 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -82,9 +117,24 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -98,9 +148,24 @@ jobs:
     strategy:
       matrix:
         crate: [lading_throttle, lading_payload]
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -113,12 +178,27 @@ jobs:
   fuzz-check:
     name: Check Fuzz Targets
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
         with:
           toolchain: nightly
           components: rust-src
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
@@ -131,9 +211,24 @@ jobs:
   fingerprint:
     name: Payload Fingerprint Verification
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
