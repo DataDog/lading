@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - Updated OpenTelemetry trace generator to generate more realistic traces: resource,
   scope, and attributes are populated, along with nested child spans.
+- Updated Trace Agent generator to nest child spans in a more realistic manner.
 
 ## [0.29.2]
 ## Added
