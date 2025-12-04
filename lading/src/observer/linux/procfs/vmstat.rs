@@ -1,6 +1,5 @@
 use metrics::gauge;
 use rustc_hash::FxHashMap;
-use std::hash::BuildHasherDefault;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
@@ -43,7 +42,7 @@ pub(crate) async fn poll() -> Result<(), Error> {
 /// Function errors if the file is malformed or contains unparseable values.
 #[inline]
 fn proc_vmstat_inner(contents: &str) -> Result<FxHashMap<&str, u64>, Error> {
-    let mut vmstat_data = FxHashMap::with_capacity_and_hasher(128, BuildHasherDefault::default());
+    let mut vmstat_data = FxHashMap::with_capacity_and_hasher(128, Default::default());
 
     for line in contents.lines() {
         let line = line.trim();
