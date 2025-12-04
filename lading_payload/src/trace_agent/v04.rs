@@ -359,12 +359,19 @@ impl<'a> Generator<'a> for V04 {
 
         // Generate child spans with random timing, allowing for async patterns
         // where child spans may have gaps or overlaps with parents.
-        let mut parent_candidates = vec![root_span_id];
+        //
+        // We maintain a span stack that is sampled from to select the "parent" span
+        // for the child span being generated. The stack has a maximum depth of `MAX_TRACE_DEPTH`
+        // to avoid recursing too deeply.
+        let mut parent_candidates = vec![vec![0]];
         for _ in 1..span_count {
-            let parent_id = parent_candidates
+            let parent_span_level = rng.random_range(0..parent_candidates.len());
+            let parent_span_idx = parent_candidates[parent_span_level]
                 .choose(rng)
                 .copied()
                 .ok_or(Error::StringGenerate)?;
+            let parent_span = &spans[parent_span_idx];
+            let parent_id = parent_span.span_id;
 
             // Child spans get independent random timing, not constrained by parent.
             // Each span gets its own random start time and duration that satisfy trace-agent bounds.
@@ -385,12 +392,20 @@ impl<'a> Generator<'a> for V04 {
                 span_start_nanos,
                 span_duration_nanos,
             );
-
-            // If we aren't past the max trace depth, add as a potential parent.
-            if spans.len() < MAX_TRACE_DEPTH {
-                parent_candidates.push(span_id);
-            }
             spans.push(span);
+
+            // Add this new child span as a potential parent for future spans.
+            //
+            // Figure out what "level" this child span is at, and as long as we're not yet at the maximum depth,
+            // add it to the appropriate level in `parent_candidates` to make it eligible.
+            let next_span_level = parent_span_level + 1;
+            if next_span_level < MAX_TRACE_DEPTH {
+                // Create the level if it doesn't exist.
+                if parent_candidates.len() <= next_span_level {
+                    parent_candidates.push(Vec::new());
+                }
+                parent_candidates[next_span_level].push(spans.len() - 1);
+            }
         }
 
         Ok(Trace { spans })
@@ -714,6 +729,6 @@ mod test {
         // value will need to be modified, but keeping it exact allows us to set
         // accurate bounds on memory consumption. Do not make this an
         // inequality.
-        assert_eq!(serialized.len(), 20_386);
+        assert_eq!(serialized.len(), 21_075);
     }
 }
