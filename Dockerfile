@@ -3,7 +3,7 @@
 # Stage 0: Planner - Extract dependency metadata
 FROM docker.io/rust:1.90.0-slim-bookworm AS planner
 WORKDIR /app
-RUN cargo install cargo-chef --version 0.1.68
+RUN cargo install cargo-chef --version 0.1.73
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --version 0.1.68
+RUN cargo install cargo-chef --version 0.1.73
 COPY --from=planner /app/recipe.json recipe.json
 # This layer is cached until Cargo.toml/Cargo.lock change
 RUN cargo chef cook --release --locked --features logrotate_fs --recipe-path recipe.json
