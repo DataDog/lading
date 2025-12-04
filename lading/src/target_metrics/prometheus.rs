@@ -355,13 +355,11 @@ mod tests {
     use hyper_util::rt::TokioIo;
     use metrics::{Key, Label};
     use metrics_util::{CompositeKey, MetricKind, debugging};
-    use rustc_hash::FxHasher;
-    use std::hash::BuildHasherDefault;
     use tokio::{net::TcpListener, sync::oneshot};
 
     fn parse_and_get_metrics(
         s: &str,
-        tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
+        tags: Option<FxHashMap<String, String>>,
     ) -> HashMap<
         CompositeKey,
         (
@@ -382,7 +380,7 @@ mod tests {
 
     async fn run_scrape_and_parse_metrics(
         s: &str,
-        tags: Option<HashMap<String, String, BuildHasherDefault<FxHasher>>>,
+        tags: Option<FxHashMap<String, String>>,
     ) -> HashMap<
         CompositeKey,
         (
