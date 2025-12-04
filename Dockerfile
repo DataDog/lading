@@ -12,6 +12,7 @@ FROM docker.io/rust:1.90.0-slim-bookworm AS cacher
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
+    libssl-dev=3.0.17-1~deb12u3 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
@@ -26,6 +27,7 @@ FROM docker.io/rust:1.90.0-slim-bookworm AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
+    libssl-dev=3.0.17-1~deb12u3 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
