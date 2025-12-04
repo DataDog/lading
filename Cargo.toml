@@ -19,9 +19,9 @@ arrow-schema = { version = "57.0", default-features = false }
 bytes = { version = "1.10", default-features = false, features = ["std"] }
 byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
 sha2 = { version = "0.10", default-features = false }
-metrics = { version = "0.23" }
-metrics-util = { version = "0.17" }
-metrics-exporter-prometheus = { version = "0.15", default-features = false, features = [
+metrics = { version = "0.24" }
+metrics-util = { version = "0.20" }
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = [
   "http-listener",
   "uds-listener",
 ] }
