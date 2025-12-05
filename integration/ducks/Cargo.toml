@@ -16,7 +16,7 @@ hyper = { workspace = true, features = ["server"] }
 hyper-util = { workspace = true }
 once_cell = { workspace = true }
 shared = { path = "../shared" }
-sketches-ddsketch = "0.3"
+ddsketch-agent = { workspace = true }
 tokio = { workspace = true, features = [
   "rt",
   "macros",

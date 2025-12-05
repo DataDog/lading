@@ -85,6 +85,15 @@ impl<W1: Write, W2: Write + Seek + Send> crate::formats::OutputFormat for Format
     fn close(self) -> Result<(), crate::formats::Error> {
         self.close().map_err(Into::into)
     }
+
+    fn serialize_sketch(
+        &self,
+        sketch: &ddsketch_agent::DDSketch,
+    ) -> Result<Vec<u8>, crate::formats::Error> {
+        // Multi format writes to both JSONL and Parquet, each will serialize
+        // appropriately when write_metric is called. Use JSON here as a default.
+        self.jsonl.serialize_sketch(sketch)
+    }
 }
 
 #[cfg(test)]
@@ -117,6 +126,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
+            value_histogram: None,
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -158,6 +168,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
+                value_histogram: None,
             };
 
             format.write_metric(&line).expect("write should succeed");

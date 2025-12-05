@@ -156,3 +156,23 @@ pub async fn gauge_set(
     }))
     .await
 }
+
+/// Send a historical histogram sample
+///
+/// # Errors
+///
+/// Returns error if sender not initialized or channel is closed.
+pub async fn histogram(
+    name: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+    timestamp: Instant,
+) -> Result<(), Error> {
+    let key = make_key(name, labels);
+    send_metric(Metric::Histogram(metric::Histogram {
+        key,
+        timestamp,
+        value,
+    }))
+    .await
+}

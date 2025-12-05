@@ -82,6 +82,14 @@ impl<W: Write> crate::formats::OutputFormat for Format<W> {
     fn close(self) -> Result<(), crate::formats::Error> {
         self.close().map_err(Into::into)
     }
+
+    fn serialize_sketch(
+        &self,
+        sketch: &ddsketch_agent::DDSketch,
+    ) -> Result<Vec<u8>, crate::formats::Error> {
+        use crate::formats;
+        serde_json::to_vec(sketch).map_err(|e| formats::Error::Jsonl(e.into()))
+    }
 }
 
 #[cfg(test)]
@@ -104,6 +112,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
+            value_histogram: None,
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -132,6 +141,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
+                value_histogram: None,
             };
 
             format.write_metric(&line).expect("write should succeed");

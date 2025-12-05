@@ -60,6 +60,9 @@ hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 sysinfo = { version = "0.37", default-features = false }
 opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
+ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = ["serde"] }
+datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
+protobuf = { version = "3.7" }
 
 [workspace.lints.clippy]
 all = "deny"

@@ -16,6 +16,8 @@ pub enum MetricKind {
     Counter,
     /// A point-at-time value.
     Gauge,
+    /// A histogram distribution with serialized `DDSketch` data.
+    Histogram,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -71,6 +73,15 @@ pub struct Line {
     #[serde(flatten)]
     /// The labels associated with this metric.
     pub labels: FxHashMap<String, String>,
+    /// Serialized `DDSketch` histogram data for histogram rows. Only present
+    /// when `metric_kind` is `Histogram`.
+    ///
+    /// Serialization format varies by output: JSONL uses JSON, Parquet uses
+    /// protobuf.  Consumers must deserialize accordingly:
+    /// `serde_json::from_slice` for JSONL, `Dogsketch::parse_from_bytes` then
+    /// `DDSketch::try_from` for Parquet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_histogram: Option<Vec<u8>>,
 }
 
 impl Line {
@@ -98,6 +109,7 @@ mod tests {
             metric_kind in prop_oneof![
                 Just(MetricKind::Counter),
                 Just(MetricKind::Gauge),
+                Just(MetricKind::Histogram),
             ],
             value in prop_oneof![
                 any::<u64>().prop_map(LineValue::Int),
@@ -113,6 +125,7 @@ mod tests {
                 metric_kind,
                 value,
                 labels: labels.into_iter().collect(),
+                value_histogram: None,
             };
 
             // Serialize to JSON

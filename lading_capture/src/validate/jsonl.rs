@@ -68,10 +68,11 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
         let mut hasher = hash_builder.build_hasher();
         hasher.write_usize(line.metric_name.len());
         hasher.write(line.metric_name.as_bytes());
-        // Include metric kind to distinguish counter from gauge
+        // Include metric kind to distinguish counter from gauge from histogram from sketch
         let kind_byte = match line.metric_kind {
             MetricKind::Counter => 0u8,
             MetricKind::Gauge => 1u8,
+            MetricKind::Histogram => 2u8,
         };
         hasher.write_u8(kind_byte);
         for label in &sorted_labels {
@@ -83,6 +84,7 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
         let kind_str = match line.metric_kind {
             MetricKind::Counter => "counter",
             MetricKind::Gauge => "gauge",
+            MetricKind::Histogram => "histogram",
         };
         let series_id = format!(
             "{kind}:{metric}[{labels}]",

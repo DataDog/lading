@@ -29,7 +29,7 @@ use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// Duration of a single `Accumulator` tick in milliseconds, drives the
 /// `CaptureManager` polling interval.
@@ -41,6 +41,98 @@ pub(crate) struct Sender {
 
 pub(crate) static HISTORICAL_SENDER: LazyLock<ArcSwap<Option<Arc<Sender>>>> =
     LazyLock::new(|| ArcSwap::new(Arc::new(None)));
+
+/// Minimal clock abstraction for histogram timestamping.
+///
+/// The full Clock trait has associated types which complicate trait objects.
+/// For histogram timestamps we only need `now()`, so we use a minimal trait.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) trait InstantClock: Send + Sync {
+    fn now(&self) -> Instant;
+}
+
+/// Blanket implementation for any type implementing Clock
+impl<C: Clock> InstantClock for C {
+    fn now(&self) -> Instant {
+        Clock::now(self)
+    }
+}
+
+/// Clock function abstraction that avoids dynamic dispatch in production.
+///
+/// Uses an enum to provide zero-cost abstraction for the production path while
+/// still supporting test clocks. The `Real` variant compiles to a direct call
+/// to `Instant::now()` with no vtable lookup.
+pub(crate) enum ClockFn {
+    /// Production: direct call to `Instant::now()` with no indirection
+    Real,
+    /// Test: uses `InstantClock` trait for controllable time
+    #[cfg(test)]
+    Test(Arc<dyn InstantClock>),
+}
+
+impl ClockFn {
+    #[inline]
+    pub(crate) fn now(&self) -> Instant {
+        match self {
+            ClockFn::Real => Instant::now(),
+            #[cfg(test)]
+            ClockFn::Test(clock) => clock.now(),
+        }
+    }
+}
+
+/// Global clock for histogram sample timestamps.
+///
+/// Counters and gauges are scraped from the registry and timestamped in bulk
+/// during tick processing. Histogram samples must be timestamped when recorded,
+/// not when scraped. The `metrics::HistogramFn::record` trait provides no
+/// timestamp parameter. The clock must be globally accessible.
+///
+/// `StateMachine::new` stores its clock here. `CaptureHistogram::record` reads
+/// from it. In production this is `Instant::now`. In tests this is a controlled
+/// clock for deterministic behavior.
+pub(crate) static CAPTURE_CLOCK: LazyLock<ArcSwap<ClockFn>> =
+    LazyLock::new(|| ArcSwap::from_pointee(ClockFn::Real));
+
+/// Custom histogram implementation that sends samples to `HISTORICAL_SENDER`
+struct CaptureHistogram {
+    key: Arc<Key>,
+}
+
+impl metrics::HistogramFn for CaptureHistogram {
+    fn record(&self, value: f64) {
+        use crate::metric::{Histogram, Metric};
+
+        // Use the global clock for deterministic timestamping
+        let clock_guard = CAPTURE_CLOCK.load();
+        let timestamp = clock_guard.now();
+        let histogram = Histogram {
+            key: (*self.key).clone(),
+            timestamp,
+            value,
+        };
+        // Send through HISTORICAL_SENDER. Warn if samples are dropped since
+        // this invalidates measurement accuracy.
+        let sender_guard = HISTORICAL_SENDER.load();
+        if let Some(sender) = sender_guard.as_ref().as_ref() {
+            // Use try_send to avoid blocking. If the channel is full,
+            // drop the sample to prevent backpressure on the caller.
+            if let Err(e) = sender.snd.try_send(Metric::Histogram(histogram)) {
+                warn!(
+                    key = %self.key.name(),
+                    error = %e,
+                    "Histogram sample dropped - capture channel full or closed"
+                );
+            }
+        } else {
+            warn!(
+                key = %self.key.name(),
+                "Histogram sample dropped - capture system not initialized"
+            );
+        }
+    }
+}
 
 /// Errors produced by [`CaptureManager`]
 #[derive(thiserror::Error, Debug)]
@@ -137,7 +229,7 @@ impl Clock for RealClock {
     type Interval = RealInterval;
 
     fn now_ms(&self) -> u128 {
-        let now = self.now();
+        let now = Clock::now(self);
         let elapsed = now.duration_since(self.start_instant);
         (self.start_system_time + elapsed)
             .duration_since(UNIX_EPOCH)
@@ -194,7 +286,7 @@ impl<F: OutputFormat, C: Clock> std::fmt::Debug for CaptureManager<F, C> {
     }
 }
 
-impl<F: OutputFormat, C: Clock> CaptureManager<F, C> {
+impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
     /// Create a new [`CaptureManager`] with a custom format and clock
     pub fn new_with_format(
         format: F,
@@ -497,10 +589,18 @@ impl metrics::Recorder for CaptureRecorder {
 
     fn register_histogram(
         &self,
-        _key: &metrics::Key,
+        key: &metrics::Key,
         _: &metrics::Metadata<'_>,
     ) -> metrics::Histogram {
-        // nothing, intentionally
-        unimplemented!()
+        // Histogram samples must be timestamped when recorded, not when scraped.
+        // CaptureHistogram sends samples to HISTORICAL_SENDER with timestamps
+        // for interval partitioning.
+        self.registry
+            .get_or_create_histogram(key, |_atomic_bucket| {
+                let histogram = CaptureHistogram {
+                    key: Arc::new(key.clone()),
+                };
+                metrics::Histogram::from_arc(Arc::new(histogram))
+            })
     }
 }

@@ -31,6 +31,9 @@ thiserror = { workspace = true }
 metrics-util = { workspace = true }
 tracing = { workspace = true }
 ustr = { workspace = true }
+ddsketch-agent = { workspace = true }
+datadog-protos = { workspace = true }
+protobuf = { workspace = true }
 
 [lib]
 doctest = false
