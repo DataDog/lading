@@ -49,7 +49,7 @@ once_cell = { version = "1.21" }
 arrow = { version = "57.0", default-features = false }
 parquet = { version = "57.0", default-features = false }
 proptest = { version = "1.9" }
-proptest-derive = { version = "0.6" }
+proptest-derive = { version = "0.7" }
 tempfile = { version = "3.23" }
 
 http = { version = "1.3" }
