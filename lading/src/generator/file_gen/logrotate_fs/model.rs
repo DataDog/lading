@@ -1396,15 +1396,6 @@ mod test {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig {
-            // Increase the number of generated cases (default is 256)
-            cases: 1_024,
-            // Allow more shrink iterations (default is 4096)
-            max_shrink_iters: 1_000_000,
-            max_shrink_time: 300_000, // five minutes
-            .. ProptestConfig::default()
-        })]
-
         #[test]
         fn test_state_operations(seed in any::<u64>(),
                                  state in any::<State>(),

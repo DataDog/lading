@@ -133,6 +133,25 @@ When writing tests:
 - Think about the properties your code should maintain
 - Test invariants, not specific examples
 
+## Property Testing Configuration
+
+Lading uses different proptest configurations for local development vs CI:
+
+**Local development** (via `ci/test`):
+- `PROPTEST_CASES=64` - Fast feedback, ~75% faster than defaults
+- `PROPTEST_MAX_SHRINK_ITERS=2048` - Reasonable shrinking for local debugging
+
+**CI** (via `.github/workflows/ci.yml`):
+- `PROPTEST_CASES=512` - Thorough testing, 8x more than local, 2x more than defaults
+- `PROPTEST_MAX_SHRINK_ITERS=10000` - Better minimal examples for failures
+- `PROPTEST_MAX_SHRINK_TIME=60000` - 60s timeout for complex shrinking
+
+**Override locally**: Run `PROPTEST_CASES=512 ci/test` to use CI-level thoroughness.
+
+**All property tests** use these environment variable settings uniformly. There are
+no tests with explicit `#![proptest_config(...)]` overrides - all tests respect
+the environment variables for consistent control across the entire test suite.
+
 # CRITICAL: Validation Workflow
 
 You MUST run `ci/validate` after making any code changes. This is not optional.
