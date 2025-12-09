@@ -222,6 +222,19 @@ pub enum Error {
         /// The URI that was missing the component
         uri: String,
     },
+    /// Error making trace agent request
+    #[error("Failed to send trace request to {endpoint}: {source}")]
+    RequestFailed {
+        /// Target endpoint
+        endpoint: String,
+        /// Attempt number
+        attempt: u32,
+        /// Status code if received
+        status_code: Option<u16>,
+        /// Underlying hyper error
+        #[source]
+        source: Box<hyper::Error>,
+    },
 }
 
 /// The Datadog Trace Agent generator.

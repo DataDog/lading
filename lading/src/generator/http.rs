@@ -102,6 +102,15 @@ pub enum Error {
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] ThrottleConversionError),
+    /// Error making HTTP request
+    #[error("Failed to send HTTP request to {uri}: {source}")]
+    RequestFailed {
+        /// Target URI
+        uri: String,
+        /// Underlying hyper error
+        #[source]
+        source: Box<hyper::Error>,
+    },
 }
 
 /// The HTTP generator.
@@ -243,6 +252,7 @@ impl Http {
                             let labels = labels.clone();
                             let data_points = metadata.data_points;
 
+                            let uri_clone = uri.clone();
                             let permit = CONNECTION_SEMAPHORE.get().expect("Connection Semaphore is being initialized or cell is empty").acquire().await.expect("Connection Semaphore has already closed");
                             tokio::spawn(async move {
                                 counter!("requests_sent", &labels).increment(1);
@@ -260,9 +270,13 @@ impl Http {
                                             .push(("status_code".to_string(), status.as_u16().to_string()));
                                         counter!("request_ok", &status_labels).increment(1);
                                     }
-                                    Err(err) => {
+                                    Err(source) => {
+                                        error!(
+                                            "Failed to send HTTP request to {uri}: {source}",
+                                            uri = uri_clone
+                                        );
                                         let mut error_labels = labels.clone();
-                                        error_labels.push(("error".to_string(), err.to_string()));
+                                        error_labels.push(("error".to_string(), source.to_string()));
                                         counter!("request_failure", &error_labels).increment(1);
                                     }
                                 }

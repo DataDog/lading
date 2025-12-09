@@ -20,7 +20,7 @@ use k8s_openapi::api::{
 use kube::api::{DeleteParams, PostParams};
 use lading_throttle::{self, Throttle};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::generator::General;
 
@@ -74,6 +74,32 @@ pub enum Error {
     /// State machine error
     #[error(transparent)]
     StateMachine(#[from] state_machine::Error),
+    /// Error creating a single resource
+    #[error("Failed to create {kind} resource {name} (index {index}): {source}")]
+    ResourceCreateFailed {
+        /// Resource kind
+        kind: String,
+        /// Resource name
+        name: String,
+        /// Resource index
+        index: u32,
+        /// Underlying kube error
+        #[source]
+        source: Box<kube::Error>,
+    },
+    /// Error deleting a single resource
+    #[error("Failed to delete {kind} resource {name} (index {index}): {source}")]
+    ResourceDeleteFailed {
+        /// Resource kind
+        kind: String,
+        /// Resource name
+        name: String,
+        /// Resource index
+        index: u32,
+        /// Underlying kube error
+        #[source]
+        source: Box<kube::Error>,
+    },
 }
 
 /// Represents a Kubernetes resource
@@ -199,8 +225,11 @@ impl Kubernetes {
                             debug!("Successfully created all instances");
                             Event::AllInstancesCreated { success: true }
                         }
-                        Err(e) => {
-                            warn!("Failed to create all instances: {e}");
+                        Err(source) => {
+                            warn!(
+                                "Failed to create all {count} instances: {source}",
+                                count = self.concurrent_instances
+                            );
                             Event::AllInstancesCreated { success: false }
                         }
                     }
@@ -223,8 +252,8 @@ impl Kubernetes {
                                 success: true,
                             }
                         }
-                        Err(e) => {
-                            warn!("Failed to create instance {index}: {e}");
+                        Err(source) => {
+                            warn!("Failed to create instance {index}: {source}");
                             Event::InstanceCreated {
                                 index,
                                 success: false,
@@ -250,8 +279,8 @@ impl Kubernetes {
                                 success: true,
                             }
                         }
-                        Err(e) => {
-                            warn!("Failed to delete instance {index}: {e}");
+                        Err(source) => {
+                            warn!("Failed to delete instance {index}: {source}");
                             Event::InstanceDeleted {
                                 index,
                                 success: false,
@@ -274,8 +303,11 @@ impl Kubernetes {
                             debug!("Successfully deleted all instances");
                             Event::AllInstancesDeleted { success: true }
                         }
-                        Err(e) => {
-                            warn!("Failed to delete all instances: {e}");
+                        Err(source) => {
+                            warn!(
+                                "Failed to delete all {count} instances: {source}",
+                                count = self.concurrent_instances
+                            );
                             Event::AllInstancesDeleted { success: false }
                         }
                     }
@@ -297,25 +329,28 @@ async fn create_single_resource(
 ) -> Result<Resource, Error> {
     let mut object = resource.clone();
     object.set_name(concurrent_instances, index);
+    let kind = object.kind().to_lowercase();
+    let name = object.get_name();
 
     object
         .create(client, &PostParams::default())
         .await
         .inspect(|o| {
-            debug!(
-                "Created {kind} {name}",
-                kind = object.kind().to_lowercase(),
-                name = o.get_name()
-            );
+            debug!("Created {kind} {name}", kind = kind, name = o.get_name());
         })
-        .inspect_err(|e| {
+        .inspect_err(|source| {
             warn!(
-                "Failed to create {kind} {name}: {e}",
-                kind = object.kind().to_lowercase(),
-                name = object.get_name()
+                "Failed to create {kind} {name} (index {index}): {source}",
+                kind = kind,
+                name = name
             );
         })
-        .map_err(Error::from)
+        .map_err(|source| Error::ResourceCreateFailed {
+            kind,
+            name: name.to_string(),
+            index,
+            source: Box::new(source),
+        })
 }
 
 async fn create_resources(
@@ -339,6 +374,12 @@ async fn create_resources(
     Ok(resources)
 }
 
+/// Check if a kube error represents a "not found" error (404). These errors
+/// are treated as success for idempotent operations.
+fn is_not_found_error(error: &kube::Error) -> bool {
+    matches!(error, kube::Error::Api(response) if response.code == 404)
+}
+
 async fn delete_single_resource(
     client: kube::Client,
     resource: &Resource,
@@ -347,19 +388,39 @@ async fn delete_single_resource(
 ) -> Result<(), Error> {
     let mut object = resource.clone();
     object.set_name(concurrent_instances, index);
+    let kind = object.kind().to_lowercase();
+    let name = object.get_name();
 
-    object
+    match object
         .delete(client, &DeleteParams::default().grace_period(5))
         .await
-        .inspect_err(|e| {
-            warn!(
-                "Failed to delete {kind} {name}: {e}",
-                kind = object.kind().to_lowercase(),
-                name = object.get_name()
-            );
-        })?;
-
-    Ok(())
+    {
+        Ok(()) => {
+            debug!("Deleted {kind} {name} (index {index})");
+            Ok(())
+        }
+        Err(source) => {
+            // Treat 404 as success. The resource is already gone, satisfying
+            // our goal. Makes delete operations idempotent and handles race
+            // conditions where resources disappear between state checks.
+            if is_not_found_error(&source) {
+                debug!("Resource {kind} {name} (index {index}) already gone - treating as success");
+                Ok(())
+            } else {
+                warn!(
+                    "Failed to delete {kind} {name} (index {index}): {source}",
+                    kind = kind,
+                    name = name
+                );
+                Err(Error::ResourceDeleteFailed {
+                    kind,
+                    name: name.to_string(),
+                    index,
+                    source: Box::new(source),
+                })
+            }
+        }
+    }
 }
 
 async fn delete_resources(

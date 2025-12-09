@@ -93,6 +93,24 @@ pub enum Error {
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(JoinError),
+    /// Error binding UDP socket
+    #[error("Failed to bind UDP socket: {source}")]
+    BindFailed {
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Error sending UDP packet
+    #[error("Failed to send UDP packet to {addr}: {source}")]
+    SendFailed {
+        /// Target address
+        addr: String,
+        /// Bytes sent before error
+        bytes_sent: usize,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
 }
 
 #[derive(Debug)]
@@ -225,11 +243,11 @@ impl UdpWorker {
                             debug!("UDP port bound");
                             connection = Some(sock);
                         }
-                        Err(err) => {
-                            trace!("binding UDP port failed: {}", err);
+                        Err(source) => {
+                            trace!("Failed to bind UDP socket: {source}");
 
                             let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
+                            error_labels.push(("error".to_string(), source.to_string()));
                             counter!("connection_failure", &error_labels).increment(1);
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
@@ -246,12 +264,12 @@ impl UdpWorker {
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                     connection = Some(sock);
                                 }
-                                Err(err) => {
-                                    debug!("write failed: {}", err);
+                                Err(source) => {
+                                    debug!("Failed to send UDP packet to {addr}: {source}", addr = self.addr);
 
                                     let mut error_labels = self.metric_labels.clone();
-                                    error_labels.push(("error".to_string(), err.to_string()));
-                                    counter!("write_failure", &error_labels).increment(1);
+                                    error_labels.push(("error".to_string(), source.to_string()));
+                                    counter!("request_failure", &error_labels).increment(1);
                                     connection = None;
                                 }
                             }

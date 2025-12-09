@@ -30,7 +30,7 @@ use tonic::{
     codec::{DecodeBuf, Decoder, EncodeBuf, Encoder},
     transport,
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use lading_payload::block;
 
@@ -63,6 +63,26 @@ pub enum Error {
     /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] ThrottleConversionError),
+    /// Error connecting to gRPC server
+    #[error("Failed to connect to gRPC endpoint {endpoint}: {source}")]
+    ConnectionFailed {
+        /// gRPC endpoint
+        endpoint: String,
+        /// Underlying transport error
+        #[source]
+        source: Box<tonic::transport::Error>,
+    },
+    /// Error making RPC request
+    #[error("Failed to make RPC request to {endpoint}{path}: {source}")]
+    RpcRequestFailed {
+        /// gRPC endpoint
+        endpoint: String,
+        /// RPC path
+        path: String,
+        /// Underlying RPC error
+        #[source]
+        source: Box<tonic::Status>,
+    },
 }
 
 impl From<tonic::Status> for Error {
@@ -267,7 +287,12 @@ impl Grpc {
         let mut client = loop {
             match self.connect().await {
                 Ok(c) => break c,
-                Err(e) => debug!("Failed to connect gRPC generator (will retry): {}", e),
+                Err(source) => {
+                    debug!(
+                        "Failed to connect to gRPC endpoint {endpoint} (will retry): {source}",
+                        endpoint = self.target_uri
+                    );
+                }
             }
 
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -302,9 +327,14 @@ impl Grpc {
                             counter!("request_ok", &self.metric_labels).increment(1);
                             counter!("response_bytes", &self.metric_labels).increment(res.into_inner() as u64);
                         }
-                        Err(err) => {
+                        Err(source) => {
+                            error!(
+                                "Failed to make RPC request to {endpoint}{path}: {source}",
+                                endpoint = self.target_uri,
+                                path = rpc_path
+                            );
                             let mut error_labels = self.metric_labels.clone();
-                            error_labels.push(("error".to_string(), err.to_string()));
+                            error_labels.push(("error".to_string(), source.to_string()));
                             counter!("request_failure",  &error_labels).increment(1);
                         }
                     }
