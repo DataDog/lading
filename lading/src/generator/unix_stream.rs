@@ -95,6 +95,32 @@ pub enum Error {
     /// Throttle error
     #[error("Throttle error: {0}")]
     Throttle(#[from] lading_throttle::Error),
+    /// Error connecting to Unix socket
+    #[error("Failed to connect to Unix socket at {path}: {source}")]
+    ConnectFailed {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Error writing to Unix socket
+    #[error("Failed to write to Unix socket at {path}: {source}")]
+    WriteFailed {
+        /// Socket path
+        path: String,
+        /// Bytes written before error
+        bytes_offset: usize,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Broken pipe error
+    #[error("Broken pipe on Unix socket at {path}")]
+    BrokenPipe {
+        /// Socket path
+        path: String,
+    },
 }
 
 #[derive(Debug)]
@@ -278,16 +304,16 @@ impl Child {
                                             // whole CPU.
                                             tokio::task::yield_now().await;
                                         }
-                                        Err(err ) => {
-                                            warn!("write failed: {}", err);
-                                            if err.kind() == tokio::io::ErrorKind::BrokenPipe {
-                                                warn!("Broken pipe, reconnecting");
+                                        Err(source) => {
+                                            if source.kind() == tokio::io::ErrorKind::BrokenPipe {
+                                                warn!("Broken pipe on Unix socket at {path}, reconnecting", path = self.path.display());
                                                 current_connection = None;
                                                 break;
                                             }
 
+                                            warn!("Failed to write to Unix socket at {path}: {source}", path = self.path.display());
                                             let mut error_labels = self.metric_labels.clone();
-                                            error_labels.push(("error".to_string(), err.to_string()));
+                                            error_labels.push(("error".to_string(), source.to_string()));
                                             counter!("request_failure", &error_labels).increment(1);
                                         }
                                     }

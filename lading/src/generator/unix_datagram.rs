@@ -104,6 +104,26 @@ pub enum Error {
     /// Throttle error
     #[error("Throttle error: {0}")]
     Throttle(#[from] lading_throttle::Error),
+    /// Error binding Unix datagram socket
+    #[error("Failed to bind Unix datagram socket at {path}: {source}")]
+    BindFailed {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Error sending datagram
+    #[error("Failed to send datagram to {path}: {source}")]
+    SendFailed {
+        /// Socket path
+        path: String,
+        /// Bytes sent before error
+        bytes_sent: usize,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
 }
 
 #[derive(Debug)]
@@ -269,7 +289,7 @@ impl Child {
                                     counter!("packets_sent", &self.metric_labels).increment(1);
                                 }
                                 Err(err) => {
-                                    debug!("write failed: {}", err);
+                                    debug!("Failed to send datagram to {path}: {source}", path = self.path.display(), source = err);
 
                                     let mut error_labels = self.metric_labels.clone();
                                     error_labels.push(("error".to_string(), err.to_string()));

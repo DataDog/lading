@@ -82,12 +82,32 @@ pub enum Error {
     /// Throttle conversion error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] ThrottleConversionError),
-    /// Throttle error  
+    /// Throttle error
     #[error("Throttle error: {0}")]
     Throttle(#[from] lading_throttle::Error),
     /// Child sub-task error.
     #[error("Child join error: {0}")]
     Child(JoinError),
+    /// Error connecting to TCP endpoint
+    #[error("Failed to connect to TCP address {addr}: {source}")]
+    ConnectionFailed {
+        /// Target address
+        addr: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Error writing to TCP socket
+    #[error("Failed to write to TCP address {addr}: {source}")]
+    WriteFailed {
+        /// Target address
+        addr: String,
+        /// Bytes sent before error
+        bytes_sent: usize,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
 }
 
 #[derive(Debug)]
@@ -215,11 +235,14 @@ impl TcpWorker {
                     Ok(client) => {
                         current_connection = Some(client);
                     }
-                    Err(err) => {
-                        trace!("connection to {} failed: {}", self.addr, err);
+                    Err(source) => {
+                        trace!(
+                            "Failed to connect to TCP address {addr}: {source}",
+                            addr = self.addr
+                        );
 
                         let mut error_labels = self.metric_labels.clone();
-                        error_labels.push(("error".to_string(), err.to_string()));
+                        error_labels.push(("error".to_string(), source.to_string()));
                         counter!("connection_failure", &error_labels).increment(1);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }

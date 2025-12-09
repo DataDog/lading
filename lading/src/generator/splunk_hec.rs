@@ -132,6 +132,17 @@ pub enum Error {
     /// Throttle configuration error
     #[error("Throttle configuration error: {0}")]
     ThrottleConversion(#[from] ThrottleConversionError),
+    /// Error making HEC request
+    #[error("Failed to send HEC request to {uri} with format {format}: {source}")]
+    HecRequestFailed {
+        /// Target URI
+        uri: String,
+        /// HEC format
+        format: String,
+        /// Underlying hyper error
+        #[source]
+        source: Box<hyper::Error>,
+    },
 }
 
 /// Defines a task that emits variant lines to a Splunk HEC server controlling
@@ -285,7 +296,7 @@ impl SplunkHec {
                         Ok(()) => {
                             let client = client.clone();
                             let labels = labels.clone();
-                            let uri = uri.clone();
+                            let uri_clone = uri.clone();
 
                             let block = self.block_cache.advance(&mut handle);
                             let body = crate::full(block.bytes.clone());
@@ -293,7 +304,7 @@ impl SplunkHec {
 
                             let request = Request::builder()
                                 .method(Method::POST)
-                                .uri(uri)
+                                .uri(&uri_clone)
                                 .header(AUTHORIZATION, format!("Splunk {}", self.token))
                                 .header(CONTENT_LENGTH, block_length)
                                 .header(SPLUNK_HEC_CHANNEL_HEADER, channel.id())
@@ -305,7 +316,7 @@ impl SplunkHec {
                             // the AckID, meaning we could just keep the channel logic
                             // in this main loop here and avoid the AckService entirely.
                             let permit = CONNECTION_SEMAPHORE.get().expect("Connecton Semaphore is empty or being initialized").acquire().await.expect("Semaphore has already been closed");
-                            tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone()));
+                            tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
@@ -327,6 +338,7 @@ impl SplunkHec {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,
@@ -335,6 +347,7 @@ async fn send_hec_request<B>(
     client: Client<HttpConnector, B>,
     request: Request<B>,
     shutdown: lading_signal::Watcher,
+    uri: Uri,
 ) -> Result<(), Error>
 where
     B: Body + Send + 'static + Unpin,
@@ -360,15 +373,17 @@ where
                             serde_json::from_slice::<HecResponse>(&body_bytes).expect("unable to parse response body");
                         channel.send(ready(hec_ack_response.ack_id)).await?;
                     }
-                    Err(err) => {
+                    Err(source) => {
+                        error!("Failed to send HEC request to {uri}: {source}", uri = uri);
                         let mut error_labels = labels.clone();
-                        error_labels.push(("error".to_string(), err.to_string()));
+                        error_labels.push(("error".to_string(), source.to_string()));
                         counter!("request_failure", &error_labels).increment(1);
                     }
                 }
-                Err(err) => {
+                Err(source) => {
+                    error!("HEC request to {uri} timed out after 1s: {source}", uri = uri);
                     let mut error_labels = labels.clone();
-                    error_labels.push(("error".to_string(), err.to_string()));
+                    error_labels.push(("error".to_string(), source.to_string()));
                     counter!("request_timeout", &error_labels).increment(1);
                 }
             }
