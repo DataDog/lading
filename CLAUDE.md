@@ -142,11 +142,11 @@ Lading uses different proptest configurations for local development vs CI:
 - `PROPTEST_MAX_SHRINK_ITERS=2048` - Reasonable shrinking for local debugging
 
 **CI** (via `.github/workflows/ci.yml`):
-- `PROPTEST_CASES=10000` - Very thorough testing, catches rare edge cases
-- `PROPTEST_MAX_SHRINK_ITERS=1000000` - Excellent minimal examples for failures
-- `PROPTEST_MAX_SHRINK_TIME=300000` - 5 minute timeout for complex shrinking
+- `PROPTEST_CASES=512` - Thorough testing, 8x more than local, 2x more than defaults
+- `PROPTEST_MAX_SHRINK_ITERS=10000` - Better minimal examples for failures
+- `PROPTEST_MAX_SHRINK_TIME=60000` - 60s timeout for complex shrinking
 
-**Override locally**: Run `PROPTEST_CASES=10000 ci/test` to use CI-level thoroughness.
+**Override locally**: Run `PROPTEST_CASES=512 ci/test` to use CI-level thoroughness.
 
 **All property tests** use these environment variable settings uniformly. There are
 no tests with explicit `#![proptest_config(...)]` overrides - all tests respect

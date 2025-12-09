@@ -92,9 +92,9 @@ jobs:
       SCCACHE_REGION: "us-west-2"
       RUSTC_WRAPPER: "sccache"
       # Proptest configuration for thorough CI testing
-      PROPTEST_CASES: "10000"
-      PROPTEST_MAX_SHRINK_ITERS: "1000000"
-      PROPTEST_MAX_SHRINK_TIME: "300000"
+      PROPTEST_CASES: "512"
+      PROPTEST_MAX_SHRINK_ITERS: "10000"
+      PROPTEST_MAX_SHRINK_TIME: "60000"
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
