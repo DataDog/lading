@@ -24,6 +24,24 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error(transparent)]
     Io(io::Error),
+    /// Error binding TCP listener
+    #[error("Failed to bind TCP listener to {addr}: {source}")]
+    Bind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error accepting connection
+    #[error("Failed to accept connection on {addr}: {source}")]
+    Accept {
+        /// Listening address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +105,10 @@ impl Tcp {
     pub async fn run(self) -> Result<(), Error> {
         let listener = TcpListener::bind(self.binding_addr)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|source| Error::Bind {
+                addr: self.binding_addr,
+                source: Box::new(source),
+            })?;
 
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
@@ -96,7 +117,10 @@ impl Tcp {
         loop {
             tokio::select! {
                 conn = listener.accept() => {
-                    let (socket, _) = conn.map_err(Error::Io)?;
+                    let (socket, _) = conn.map_err(|source| Error::Accept {
+                        addr: self.binding_addr,
+                        source: Box::new(source),
+                    })?;
                     counter!("connection_accepted", &self.metric_labels).increment(1);
                     tokio::spawn(
                         Self::handle_connection(socket, labels)

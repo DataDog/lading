@@ -21,6 +21,24 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error(transparent)]
     Io(io::Error),
+    /// Error binding Unix datagram socket
+    #[error("Failed to bind Unix datagram socket at {path}: {source}")]
+    Bind {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error receiving datagram
+    #[error("Failed to receive datagram on {path}: {source}")]
+    Recv {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -74,7 +92,10 @@ impl UnixDatagram {
         // Sockets cannot be rebound if they existed previously. Delete the
         // socket, ignore any errors.
         let _res = tokio::fs::remove_file(&self.path).map_err(Error::Io);
-        let socket = net::UnixDatagram::bind(&self.path).map_err(Error::Io)?;
+        let socket = net::UnixDatagram::bind(&self.path).map_err(|source| Error::Bind {
+            path: self.path.display().to_string(),
+            source: Box::new(source),
+        })?;
         let mut buf = vec![0; 65536];
 
         let shutdown_wait = self.shutdown.recv();
@@ -82,7 +103,10 @@ impl UnixDatagram {
         loop {
             tokio::select! {
                 res = socket.recv(&mut buf) => {
-                    let n: usize = res.map_err(Error::Io)?;
+                    let n: usize = res.map_err(|source| Error::Recv {
+                        path: self.path.display().to_string(),
+                        source: Box::new(source),
+                    })?;
                     counter!("bytes_received", &self.metric_labels).increment(n as u64);
                 }
                 () = &mut shutdown_wait => {

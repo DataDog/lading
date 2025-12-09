@@ -40,6 +40,24 @@ pub enum Error {
     /// Wrapper for [`crate::blackhole::common::Error`].
     #[error(transparent)]
     Common(#[from] crate::blackhole::common::Error),
+    /// Error binding HTTP server
+    #[error("Failed to bind HTTP server to {addr}: {source}")]
+    BindServer {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying error
+        #[source]
+        source: Box<crate::blackhole::common::Error>,
+    },
+    /// HTTP server encountered error
+    #[error("HTTP server on {addr} encountered error: {source}")]
+    ServerError {
+        /// Server address
+        addr: SocketAddr,
+        /// Underlying error
+        #[source]
+        source: Box<hyper::Error>,
+    },
 }
 
 /// Body variant supported by this blackhole.

@@ -53,6 +53,24 @@ pub enum Error {
     /// Wrapper for [`http::Error`].
     #[error(transparent)]
     Http(#[from] http::Error),
+    /// Error binding Datadog intake server
+    #[error("Failed to bind Datadog intake server to {addr}: {source}")]
+    Bind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Connection error on Datadog intake server
+    #[error("Connection error on Datadog intake server at {addr}: {source}")]
+    Connection {
+        /// Server address
+        addr: SocketAddr,
+        /// Underlying hyper error
+        #[source]
+        source: Box<hyper::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
