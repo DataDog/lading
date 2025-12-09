@@ -46,6 +46,24 @@ pub enum Error {
     /// No protocol was enabled.
     #[error("No protocols enabled - must enable at least HTTP or gRPC")]
     NoProtocolEnabled,
+    /// Error binding HTTP server
+    #[error("Failed to bind OTLP HTTP server to {addr}: {source}")]
+    HttpBind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying error
+        #[source]
+        source: Box<crate::blackhole::common::Error>,
+    },
+    /// Error binding gRPC server
+    #[error("Failed to bind OTLP gRPC server to {addr}: {source}")]
+    GrpcBind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying transport error
+        #[source]
+        source: Box<tonic::transport::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Copy)]

@@ -21,6 +21,24 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error(transparent)]
     Io(io::Error),
+    /// Error binding UDP socket
+    #[error("Failed to bind UDP socket to {addr}: {source}")]
+    Bind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error receiving packet
+    #[error("Failed to receive packet on {addr}: {source}")]
+    Recv {
+        /// Listening address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +92,10 @@ impl Udp {
     pub async fn run(self) -> Result<(), Error> {
         let socket = UdpSocket::bind(&self.binding_addr)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|source| Error::Bind {
+                addr: self.binding_addr,
+                source: Box::new(source),
+            })?;
         let mut buf = vec![0; 65536];
 
         let shutdown_wait = self.shutdown.recv();
@@ -82,7 +103,10 @@ impl Udp {
         loop {
             tokio::select! {
                 packet = socket.recv_from(&mut buf) => {
-                    let (bytes, _) = packet.map_err(Error::Io)?;
+                    let (bytes, _) = packet.map_err(|source| Error::Recv {
+                        addr: self.binding_addr,
+                        source: Box::new(source),
+                    })?;
                     counter!("packet_received", &self.metric_labels).increment(1);
                     counter!("bytes_received", &self.metric_labels).increment(bytes as u64);
                 }

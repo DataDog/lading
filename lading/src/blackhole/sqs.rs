@@ -39,6 +39,15 @@ pub enum Error {
     /// Wrapper for [`crate::blackhole::common::Error`].
     #[error(transparent)]
     Common(#[from] crate::blackhole::common::Error),
+    /// Error binding SQS server
+    #[error("Failed to bind SQS server to {addr}: {source}")]
+    BindServer {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying error
+        #[source]
+        source: Box<crate::blackhole::common::Error>,
+    },
 }
 
 fn default_concurrent_requests_max() -> usize {

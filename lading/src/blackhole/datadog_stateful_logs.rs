@@ -45,6 +45,15 @@ pub enum Error {
     /// The gRPC server task exited unexpectedly without reporting an error.
     #[error("gRPC server exited unexpectedly")]
     UnexpectedShutdown,
+    /// Error binding gRPC server
+    #[error("Failed to bind Datadog Stateful Logs gRPC server to {addr}: {source}")]
+    BindServer {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying transport error
+        #[source]
+        source: Box<tonic::transport::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]

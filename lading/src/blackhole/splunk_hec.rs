@@ -42,6 +42,15 @@ pub enum Error {
     /// Wrapper for [`crate::blackhole::common::Error`].
     #[error(transparent)]
     Common(#[from] crate::blackhole::common::Error),
+    /// Error binding Splunk HEC server
+    #[error("Failed to bind Splunk HEC server to {addr}: {source}")]
+    BindServer {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying error
+        #[source]
+        source: Box<crate::blackhole::common::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]

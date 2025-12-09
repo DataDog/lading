@@ -24,6 +24,24 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error(transparent)]
     Io(io::Error),
+    /// Error binding Unix socket
+    #[error("Failed to bind Unix stream socket at {path}: {source}")]
+    Bind {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error accepting connection
+    #[error("Failed to accept connection on Unix socket at {path}: {source}")]
+    Accept {
+        /// Socket path
+        path: String,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -74,7 +92,10 @@ impl UnixStream {
     ///
     /// None known.
     pub async fn run(self) -> Result<(), Error> {
-        let listener = net::UnixListener::bind(&self.path).map_err(Error::Io)?;
+        let listener = net::UnixListener::bind(&self.path).map_err(|source| Error::Bind {
+            path: self.path.display().to_string(),
+            source: Box::new(source),
+        })?;
 
         let labels: &'static _ = Box::new(self.metric_labels.clone()).leak();
 
@@ -83,7 +104,10 @@ impl UnixStream {
         loop {
             tokio::select! {
                 conn = listener.accept() => {
-                    let (socket, _) = conn.map_err(Error::Io)?;
+                    let (socket, _) = conn.map_err(|source| Error::Accept {
+                        path: self.path.display().to_string(),
+                        source: Box::new(source),
+                    })?;
                     counter!("connection_accepted", &self.metric_labels).increment(1);
                     tokio::spawn(
                         Self::handle_connection(socket, labels)
