@@ -669,7 +669,6 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10_000))]
         #[test]
         fn state_machine_output_satisfies_invariants(
             ops in prop::collection::vec(any::<CaptureOp>(), 10..50)

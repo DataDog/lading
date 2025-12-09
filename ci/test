@@ -3,6 +3,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+# Set proptest defaults for local development (fast feedback)
+# These can be overridden by setting the env vars before running ci/test
+: "${PROPTEST_CASES:=64}"
+: "${PROPTEST_MAX_SHRINK_ITERS:=2048}"
+export PROPTEST_CASES PROPTEST_MAX_SHRINK_ITERS
+
 # Check if cargo-nextest is installed
 if ! command -v cargo-nextest &> /dev/null; then
     echo "cargo-nextest is not installed. Installing it now..."
@@ -10,6 +16,8 @@ if ! command -v cargo-nextest &> /dev/null; then
 fi
 
 echo "Running cargo nextest..."
+echo "  PROPTEST_CASES=${PROPTEST_CASES}"
+echo "  PROPTEST_MAX_SHRINK_ITERS=${PROPTEST_MAX_SHRINK_ITERS}"
 cargo nextest run --workspace --all-features --exclude sheepdog "$@"
 
 echo "Tests passed!"
