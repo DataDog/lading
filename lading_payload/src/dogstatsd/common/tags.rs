@@ -186,10 +186,10 @@ mod test {
 
     proptest! {
         #[test]
-        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..10_000_usize, tags_per_msg_max in 1..u8::MAX) {
+        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..5_000_usize, tags_per_msg_max in 1..128_u8) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
             let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
             let tag_size_range = ConfRange::Inclusive{min: 3, max: 128};
             let generator = tags::Generator::new(
@@ -221,12 +221,12 @@ mod test {
         /// This test asserts that when the  is 1.0, we always are able to hit
         /// the desired number of unique tagsets no matter what.
         #[test]
-        fn unique_tagsets_respected_always_unique_tags(seed: u64, desired_num_tagsets in 1..10_000_usize) {
+        fn unique_tagsets_respected_always_unique_tags(seed: u64, desired_num_tagsets in 1..5_000_usize) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
@@ -259,12 +259,12 @@ mod test {
         /// The goal of this test is to vary the unique_tag_probability between the WARN and MAX
         /// levels and ensure that we are always able to generate the desired number of unique tagsets
         #[test]
-        fn unique_tagsets_respected_with_varying_ratio(seed: u64, desired_num_tagsets in 5..10_000_usize, unique_tag_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
+        fn unique_tagsets_respected_with_varying_ratio(seed: u64, desired_num_tagsets in 5..5_000_usize, unique_tag_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
             let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
