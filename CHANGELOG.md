@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+## Changed
+- **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
+  This reflects preexisting terminology.
+
 ## [0.30.0]
 ## Added
 - Lading now supports configuration directories. If the config path is
