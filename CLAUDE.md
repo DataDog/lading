@@ -92,20 +92,158 @@ must continue to work, but all internal code can be refactored without concern
 for compatibility. Do not add unnecessary Option types or fallback logic for
 internal API changes.
 
-Lading project uses comments strategically, documenting the "why" and not the
-"what". Do not add "what" comments that put into English the behavior of a line
-or two of code. Do add comments that explain the "why" of a block of code, how
-it functions or is unusual in a way that an experienced engineer might not
-understand.
-
-Always add comments for:
-- Non-obvious performance optimizations
-- Complex state machines or control flow
-- Unusual algorithm choices
-- Workarounds for external limitations
-- Any code that would make an experienced engineer pause and wonder "why?"
-
 Crate versions are always given as XX.YY and not XX.YY.ZZ.
+
+# Documentation and Comments
+
+Lading follows strict documentation conventions designed for experienced engineers
+who can read code but need context about design decisions. The core principle:
+document **why**, not **what**. The code shows what it does; comments explain why
+it does it that way.
+
+## Crate-Level Documentation
+
+Use `//!` in `lib.rs` files with this pattern:
+- Brief description of the crate's purpose
+- Statement about supporting the lading project
+- Context about whether the crate is intended for external use
+
+Example:
+```rust
+//! The lading daemon load generation and introspection tool.
+//!
+//! This library support the lading binary found elsewhere in this project. The
+//! bits and pieces here are not intended to be used outside of supporting
+//! lading, although if they are helpful in other domains that's a nice
+//! surprise.
+```
+
+## Module-Level Documentation
+
+Use `//!` at the top of module files. Explain the module's purpose, architectural
+role, performance rationale, or design constraints. Focus on why the module exists
+and how it fits into lading's architecture.
+
+Example:
+```rust
+//! Construct byte blocks for use in generators.
+//!
+//! The method that lading uses to maintain speed over its target is to avoid
+//! runtime generation where possible _or_ to generate into a queue and consume
+//! from that, decoupling the create/send operations. This module is the
+//! mechanism by which 'blocks' -- that is, byte blobs of a predetermined size
+//! -- are created.
+```
+
+## Struct and Function Documentation
+
+Use `///` for doc comments on types and functions.
+
+**Structs**: Describe what the type represents and its behavioral characteristics.
+Include field-level docs for configuration structs.
+
+**Functions**: Start with imperative verb (Create, Send, Wait, Get, Construct).
+Keep it brief - details go in implementation comments if needed. Always include:
+- `# Errors` section when returning `Result`
+- `# Panics` section when function can panic
+
+Example:
+```rust
+/// Create a new throttle with capacity divided by the divisor
+///
+/// This is useful when distributing a throttle across multiple workers.
+/// For `AllOut` throttles, returns self as they have unlimited capacity.
+///
+/// # Errors
+///
+/// Returns an error if the division would result in zero capacity.
+pub fn divide(self, divisor: NonZeroU32) -> Result<Self, Error> {
+```
+
+## Inline Comments: The "Why" Rule
+
+Inline comments are rare but detailed when present. They explain **why**, never
+**what**. An experienced engineer can see what the code does - they need to know
+why it does it that way.
+
+**Always add inline comments for:**
+- Non-obvious performance optimizations
+- Complex algorithm explanations (include examples and walkthroughs)
+- Unusual design choices or algorithm selections
+- Workarounds for external limitations
+- Verification constraints (Kani, Loom)
+- Implementation strategies that aren't obvious
+- Anything that would make an experienced engineer pause and wonder "why?"
+
+**Never add inline comments for:**
+- Simple operations that are clear from the code
+- Standard Rust idioms
+- Self-explanatory control flow
+- Restating what the code does in English
+
+**Good "why" comment example:**
+```rust
+// Okay, here's the idea. We have bucket that fills every INTERVAL_TICKS
+// microseconds and requests draw down on that bucket. When it's empty,
+// we return the number of ticks until the next interval roll-over.
+// Callers are expected to wait although nothing forces them to.
+// Capacity is only drawn on when it is immediately available.
+```
+
+**Another good example - explaining a constraint:**
+```rust
+// Why not use fetch_sub? That function overflows at the zero boundary
+// and we don't want the peer count to suddenly be u32::MAX.
+let mut old = self.peers.load(Ordering::Relaxed);
+```
+
+**Bad "what" comment example:**
+```rust
+// Increment the counter
+counter += 1;
+```
+
+## Complex Algorithms
+
+For complex algorithms, include detailed explanations with examples showing how
+they work step-by-step. Use conversational tone ("Okay, here's the idea...") to
+make complex topics accessible. Include concrete walkthroughs with specific values.
+
+Example:
+```rust
+// Record unused capacity for each interval we're transitioning past.
+// For example, if moving from interval 5 to interval 8
+// (intervals_passed = 3):
+//
+// * i=0: Interval 5 (self.interval -> the current interval we're leaving)
+//
+//        Amount set to self.capacity
+//
+// * i=1: Interval 6 (self.interval + 1 -> a skipped interval)
+//
+//        Amount set to self.maximum_capacity, full capacity since no
+//        request made on that interval
+//
+// * i=2: Interval 7 (self.interval + 2 - another skipped interval)
+//
+//        Amount set to self.maximum_capacity, same reasoning as
+//        Interval 6.
+```
+
+## Error Documentation
+
+Use `thiserror` with clear, actionable error messages. Document error variants
+with `///` comments explaining when they occur.
+
+```rust
+/// Errors produced by [`Throttle`].
+#[derive(thiserror::Error, Debug, Clone, Copy)]
+pub enum Error {
+    /// Division would result in zero capacity
+    #[error("Division would result in zero capacity")]
+    DivisionByZero,
+}
+```
 
 # Testing
 
@@ -220,3 +358,4 @@ When in doubt, implement rather than import.
 15. NEVER use mod.rs files - always name modules directly (e.g., foo.rs not foo/mod.rs)
 16. NEVER place `use` statements inside functions - all imports go at the top of the file
 17. NO internal backward compatibility - freely change ALL internal APIs. ONLY user configs need compatibility
+18. Document "why" not "what" - inline comments explain design decisions, not what the code does
