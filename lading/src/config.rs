@@ -44,6 +44,42 @@ pub enum Error {
     /// Error when inspector is defined in multiple config files
     #[error("Inspector cannot be defined in multiple config files")]
     ConflictingInspector,
+    /// Error getting metadata for config path
+    #[error("Failed to get metadata for config path {path:?}: {source}")]
+    Metadata {
+        /// Config path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error reading config file
+    #[error("Failed to read config file {path:?}: {source}")]
+    ReadFile {
+        /// File path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error reading directory entries
+    #[error("Failed to read directory entries from {path:?}: {source}")]
+    ReadDir {
+        /// Directory path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error reading directory entry
+    #[error("Failed to read directory entry in {dir:?}: {source}")]
+    ReadDirEntry {
+        /// Directory path
+        dir: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 fn default_sample_period() -> u64 {
@@ -354,11 +390,17 @@ fn check_duplicate_blackhole_ids(blackholes: &[blackhole::Config]) -> Result<(),
 /// * Any singleton field defined in multiple files
 /// * Duplicate IDs found in generators or blackholes
 pub fn load_config_from_path(path: &Path) -> Result<Config, Error> {
-    let metadata = fs::metadata(path)?;
+    let metadata = fs::metadata(path).map_err(|source| Error::Metadata {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
 
     if metadata.is_file() {
         // Single file, read only the yaml file and nothing else
-        let contents = fs::read_to_string(path)?;
+        let contents = fs::read_to_string(path).map_err(|source| Error::ReadFile {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })?;
         serde_yaml::from_str(&contents).map_err(Error::from)
     } else if metadata.is_dir() {
         // Directory, merge all configs found in this directory
@@ -387,8 +429,14 @@ fn load_directory_configs(dir: &Path) -> Result<Config, Error> {
     let mut found_any = false;
 
     // Process directory entries one at a time, accumulating as we go
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
+    for entry in fs::read_dir(dir).map_err(|source| Error::ReadDir {
+        path: dir.to_path_buf(),
+        source: Box::new(source),
+    })? {
+        let entry = entry.map_err(|source| Error::ReadDirEntry {
+            dir: dir.to_path_buf(),
+            source: Box::new(source),
+        })?;
         let path = entry.path();
 
         let is_yaml_file = path.is_file()
@@ -407,7 +455,10 @@ fn load_directory_configs(dir: &Path) -> Result<Config, Error> {
 
         found_any = true;
 
-        let contents = fs::read_to_string(&path)?;
+        let contents = fs::read_to_string(&path).map_err(|source| Error::ReadFile {
+            path: path.clone(),
+            source: Box::new(source),
+        })?;
         let partial: PartialConfig = serde_yaml::from_str(&contents)?;
 
         merged_partial = Some(match merged_partial {
