@@ -21,6 +21,24 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`].
     #[error("IO error: {0}")]
     Io(std::io::Error),
+    /// Error binding TCP listener
+    #[error("Failed to bind HTTP blackhole TCP listener to {addr}: {source}")]
+    Bind {
+        /// Binding address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
+    /// Error accepting connection
+    #[error("Failed to accept HTTP blackhole connection on {addr}: {source}")]
+    Accept {
+        /// Listening address
+        addr: SocketAddr,
+        /// Underlying IO error
+        #[source]
+        source: Box<std::io::Error>,
+    },
 }
 
 pub(crate) async fn run_httpd<SF, S>(
@@ -45,7 +63,12 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    let listener = TcpListener::bind(addr).await.map_err(Error::Io)?;
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|source| Error::Bind {
+            addr,
+            source: Box::new(source),
+        })?;
     let sem = Arc::new(Semaphore::new(concurrency_limit));
     let mut join_set = JoinSet::new();
 

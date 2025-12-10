@@ -44,6 +44,22 @@ pub enum Error {
     /// Target failed to transmit PID
     #[error("Target failed to transmit PID, catastrophic failure: {0}")]
     Recv(#[from] broadcast::error::RecvError),
+    /// Error spawning inspector process
+    #[error("Failed to spawn inspector command {command:?}: {source}")]
+    InspectorSpawn {
+        /// Command path
+        command: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
+    /// Error waiting for inspector process
+    #[error("Failed to wait for inspector process: {source}")]
+    InspectorWait {
+        /// Underlying IO error
+        #[source]
+        source: Box<io::Error>,
+    },
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
@@ -112,6 +128,7 @@ impl Server {
         drop(pid_snd);
 
         let config = self.config;
+        let command = config.command.clone();
 
         let mut target_cmd = Command::new(config.command);
         let mut environment_variables = config.environment_variables.clone();
@@ -129,7 +146,10 @@ impl Server {
             .kill_on_drop(true)
             .args(config.arguments)
             .envs(environment_variables.iter());
-        let mut target_child = target_cmd.spawn().map_err(Error::Io)?;
+        let mut target_child = target_cmd.spawn().map_err(|source| Error::InspectorSpawn {
+            command,
+            source: Box::new(source),
+        })?;
 
         let target_wait = target_child.wait();
         tokio::select! {
@@ -139,9 +159,11 @@ impl Server {
                         error!("child exited with status: {}", status);
                         Ok(status)
                     }
-                    Err(err) => {
-                        error!("child exited with error: {}", err);
-                        Err(Error::Io(err))
+                    Err(source) => {
+                        error!("child exited with error: {}", source);
+                        Err(Error::InspectorWait {
+                            source: Box::new(source),
+                        })
                     }
                 }
             },
@@ -152,7 +174,9 @@ impl Server {
                 // to clean up.
                 let pid: Pid = Pid::from_raw(target_child.id().ok_or(Error::ProcessFinished)?.try_into().expect("Failed to convert into valid PID"));
                 kill(pid, SIGTERM).map_err(Error::Errno)?;
-                let res = target_child.wait().await.map_err(Error::Io)?;
+                let res = target_child.wait().await.map_err(|source| Error::InspectorWait {
+                    source: Box::new(source),
+                })?;
                 Ok(res)
             }
         }

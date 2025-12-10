@@ -43,12 +43,44 @@ pub enum Error {
     /// Error converting path to string
     #[error("Error converting path to string")]
     ToStr,
-}
-
-impl From<::std::io::Error> for Error {
-    fn from(error: ::std::io::Error) -> Self {
-        Error::Io(error)
-    }
+    /// Error opening file
+    #[error("Failed to open file {path:?}: {source}")]
+    FileOpen {
+        /// File path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<::std::io::Error>,
+    },
+    /// Error creating file
+    #[error("Failed to create file {path:?}: {source}")]
+    FileCreate {
+        /// File path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<::std::io::Error>,
+    },
+    /// Error creating directory
+    #[error("Failed to create directory {path:?}: {source}")]
+    DirCreate {
+        /// Directory path
+        path: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<::std::io::Error>,
+    },
+    /// Error renaming file or directory
+    #[error("Failed to rename {from:?} to {to:?}: {source}")]
+    Rename {
+        /// Source path
+        from: PathBuf,
+        /// Destination path
+        to: PathBuf,
+        /// Underlying IO error
+        #[source]
+        source: Box<::std::io::Error>,
+    },
 }
 
 fn default_max_depth() -> NonZeroUsize {
@@ -186,7 +218,10 @@ impl FileTree {
                 _ = self.open_throttle.wait() => {
                     let node = iter.next().expect("node is not populated properly");
                     if node.exists() {
-                        File::open(node.as_path()).await?;
+                        File::open(node.as_path()).await.map_err(|source| Error::FileOpen {
+                            path: node.clone(),
+                            source: Box::new(source),
+                        })?;
                     } else {
                         create_node(node).await?;
 
@@ -269,8 +304,20 @@ async fn rename_folder(rng: &mut StdRng, folder: &Path, len: usize) -> Result<()
 
     // rename twice to keep the original folder name so that future file access
     // in the folder will still work
-    rename(&folder, &dir).await?;
-    rename(&dir, &folder).await?;
+    rename(&folder, &dir)
+        .await
+        .map_err(|source| Error::Rename {
+            from: folder.to_path_buf(),
+            to: dir.clone(),
+            source: Box::new(source),
+        })?;
+    rename(&dir, &folder)
+        .await
+        .map_err(|source| Error::Rename {
+            from: dir.clone(),
+            to: folder.to_path_buf(),
+            source: Box::new(source),
+        })?;
     Ok(())
 }
 
@@ -282,9 +329,17 @@ fn is_folder(node: &Path) -> bool {
 #[inline]
 async fn create_node(node: &Path) -> Result<(), Error> {
     if is_folder(node) {
-        create_dir(node).await?;
+        create_dir(node).await.map_err(|source| Error::DirCreate {
+            path: node.to_path_buf(),
+            source: Box::new(source),
+        })?;
     } else {
-        File::create(node).await?;
+        File::create(node)
+            .await
+            .map_err(|source| Error::FileCreate {
+                path: node.to_path_buf(),
+                source: Box::new(source),
+            })?;
     }
     Ok(())
 }
