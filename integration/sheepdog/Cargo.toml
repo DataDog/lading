@@ -8,11 +8,11 @@ license = "MIT"
 publish = false
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 escargot = "0.5.14"
 shared = { path = "../shared" }
-tempfile = "3.23"
-tokio = { version = "1.47", features = [
+tempfile = { workspace = true }
+tokio = { workspace = true, features = [
   "fs",
   "io-util",
   "macros",
@@ -30,5 +30,5 @@ tower = { workspace = true, features = [
   "timeout",
   "util",
 ] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

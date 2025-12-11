@@ -8,7 +8,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 bytes = { workspace = true }
 entropy = "0.4"
 http-body-util = { workspace = true }
@@ -27,10 +27,10 @@ tokio = { workspace = true, features = [
   "signal",
   "time",
 ] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true, features = ["net"] }
 tonic = { workspace = true, default-features = false, features = [
   "transport",
   "router",
 ] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
