@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This reflects preexisting terminology.
 ## Added
 - Lading now supports histogram approximations in its capture files.
+- HTTP blackhole now tracks distribution of bytes received, both decoded and
+  compressed.
 
 ## [0.30.0]
 ## Added
