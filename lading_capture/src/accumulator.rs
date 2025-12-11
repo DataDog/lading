@@ -227,11 +227,9 @@ impl Iterator for DrainIter {
             if sketch.count() > 0 {
                 let mut dogsketch = Dogsketch::new();
                 sketch.merge_to_dogsketch(&mut dogsketch);
-                // Protobuf serialization of well-formed DDSketch should never fail.
-                // Failure indicates memory corruption or a protobuf library bug.
                 let sketch_bytes = dogsketch
                     .write_to_bytes()
-                    .expect("protobuf serialization should not fail - indicates memory corruption");
+                    .expect("protobuf serialization failed");
                 metrics.push((
                     key.clone(),
                     MetricValue::Histogram(sketch_bytes),
@@ -526,7 +524,7 @@ impl Accumulator {
                 sketch.merge_to_dogsketch(&mut dogsketch);
                 let sketch_bytes = dogsketch
                     .write_to_bytes()
-                    .expect("protobuf serialization should not fail - indicates memory corruption");
+                    .expect("protobuf serialization failed");
                 metrics.push((
                     key.clone(),
                     MetricValue::Histogram(sketch_bytes),
