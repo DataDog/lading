@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 bytes = { workspace = true }
-entropy = "0.4"
+entropy = { version = "0.4" }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server"] }
 hyper-util = { workspace = true }

@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-escargot = "0.5.14"
+escargot = { version = "0.5.14" }
 shared = { path = "../shared" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = [
