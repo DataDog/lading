@@ -388,6 +388,7 @@ mod tests {
     use metrics_util::registry::{AtomicStorage, Registry};
     use proptest::prelude::*;
     use std::{
+        collections::HashSet,
         sync::{Arc, Mutex},
         time::Duration,
     };
@@ -694,9 +695,27 @@ mod tests {
                 clock.clone(),
             );
 
-            // Execute operations. FlushTick is independent of time advancement,
-            // allowing us to test scenarios where multiple flushes happen at
-            // the same clock millisecond.
+            let flush_tick_count = ops
+                .iter()
+                .filter(|op| matches!(op, CaptureOp::FlushTick))
+                .count();
+
+            let written_metric_names: HashSet<String> = ops
+                .iter()
+                .filter_map(|op| match op {
+                    CaptureOp::WriteCounter { name, .. }
+                    | CaptureOp::WriteGauge { name, .. }
+                    | CaptureOp::HistoricalCounterIncr { name, .. }
+                    | CaptureOp::HistoricalCounterAbs { name, .. }
+                    | CaptureOp::HistoricalGaugeIncr { name, .. }
+                    | CaptureOp::HistoricalGaugeDec { name, .. }
+                    | CaptureOp::HistoricalGaugeSet { name, .. } => Some(name.clone()),
+                    CaptureOp::AdvanceTime { .. }
+                    | CaptureOp::BackwardTime { .. }
+                    | CaptureOp::FlushTick => None,
+                })
+                .collect();
+
             for op in ops {
                 match op {
                     CaptureOp::WriteCounter { name, value } => {
@@ -776,10 +795,8 @@ mod tests {
                 }
             }
 
-            // Simulate shutdown: drain all remaining metrics
             let _ = machine.next(Event::ShutdownSignaled);
 
-            // Parse the output and validate it satisfies all invariants
             let lines = writer.parse_lines().unwrap();
             let result = crate::validate::jsonl::validate_lines(&lines, None);
 
@@ -790,6 +807,19 @@ mod tests {
                 series = result.first_error.as_ref().map(|(_, s, _)| s.as_str()).unwrap_or(""),
                 msg = result.first_error.as_ref().map(|(_, _, m)| m.as_str()).unwrap_or("")
             );
+
+            if flush_tick_count >= 60 && !written_metric_names.is_empty() {
+                let output_metric_names: HashSet<String> =
+                    lines.iter().map(|line| line.metric_name.clone()).collect();
+
+                for name in &written_metric_names {
+                    prop_assert!(
+                        output_metric_names.contains(name),
+                        "Metric '{}' was written but not found in output (60+ FlushTicks occurred)",
+                        name
+                    );
+                }
+            }
         }
     }
 

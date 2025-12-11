@@ -93,12 +93,10 @@ mod tests {
                 // in the binary<->decimal conversion while still catching actual bugs.
                 prop_assert!(
                     relative_eq!(x, y, max_relative = 1e-12),
-                    "floats not equal: {} vs {}",
-                    x,
-                    y
+                    "floats not equal: {x} vs {y}"
                 );
             }
-            (x, y) => prop_assert!(false, "value types don't match: {:?} vs {:?}", x, y),
+            (x, y) => prop_assert!(false, "value types don't match: {x:?} vs {y:?}"),
         }
 
         prop_assert_eq!(a.labels.len(), b.labels.len());
@@ -296,6 +294,7 @@ mod tests {
             for row_idx in 0..batch_len {
                 let run_id = Uuid::parse_str(run_id_array.value(row_idx)).expect("parse UUID");
 
+                // Parquet stores timestamps as non-negative milliseconds since epoch
                 #[allow(clippy::cast_sign_loss)]
                 let time = time_array.value(row_idx) as u128;
 
@@ -305,7 +304,7 @@ mod tests {
                 let metric_kind = match metric_kind_array.value(row_idx) {
                     "counter" => MetricKind::Counter,
                     "gauge" => MetricKind::Gauge,
-                    kind => panic!("Unknown metric kind: {kind}"),
+                    kind => panic!("unknown metric kind: {kind}"),
                 };
 
                 let value = if value_int_array.is_null(row_idx) {
@@ -319,12 +318,12 @@ mod tests {
                     .column(0)
                     .as_any()
                     .downcast_ref::<StringArray>()
-                    .expect("keys are strings");
+                    .expect("label keys are strings");
                 let values = labels_slice
                     .column(1)
                     .as_any()
                     .downcast_ref::<StringArray>()
-                    .expect("values are strings");
+                    .expect("label values are strings");
 
                 let mut labels = FxHashMap::default();
                 for i in 0..keys.len() {
