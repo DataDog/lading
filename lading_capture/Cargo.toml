@@ -36,6 +36,8 @@ ustr = { workspace = true }
 doctest = false
 
 [dev-dependencies]
+approx = { workspace = true }
+bytes = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }

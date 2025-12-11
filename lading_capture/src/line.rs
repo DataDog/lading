@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 /// The kinds of metrics that are recorded in [`Line`].
 pub enum MetricKind {
@@ -86,6 +86,7 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::relative_eq;
     use proptest::prelude::*;
 
     proptest! {
@@ -127,12 +128,10 @@ mod tests {
             prop_assert_eq!(line.fetch_index, deserialized.fetch_index);
             prop_assert_eq!(line.metric_name, deserialized.metric_name);
 
-            // For values, handle float comparison specially
             match (line.value, deserialized.value) {
                 (LineValue::Int(a), LineValue::Int(b)) => prop_assert_eq!(a, b),
                 (LineValue::Float(a), LineValue::Float(b)) => {
-                    let diff = (a - b).abs();
-                    prop_assert!(diff < 1e-10 || diff / a.abs().max(b.abs()) < 1e-10,
+                    prop_assert!(relative_eq!(a, b, epsilon = 1e-10),
                         "floats not approximately equal: {a} vs {b}");
                 }
                 (a, b) => prop_assert!(false, "value types don't match: {a:?} vs {b:?}"),
