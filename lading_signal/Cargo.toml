@@ -13,12 +13,12 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-tokio = { workspace = true, features = ["time", "sync", "rt"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.7", features = ["futures", "checkpoint"] }
+loom = { version = "0.7", features = ["checkpoint", "futures"] }
 
 [lib]
 doctest = false

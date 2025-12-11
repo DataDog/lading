@@ -11,56 +11,59 @@ members = [
 ]
 
 [workspace.dependencies]
-anyhow = { version = "1.0" }
+anyhow = "1.0"
 arc-swap = { version = "1.7" }
 arrow-array = { version = "57.0", default-features = false }
 arrow-buffer = { version = "57.0", default-features = false }
 arrow-schema = { version = "57.0", default-features = false }
-bytes = { version = "1.10", default-features = false, features = ["std"] }
-byte-unit = { version = "5.1", default-features = false, features = ["serde", "byte"] }
+bytes = "1.10"
+byte-unit = { version = "5.1", default-features = false, features = [
+  "byte",
+  "serde",
+] }
 sha2 = { version = "0.10", default-features = false }
 metrics = { version = "0.24" }
-metrics-util = { version = "0.20" }
+metrics-util = "0.20"
 metrics-exporter-prometheus = { version = "0.18", default-features = false, features = [
-  "http-listener",
   "uds-listener",
 ] }
-prost = { version = "0.14" }
-prost-build = { version = "0.14" }
+prost = "0.14"
+prost-build = "0.14"
 rand = { version = "0.9", default-features = false }
-rustc-hash = { version = "2.1" }
-serde = { version = "1.0", features = ["std", "derive"] }
-serde_json = { version = "1.0", features = ["std"] }
-thiserror = { version = "2.0" }
+rustc-hash = "2.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
 tokio = { version = "1.47" }
-# If you update tonic, search for tonic-prost-build in sub-crates and update their
-# version.
-tonic = { version = "0.14", default-features = false, features = ["server", "transport", "router", "codegen"] }
+tokio-stream = { version = "0.1" }
+tonic = { version = "0.14", default-features = false }
 tonic-prost = { version = "0.14" }
 tonic-prost-build = "0.14"
 tower = { version = "0.5", default-features = false }
-tracing = { version = "0.1" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3" }
 ustr = { version = "1.1" }
 uuid = { version = "1.18", default-features = false, features = [
-  "v4",
   "serde",
+  "v4",
 ] }
-once_cell = { version = "1.21" }
+once_cell = "1.21"
 arrow = { version = "57.0", default-features = false }
 parquet = { version = "57.0", default-features = false }
-proptest = { version = "1.9" }
+proptest = "1.9"
 proptest-derive = { version = "0.7" }
-approx = { version = "0.5" }
-tempfile = { version = "3.23" }
-
-http = { version = "1.3" }
+approx = "0.5"
+tempfile = "3.23"
+http = "1.3"
 http-body-util = { version = "0.1" }
 http-serde = { version = "2.1" }
 hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 sysinfo = { version = "0.37", default-features = false }
-opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "logs", "metrics", "trace", "with-serde"] }
-ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = ["serde"] }
+opentelemetry-proto = "0.31"
+ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = [
+  "serde",
+] }
 datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
 protobuf = { version = "3.7" }
 
@@ -96,14 +99,14 @@ missing_docs = "deny"
 warnings = "deny"
 
 [profile.release]
-lto = true        # Optimize our binary at link stage.
-codegen-units = 1 # Increases compile time but improves optimization alternatives.
-opt-level = 3     # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
+lto = true                   # Optimize our binary at link stage.
+codegen-units = 1            # Increases compile time but improves optimization alternatives.
+opt-level = 3                # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
 panic = "abort"
-debug = 2                       # keep symbols in release too
+debug = 2                    # keep symbols in release too
 split-debuginfo = "unpacked"
 
 [profile.dev]
 panic = "abort"
 debug = 2
-split-debuginfo = "unpacked"   # generates a .dSYM bundle Instruments can use
+split-debuginfo = "unpacked" # generates a .dSYM bundle Instruments can use

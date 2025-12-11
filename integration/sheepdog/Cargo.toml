@@ -8,29 +8,27 @@ license = "MIT"
 publish = false
 
 [dependencies]
-anyhow = "1.0"
-escargot = "0.5.14"
+anyhow = { workspace = true }
+escargot = { version = "0.5.14" }
 shared = { path = "../shared" }
-tempfile = "3.23"
-tokio = { version = "1.47", features = [
-  "rt",
-  "macros",
+tempfile = { workspace = true }
+tokio = { workspace = true, features = [
   "fs",
   "io-util",
+  "macros",
+  "net",
   "process",
+  "rt",
   "signal",
   "time",
-  "net",
 ] }
-tonic = { workspace = true, default-features = false, features = [
-  "transport",
-] }
+tonic = { workspace = true, default-features = false, features = ["transport"] }
 hyper-util = { workspace = true }
 tower = { workspace = true, features = [
-  "timeout",
   "limit",
   "load-shed",
-  "util"
+  "timeout",
+  "util",
 ] }
-tracing = { version = "0.1", features = ["std", "attributes"] }
-tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
