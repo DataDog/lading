@@ -55,7 +55,7 @@ struct ColumnBuffers {
     label_keys: Vec<String>,
     label_values: Vec<String>,
     label_offsets: Vec<i32>,
-    values_histogram: Vec<Option<Vec<u8>>>,
+    values_histogram: Vec<Vec<u8>>,
 }
 
 impl ColumnBuffers {
@@ -277,7 +277,13 @@ impl<W: Write + Seek + Send> Format<W> {
                 self.buffers
                     .values_histogram
                     .iter()
-                    .map(|opt| opt.as_deref())
+                    .map(|v| {
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(v.as_slice())
+                        }
+                    })
                     .collect(),
             )),
         ];
@@ -383,7 +389,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
-            value_histogram: None,
+            value_histogram: Vec::new(),
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -409,7 +415,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             };
             format.write_metric(&line).expect("write should succeed");
         }
@@ -441,7 +447,7 @@ mod tests {
                 metric_kind: MetricKind::Histogram,
                 value: LineValue::Float(0.0),
                 labels: FxHashMap::default(),
-                value_histogram: Some(dogsketch.write_to_bytes().expect("protobuf")),
+                value_histogram: dogsketch.write_to_bytes().expect("protobuf"),
             };
 
             format.write_metric(&line).expect("write should succeed");

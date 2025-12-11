@@ -6,7 +6,6 @@
 //! a single `next()` method that processes events and returns operations.
 
 use std::{
-    io,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -21,10 +20,8 @@ use crate::{
 
 #[cfg(test)]
 use crate::manager::{ClockFn, InstantClock};
-use datadog_protos::metrics::Dogsketch;
 use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
-use protobuf::Message;
 use rustc_hash::FxHashMap;
 use std::sync::atomic::Ordering;
 use tracing::{debug, info, trace, warn};
@@ -391,7 +388,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
                     metric_kind: line::MetricKind::Counter,
                     value: line::LineValue::Int(*val),
                     labels,
-                    value_histogram: None,
+                    value_histogram: Vec::new(),
                 };
                 self.format
                     .as_mut()
@@ -407,20 +404,14 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
                     metric_kind: line::MetricKind::Gauge,
                     value: line::LineValue::Float(*val),
                     labels,
-                    value_histogram: None,
+                    value_histogram: Vec::new(),
                 };
                 self.format
                     .as_mut()
                     .expect("format must be present during operation")
                     .write_metric(&line)?;
             }
-            MetricValue::Histogram(sketch) => {
-                let mut dogsketch = Dogsketch::new();
-                sketch.merge_to_dogsketch(&mut dogsketch);
-                let sketch_bytes = dogsketch
-                    .write_to_bytes()
-                    .map_err(|e| formats::Error::Io(io::Error::other(e)))?;
-
+            MetricValue::Histogram(sketch_bytes) => {
                 let line = line::Line {
                     run_id: self.run_id,
                     time: now_ms,
@@ -429,7 +420,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
                     metric_kind: line::MetricKind::Histogram,
                     value: line::LineValue::Float(0.0),
                     labels,
-                    value_histogram: Some(sketch_bytes),
+                    value_histogram: sketch_bytes.clone(),
                 };
 
                 self.format
@@ -946,7 +937,8 @@ mod tests {
                 // Verify histogram data integrity
                 for line in &lines {
                     if line.metric_kind == line::MetricKind::Histogram {
-                        if let Some(sketch_bytes) = &line.value_histogram {
+                        if !line.value_histogram.is_empty() {
+                            let sketch_bytes = &line.value_histogram;
                             let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes)
                                 .expect("should parse protobuf");
                             let sketch = DDSketch::try_from(dogsketch).expect("should convert");
@@ -1690,12 +1682,12 @@ mod tests {
         let hist_line = histogram_lines[0];
         assert!(matches!(hist_line.metric_kind, line::MetricKind::Histogram));
         assert!(
-            hist_line.value_histogram.is_some(),
+            !hist_line.value_histogram.is_empty(),
             "Should have value_histogram"
         );
 
         // Verify sketch data
-        let sketch_bytes = hist_line.value_histogram.as_ref().unwrap();
+        let sketch_bytes = &hist_line.value_histogram;
         let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes).expect("parse protobuf");
         let sketch = DDSketch::try_from(dogsketch).expect("convert");
 

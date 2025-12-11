@@ -120,7 +120,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
-            value_histogram: None,
+            value_histogram: Vec::new(),
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -162,7 +162,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             };
 
             format.write_metric(&line).expect("write should succeed");
@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn histogram_uses_protobuf() {
+    fn histogram_consistency_across_formats() {
         let mut jsonl_buffer = Vec::new();
         let mut parquet_buffer = Cursor::new(Vec::new());
 
@@ -202,6 +202,7 @@ mod tests {
         let mut dogsketch = Dogsketch::new();
         sketch.merge_to_dogsketch(&mut dogsketch);
         let protobuf_bytes = dogsketch.write_to_bytes().expect("protobuf");
+        let original_sketch = DDSketch::try_from(dogsketch).expect("convert");
 
         let line = Line {
             run_id: Uuid::new_v4(),
@@ -211,7 +212,7 @@ mod tests {
             metric_kind: MetricKind::Histogram,
             value: LineValue::Float(0.0),
             labels: FxHashMap::default(),
-            value_histogram: Some(protobuf_bytes.clone()),
+            value_histogram: protobuf_bytes.clone(),
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -219,9 +220,20 @@ mod tests {
         format.close().expect("close should succeed");
 
         let jsonl_output = String::from_utf8(jsonl_buffer).expect("should be valid UTF-8");
-        assert!(jsonl_output.contains("value_histogram"));
+        let jsonl_line: Line = serde_json::from_str(&jsonl_output).expect("parse JSON");
 
-        let parquet_bytes = parquet_buffer.into_inner();
-        assert!(!parquet_bytes.is_empty(), "Parquet file should have data");
+        assert_eq!(
+            jsonl_line.value_histogram, protobuf_bytes,
+            "JSONL histogram bytes should match original protobuf after base64 round-trip"
+        );
+
+        let parquet_file_bytes = parquet_buffer.into_inner();
+        assert!(!parquet_file_bytes.is_empty(), "Parquet should have data");
+
+        assert_eq!(
+            original_sketch.count(),
+            3,
+            "Original sketch should have 3 samples"
+        );
     }
 }

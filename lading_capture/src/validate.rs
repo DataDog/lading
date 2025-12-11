@@ -57,7 +57,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(100),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -67,7 +67,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(200),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -81,7 +81,7 @@ mod tests {
                     map.insert("env".to_string(), "prod".to_string());
                     map
                 },
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ]
     }
@@ -138,7 +138,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -148,7 +148,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -184,7 +184,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -194,7 +194,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -218,7 +218,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -228,7 +228,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -263,7 +263,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -273,7 +273,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(42.0),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -309,7 +309,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(1),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -319,7 +319,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -344,7 +344,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(i),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             });
         }
 
@@ -381,7 +381,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(i),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             });
         }
 
@@ -404,7 +404,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(5),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -414,7 +414,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -424,7 +424,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(8),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 
@@ -449,7 +449,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(5),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -459,7 +459,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(2),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
             Line {
                 run_id,
@@ -469,7 +469,7 @@ mod tests {
                 metric_kind: MetricKind::Counter,
                 value: LineValue::Int(8),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             },
         ];
 

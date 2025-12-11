@@ -32,8 +32,10 @@ pub enum Error {
 /// metrics to a specific file format. The capture manager's state machine uses
 /// this trait to remain agnostic to the output format.
 ///
-/// Histogram values in `Line::value_histogram` are stored as JSON-encoded bytes.
-/// JSONL displays as human-readable JSON. Parquet stores as compact binary.
+/// Histogram values in `Line::value_histogram` are stored as protobuf-serialized
+/// bytes (via `Dogsketch::write_to_bytes`). Both JSONL and Parquet formats store
+/// the same protobuf bytes - JSONL base64-encodes them in JSON, Parquet stores
+/// them as binary.
 pub trait OutputFormat {
     /// Write a single metric line to the output
     ///
@@ -119,43 +121,38 @@ mod tests {
         }
 
         // For histograms, verify protobuf bytes and DDSketch properties
-        match (&a.value_histogram, &b.value_histogram) {
-            (None, None) => {}
-            (Some(a_bytes), Some(b_bytes)) => {
-                prop_assert_eq!(a_bytes, b_bytes, "Histogram protobuf bytes differ");
+        prop_assert_eq!(
+            &a.value_histogram,
+            &b.value_histogram,
+            "Histogram protobuf bytes differ"
+        );
 
-                let a_sketch = Dogsketch::parse_from_bytes(a_bytes)
-                    .ok()
-                    .and_then(|ds| DDSketch::try_from(ds).ok());
-                let b_sketch = Dogsketch::parse_from_bytes(b_bytes)
-                    .ok()
-                    .and_then(|ds| DDSketch::try_from(ds).ok());
+        if !a.value_histogram.is_empty() {
+            let a_sketch = Dogsketch::parse_from_bytes(&a.value_histogram)
+                .ok()
+                .and_then(|ds| DDSketch::try_from(ds).ok());
+            let b_sketch = Dogsketch::parse_from_bytes(&b.value_histogram)
+                .ok()
+                .and_then(|ds| DDSketch::try_from(ds).ok());
 
-                if let (Some(a_sketch), Some(b_sketch)) = (a_sketch, b_sketch) {
-                    prop_assert_eq!(a_sketch.count(), b_sketch.count());
+            if let (Some(a_sketch), Some(b_sketch)) = (a_sketch, b_sketch) {
+                prop_assert_eq!(a_sketch.count(), b_sketch.count());
 
-                    if a_sketch.count() > 0 {
-                        let a_min = a_sketch.min().unwrap_or(f64::NAN);
-                        let b_min = b_sketch.min().unwrap_or(f64::NAN);
-                        prop_assert!(
-                            relative_eq!(a_min, b_min, epsilon = 1e-10)
-                                || (a_min.is_nan() && b_min.is_nan())
-                        );
+                if a_sketch.count() > 0 {
+                    let a_min = a_sketch.min().unwrap_or(f64::NAN);
+                    let b_min = b_sketch.min().unwrap_or(f64::NAN);
+                    prop_assert!(
+                        relative_eq!(a_min, b_min, epsilon = 1e-10)
+                            || (a_min.is_nan() && b_min.is_nan())
+                    );
 
-                        let a_max = a_sketch.max().unwrap_or(f64::NAN);
-                        let b_max = b_sketch.max().unwrap_or(f64::NAN);
-                        prop_assert!(
-                            relative_eq!(a_max, b_max, epsilon = 1e-10)
-                                || (a_max.is_nan() && b_max.is_nan())
-                        );
-                    }
+                    let a_max = a_sketch.max().unwrap_or(f64::NAN);
+                    let b_max = b_sketch.max().unwrap_or(f64::NAN);
+                    prop_assert!(
+                        relative_eq!(a_max, b_max, epsilon = 1e-10)
+                            || (a_max.is_nan() && b_max.is_nan())
+                    );
                 }
-            }
-            (Some(_), None) => {
-                prop_assert!(false, "Input had histogram data but output is empty");
-            }
-            (None, Some(_)) => {
-                prop_assert!(false, "Input was empty but output has histogram data");
             }
         }
 
@@ -182,7 +179,7 @@ mod tests {
                                 .prop_map(LineValue::Float),
                         ],
                         prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
-                        Just(None),
+                        Just(Vec::new()),
                     ),
                     // Histogram metrics with DDSketch data - comprehensive edge cases
                     (
@@ -194,7 +191,7 @@ mod tests {
                         prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
                         prop_oneof![
                             // Empty histogram (should not be written per accumulator.rs:508)
-                            Just(None),
+                            Just(Vec::new()),
                             // Histograms with unconstrained finite f64 values
                             prop::collection::vec(
                                 any::<f64>().prop_filter("finite", |f| f.is_finite()),
@@ -204,7 +201,7 @@ mod tests {
                                 for sample in samples {
                                     sketch.insert(sample);
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                         ],
                     ),
@@ -268,7 +265,7 @@ mod tests {
                                 .prop_map(LineValue::Float),
                         ],
                         prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
-                        Just(None),
+                        Just(Vec::new()),
                     ),
                     // Histogram metrics with DDSketch data - comprehensive edge cases
                     (
@@ -280,13 +277,13 @@ mod tests {
                         prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
                         prop_oneof![
                             // Empty histogram
-                            Just(None),
+                            Just(Vec::new()),
                             // Single sample (protobuf for Parquet)
                             any::<f64>().prop_filter("finite", |f| f.is_finite())
                                 .prop_map(|sample| {
                                     let mut sketch = DDSketch::default();
                                     sketch.insert(sample);
-                                    Some(sketch_to_protobuf(&sketch))
+                                    sketch_to_protobuf(&sketch)
                                 }),
                             // Small histogram (typical case)
                             prop::collection::vec(
@@ -297,7 +294,7 @@ mod tests {
                                 for sample in samples {
                                     sketch.insert(sample);
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                             // Large histogram (stress test)
                             prop::collection::vec(
@@ -308,7 +305,7 @@ mod tests {
                                 for sample in samples {
                                     sketch.insert(sample);
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                             // All zeros
                             prop::collection::vec(Just(0.0), 1..10)
@@ -317,7 +314,7 @@ mod tests {
                                     for sample in samples {
                                         sketch.insert(sample);
                                     }
-                                    Some(sketch_to_protobuf(&sketch))
+                                    sketch_to_protobuf(&sketch)
                                 }),
                             // All negative
                             prop::collection::vec(
@@ -328,7 +325,7 @@ mod tests {
                                 for sample in samples {
                                     sketch.insert(sample);
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                             // Extreme values that test DDSketch limits
                             prop::collection::vec(
@@ -345,7 +342,7 @@ mod tests {
                                 for sample in samples {
                                     sketch.insert(sample);
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                             // Mix of very close values (tests bin resolution)
                             prop::collection::vec(
@@ -357,7 +354,7 @@ mod tests {
                                     // Insert values very close together
                                     sketch.insert(1.0 + (i as f64 * 1e-10));
                                 }
-                                Some(sketch_to_protobuf(&sketch))
+                                sketch_to_protobuf(&sketch)
                             }),
                         ],
                     ),
@@ -519,9 +516,9 @@ mod tests {
                 }
 
                 let value_histogram = if value_histogram_array.is_null(row_idx) {
-                    None
+                    Vec::new()
                 } else {
-                    Some(value_histogram_array.value(row_idx).to_vec())
+                    value_histogram_array.value(row_idx).to_vec()
                 };
 
                 lines.push(Line {

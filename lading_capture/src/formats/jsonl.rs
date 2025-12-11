@@ -107,7 +107,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
-            value_histogram: None,
+            value_histogram: Vec::new(),
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -136,7 +136,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
-                value_histogram: None,
+                value_histogram: Vec::new(),
             };
 
             format.write_metric(&line).expect("write should succeed");
@@ -172,7 +172,7 @@ mod tests {
             metric_kind: MetricKind::Histogram,
             value: LineValue::Float(0.0),
             labels: FxHashMap::default(),
-            value_histogram: Some(dogsketch.write_to_bytes().expect("protobuf")),
+            value_histogram: dogsketch.write_to_bytes().expect("protobuf"),
         };
 
         format.write_metric(&line).expect("write should succeed");

@@ -150,8 +150,10 @@
 //!  * Empty sketches are not flushed.
 //!  * Infinity and NaN are filtered with warning.
 
+use datadog_protos::metrics::Dogsketch;
 use ddsketch_agent::DDSketch;
 use metrics::Key;
+use protobuf::Message;
 use rustc_hash::FxHashMap;
 use tracing::warn;
 
@@ -223,7 +225,18 @@ impl Iterator for DrainIter {
         for (key, sketches) in &mut self.accumulator.histograms {
             let sketch = std::mem::take(&mut sketches[interval]);
             if sketch.count() > 0 {
-                metrics.push((key.clone(), MetricValue::Histogram(sketch), tick_to_flush));
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                // Protobuf serialization of well-formed DDSketch should never fail.
+                // Failure indicates memory corruption or a protobuf library bug.
+                let sketch_bytes = dogsketch
+                    .write_to_bytes()
+                    .expect("protobuf serialization should not fail - indicates memory corruption");
+                metrics.push((
+                    key.clone(),
+                    MetricValue::Histogram(sketch_bytes),
+                    tick_to_flush,
+                ));
             }
         }
 
@@ -245,8 +258,8 @@ pub(crate) enum MetricValue {
     Counter(u64),
     /// Gauge value
     Gauge(f64),
-    /// Histogram distribution (`DDSketch`)
-    Histogram(DDSketch),
+    /// Histogram distribution (protobuf-serialized `DDSketch`)
+    Histogram(Vec<u8>),
 }
 
 impl std::fmt::Debug for MetricValue {
@@ -254,8 +267,11 @@ impl std::fmt::Debug for MetricValue {
         match self {
             MetricValue::Counter(v) => f.debug_tuple("Counter").field(v).finish(),
             MetricValue::Gauge(v) => f.debug_tuple("Gauge").field(v).finish(),
-            MetricValue::Histogram(sketch) => {
-                let count = sketch.count();
+            MetricValue::Histogram(bytes) => {
+                let count = Dogsketch::parse_from_bytes(bytes)
+                    .ok()
+                    .and_then(|ds| ddsketch_agent::DDSketch::try_from(ds).ok())
+                    .map_or(0, |sketch| sketch.count());
                 f.debug_tuple("Histogram")
                     .field(&format!("count={count}"))
                     .finish()
@@ -506,7 +522,16 @@ impl Accumulator {
             // "no data" which is different from counters/gauges where 0 is
             // meaningful.
             if sketch.count() > 0 {
-                metrics.push((key.clone(), MetricValue::Histogram(sketch), flush_tick));
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                let sketch_bytes = dogsketch
+                    .write_to_bytes()
+                    .expect("protobuf serialization should not fail - indicates memory corruption");
+                metrics.push((
+                    key.clone(),
+                    MetricValue::Histogram(sketch_bytes),
+                    flush_tick,
+                ));
             }
         }
 
@@ -577,6 +602,11 @@ mod tests {
     use crate::metric::{Counter, CounterValue, Gauge, GaugeValue, Histogram};
     use proptest::prelude::*;
     use std::time::Instant;
+
+    fn deserialize_histogram(bytes: &[u8]) -> DDSketch {
+        let dogsketch = Dogsketch::parse_from_bytes(bytes).expect("parse protobuf");
+        DDSketch::try_from(dogsketch).expect("convert")
+    }
 
     // Test helpers that handle the full counter/gauge operation
     fn counter_increment(
@@ -1538,7 +1568,8 @@ mod tests {
                 .find(|(k, _, _)| k.name() == "test_hist")
                 .expect("should find histogram");
 
-            if let MetricValue::Histogram(sketch) = &hist.1 {
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+                let sketch = deserialize_histogram(sketch_bytes);
                 assert_eq!(sketch.count() as usize, samples.len());
 
                 let min_sample = samples.iter().copied().fold(f64::INFINITY, f64::min);
@@ -1666,7 +1697,8 @@ mod tests {
                 .find(|(k, _, tick)| k.name() == "test_hist" && *tick == 0)
                 .expect("should find histogram");
 
-            if let MetricValue::Histogram(sketch) = &hist.1 {
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+                let sketch = deserialize_histogram(sketch_bytes);
                 assert_eq!(sketch.count() as usize, samples.len());
             } else {
                 panic!("Expected histogram");
@@ -1721,7 +1753,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             assert_eq!(sketch.min(), Some(42.0));
             assert_eq!(sketch.max(), Some(42.0));
         } else {
@@ -1756,7 +1789,8 @@ mod tests {
             .find(|(k, _, tick)| k.name() == "test_hist" && *tick == 0);
 
         assert!(maybe_hist.is_some(), "Should have histogram at tick 0");
-        if let Some((_, MetricValue::Histogram(sketch), _)) = maybe_hist {
+        if let Some((_, MetricValue::Histogram(sketch_bytes), _)) = maybe_hist {
+            let sketch = deserialize_histogram(sketch_bytes);
             // Should only have tick 0 sample (100.0), not tick 1 (200.0)
             assert_eq!(sketch.count(), 1);
             assert_eq!(sketch.min(), Some(100.0));
@@ -1787,7 +1821,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             // Only the normal value should be in the sketch (infinities filtered)
             assert_eq!(sketch.count(), 1);
             assert_eq!(sketch.min(), Some(42.0));
@@ -1818,7 +1853,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             // Verify DDSketch handles NaN values
             // Count should include all samples that were added
             assert!(
@@ -1857,7 +1893,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             // Verify DDSketch handles extreme values
             assert_eq!(sketch.count(), 4);
             assert!(sketch.min().is_some());
@@ -1888,7 +1925,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             assert_eq!(sketch.count(), 7);
             assert_eq!(sketch.min(), Some(-100.0));
             assert_eq!(sketch.max(), Some(100.0));
@@ -1936,7 +1974,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             assert_eq!(
                 sketch.count(),
                 samples.len() as u32,
@@ -1970,7 +2009,8 @@ mod tests {
             .find(|(k, _, _)| k.name() == "test_hist")
             .expect("should find histogram");
 
-        if let MetricValue::Histogram(sketch) = &hist.1 {
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
             let min = sketch.min().expect("should have min");
             let max = sketch.max().expect("should have max");
 
@@ -2016,7 +2056,8 @@ mod tests {
                 .find(|(k, _, _)| k.name() == "test_hist")
                 .expect("should find histogram");
 
-            if let MetricValue::Histogram(sketch) = &hist.1 {
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
                 // Verify sketch has the expected sample count
                 prop_assert_eq!(sketch.count(), samples.len() as u32);
 
