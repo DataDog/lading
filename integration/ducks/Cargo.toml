@@ -17,20 +17,11 @@ hyper-util = { workspace = true }
 once_cell = { workspace = true }
 shared = { path = "../shared" }
 ddsketch-agent = { workspace = true }
-tokio = { workspace = true, features = [
-  "rt",
-  "macros",
-  "fs",
-  "io-util",
-  "process",
-  "signal",
-  "time",
-  "net",
-] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "signal", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true, default-features = false, features = [
   "transport",
   "router",
 ] }
-tracing = { version = "0.1", features = ["std", "attributes"] }
-tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
