@@ -6,6 +6,7 @@
 //! a single `next()` method that processes events and returns operations.
 
 use std::{
+    io,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -20,8 +21,10 @@ use crate::{
 
 #[cfg(test)]
 use crate::manager::{ClockFn, InstantClock};
+use datadog_protos::metrics::Dogsketch;
 use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
+use protobuf::Message;
 use rustc_hash::FxHashMap;
 use std::sync::atomic::Ordering;
 use tracing::{debug, info, trace, warn};
@@ -412,12 +415,11 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
                     .write_metric(&line)?;
             }
             MetricValue::Histogram(sketch) => {
-                // Format-specific serialization: JSONL uses JSON, Parquet uses protobuf
-                let sketch_bytes = self
-                    .format
-                    .as_ref()
-                    .expect("format must be present during operation")
-                    .serialize_sketch(sketch)?;
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                let sketch_bytes = dogsketch
+                    .write_to_bytes()
+                    .map_err(|e| formats::Error::Io(io::Error::other(e)))?;
 
                 let line = line::Line {
                     run_id: self.run_id,
@@ -446,9 +448,11 @@ mod tests {
     use super::*;
     use crate::metric::{Counter, Gauge, Histogram};
     use crate::{formats::jsonl, test::writer::InMemoryWriter};
+    use datadog_protos::metrics::Dogsketch;
     use ddsketch_agent::DDSketch;
     use metrics_util::registry::{AtomicStorage, Registry};
     use proptest::prelude::*;
+    use protobuf::Message;
     use std::{
         collections::HashSet,
         sync::{Arc, Mutex},
@@ -942,12 +946,11 @@ mod tests {
                 // Verify histogram data integrity
                 for line in &lines {
                     if line.metric_kind == line::MetricKind::Histogram {
-                        if let Some(histogram_bytes) = &line.value_histogram {
-                            // Verify sketch deserializes correctly
-                            let sketch: DDSketch = serde_json::from_slice(histogram_bytes)
-                                .expect("Failed to deserialize histogram");
+                        if let Some(sketch_bytes) = &line.value_histogram {
+                            let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes)
+                                .expect("should parse protobuf");
+                            let sketch = DDSketch::try_from(dogsketch).expect("should convert");
 
-                            // Verify sketch has data (non-empty histograms should have samples)
                             prop_assert!(
                                 sketch.count() > 0,
                                 "Histogram {} has empty sketch but should have samples",
@@ -1691,12 +1694,11 @@ mod tests {
             "Should have value_histogram"
         );
 
-        // Verify we can deserialize the sketch
+        // Verify sketch data
         let sketch_bytes = hist_line.value_histogram.as_ref().unwrap();
-        let sketch: DDSketch =
-            serde_json::from_slice(sketch_bytes).expect("should deserialize sketch");
+        let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes).expect("parse protobuf");
+        let sketch = DDSketch::try_from(dogsketch).expect("convert");
 
-        // Verify sketch has correct data
         assert_eq!(sketch.min(), Some(10.0));
         assert_eq!(sketch.max(), Some(50.0));
         let median = sketch.quantile(0.5).unwrap();

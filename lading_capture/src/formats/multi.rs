@@ -85,15 +85,6 @@ impl<W1: Write, W2: Write + Seek + Send> crate::formats::OutputFormat for Format
     fn close(self) -> Result<(), crate::formats::Error> {
         self.close().map_err(Into::into)
     }
-
-    fn serialize_sketch(
-        &self,
-        sketch: &ddsketch_agent::DDSketch,
-    ) -> Result<Vec<u8>, crate::formats::Error> {
-        // Multi format writes to both JSONL and Parquet, each will serialize
-        // appropriately when write_metric is called. Use JSON here as a default.
-        self.jsonl.serialize_sketch(sketch)
-    }
 }
 
 #[cfg(test)]
@@ -187,5 +178,52 @@ mod tests {
             !parquet_buffer.get_ref().is_empty(),
             "Parquet buffer should not be empty"
         );
+    }
+
+    #[test]
+    fn histogram_uses_protobuf() {
+        use datadog_protos::metrics::Dogsketch;
+        use ddsketch_agent::DDSketch;
+        use protobuf::Message;
+        use std::io::Cursor;
+
+        let mut jsonl_buffer = Vec::new();
+        let mut parquet_buffer = Cursor::new(Vec::new());
+
+        let jsonl_format = jsonl::Format::new(&mut jsonl_buffer);
+        let parquet_format = parquet::Format::new(&mut parquet_buffer, 6)
+            .expect("parquet format creation should succeed");
+
+        let mut format = Format::new(jsonl_format, parquet_format);
+
+        let mut sketch = DDSketch::default();
+        sketch.insert(1.0);
+        sketch.insert(2.0);
+        sketch.insert(3.0);
+
+        let mut dogsketch = Dogsketch::new();
+        sketch.merge_to_dogsketch(&mut dogsketch);
+        let protobuf_bytes = dogsketch.write_to_bytes().expect("protobuf");
+
+        let line = Line {
+            run_id: Uuid::new_v4(),
+            time: 1000,
+            fetch_index: 0,
+            metric_name: "histogram_metric".into(),
+            metric_kind: MetricKind::Histogram,
+            value: LineValue::Float(0.0),
+            labels: FxHashMap::default(),
+            value_histogram: Some(protobuf_bytes.clone()),
+        };
+
+        format.write_metric(&line).expect("write should succeed");
+        format.flush().expect("flush should succeed");
+        format.close().expect("close should succeed");
+
+        let jsonl_output = String::from_utf8(jsonl_buffer).expect("should be valid UTF-8");
+        assert!(jsonl_output.contains("value_histogram"));
+
+        let parquet_bytes = parquet_buffer.into_inner();
+        assert!(!parquet_bytes.is_empty(), "Parquet file should have data");
     }
 }

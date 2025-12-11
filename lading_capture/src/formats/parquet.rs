@@ -15,14 +15,12 @@ use arrow_array::{
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, TimeUnit};
-use datadog_protos::metrics::Dogsketch;
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
     file::properties::{WriterProperties, WriterVersion},
     schema::types::ColumnPath,
 };
-use protobuf::Message;
 
 use crate::line;
 
@@ -358,21 +356,6 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 
     fn close(self) -> Result<(), crate::formats::Error> {
         self.close().map_err(Into::into)
-    }
-
-    fn serialize_sketch(
-        &self,
-        sketch: &ddsketch_agent::DDSketch,
-    ) -> Result<Vec<u8>, crate::formats::Error> {
-        use crate::formats;
-        use std::io;
-
-        // Protobuf serialization produces smaller files than JSON
-        let mut dogsketch = Dogsketch::new();
-        sketch.merge_to_dogsketch(&mut dogsketch);
-        dogsketch
-            .write_to_bytes()
-            .map_err(|e| formats::Error::Parquet(Error::Io(io::Error::other(e))))
     }
 }
 

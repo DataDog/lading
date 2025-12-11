@@ -73,13 +73,9 @@ pub struct Line {
     #[serde(flatten)]
     /// The labels associated with this metric.
     pub labels: FxHashMap<String, String>,
-    /// Serialized `DDSketch` histogram data for histogram rows. Only present
-    /// when `metric_kind` is `Histogram`.
-    ///
-    /// Serialization format varies by output: JSONL uses JSON, Parquet uses
-    /// protobuf.  Consumers must deserialize accordingly:
-    /// `serde_json::from_slice` for JSONL, `Dogsketch::parse_from_bytes` then
-    /// `DDSketch::try_from` for Parquet.
+    /// Protobuf-serialized `DDSketch` histogram data for histogram metrics.
+    /// Only present when `metric_kind` is `Histogram`. All formats use protobuf
+    /// serialization (via `Dogsketch::write_to_bytes`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_histogram: Option<Vec<u8>>,
 }
