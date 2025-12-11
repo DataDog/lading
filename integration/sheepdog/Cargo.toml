@@ -12,11 +12,23 @@ anyhow = "1.0"
 escargot = "0.5.14"
 shared = { path = "../shared" }
 tempfile = "3.23"
-tokio = { version = "1.47", features = ["fs", "io-util", "macros", "net", "process", "rt", "signal", "time"] }
-tonic = { workspace = true, default-features = false, features = [
-  "transport",
+tokio = { version = "1.47", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt",
+  "signal",
+  "time",
 ] }
+tonic = { workspace = true, default-features = false, features = ["transport"] }
 hyper-util = { workspace = true }
-tower = { workspace = true, features = ["limit", "load-shed", "timeout", "util"] }
+tower = { workspace = true, features = [
+  "limit",
+  "load-shed",
+  "timeout",
+  "util",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
