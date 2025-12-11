@@ -84,7 +84,10 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { workspace = true, features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tonic = { workspace = true, features = ["transport"] }
+tonic = { workspace = true, features = [
+  "transport",
+  "router",
+] }
 tonic-prost = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
