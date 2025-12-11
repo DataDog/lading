@@ -88,6 +88,9 @@ impl<W: Write> crate::formats::OutputFormat for Format<W> {
 mod tests {
     use super::*;
     use crate::line::{Line, LineValue, MetricKind};
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
+    use protobuf::Message;
     use rustc_hash::FxHashMap;
     use uuid::Uuid;
 
@@ -148,5 +151,33 @@ mod tests {
             let parsed: Line = serde_json::from_str(line_str).expect("should deserialize");
             assert_eq!(parsed.metric_name, format!("metric_{i}"));
         }
+    }
+
+    #[test]
+    fn writes_histogram() {
+        let mut buffer = Vec::new();
+        let mut format = Format::new(&mut buffer);
+
+        let mut sketch = DDSketch::default();
+        sketch.insert(1.0);
+        sketch.insert(2.0);
+        let mut dogsketch = Dogsketch::new();
+        sketch.merge_to_dogsketch(&mut dogsketch);
+
+        let line = Line {
+            run_id: Uuid::new_v4(),
+            time: 1000,
+            fetch_index: 0,
+            metric_name: "histogram_metric".into(),
+            metric_kind: MetricKind::Histogram,
+            value: LineValue::Float(0.0),
+            labels: FxHashMap::default(),
+            value_histogram: Some(dogsketch.write_to_bytes().expect("protobuf")),
+        };
+
+        format.write_metric(&line).expect("write should succeed");
+
+        let output = String::from_utf8(buffer).expect("should be valid UTF-8");
+        assert!(output.contains("value_histogram"));
     }
 }

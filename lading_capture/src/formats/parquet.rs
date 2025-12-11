@@ -363,6 +363,9 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 mod tests {
     use super::*;
     use crate::line::{Line, LineValue, MetricKind};
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
+    use protobuf::Message;
     use rustc_hash::FxHashMap;
     use std::io::Cursor;
     use uuid::Uuid;
@@ -415,5 +418,36 @@ mod tests {
         format.flush().expect("flush should succeed");
 
         assert_eq!(format.buffers.len(), 0, "buffers should be empty");
+    }
+
+    #[test]
+    fn writes_histogram() {
+        let mut buffer = Cursor::new(Vec::new());
+
+        {
+            let mut format = Format::new(&mut buffer, 10).expect("create format");
+
+            let mut sketch = DDSketch::default();
+            sketch.insert(10.0);
+            sketch.insert(20.0);
+            let mut dogsketch = Dogsketch::new();
+            sketch.merge_to_dogsketch(&mut dogsketch);
+
+            let line = Line {
+                run_id: Uuid::new_v4(),
+                time: 1000,
+                fetch_index: 0,
+                metric_name: "histogram_metric".into(),
+                metric_kind: MetricKind::Histogram,
+                value: LineValue::Float(0.0),
+                labels: FxHashMap::default(),
+                value_histogram: Some(dogsketch.write_to_bytes().expect("protobuf")),
+            };
+
+            format.write_metric(&line).expect("write should succeed");
+            format.flush().expect("flush should succeed");
+        }
+
+        assert!(!buffer.get_ref().is_empty(), "should have written data");
     }
 }

@@ -94,7 +94,10 @@ impl Line {
 mod tests {
     use super::*;
     use approx::relative_eq;
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
     use proptest::prelude::*;
+    use protobuf::Message;
 
     proptest! {
         #[test]
@@ -112,7 +115,23 @@ mod tests {
                 any::<f64>().prop_filter("must be finite", |f| f.is_finite()).prop_map(LineValue::Float),
             ],
             labels in prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..10),
+            histogram_samples in prop::collection::vec(
+                any::<f64>().prop_filter("finite", |f| f.is_finite()),
+                0..50
+            ),
         ) {
+            let value_histogram = if metric_kind == MetricKind::Histogram && !histogram_samples.is_empty() {
+                let mut sketch = DDSketch::default();
+                for sample in histogram_samples {
+                    sketch.insert(sample);
+                }
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                Some(dogsketch.write_to_bytes().expect("protobuf"))
+            } else {
+                None
+            };
+
             let line = Line {
                 run_id: Uuid::new_v4(),
                 time,
@@ -121,7 +140,7 @@ mod tests {
                 metric_kind,
                 value,
                 labels: labels.into_iter().collect(),
-                value_histogram: None,
+                value_histogram,
             };
 
             // Serialize to JSON

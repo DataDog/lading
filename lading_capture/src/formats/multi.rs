@@ -94,6 +94,9 @@ mod tests {
         formats::{jsonl, parquet},
         line::{Line, LineValue, MetricKind},
     };
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
+    use protobuf::Message;
     use rustc_hash::FxHashMap;
     use std::io::Cursor;
     use uuid::Uuid;
@@ -182,11 +185,6 @@ mod tests {
 
     #[test]
     fn histogram_uses_protobuf() {
-        use datadog_protos::metrics::Dogsketch;
-        use ddsketch_agent::DDSketch;
-        use protobuf::Message;
-        use std::io::Cursor;
-
         let mut jsonl_buffer = Vec::new();
         let mut parquet_buffer = Cursor::new(Vec::new());
 
