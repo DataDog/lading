@@ -131,7 +131,12 @@ mod tests {
             match (line.value, deserialized.value) {
                 (LineValue::Int(a), LineValue::Int(b)) => prop_assert_eq!(a, b),
                 (LineValue::Float(a), LineValue::Float(b)) => {
-                    prop_assert!(relative_eq!(a, b, epsilon = 1e-10),
+                    // For very large or very small floats, JSON serialization can
+                    // introduce precision loss due to decimal representation. Use
+                    // relative comparison with a tolerance appropriate for f64 precision.
+                    // The max_relative of 1e-12 allows for the precision loss inherent
+                    // in the binary<->decimal conversion while still catching actual bugs.
+                    prop_assert!(relative_eq!(a, b, max_relative = 1e-12),
                         "floats not approximately equal: {a} vs {b}");
                 }
                 (a, b) => prop_assert!(false, "value types don't match: {a:?} vs {b:?}"),
