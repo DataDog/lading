@@ -16,6 +16,7 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 lading-capture = { version = "0.2", path = "../lading_capture" }
+lading-capture-schema = { path = "../lading_capture_schema" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
 lading-signal = { version = "0.1", path = "../lading_signal" }

@@ -14,7 +14,8 @@ use arrow_array::{
     TimestampMillisecondArray, UInt64Array,
 };
 use arrow_buffer::OffsetBuffer;
-use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, TimeUnit};
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
+use lading_capture_schema::{capture_schema, columns};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
@@ -166,35 +167,7 @@ impl<W: Write + Seek + Send> Format<W> {
     ///
     /// Returns error if Arrow writer creation fails
     pub fn new(writer: W, compression_level: i32) -> Result<Self, Error> {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("run_id", DataType::Utf8, false),
-            Field::new(
-                "time",
-                DataType::Timestamp(TimeUnit::Millisecond, None),
-                false,
-            ),
-            Field::new("fetch_index", DataType::UInt64, false),
-            Field::new("metric_name", DataType::Utf8, false),
-            Field::new("metric_kind", DataType::Utf8, false),
-            Field::new("value_int", DataType::UInt64, true),
-            Field::new("value_float", DataType::Float64, true),
-            Field::new(
-                "labels",
-                DataType::Map(
-                    Arc::new(Field::new(
-                        "entries",
-                        DataType::Struct(Fields::from(vec![
-                            Field::new("key", DataType::Utf8, false),
-                            Field::new("value", DataType::Utf8, false),
-                        ])),
-                        false,
-                    )),
-                    false,
-                ),
-                false,
-            ),
-            Field::new("value_histogram", DataType::Binary, true),
-        ]));
+        let schema = Arc::new(capture_schema());
 
         // Use Parquet v2 format for better encodings and compression:
         //
@@ -209,8 +182,8 @@ impl<W: Write + Seek + Send> Format<W> {
         let props = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression_level)?))
-            .set_column_dictionary_enabled(ColumnPath::from("metric_kind"), true)
-            .set_column_dictionary_enabled(ColumnPath::from("run_id"), true)
+            .set_column_dictionary_enabled(ColumnPath::from(columns::METRIC_KIND), true)
+            .set_column_dictionary_enabled(ColumnPath::from(columns::RUN_ID), true)
             .build();
 
         let arrow_writer = ArrowWriter::try_new(writer, schema.clone(), Some(props))?;
@@ -242,20 +215,20 @@ impl<W: Write + Seek + Send> Format<W> {
         let values_array = Arc::new(StringArray::from(self.buffers.label_values.clone()));
         let struct_array = StructArray::from(vec![
             (
-                Arc::new(Field::new("key", DataType::Utf8, false)),
+                Arc::new(Field::new(columns::LABEL_KEY, DataType::Utf8, false)),
                 keys_array as ArrayRef,
             ),
             (
-                Arc::new(Field::new("value", DataType::Utf8, false)),
+                Arc::new(Field::new(columns::LABEL_VALUE, DataType::Utf8, false)),
                 values_array as ArrayRef,
             ),
         ]);
 
         let field = Arc::new(Field::new(
-            "entries",
+            columns::LABEL_ENTRIES,
             DataType::Struct(Fields::from(vec![
-                Field::new("key", DataType::Utf8, false),
-                Field::new("value", DataType::Utf8, false),
+                Field::new(columns::LABEL_KEY, DataType::Utf8, false),
+                Field::new(columns::LABEL_VALUE, DataType::Utf8, false),
             ])),
             false,
         ));
