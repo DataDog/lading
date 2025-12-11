@@ -8,6 +8,7 @@ use std::fs::File;
 use std::path::Path;
 
 use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
+use lading_capture_schema::columns;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use super::{MetricInfo, SeriesStats};
@@ -53,18 +54,22 @@ pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, E
         }
 
         let metric_name_array = batch
-            .column_by_name("metric_name")
-            .ok_or_else(|| Error::MissingColumn("metric_name".to_string()))?
+            .column_by_name(columns::METRIC_NAME)
+            .ok_or_else(|| Error::MissingColumn(columns::METRIC_NAME.to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'metric_name' is not String".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not String", columns::METRIC_NAME))
+            })?;
 
         let metric_kind_array = batch
-            .column_by_name("metric_kind")
-            .ok_or_else(|| Error::MissingColumn("metric_kind".to_string()))?
+            .column_by_name(columns::METRIC_KIND)
+            .ok_or_else(|| Error::MissingColumn(columns::METRIC_KIND.to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'metric_kind' is not String".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not String", columns::METRIC_KIND))
+            })?;
 
         for row in 0..batch.num_rows() {
             let name = metric_name_array.value(row).to_string();
@@ -102,39 +107,47 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
         }
 
         let name_array = batch
-            .column_by_name("metric_name")
-            .ok_or_else(|| Error::MissingColumn("metric_name".to_string()))?
+            .column_by_name(columns::METRIC_NAME)
+            .ok_or_else(|| Error::MissingColumn(columns::METRIC_NAME.to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'metric_name' is not String".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not String", columns::METRIC_NAME))
+            })?;
 
         let fetch_index_array = batch
-            .column_by_name("fetch_index")
-            .ok_or_else(|| Error::MissingColumn("fetch_index".to_string()))?
+            .column_by_name(columns::FETCH_INDEX)
+            .ok_or_else(|| Error::MissingColumn(columns::FETCH_INDEX.to_string()))?
             .as_any()
             .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| Error::InvalidColumnType("'fetch_index' is not UInt64".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not UInt64", columns::FETCH_INDEX))
+            })?;
 
         let value_int_array = batch
-            .column_by_name("value_int")
-            .ok_or_else(|| Error::MissingColumn("value_int".to_string()))?
+            .column_by_name(columns::VALUE_INT)
+            .ok_or_else(|| Error::MissingColumn(columns::VALUE_INT.to_string()))?
             .as_any()
             .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| Error::InvalidColumnType("'value_int' is not UInt64".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not UInt64", columns::VALUE_INT))
+            })?;
 
         let value_float_array = batch
-            .column_by_name("value_float")
-            .ok_or_else(|| Error::MissingColumn("value_float".to_string()))?
+            .column_by_name(columns::VALUE_FLOAT)
+            .ok_or_else(|| Error::MissingColumn(columns::VALUE_FLOAT.to_string()))?
             .as_any()
             .downcast_ref::<Float64Array>()
-            .ok_or_else(|| Error::InvalidColumnType("'value_float' is not Float64".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' is not Float64", columns::VALUE_FLOAT))
+            })?;
 
         let labels_array = batch
-            .column_by_name("labels")
-            .ok_or_else(|| Error::MissingColumn("labels".to_string()))?
+            .column_by_name(columns::LABELS)
+            .ok_or_else(|| Error::MissingColumn(columns::LABELS.to_string()))?
             .as_any()
             .downcast_ref::<MapArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'labels' is not Map".to_string()))?;
+            .ok_or_else(|| Error::InvalidColumnType(format!("'{}' is not Map", columns::LABELS)))?;
 
         // Filter to only rows matching the metric name
         for row in 0..batch.num_rows() {

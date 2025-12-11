@@ -1,0 +1,23 @@
+[package]
+name = "lading-capture-schema"
+version = "0.1.0"
+authors = [
+  "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+  "George Hahn <george.hahn@datadoghq.com",
+]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::profiling"]
+description = "Shared Arrow schema for Lading capture parquet files."
+readme = "../README.md"
+
+[dependencies]
+arrow-schema = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
