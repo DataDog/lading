@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
   This reflects preexisting terminology.
+## Added
+- Lading now supports histogram approximations in its capture files.
 
 ## [0.30.0]
 ## Added

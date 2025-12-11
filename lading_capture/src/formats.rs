@@ -31,6 +31,11 @@ pub enum Error {
 /// Implementations of this trait handle the serialization and writing of
 /// metrics to a specific file format. The capture manager's state machine uses
 /// this trait to remain agnostic to the output format.
+///
+/// Histogram values in `Line::value_histogram` are stored as protobuf-serialized
+/// bytes (via `Dogsketch::write_to_bytes`). Both JSONL and Parquet formats store
+/// the same protobuf bytes - JSONL base64-encodes them in JSON, Parquet stores
+/// them as binary.
 pub trait OutputFormat {
     /// Write a single metric line to the output
     ///
@@ -66,15 +71,26 @@ mod tests {
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, Float64Array, MapArray, StringArray, StructArray, TimestampMillisecondArray,
-        UInt64Array,
+        Array, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
+        TimestampMillisecondArray, UInt64Array,
     };
     use bytes::Bytes;
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use proptest::prelude::*;
+    use protobuf::Message;
     use rustc_hash::FxHashMap;
     use std::io::{BufRead, BufReader, Cursor};
     use uuid::Uuid;
+
+    fn sketch_to_protobuf(sketch: &DDSketch) -> Vec<u8> {
+        let mut dogsketch = Dogsketch::new();
+        sketch.merge_to_dogsketch(&mut dogsketch);
+        dogsketch
+            .write_to_bytes()
+            .expect("protobuf serialization should succeed")
+    }
 
     fn assert_lines_equal(a: &Line, b: &Line) -> Result<(), proptest::test_runner::TestCaseError> {
         prop_assert_eq!(a.run_id, b.run_id);
@@ -104,6 +120,42 @@ mod tests {
             prop_assert_eq!(b.labels.get(k), Some(v));
         }
 
+        // For histograms, verify protobuf bytes and DDSketch properties
+        prop_assert_eq!(
+            &a.value_histogram,
+            &b.value_histogram,
+            "Histogram protobuf bytes differ"
+        );
+
+        if !a.value_histogram.is_empty() {
+            let a_sketch = Dogsketch::parse_from_bytes(&a.value_histogram)
+                .ok()
+                .and_then(|ds| DDSketch::try_from(ds).ok());
+            let b_sketch = Dogsketch::parse_from_bytes(&b.value_histogram)
+                .ok()
+                .and_then(|ds| DDSketch::try_from(ds).ok());
+
+            if let (Some(a_sketch), Some(b_sketch)) = (a_sketch, b_sketch) {
+                prop_assert_eq!(a_sketch.count(), b_sketch.count());
+
+                if a_sketch.count() > 0 {
+                    let a_min = a_sketch.min().unwrap_or(f64::NAN);
+                    let b_min = b_sketch.min().unwrap_or(f64::NAN);
+                    prop_assert!(
+                        relative_eq!(a_min, b_min, epsilon = 1e-10)
+                            || (a_min.is_nan() && b_min.is_nan())
+                    );
+
+                    let a_max = a_sketch.max().unwrap_or(f64::NAN);
+                    let b_max = b_sketch.max().unwrap_or(f64::NAN);
+                    prop_assert!(
+                        relative_eq!(a_max, b_max, epsilon = 1e-10)
+                            || (a_max.is_nan() && b_max.is_nan())
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -111,28 +163,56 @@ mod tests {
         #[test]
         fn jsonl_round_trip_identity(
             lines in prop::collection::vec(
-                (
-                    any::<u128>(),
-                    any::<u64>(),
-                    "[a-z][a-z0-9_]*",
-                    prop_oneof![
-                        Just(MetricKind::Counter),
-                        Just(MetricKind::Gauge),
-                    ],
-                    prop_oneof![
-                        any::<u64>().prop_map(LineValue::Int),
-                        any::<f64>().prop_filter("finite", |f| f.is_finite())
-                            .prop_map(LineValue::Float),
-                    ],
-                    prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
-                ),
+                prop_oneof![
+                    // Counter or Gauge metrics (no histogram)
+                    (
+                        any::<u128>(),
+                        any::<u64>(),
+                        "[a-z][a-z0-9_]*",
+                        prop_oneof![
+                            Just(MetricKind::Counter),
+                            Just(MetricKind::Gauge),
+                        ],
+                        prop_oneof![
+                            any::<u64>().prop_map(LineValue::Int),
+                            any::<f64>().prop_filter("finite", |f| f.is_finite())
+                                .prop_map(LineValue::Float),
+                        ],
+                        prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
+                        Just(Vec::new()),
+                    ),
+                    // Histogram metrics with DDSketch data - comprehensive edge cases
+                    (
+                        any::<u128>(),
+                        any::<u64>(),
+                        "[a-z][a-z0-9_]*",
+                        Just(MetricKind::Histogram),
+                        Just(LineValue::Float(0.0)),
+                        prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
+                        prop_oneof![
+                            // Empty histogram (should not be written per accumulator.rs:508)
+                            Just(Vec::new()),
+                            // Histograms with unconstrained finite f64 values
+                            prop::collection::vec(
+                                any::<f64>().prop_filter("finite", |f| f.is_finite()),
+                                1..100
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for sample in samples {
+                                    sketch.insert(sample);
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                        ],
+                    ),
+                ],
                 1..10
             )
         ) {
             let run_id = Uuid::new_v4();
             let input_lines: Vec<Line> = lines
                 .into_iter()
-                .map(|(time, fetch_index, metric_name, metric_kind, value, labels)| Line {
+                .map(|(time, fetch_index, metric_name, metric_kind, value, labels, value_histogram)| Line {
                     run_id,
                     time,
                     fetch_index,
@@ -140,6 +220,7 @@ mod tests {
                     metric_kind,
                     value,
                     labels: labels.into_iter().collect(),
+                    value_histogram,
                 })
                 .collect();
 
@@ -168,28 +249,123 @@ mod tests {
         #[test]
         fn parquet_round_trip_identity(
             lines in prop::collection::vec(
-                (
-                    0u128..=(i64::MAX as u128),
-                    any::<u64>(),
-                    "[a-z][a-z0-9_]*",
-                    prop_oneof![
-                        Just(MetricKind::Counter),
-                        Just(MetricKind::Gauge),
-                    ],
-                    prop_oneof![
-                        any::<u64>().prop_map(LineValue::Int),
-                        any::<f64>().prop_filter("finite", |f| f.is_finite())
-                            .prop_map(LineValue::Float),
-                    ],
-                    prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
-                ),
+                prop_oneof![
+                    // Counter or Gauge metrics (no histogram)
+                    (
+                        0u128..=(i64::MAX as u128),
+                        any::<u64>(),
+                        "[a-z][a-z0-9_]*",
+                        prop_oneof![
+                            Just(MetricKind::Counter),
+                            Just(MetricKind::Gauge),
+                        ],
+                        prop_oneof![
+                            any::<u64>().prop_map(LineValue::Int),
+                            any::<f64>().prop_filter("finite", |f| f.is_finite())
+                                .prop_map(LineValue::Float),
+                        ],
+                        prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
+                        Just(Vec::new()),
+                    ),
+                    // Histogram metrics with DDSketch data - comprehensive edge cases
+                    (
+                        0u128..=(i64::MAX as u128),
+                        any::<u64>(),
+                        "[a-z][a-z0-9_]*",
+                        Just(MetricKind::Histogram),
+                        Just(LineValue::Float(0.0)),
+                        prop::collection::hash_map("[a-z][a-z0-9_]*", "[a-z][a-z0-9_]*", 0..5),
+                        prop_oneof![
+                            // Empty histogram
+                            Just(Vec::new()),
+                            // Single sample (protobuf for Parquet)
+                            any::<f64>().prop_filter("finite", |f| f.is_finite())
+                                .prop_map(|sample| {
+                                    let mut sketch = DDSketch::default();
+                                    sketch.insert(sample);
+                                    sketch_to_protobuf(&sketch)
+                                }),
+                            // Small histogram (typical case)
+                            prop::collection::vec(
+                                any::<f64>().prop_filter("finite", |f| f.is_finite()),
+                                2..20
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for sample in samples {
+                                    sketch.insert(sample);
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                            // Large histogram (stress test)
+                            prop::collection::vec(
+                                any::<f64>().prop_filter("finite", |f| f.is_finite()),
+                                100..1000
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for sample in samples {
+                                    sketch.insert(sample);
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                            // All zeros
+                            prop::collection::vec(Just(0.0), 1..10)
+                                .prop_map(|samples| {
+                                    let mut sketch = DDSketch::default();
+                                    for sample in samples {
+                                        sketch.insert(sample);
+                                    }
+                                    sketch_to_protobuf(&sketch)
+                                }),
+                            // All negative
+                            prop::collection::vec(
+                                -1000.0f64..-1.0f64,
+                                1..10
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for sample in samples {
+                                    sketch.insert(sample);
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                            // Extreme values that test DDSketch limits
+                            prop::collection::vec(
+                                prop_oneof![
+                                    Just(f64::MIN_POSITIVE),  // Smallest positive
+                                    Just(1e-300),             // Near-zero positive
+                                    Just(-1e-300),            // Near-zero negative
+                                    Just(1e100),              // Large positive
+                                    Just(-1e100),             // Large negative
+                                ],
+                                1..5
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for sample in samples {
+                                    sketch.insert(sample);
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                            // Mix of very close values (tests bin resolution)
+                            prop::collection::vec(
+                                Just(1.0),
+                                1..10
+                            ).prop_map(|samples| {
+                                let mut sketch = DDSketch::default();
+                                for (i, _) in samples.iter().enumerate() {
+                                    // Insert values very close together
+                                    sketch.insert(1.0 + (i as f64 * 1e-10));
+                                }
+                                sketch_to_protobuf(&sketch)
+                            }),
+                        ],
+                    ),
+                ],
                 1..10
             )
         ) {
             let run_id = Uuid::new_v4();
             let input_lines: Vec<Line> = lines
                 .into_iter()
-                .map(|(time, fetch_index, metric_name, metric_kind, value, labels)| Line {
+                .map(|(time, fetch_index, metric_name, metric_kind, value, labels, value_histogram)| Line {
                     run_id,
                     time,
                     fetch_index,
@@ -197,6 +373,7 @@ mod tests {
                     metric_kind,
                     value,
                     labels: labels.into_iter().collect(),
+                    value_histogram,
                 })
                 .collect();
 
@@ -291,6 +468,13 @@ mod tests {
                 .downcast_ref::<MapArray>()
                 .expect("labels is MapArray");
 
+            let value_histogram_array = batch
+                .column_by_name("value_histogram")
+                .expect("value_histogram column")
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("value_histogram is BinaryArray");
+
             for row_idx in 0..batch_len {
                 let run_id = Uuid::parse_str(run_id_array.value(row_idx)).expect("parse UUID");
 
@@ -304,6 +488,7 @@ mod tests {
                 let metric_kind = match metric_kind_array.value(row_idx) {
                     "counter" => MetricKind::Counter,
                     "gauge" => MetricKind::Gauge,
+                    "histogram" => MetricKind::Histogram,
                     kind => panic!("unknown metric kind: {kind}"),
                 };
 
@@ -330,6 +515,12 @@ mod tests {
                     labels.insert(keys.value(i).to_string(), values.value(i).to_string());
                 }
 
+                let value_histogram = if value_histogram_array.is_null(row_idx) {
+                    Vec::new()
+                } else {
+                    value_histogram_array.value(row_idx).to_vec()
+                };
+
                 lines.push(Line {
                     run_id,
                     time,
@@ -338,6 +529,7 @@ mod tests {
                     metric_kind,
                     value,
                     labels,
+                    value_histogram,
                 });
             }
         }

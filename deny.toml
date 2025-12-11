@@ -18,6 +18,7 @@ unused-allowed-license = "allow"
 
 [sources]
 unknown-git = "deny"
+allow-git = ["https://github.com/DataDog/saluki"]
 
 [advisories]
 version = 2

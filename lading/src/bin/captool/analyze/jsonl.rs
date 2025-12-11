@@ -20,6 +20,7 @@ pub(crate) fn list_metrics(lines: &[Line]) -> Vec<MetricInfo> {
         let kind = match line.metric_kind {
             MetricKind::Counter => "counter".to_string(),
             MetricKind::Gauge => "gauge".to_string(),
+            MetricKind::Histogram => "histogram".to_string(),
         };
         metrics.insert(MetricInfo {
             kind,

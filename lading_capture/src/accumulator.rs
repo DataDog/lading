@@ -108,12 +108,56 @@
 //!  * `Increment` and `Decrement` commute.
 //!  * `Set` is idempotent.
 //!  * `Set` does not commute with `Increment` nor `Decrement`.
+//!
+//! ## Histograms
+//!
+//! A `Histogram` write is `Record(k, T, v)` where `T` is the absolute logical
+//! tick when the sample was recorded, `k` is the identifying key of the metric,
+//! and `v` is a finite sample value. The operation `Record(k, T, v)` adds sample
+//! `v` to the `DDSketch` distribution at key `k` in each interval Ti such that
+//! T <= Ti <= `current_tick`. Infinity and NaN values are rejected.
+//!
+//! Histograms do not copy forward on tick advance. Each interval stores only
+//! samples recorded during that tick.
+//!
+//! ```
+//! [Record(k, 0, 10.0), Record(k, 0, 20.0), TICK]
+//!  -> 0:[-]                   => []
+//!  -> 0:[Record(k, 0, 10.0)]  => [(k, DDSketch{10.0})]
+//!  -> 0:[Record(k, 0, 20.0)]  => [(k, DDSketch{10.0, 20.0})]
+//!  -> 0:[TICK]                => [(k, DDSketch{10.0, 20.0}), (k, DDSketch{})]
+//! ```
+//!
+//! On TICK, the new interval receives an empty sketch. This contrasts with
+//! Counters and Gauges which copy forward. Historical writes populate multiple
+//! intervals:
+//!
+//! ```
+//! [TICK, Record(k, 0, 5.0)]
+//!  -> 0:[-]                  => []
+//!  -> 0:[TICK]               => [∅, ∅]
+//!  -> 1:[Record(k, 0, 5.0)]  => [(k, DDSketch{5.0}), (k, DDSketch{5.0})]
+//! ```
+//!
+//! Flush extracts the sketch from the flushable interval and replaces it with
+//! an empty sketch.
+//!
+//! Stated logically:
+//!
+//!  * `Record` is not commutative.
+//!  * `Record` is not idempotent.
+//!  * Historical writes populate all intervals from T to `current_tick`.
+//!  * Empty sketches are not flushed.
+//!  * Infinity and NaN are filtered with warning.
 
+use datadog_protos::metrics::Dogsketch;
+use ddsketch_agent::DDSketch;
 use metrics::Key;
+use protobuf::Message;
 use rustc_hash::FxHashMap;
 use tracing::warn;
 
-use crate::metric::{Counter, CounterValue, Gauge, GaugeValue};
+use crate::metric::{Counter, CounterValue, Gauge, GaugeValue, Histogram};
 
 pub(crate) const INTERVALS: usize = 60;
 // The actual buffer size is INTERVALS + 1 to prevent accidental overwrite when
@@ -178,6 +222,21 @@ impl Iterator for DrainIter {
             let value = values[interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), tick_to_flush));
         }
+        for (key, sketches) in &mut self.accumulator.histograms {
+            let sketch = std::mem::take(&mut sketches[interval]);
+            if sketch.count() > 0 {
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                let sketch_bytes = dogsketch
+                    .write_to_bytes()
+                    .expect("protobuf serialization failed");
+                metrics.push((
+                    key.clone(),
+                    MetricValue::Histogram(sketch_bytes),
+                    tick_to_flush,
+                ));
+            }
+        }
 
         self.accumulator.last_flushed_tick = Some(tick_to_flush);
         Some(metrics)
@@ -190,13 +249,33 @@ impl Iterator for DrainIter {
 
 impl ExactSizeIterator for DrainIter {}
 
-/// Represents a metric value (counter or gauge)
-#[derive(Debug, Clone)]
+/// Represents a metric value (counter, gauge, or histogram)
+#[derive(Clone)]
 pub(crate) enum MetricValue {
     /// Counter value
     Counter(u64),
     /// Gauge value
     Gauge(f64),
+    /// Histogram distribution (protobuf-serialized `DDSketch`)
+    Histogram(Vec<u8>),
+}
+
+impl std::fmt::Debug for MetricValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetricValue::Counter(v) => f.debug_tuple("Counter").field(v).finish(),
+            MetricValue::Gauge(v) => f.debug_tuple("Gauge").field(v).finish(),
+            MetricValue::Histogram(bytes) => {
+                let count = Dogsketch::parse_from_bytes(bytes)
+                    .ok()
+                    .and_then(|ds| ddsketch_agent::DDSketch::try_from(ds).ok())
+                    .map_or(0, |sketch| sketch.count());
+                f.debug_tuple("Histogram")
+                    .field(&format!("count={count}"))
+                    .finish()
+            }
+        }
+    }
 }
 
 /// Accumulator with 60-interval rolling window for metrics
@@ -212,12 +291,27 @@ pub(crate) enum MetricValue {
 /// - When tick N is written, it goes to slot N % 61.
 /// - The extra slot ensures the write-advance-flush pattern doesn't overwrite
 ///   data.
-#[derive(Debug)]
 pub(crate) struct Accumulator {
     counters: FxHashMap<Key, [u64; BUFFER_SIZE]>,
     gauges: FxHashMap<Key, [f64; BUFFER_SIZE]>,
+    histograms: FxHashMap<Key, [DDSketch; BUFFER_SIZE]>,
     pub(crate) current_tick: u64,
     last_flushed_tick: Option<u64>,
+}
+
+impl std::fmt::Debug for Accumulator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Accumulator")
+            .field("counters", &self.counters)
+            .field("gauges", &self.gauges)
+            .field(
+                "histograms",
+                &format!("<{len} histogram keys>", len = self.histograms.len()),
+            )
+            .field("current_tick", &self.current_tick)
+            .field("last_flushed_tick", &self.last_flushed_tick)
+            .finish()
+    }
 }
 
 impl Accumulator {
@@ -225,6 +319,7 @@ impl Accumulator {
         Self {
             counters: FxHashMap::default(),
             gauges: FxHashMap::default(),
+            histograms: FxHashMap::default(),
             current_tick: 0,
             last_flushed_tick: None,
         }
@@ -313,6 +408,57 @@ impl Accumulator {
         Ok(())
     }
 
+    pub(crate) fn histogram(&mut self, h: Histogram, tick: u64) -> Result<(), Error> {
+        if tick > self.current_tick {
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                delta = tick - self.current_tick,
+                timestamp = ?h.timestamp,
+                key = %h.key.name(),
+                "Histogram metric tick is from future"
+            );
+            return Err(Error::FutureTick { tick });
+        }
+
+        let tick_offset = self.current_tick.saturating_sub(tick);
+        if tick_offset >= INTERVALS as u64 {
+            warn!(
+                metric_tick = tick,
+                current_tick = self.current_tick,
+                tick_offset = tick_offset,
+                timestamp = ?h.timestamp,
+                key = %h.key.name(),
+                "Histogram metric tick too old"
+            );
+            return Err(Error::TickTooOld { tick });
+        }
+
+        // Filter infinity and NaN. DDSketch panics on infinite values.
+        if !h.value.is_finite() {
+            warn!(
+                key = %h.key.name(),
+                value = h.value,
+                tick = tick,
+                "Histogram sample rejected - infinity or NaN not supported by DDSketch"
+            );
+            return Ok(());
+        }
+
+        let sketches = self
+            .histograms
+            .entry(h.key)
+            .or_insert_with(|| std::array::from_fn(|_| DDSketch::default()));
+
+        for offset in 0..=tick_offset {
+            let target_tick = self.current_tick - offset;
+            let interval = interval_idx(target_tick);
+            sketches[interval].insert(h.value);
+        }
+
+        Ok(())
+    }
+
     /// Advance tick and copy forward values
     ///
     /// This function is intended to be paired with calls to `flush`. It WILL
@@ -340,7 +486,8 @@ impl Accumulator {
     /// Returns metrics from the interval that is INTERVALS ticks old. If the
     /// current tick has not yet reached INTERVALS, returns an empty iterator.
     pub(crate) fn flush(&mut self) -> impl Iterator<Item = (Key, MetricValue, u64)> + use<> {
-        let mut metrics = Vec::with_capacity(self.counters.len() + self.gauges.len());
+        let mut metrics =
+            Vec::with_capacity(self.counters.len() + self.gauges.len() + self.histograms.len());
 
         if self.current_tick < INTERVALS as u64 {
             return metrics.into_iter();
@@ -365,6 +512,25 @@ impl Accumulator {
         for (key, values) in &self.gauges {
             let value = values[flush_interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
+        }
+
+        for (key, sketches) in &mut self.histograms {
+            let sketch = std::mem::take(&mut sketches[flush_interval]);
+            // Only include histograms with samples. Empty sketches represent
+            // "no data" which is different from counters/gauges where 0 is
+            // meaningful.
+            if sketch.count() > 0 {
+                let mut dogsketch = Dogsketch::new();
+                sketch.merge_to_dogsketch(&mut dogsketch);
+                let sketch_bytes = dogsketch
+                    .write_to_bytes()
+                    .expect("protobuf serialization failed");
+                metrics.push((
+                    key.clone(),
+                    MetricValue::Histogram(sketch_bytes),
+                    flush_tick,
+                ));
+            }
         }
 
         self.last_flushed_tick = Some(flush_tick);
@@ -431,9 +597,14 @@ impl Accumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metric::{Counter, CounterValue, Gauge, GaugeValue};
+    use crate::metric::{Counter, CounterValue, Gauge, GaugeValue, Histogram};
     use proptest::prelude::*;
     use std::time::Instant;
+
+    fn deserialize_histogram(bytes: &[u8]) -> DDSketch {
+        let dogsketch = Dogsketch::parse_from_bytes(bytes).expect("parse protobuf");
+        DDSketch::try_from(dogsketch).expect("convert")
+    }
 
     // Test helpers that handle the full counter/gauge operation
     fn counter_increment(
@@ -501,6 +672,20 @@ mod tests {
         acc.gauge(gauge, tick)
     }
 
+    fn histogram_sample(
+        acc: &mut Accumulator,
+        key: Key,
+        tick: u64,
+        value: f64,
+    ) -> Result<(), Error> {
+        let histogram = Histogram {
+            key,
+            timestamp: Instant::now(),
+            value,
+        };
+        acc.histogram(histogram, tick)
+    }
+
     #[derive(Debug, Clone)]
     enum Op {
         CounterIncrement(u64),
@@ -508,6 +693,7 @@ mod tests {
         GaugeIncrement(f64),
         GaugeDecrement(f64),
         GaugeSet(f64),
+        HistogramRecord(f64),
         AdvanceTick,
     }
 
@@ -522,6 +708,9 @@ mod tests {
                 (0.0f64..100.0f64).prop_map(Op::GaugeIncrement),
                 (0.0f64..100.0f64).prop_map(Op::GaugeDecrement),
                 (0.0f64..100.0f64).prop_map(Op::GaugeSet),
+                (-100.0f64..100.0f64)
+                    .prop_filter("must be finite", |f| f.is_finite())
+                    .prop_map(Op::HistogramRecord),
                 Just(Op::AdvanceTick),
             ]
             .boxed()
@@ -560,6 +749,9 @@ mod tests {
                     }
                     Op::GaugeSet(v) => {
                         let _ = gauge_set(&mut acc, key.clone(), 0, v);
+                    }
+                    Op::HistogramRecord(v) => {
+                        let _ = histogram_sample(&mut acc, key.clone(), 0, v);
                     }
                     Op::AdvanceTick => {
                         acc.advance_tick();
@@ -1340,5 +1532,556 @@ mod tests {
         assert_eq!(acc.get_counter_value(&key, 0), 10);
         assert_eq!(acc.get_counter_value(&key, 1), 10);
         assert_eq!(acc.get_counter_value(&key, 2), 110);
+    }
+
+    // Histogram property tests
+
+    proptest! {
+        /// Verify DDSketch accumulates samples correctly with exact count and min/max.
+        ///
+        /// Add arbitrary samples to a histogram at tick 0, advance to flush point,
+        /// then verify the flushed sketch maintains exact count and min/max values.
+        /// DDSketch quantiles are approximate due to bucketing. We verify the median
+        /// is finite and within reasonable tolerance: 10% of range for multiple
+        /// samples, or 10% plus 10 absolute for single samples where bucketing
+        /// effects are more pronounced.
+        #[test]
+        fn histogram_samples_accumulate_correctly(
+            samples in prop::collection::vec(0.0f64..1000.0f64, 1..100)
+        ) {
+            let key = Key::from_name("test_hist");
+            let mut acc = Accumulator::new();
+
+            for &value in &samples {
+                histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+            }
+
+            for _ in 0..INTERVALS {
+                acc.advance_tick();
+            }
+
+            let results: Vec<_> = acc.flush().collect();
+            let hist = results
+                .iter()
+                .find(|(k, _, _)| k.name() == "test_hist")
+                .expect("should find histogram");
+
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+                let sketch = deserialize_histogram(sketch_bytes);
+                assert_eq!(sketch.count() as usize, samples.len());
+
+                let min_sample = samples.iter().copied().fold(f64::INFINITY, f64::min);
+                let max_sample = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                assert_eq!(sketch.min(), Some(min_sample));
+                assert_eq!(sketch.max(), Some(max_sample));
+
+                if let Some(median) = sketch.quantile(0.5) {
+                    assert!(median.is_finite(), "median must be finite");
+                    if samples.len() > 1 {
+                        let range = max_sample - min_sample;
+                        let tolerance = if range > 0.0 { range * 0.1 } else { 10.0 };
+                        assert!(
+                            median >= min_sample - tolerance && median <= max_sample + tolerance,
+                            "median {median} should be approximately between {min_sample} and {max_sample}"
+                        );
+                    } else {
+                        let sample = samples[0];
+                        let tolerance = sample.abs() * 0.1 + 10.0;
+                        assert!(
+                            (median - sample).abs() <= tolerance,
+                            "median {median} should be approximately {sample}"
+                        );
+                    }
+                }
+            } else {
+                panic!("Expected histogram");
+            }
+        }
+
+        /// Verify historical writes populate all intervals from T to current_tick.
+        ///
+        /// Advance the accumulator to an arbitrary tick offset, then write a sample
+        /// timestamped at tick 0. Per histogram semantics, this historical write must
+        /// populate all intervals from the sample's timestamp through the current tick.
+        /// Verify each interval contains exactly one sample with the expected value.
+        #[test]
+        fn histogram_historical_writes_populate_all_intervals(
+            tick_offset in 0u64..10u64,
+            value in 0.0f64..1000.0f64
+        ) {
+            let key = Key::from_name("test_hist");
+            let mut acc = Accumulator::new();
+
+            for _ in 0..tick_offset {
+                acc.advance_tick();
+            }
+
+            histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+
+            for tick in 0..=tick_offset {
+                let interval = interval_idx(tick);
+                let sketches = acc.histograms.get(&key).expect("should have histogram key");
+                let sketch = &sketches[interval];
+                assert!(sketch.count() > 0, "tick {tick} should have sample");
+                assert_eq!(sketch.min(), Some(value));
+                assert_eq!(sketch.max(), Some(value));
+            }
+        }
+
+        /// Verify histograms do not copy forward on tick advance.
+        ///
+        /// Add samples at tick 0, advance to tick 1, add different samples at tick 1.
+        /// Unlike counters and gauges which copy forward their values on tick advance,
+        /// histograms maintain separate sketch state per interval. Verify that tick 0's
+        /// interval contains only tick 0 samples and tick 1's interval contains only
+        /// tick 1 samples. Disjoint value ranges detect contamination.
+        #[test]
+        fn histogram_does_not_copy_forward_on_advance(
+            samples_tick_0 in prop::collection::vec(0.0f64..100.0f64, 1..10),
+            samples_tick_1 in prop::collection::vec(100.0f64..200.0f64, 1..10),
+        ) {
+            let key = Key::from_name("test_hist");
+            let mut acc = Accumulator::new();
+
+            for &value in &samples_tick_0 {
+                histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+            }
+
+            acc.advance_tick();
+
+            for &value in &samples_tick_1 {
+                histogram_sample(&mut acc, key.clone(), 1, value).unwrap();
+            }
+
+            let interval_0 = interval_idx(0);
+            let sketches = acc.histograms.get(&key).expect("should have histogram key");
+            let sketch_0 = &sketches[interval_0];
+
+            assert_eq!(sketch_0.count() as usize, samples_tick_0.len());
+            let max_tick_0 = samples_tick_0.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!(sketch_0.max(), Some(max_tick_0));
+
+            let interval_1 = interval_idx(1);
+            let sketch_1 = &sketches[interval_1];
+            assert_eq!(sketch_1.count() as usize, samples_tick_1.len());
+            let max_tick_1 = samples_tick_1.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!(sketch_1.max(), Some(max_tick_1));
+        }
+
+        /// Verify flush extracts sketch and resets interval.
+        ///
+        /// Add samples at tick 0, advance INTERVALS ticks to the flush point, then
+        /// flush. The flushed sketch should contain all samples from tick 0, and the
+        /// interval slot for tick 0 should be reset to an empty sketch ready for
+        /// future use. This ensures flush is a move operation, not a copy.
+        #[test]
+        fn histogram_flush_moves_sketch_and_resets(
+            samples in prop::collection::vec(0.0f64..1000.0f64, 1..50)
+        ) {
+            let key = Key::from_name("test_hist");
+            let mut acc = Accumulator::new();
+
+            for &value in &samples {
+                histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+            }
+
+            for _ in 0..INTERVALS {
+                acc.advance_tick();
+            }
+
+            let results: Vec<_> = acc.flush().collect();
+            let hist = results
+                .iter()
+                .find(|(k, _, tick)| k.name() == "test_hist" && *tick == 0)
+                .expect("should find histogram");
+
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+                let sketch = deserialize_histogram(sketch_bytes);
+                assert_eq!(sketch.count() as usize, samples.len());
+            } else {
+                panic!("Expected histogram");
+            }
+
+            let interval_0 = interval_idx(0);
+            let sketches = acc.histograms.get(&key).expect("should have histogram key");
+            let sketch_0 = &sketches[interval_0];
+            assert_eq!(sketch_0.count(), 0, "flushed interval should be reset to empty");
+        }
+
+        /// Verify empty sketches are not flushed.
+        ///
+        /// Advance the accumulator past the flush point without adding any samples,
+        /// then flush. Unlike counters and gauges where zero is meaningful, an empty
+        /// histogram represents "no data" and should not appear in flush results.
+        /// Verify no histogram metrics are returned.
+        #[test]
+        fn histogram_empty_intervals_not_flushed(
+            advance_count in (INTERVALS as u64)..((INTERVALS as u64) + 10)
+        ) {
+            let mut acc = Accumulator::new();
+
+            for _ in 0..advance_count {
+                acc.advance_tick();
+            }
+
+            let results: Vec<_> = acc.flush().collect();
+            let hist_count = results
+                .iter()
+                .filter(|(_, v, _)| matches!(v, MetricValue::Histogram(_)))
+                .count();
+
+            assert_eq!(hist_count, 0, "empty histograms should not be flushed");
+        }
+    }
+
+    #[test]
+    fn histogram_basic() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        histogram_sample(&mut acc, key.clone(), 0, 42.0).unwrap();
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            assert_eq!(sketch.min(), Some(42.0));
+            assert_eq!(sketch.max(), Some(42.0));
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    #[test]
+    fn histogram_no_copy_forward() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        // Add sample at tick 0
+        histogram_sample(&mut acc, key.clone(), 0, 100.0).unwrap();
+
+        // Advance tick - histogram should NOT copy forward
+        acc.advance_tick();
+        assert_eq!(acc.current_tick, 1);
+
+        // Add sample at tick 1 for comparison
+        histogram_sample(&mut acc, key.clone(), 1, 200.0).unwrap();
+
+        // Advance to flush point for tick 0 (need to be at tick 60 to flush tick 0)
+        for _ in 0..(INTERVALS - 1) {
+            acc.advance_tick();
+        }
+
+        // Flush tick 0 - should have the 100.0 sample only (no copy forward of tick 1 data)
+        let results: Vec<_> = acc.flush().collect();
+        let maybe_hist = results
+            .iter()
+            .find(|(k, _, tick)| k.name() == "test_hist" && *tick == 0);
+
+        assert!(maybe_hist.is_some(), "Should have histogram at tick 0");
+        if let Some((_, MetricValue::Histogram(sketch_bytes), _)) = maybe_hist {
+            let sketch = deserialize_histogram(sketch_bytes);
+            // Should only have tick 0 sample (100.0), not tick 1 (200.0)
+            assert_eq!(sketch.count(), 1);
+            assert_eq!(sketch.min(), Some(100.0));
+            assert_eq!(sketch.max(), Some(100.0));
+        }
+    }
+
+    /// Infinity values are filtered with warning.
+    #[test]
+    fn histogram_filters_infinity() {
+        // Infinity values are filtered by accumulator before reaching DDSketch
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        // Add infinity - should be filtered with warning
+        histogram_sample(&mut acc, key.clone(), 0, f64::INFINITY).unwrap();
+        histogram_sample(&mut acc, key.clone(), 0, f64::NEG_INFINITY).unwrap();
+        // Add normal value
+        histogram_sample(&mut acc, key.clone(), 0, 42.0).unwrap();
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            // Only the normal value should be in the sketch (infinities filtered)
+            assert_eq!(sketch.count(), 1);
+            assert_eq!(sketch.min(), Some(42.0));
+            assert_eq!(sketch.max(), Some(42.0));
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    /// NaN values are filtered.
+    #[test]
+    fn histogram_handles_nan() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        // Add NaN value
+        histogram_sample(&mut acc, key.clone(), 0, f64::NAN).unwrap();
+        // Add normal value
+        histogram_sample(&mut acc, key.clone(), 0, 42.0).unwrap();
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            // Verify DDSketch handles NaN values
+            // Count should include all samples that were added
+            assert!(
+                sketch.count() >= 1,
+                "sketch should have at least the normal value"
+            );
+            // DDSketch should handle NaN gracefully (may filter or include it)
+            assert!(sketch.min().is_some() || sketch.max().is_some());
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    /// Extreme finite values are supported.
+    #[test]
+    fn histogram_handles_extreme_values() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        // Add extremely large positive value
+        histogram_sample(&mut acc, key.clone(), 0, f64::MAX).unwrap();
+        // Add extremely small positive value
+        histogram_sample(&mut acc, key.clone(), 0, f64::MIN_POSITIVE).unwrap();
+        // Add value near zero
+        histogram_sample(&mut acc, key.clone(), 0, 1e-300).unwrap();
+        // Add large negative value
+        histogram_sample(&mut acc, key.clone(), 0, f64::MIN).unwrap();
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            // Verify DDSketch handles extreme values
+            assert_eq!(sketch.count(), 4);
+            assert!(sketch.min().is_some());
+            assert!(sketch.max().is_some());
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    /// Negative values are supported.
+    #[test]
+    fn histogram_handles_negative_values() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        // Add mix of negative and positive values
+        for &value in &[-100.0, -50.0, -10.0, 0.0, 10.0, 50.0, 100.0] {
+            histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+        }
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            assert_eq!(sketch.count(), 7);
+            assert_eq!(sketch.min(), Some(-100.0));
+            assert_eq!(sketch.max(), Some(100.0));
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    /// Empty histograms are not flushed
+    #[test]
+    fn empty_histograms_not_flushed() {
+        let mut acc = Accumulator::new();
+
+        // Don't add any samples - histogram should be empty
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+
+        // Empty histogram should not appear in results
+        let hist = results.iter().find(|(k, _, _)| k.name() == "test_hist");
+        assert!(hist.is_none(), "Empty histogram should not be flushed");
+    }
+
+    /// Histogram sample count matches inserted samples
+    #[test]
+    fn histogram_count_equals_samples_inserted() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        let samples = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        for &value in &samples {
+            histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+        }
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            assert_eq!(
+                sketch.count(),
+                samples.len() as u32,
+                "Sketch count should match number of samples inserted"
+            );
+            assert_eq!(sketch.min(), Some(1.0));
+            assert_eq!(sketch.max(), Some(10.0));
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    /// Histogram min/max bounds are correct
+    #[test]
+    fn histogram_min_max_bounds() {
+        let key = Key::from_name("test_hist");
+        let mut acc = Accumulator::new();
+
+        let samples = [5.5, 10.2, -3.7, 0.0, 42.0];
+        for &value in &samples {
+            histogram_sample(&mut acc, key.clone(), 0, value).unwrap();
+        }
+
+        for _ in 0..INTERVALS {
+            acc.advance_tick();
+        }
+
+        let results: Vec<_> = acc.flush().collect();
+        let hist = results
+            .iter()
+            .find(|(k, _, _)| k.name() == "test_hist")
+            .expect("should find histogram");
+
+        if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+            let min = sketch.min().expect("should have min");
+            let max = sketch.max().expect("should have max");
+
+            // Verify min/max are within sample bounds
+            assert_eq!(min, -3.7, "Min should be smallest sample");
+            assert_eq!(max, 42.0, "Max should be largest sample");
+
+            // Verify all samples are within min/max range
+            for &sample in &samples {
+                assert!(
+                    sample >= min && sample <= max,
+                    "Sample {sample} should be within [{min}, {max}]"
+                );
+            }
+        } else {
+            panic!("Expected histogram");
+        }
+    }
+
+    proptest! {
+        /// Histogram quantiles maintain ordering: P0 <= P25 <= P50 <= P75 <= P100
+        #[test]
+        fn histogram_quantile_ordering(
+            samples in prop::collection::vec(
+                any::<f64>().prop_filter("finite", |f| f.is_finite()),
+                1..100
+            )
+        ) {
+            let key = Key::from_name("test_hist");
+            let mut acc = Accumulator::new();
+
+            for sample in &samples {
+                histogram_sample(&mut acc, key.clone(), 0, *sample).unwrap();
+            }
+
+            for _ in 0..INTERVALS {
+                acc.advance_tick();
+            }
+
+            let results: Vec<_> = acc.flush().collect();
+            let hist = results
+                .iter()
+                .find(|(k, _, _)| k.name() == "test_hist")
+                .expect("should find histogram");
+
+            if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
+            let sketch = deserialize_histogram(sketch_bytes);
+                // Verify sketch has the expected sample count
+                prop_assert_eq!(sketch.count(), samples.len() as u32);
+
+                let p0 = sketch.min().unwrap();
+                let p25 = sketch.quantile(0.25).unwrap_or(f64::NAN);
+                let p50 = sketch.quantile(0.5).unwrap_or(f64::NAN);
+                let p75 = sketch.quantile(0.75).unwrap_or(f64::NAN);
+                let p100 = sketch.max().unwrap();
+
+                // Only verify ordering for quantiles that exist (non-NaN)
+                // DDSketch may return NaN for quantiles with insufficient samples
+                if p25.is_finite() && p50.is_finite() && p75.is_finite() {
+                    prop_assert!(
+                        p0 <= p25 && p25 <= p50 && p50 <= p75 && p75 <= p100,
+                        "Quantile ordering violated: P0={p0} P25={p25} P50={p50} P75={p75} P100={p100}"
+                    );
+                }
+
+                // Always verify min <= max
+                prop_assert!(
+                    p0 <= p100,
+                    "Min must be <= max: min={p0} max={p100}"
+                );
+            } else {
+                prop_assert!(false, "Expected histogram");
+            }
+        }
     }
 }

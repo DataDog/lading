@@ -16,6 +16,7 @@
 use anyhow::Context;
 use bytes::Bytes;
 use bytes::BytesMut;
+use ddsketch_agent::DDSketch;
 use http_body_util::Full;
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Method, Request, StatusCode, service::service_fn};
@@ -30,7 +31,6 @@ use shared::{
         integration_target_server::{IntegrationTarget, IntegrationTargetServer},
     },
 };
-use sketches_ddsketch::DDSketch;
 use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 use tokio::task::JoinSet;
 use tokio::{
@@ -48,6 +48,7 @@ static HTTP_COUNTERS: OnceCell<Arc<Mutex<HttpCounters>>> = OnceCell::new();
 static TCP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
 static UDP_COUNTERS: OnceCell<Arc<Mutex<SocketCounters>>> = OnceCell::new();
 
+#[derive(Default)]
 struct HttpCounters {
     body_size: DDSketch,
     entropy: DDSketch,
@@ -56,60 +57,22 @@ struct HttpCounters {
     methods: HashMap<Method, u64>,
 }
 
-impl Default for HttpCounters {
-    fn default() -> Self {
-        let config = sketches_ddsketch::Config::defaults();
-        let message_len = DDSketch::new(config);
-
-        let config = sketches_ddsketch::Config::defaults();
-        let entropy = DDSketch::new(config);
-
-        Self {
-            body_size: message_len,
-            entropy,
-            request_count: Default::default(),
-            total_bytes: Default::default(),
-            methods: HashMap::new(),
-        }
-    }
-}
-
 impl From<&HttpCounters> for HttpMetrics {
     fn from(val: &HttpCounters) -> Self {
         HttpMetrics {
             request_count: val.request_count,
             total_bytes: val.total_bytes,
-            median_entropy: val
-                .entropy
-                .quantile(0.5)
-                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
-                .unwrap_or_default(),
-            median_size: val
-                .body_size
-                .quantile(0.5)
-                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
-                .unwrap_or_default(),
+            median_entropy: val.entropy.quantile(0.5).unwrap_or_default(),
+            median_size: val.body_size.quantile(0.5).unwrap_or_default(),
         }
     }
 }
 
+#[derive(Default)]
 struct SocketCounters {
     entropy: DDSketch,
     read_count: u64,
     total_bytes: u64,
-}
-
-impl Default for SocketCounters {
-    fn default() -> Self {
-        let config = sketches_ddsketch::Config::defaults();
-        let entropy = DDSketch::new(config);
-
-        Self {
-            entropy,
-            read_count: Default::default(),
-            total_bytes: Default::default(),
-        }
-    }
 }
 
 impl From<&SocketCounters> for SocketMetrics {
@@ -117,11 +80,7 @@ impl From<&SocketCounters> for SocketMetrics {
         SocketMetrics {
             read_count: val.read_count,
             total_bytes: val.total_bytes,
-            median_entropy: val
-                .entropy
-                .quantile(0.5)
-                .expect("quantile argument must be between 0.0 and 1.0 inclusive")
-                .unwrap_or_default(),
+            median_entropy: val.entropy.quantile(0.5).unwrap_or_default(),
         }
     }
 }
@@ -142,9 +101,9 @@ async fn http_req_handler(
         m.request_count += 1;
 
         m.total_bytes = body.len() as u64;
-        m.entropy.add(entropy::metric_entropy(&body) as f64);
+        m.entropy.insert(entropy::metric_entropy(&body) as f64);
 
-        m.body_size.add(body.len() as f64);
+        m.body_size.insert(body.len() as f64);
 
         let method_counter = m.methods.entry(parts.method).or_default();
         *method_counter += 1;
@@ -317,7 +276,7 @@ impl DucksTarget {
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += buffer.len() as u64;
-                m.entropy.add(entropy::metric_entropy(&buffer) as f64);
+                m.entropy.insert(entropy::metric_entropy(&buffer) as f64);
             }
 
             buffer.clear();
@@ -351,7 +310,7 @@ impl DucksTarget {
                 let mut m = metric.lock().await;
                 m.read_count += 1;
                 m.total_bytes += count as u64;
-                m.entropy.add(entropy::metric_entropy(buf) as f64);
+                m.entropy.insert(entropy::metric_entropy(buf) as f64);
             }
         }
     }

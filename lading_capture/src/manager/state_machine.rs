@@ -17,6 +17,9 @@ use crate::{
     manager::Clock,
     metric::{Counter, CounterValue, Gauge, GaugeValue, Metric},
 };
+
+#[cfg(test)]
+use crate::manager::{ClockFn, InstantClock};
 use metrics::Key;
 use metrics_util::registry::{AtomicStorage, Registry};
 use rustc_hash::FxHashMap;
@@ -119,10 +122,28 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         accumulator: Accumulator,
         mut global_labels: FxHashMap<String, String>,
         clock: C,
-    ) -> Self {
+    ) -> Self
+    where
+        C: Clone + 'static,
+    {
         let start = clock.start();
         let start_ms = clock.now_ms();
         let run_id = Uuid::new_v4();
+
+        // Set the global clock for histogram timestamping to ensure determinism
+        // In tests, use the controllable clock. In production, the default
+        // ClockFn::Real is used (direct call to Instant::now).
+        #[cfg(test)]
+        {
+            let clock_clone = clock.clone();
+            let clock_arc: Arc<dyn InstantClock> = Arc::new(clock_clone);
+            crate::manager::CAPTURE_CLOCK.store(Arc::new(ClockFn::Test(clock_arc)));
+        }
+        #[cfg(not(test))]
+        {
+            // Suppress unused variable warning in non-test builds
+            let _ = &clock;
+        }
 
         // Filter out reserved names from global labels in place
         for reserved in RESERVED_LABEL_NAMES {
@@ -176,6 +197,10 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
             Metric::Gauge(g) => {
                 let tick = self.instant_to_tick(g.timestamp);
                 self.accumulator.gauge(g, tick)?;
+            }
+            Metric::Histogram(h) => {
+                let tick = self.instant_to_tick(h.timestamp);
+                self.accumulator.histogram(h, tick)?;
             }
         }
         Ok(Operation::Continue)
@@ -320,6 +345,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn write_metric_line(
         &mut self,
         key: &Key,
@@ -352,31 +378,58 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
             return Ok(());
         }
 
-        let line = match value {
-            MetricValue::Counter(val) => line::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: tick,
-                metric_name: key.name().into(),
-                metric_kind: line::MetricKind::Counter,
-                value: line::LineValue::Int(*val),
-                labels,
-            },
-            MetricValue::Gauge(val) => line::Line {
-                run_id: self.run_id,
-                time: now_ms,
-                fetch_index: tick,
-                metric_name: key.name().into(),
-                metric_kind: line::MetricKind::Gauge,
-                value: line::LineValue::Float(*val),
-                labels,
-            },
-        };
+        match value {
+            MetricValue::Counter(val) => {
+                let line = line::Line {
+                    run_id: self.run_id,
+                    time: now_ms,
+                    fetch_index: tick,
+                    metric_name: key.name().into(),
+                    metric_kind: line::MetricKind::Counter,
+                    value: line::LineValue::Int(*val),
+                    labels,
+                    value_histogram: Vec::new(),
+                };
+                self.format
+                    .as_mut()
+                    .expect("format must be present during operation")
+                    .write_metric(&line)?;
+            }
+            MetricValue::Gauge(val) => {
+                let line = line::Line {
+                    run_id: self.run_id,
+                    time: now_ms,
+                    fetch_index: tick,
+                    metric_name: key.name().into(),
+                    metric_kind: line::MetricKind::Gauge,
+                    value: line::LineValue::Float(*val),
+                    labels,
+                    value_histogram: Vec::new(),
+                };
+                self.format
+                    .as_mut()
+                    .expect("format must be present during operation")
+                    .write_metric(&line)?;
+            }
+            MetricValue::Histogram(sketch_bytes) => {
+                let line = line::Line {
+                    run_id: self.run_id,
+                    time: now_ms,
+                    fetch_index: tick,
+                    metric_name: key.name().into(),
+                    metric_kind: line::MetricKind::Histogram,
+                    value: line::LineValue::Float(0.0),
+                    labels,
+                    value_histogram: sketch_bytes.clone(),
+                };
 
-        self.format
-            .as_mut()
-            .expect("format must be present during operation")
-            .write_metric(&line)?;
+                self.format
+                    .as_mut()
+                    .expect("format must be present during operation")
+                    .write_metric(&line)?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -384,9 +437,13 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metric::{Counter, Gauge, Histogram};
     use crate::{formats::jsonl, test::writer::InMemoryWriter};
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
     use metrics_util::registry::{AtomicStorage, Registry};
     use proptest::prelude::*;
+    use protobuf::Message;
     use std::{
         collections::HashSet,
         sync::{Arc, Mutex},
@@ -498,6 +555,10 @@ mod tests {
             name: String,
             value: f64,
         },
+        WriteHistogram {
+            name: String,
+            value: f64,
+        },
         HistoricalCounterIncr {
             name: String,
             value: u64,
@@ -519,6 +580,11 @@ mod tests {
             tick_offset: u64,
         },
         HistoricalGaugeSet {
+            name: String,
+            value: f64,
+            tick_offset: u64,
+        },
+        HistoricalHistogram {
             name: String,
             value: f64,
             tick_offset: u64,
@@ -591,6 +657,19 @@ mod tests {
                         "HistoricalGaugeSet({name:?}, {value}, tick_offset={tick_offset})"
                     )
                 }
+                Self::WriteHistogram { name, value } => {
+                    write!(f, "WriteHistogram({name:?}, {value})")
+                }
+                Self::HistoricalHistogram {
+                    name,
+                    value,
+                    tick_offset,
+                } => {
+                    write!(
+                        f,
+                        "HistoricalHistogram({name:?}, {value}, tick_offset={tick_offset})"
+                    )
+                }
                 Self::AdvanceTime { millis } => write!(f, "AdvanceTime({millis})"),
                 Self::BackwardTime { millis } => write!(f, "BackwardTime({millis})"),
                 Self::FlushTick => write!(f, "FlushTick"),
@@ -661,6 +740,23 @@ mod tests {
                             tick_offset,
                         }
                     }),
+                (
+                    "[a-z]{1,5}",
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite())
+                )
+                    .prop_map(|(name, value)| CaptureOp::WriteHistogram { name, value }),
+                (
+                    "[a-z]{1,5}",
+                    (-1000.0f64..1000.0f64).prop_filter("must be finite", |f| f.is_finite()),
+                    0u64..=10u64
+                )
+                    .prop_map(|(name, value, tick_offset)| {
+                        CaptureOp::HistoricalHistogram {
+                            name,
+                            value,
+                            tick_offset,
+                        }
+                    }),
                 (0u128..=1_000u128).prop_map(|millis| CaptureOp::AdvanceTime { millis }),
                 (0u128..=500u128).prop_map(|millis| CaptureOp::BackwardTime { millis }),
                 Just(CaptureOp::FlushTick),
@@ -705,11 +801,13 @@ mod tests {
                 .filter_map(|op| match op {
                     CaptureOp::WriteCounter { name, .. }
                     | CaptureOp::WriteGauge { name, .. }
+                    | CaptureOp::WriteHistogram { name, .. }
                     | CaptureOp::HistoricalCounterIncr { name, .. }
                     | CaptureOp::HistoricalCounterAbs { name, .. }
                     | CaptureOp::HistoricalGaugeIncr { name, .. }
                     | CaptureOp::HistoricalGaugeDec { name, .. }
-                    | CaptureOp::HistoricalGaugeSet { name, .. } => Some(name.clone()),
+                    | CaptureOp::HistoricalGaugeSet { name, .. }
+                    | CaptureOp::HistoricalHistogram { name, .. } => Some(name.clone()),
                     CaptureOp::AdvanceTime { .. }
                     | CaptureOp::BackwardTime { .. }
                     | CaptureOp::FlushTick => None,
@@ -728,8 +826,13 @@ mod tests {
                             metrics::gauge!(name).set(value);
                         });
                     }
+                    CaptureOp::WriteHistogram { name, value } => {
+                        metrics::with_local_recorder(&recorder, || {
+                            metrics::histogram!(name).record(value);
+                        });
+                    }
                     CaptureOp::HistoricalCounterIncr { name, value, tick_offset } => {
-                        let timestamp = clock.now()
+                        let timestamp = Clock::now(&clock)
                             .checked_sub(Duration::from_secs(tick_offset))
                             .unwrap_or(clock.start());
                         let counter = Counter {
@@ -740,7 +843,7 @@ mod tests {
                         let _ = machine.next(Event::MetricReceived(Metric::Counter(counter)));
                     }
                     CaptureOp::HistoricalCounterAbs { name, value, tick_offset } => {
-                        let timestamp = clock.now()
+                        let timestamp = Clock::now(&clock)
                             .checked_sub(Duration::from_secs(tick_offset))
                             .unwrap_or(clock.start());
                         let counter = Counter {
@@ -751,7 +854,7 @@ mod tests {
                         let _ = machine.next(Event::MetricReceived(Metric::Counter(counter)));
                     }
                     CaptureOp::HistoricalGaugeIncr { name, value, tick_offset } => {
-                        let timestamp = clock.now()
+                        let timestamp = Clock::now(&clock)
                             .checked_sub(Duration::from_secs(tick_offset))
                             .unwrap_or(clock.start());
                         let gauge = Gauge {
@@ -762,7 +865,7 @@ mod tests {
                         let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
                     }
                     CaptureOp::HistoricalGaugeDec { name, value, tick_offset } => {
-                        let timestamp = clock.now()
+                        let timestamp = Clock::now(&clock)
                             .checked_sub(Duration::from_secs(tick_offset))
                             .unwrap_or(clock.start());
                         let gauge = Gauge {
@@ -773,7 +876,7 @@ mod tests {
                         let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
                     }
                     CaptureOp::HistoricalGaugeSet { name, value, tick_offset } => {
-                        let timestamp = clock.now()
+                        let timestamp = Clock::now(&clock)
                             .checked_sub(Duration::from_secs(tick_offset))
                             .unwrap_or(clock.start());
                         let gauge = Gauge {
@@ -782,6 +885,17 @@ mod tests {
                             value: GaugeValue::Set(value),
                         };
                         let _ = machine.next(Event::MetricReceived(Metric::Gauge(gauge)));
+                    }
+                    CaptureOp::HistoricalHistogram { name, value, tick_offset } => {
+                        let timestamp = Clock::now(&clock)
+                            .checked_sub(Duration::from_secs(tick_offset))
+                            .unwrap_or(clock.start());
+                        let histogram = Histogram {
+                            key: Key::from_name(name),
+                            timestamp,
+                            value,
+                        };
+                        let _ = machine.next(Event::MetricReceived(Metric::Histogram(histogram)));
                     }
                     CaptureOp::AdvanceTime { millis } => {
                         clock.advance(millis);
@@ -818,6 +932,54 @@ mod tests {
                         "Metric '{}' was written but not found in output (60+ FlushTicks occurred)",
                         name
                     );
+                }
+
+                // Verify histogram data integrity
+                for line in &lines {
+                    if line.metric_kind == line::MetricKind::Histogram {
+                        if !line.value_histogram.is_empty() {
+                            let sketch_bytes = &line.value_histogram;
+                            let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes)
+                                .expect("should parse protobuf");
+                            let sketch = DDSketch::try_from(dogsketch).expect("should convert");
+
+                            prop_assert!(
+                                sketch.count() > 0,
+                                "Histogram {} has empty sketch but should have samples",
+                                line.metric_name
+                            );
+
+                            // Verify min/max are finite when sketch has data
+                            if let Some(min) = sketch.min() {
+                                prop_assert!(
+                                    min.is_finite(),
+                                    "Histogram {} has non-finite min: {}",
+                                    line.metric_name,
+                                    min
+                                );
+                            }
+                            if let Some(max) = sketch.max() {
+                                prop_assert!(
+                                    max.is_finite(),
+                                    "Histogram {} has non-finite max: {}",
+                                    line.metric_name,
+                                    max
+                                );
+                            }
+
+                            // Verify quantiles work and return finite values
+                            let median = sketch.quantile(0.5).unwrap_or(f64::NAN);
+                            prop_assert!(
+                                median.is_finite(),
+                                "Histogram {} has non-finite median: {}",
+                                line.metric_name,
+                                median
+                            );
+                        } else {
+                            // Histogram line exists but has no data - this might be valid
+                            // for empty sketches that weren't filtered
+                        }
+                    }
                 }
             }
         }
@@ -1464,5 +1626,74 @@ mod tests {
                 "Run with single FlushTick should drain tick 0"
             );
         }
+    }
+
+    #[test]
+    fn histogram_end_to_end() {
+        let writer = InMemoryWriter::new();
+        let format = jsonl::Format::new(writer.clone());
+        let clock = TestClock::new(0);
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let accumulator = Accumulator::new();
+        let labels = FxHashMap::default();
+
+        let mut machine = StateMachine::new(
+            Duration::from_secs(60),
+            format,
+            1,
+            registry,
+            accumulator,
+            labels,
+            clock.clone(),
+        );
+
+        // Send histogram samples at tick 0
+        for value in [10.0, 20.0, 30.0, 40.0, 50.0] {
+            let hist = crate::metric::Histogram {
+                key: Key::from_parts(
+                    "test_histogram",
+                    vec![metrics::Label::new("service", "api")],
+                ),
+                timestamp: clock.start(),
+                value,
+            };
+            let _ = machine.next(Event::MetricReceived(Metric::Histogram(hist)));
+        }
+
+        // Advance and flush
+        for _ in 0..61 {
+            clock.advance(1000);
+            let _ = machine.next(Event::FlushTick);
+        }
+
+        let _ = machine.next(Event::ShutdownSignaled);
+
+        // Parse output
+        let lines = writer.parse_lines().expect("should parse");
+
+        // Should have 1 histogram row with value_histogram field
+        let histogram_lines: Vec<_> = lines
+            .iter()
+            .filter(|l| l.metric_name == "test_histogram")
+            .collect();
+
+        assert_eq!(histogram_lines.len(), 1, "Should have 1 histogram row");
+
+        let hist_line = histogram_lines[0];
+        assert!(matches!(hist_line.metric_kind, line::MetricKind::Histogram));
+        assert!(
+            !hist_line.value_histogram.is_empty(),
+            "Should have value_histogram"
+        );
+
+        // Verify sketch data
+        let sketch_bytes = &hist_line.value_histogram;
+        let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes).expect("parse protobuf");
+        let sketch = DDSketch::try_from(dogsketch).expect("convert");
+
+        assert_eq!(sketch.min(), Some(10.0));
+        assert_eq!(sketch.max(), Some(50.0));
+        let median = sketch.quantile(0.5).unwrap();
+        assert!((median - 30.0).abs() < 5.0, "median should be ~30");
     }
 }

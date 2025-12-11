@@ -10,7 +10,7 @@ use std::{
 };
 
 use arrow_array::{
-    ArrayRef, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
+    ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
     TimestampMillisecondArray, UInt64Array,
 };
 use arrow_buffer::OffsetBuffer;
@@ -55,6 +55,7 @@ struct ColumnBuffers {
     label_keys: Vec<String>,
     label_values: Vec<String>,
     label_offsets: Vec<i32>,
+    values_histogram: Vec<Vec<u8>>,
 }
 
 impl ColumnBuffers {
@@ -73,6 +74,7 @@ impl ColumnBuffers {
             label_keys: Vec::with_capacity(INITIAL_CAPACITY * 2),
             label_values: Vec::with_capacity(INITIAL_CAPACITY * 2),
             label_offsets: Vec::with_capacity(INITIAL_CAPACITY + 1),
+            values_histogram: Vec::with_capacity(INITIAL_CAPACITY),
         }
     }
 
@@ -88,6 +90,7 @@ impl ColumnBuffers {
         self.label_keys.clear();
         self.label_values.clear();
         self.label_offsets.clear();
+        self.values_histogram.clear();
     }
 
     /// Add a metric line to the buffers
@@ -100,6 +103,7 @@ impl ColumnBuffers {
         self.metric_kinds.push(match line.metric_kind {
             line::MetricKind::Counter => "counter",
             line::MetricKind::Gauge => "gauge",
+            line::MetricKind::Histogram => "histogram",
         });
 
         match line.value {
@@ -120,6 +124,8 @@ impl ColumnBuffers {
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         self.label_offsets.push(self.label_keys.len() as i32);
+
+        self.values_histogram.push(line.value_histogram.clone());
     }
 
     /// Check if buffers are empty
@@ -187,6 +193,7 @@ impl<W: Write + Seek + Send> Format<W> {
                 ),
                 false,
             ),
+            Field::new("value_histogram", DataType::Binary, true),
         ]));
 
         // Use Parquet v2 format for better encodings and compression:
@@ -266,6 +273,19 @@ impl<W: Write + Seek + Send> Format<W> {
             Arc::new(UInt64Array::from(self.buffers.values_int.clone())),
             Arc::new(Float64Array::from(self.buffers.values_float.clone())),
             Arc::new(labels_map),
+            Arc::new(BinaryArray::from_opt_vec(
+                self.buffers
+                    .values_histogram
+                    .iter()
+                    .map(|v| {
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(v.as_slice())
+                        }
+                    })
+                    .collect(),
+            )),
         ];
 
         Ok(RecordBatch::try_new(self.schema.clone(), arrays)?)
@@ -349,6 +369,9 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 mod tests {
     use super::*;
     use crate::line::{Line, LineValue, MetricKind};
+    use datadog_protos::metrics::Dogsketch;
+    use ddsketch_agent::DDSketch;
+    use protobuf::Message;
     use rustc_hash::FxHashMap;
     use std::io::Cursor;
     use uuid::Uuid;
@@ -366,6 +389,7 @@ mod tests {
             metric_kind: MetricKind::Counter,
             value: LineValue::Int(42),
             labels: FxHashMap::default(),
+            value_histogram: Vec::new(),
         };
 
         format.write_metric(&line).expect("write should succeed");
@@ -391,6 +415,7 @@ mod tests {
                 metric_kind: MetricKind::Gauge,
                 value: LineValue::Float(i as f64),
                 labels: FxHashMap::default(),
+                value_histogram: Vec::new(),
             };
             format.write_metric(&line).expect("write should succeed");
         }
@@ -399,5 +424,36 @@ mod tests {
         format.flush().expect("flush should succeed");
 
         assert_eq!(format.buffers.len(), 0, "buffers should be empty");
+    }
+
+    #[test]
+    fn writes_histogram() {
+        let mut buffer = Cursor::new(Vec::new());
+
+        {
+            let mut format = Format::new(&mut buffer, 10).expect("create format");
+
+            let mut sketch = DDSketch::default();
+            sketch.insert(10.0);
+            sketch.insert(20.0);
+            let mut dogsketch = Dogsketch::new();
+            sketch.merge_to_dogsketch(&mut dogsketch);
+
+            let line = Line {
+                run_id: Uuid::new_v4(),
+                time: 1000,
+                fetch_index: 0,
+                metric_name: "histogram_metric".into(),
+                metric_kind: MetricKind::Histogram,
+                value: LineValue::Float(0.0),
+                labels: FxHashMap::default(),
+                value_histogram: dogsketch.write_to_bytes().expect("protobuf"),
+            };
+
+            format.write_metric(&line).expect("write should succeed");
+            format.flush().expect("flush should succeed");
+        }
+
+        assert!(!buffer.get_ref().is_empty(), "should have written data");
     }
 }
