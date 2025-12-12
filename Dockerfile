@@ -1,5 +1,15 @@
+FROM docker.io/rust:1.90.0-bookworm AS chef
+RUN cargo install cargo-chef
+WORKDIR /app
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
 # Update the rust version in-sync with the version in rust-toolchain.toml
-FROM docker.io/rust:1.90.0-bookworm AS builder
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler fuse3 libfuse3-dev \
@@ -25,20 +35,21 @@ COPY --from=builder /app/target/release/lading /usr/bin/lading
 
 # Create wrapper script that starts tcpdump before lading
 RUN echo '#!/bin/bash\n\
-set -e\n\
-\n\
-echo "Starting tcpdump on port 11538..."\n\
-tcpdump -i any -nn -s0 port 11538 -w /captures/grpc-traffic.pcap &\n\
-TCPDUMP_PID=$!\n\
-echo $TCPDUMP_PID > /tmp/tcpdump.pid\n\
-echo "tcpdump started with PID $TCPDUMP_PID, capturing to /captures/grpc-traffic.pcap"\n\
-\n\
-# Give tcpdump time to initialize\n\
-sleep 2\n\
-\n\
-# Start lading with all arguments\n\
-exec /usr/bin/lading "$@"\n\
-' > /usr/bin/lading-wrapper && chmod +x /usr/bin/lading-wrapper
+    set -e\n\
+    \n\
+    echo "Starting tcpdump on port 11538..."\n\
+    # Full-packet capture with large buffer to avoid drops/truncation\n\
+    tcpdump -i any -nn -s0 -B 512000 -w /captures/grpc-traffic.pcap tcp port 11538 &\n\
+    TCPDUMP_PID=$!\n\
+    echo $TCPDUMP_PID > /tmp/tcpdump.pid\n\
+    echo "tcpdump started with PID $TCPDUMP_PID, capturing to /captures/grpc-traffic.pcap"\n\
+    \n\
+    # Give tcpdump time to initialize\n\
+    sleep 2\n\
+    \n\
+    # Start lading with all arguments\n\
+    exec /usr/bin/lading "$@"\n\
+    ' > /usr/bin/lading-wrapper && chmod +x /usr/bin/lading-wrapper
 
 # smoke test
 RUN ["/usr/bin/lading", "--help"]
