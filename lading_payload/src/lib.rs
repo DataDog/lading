@@ -164,6 +164,9 @@ pub enum Config {
         /// no lines. When false, empty seconds are skipped.
         #[serde(default)]
         emit_placeholder: bool,
+        /// Optional starting line offset; lines before this index are skipped.
+        #[serde(default)]
+        start_line_index: Option<u64>,
     },
     /// Generates a line of printable ascii characters
     Ascii,

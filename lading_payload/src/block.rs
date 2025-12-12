@@ -385,11 +385,16 @@ impl Cache {
                 static_path,
                 timestamp_format,
                 emit_placeholder,
+                start_line_index,
             } => {
                 let span = span!(Level::INFO, "fixed", payload = "static-second");
                 let _guard = span.enter();
-                let mut serializer =
-                    crate::StaticSecond::new(static_path, &timestamp_format, *emit_placeholder)?;
+                let mut serializer = crate::StaticSecond::new(
+                    static_path,
+                    &timestamp_format,
+                    *emit_placeholder,
+                    start_line_index.unwrap_or(0),
+                )?;
                 construct_block_cache_inner(
                     &mut rng,
                     &mut serializer,
@@ -466,6 +471,14 @@ impl Cache {
     pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
+        }
+    }
+
+    /// Get the number of blocks in the cache.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Fixed { blocks, .. } => blocks.len(),
         }
     }
 

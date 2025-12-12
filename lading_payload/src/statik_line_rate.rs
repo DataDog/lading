@@ -152,6 +152,7 @@ fn read_lines_from_reader<R: std::io::Read>(reader: R) -> Result<Vec<Vec<u8>>, s
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Serialize;
     use rand::{SeedableRng, rngs::StdRng};
     use std::{env, fs::File, io::Write as IoWrite};
 

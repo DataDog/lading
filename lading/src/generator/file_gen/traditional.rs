@@ -128,6 +128,11 @@ pub struct Config {
     /// buffered writer would otherwise delay writes to disk.
     #[serde(default)]
     pub flush_each_block: bool,
+    /// Optional starting line offset into the block cache. This advances
+    /// through blocks until the cumulative line count reaches this value,
+    /// then begins emitting from that block. If data point counts are not
+    /// available for a payload, this setting is effectively ignored.
+    pub start_line_index: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -207,6 +212,7 @@ impl Server {
                     .block_interval_millis
                     .map(Duration::from_millis),
                 flush_each_block: config.flush_each_block,
+                start_line_index: config.start_line_index.unwrap_or(0),
             };
 
             handles.spawn(child.spin());
@@ -283,6 +289,7 @@ struct Child {
     shutdown: lading_signal::Watcher,
     block_interval: Option<Duration>,
     flush_each_block: bool,
+    start_line_index: u64,
 }
 
 impl Child {
@@ -314,7 +321,23 @@ impl Child {
         );
 
         let mut handle = self.block_cache.handle();
-
+        if self.start_line_index > 0 {
+            let mut remaining = self.start_line_index;
+            // Walk blocks until we reach or surpass the requested line offset.
+            // If metadata is missing, assume at least one data point to ensure progress.
+            loop {
+                let md = self.block_cache.peek_next_metadata(&handle);
+                let mut lines = md.data_points.unwrap_or(1);
+                if lines == 0 {
+                    lines = 1;
+                }
+                if lines >= remaining {
+                    break;
+                }
+                remaining = remaining.saturating_sub(lines);
+                let _ = self.block_cache.advance(&mut handle);
+            }
+        }
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         let mut next_tick = self
