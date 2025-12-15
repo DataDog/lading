@@ -26,6 +26,7 @@ pub use opentelemetry::log::OpentelemetryLogs;
 pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
+pub use static_chunks::StaticChunks;
 pub use statik::Static;
 pub use syslog::Syslog5424;
 
@@ -39,6 +40,7 @@ pub mod json;
 pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
+pub mod static_chunks;
 pub mod statik;
 pub mod syslog;
 pub mod trace_agent;
@@ -129,6 +131,14 @@ pub enum Config {
         /// assumed to be line-oriented but no other claim is made on the file.
         static_path: PathBuf,
     },
+    /// Generates blocks from a user supplied path. This form of static will chunk
+    /// data by lines trying to fill up the maximum bytes per block (as opposed to Static which
+    /// will read entire files into a single block).
+    StaticChunks {
+        /// Defines the file path to read static variant data from. When this is a directory,
+        /// all files under it (non-recursively) will be read line by line.
+        static_path: PathBuf,
+    },
     /// Generates a line of printable ascii characters
     Ascii,
     /// Generates a json encoded line
@@ -167,6 +177,8 @@ pub enum Payload {
     SplunkHec(splunk_hec::SplunkHec),
     /// Static file content
     Static(Static),
+    /// Static file content, chunked into lines that fill blocks as closely as possible.
+    StaticChunks(StaticChunks),
     /// Syslog RFC 5424 format
     Syslog(Syslog5424),
     /// OpenTelemetry traces
@@ -195,6 +207,7 @@ impl Serialize for Payload {
             Payload::Json(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::SplunkHec(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Static(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::StaticChunks(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Syslog(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),

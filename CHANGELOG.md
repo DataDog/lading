@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lading now supports histogram approximations in its capture files.
 - HTTP blackhole now tracks distribution of bytes received, both decoded and
   compressed.
+- New "Static Chunks" generator that divides static files by lines into blocks
+  (as opposed to static which turns each file into a block).
 
 ## [0.30.0]
 ## Added
