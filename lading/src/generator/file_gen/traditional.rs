@@ -208,9 +208,7 @@ impl Server {
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
-                block_interval: config
-                    .block_interval_millis
-                    .map(Duration::from_millis),
+                block_interval: config.block_interval_millis.map(Duration::from_millis),
                 flush_each_block: config.flush_each_block,
                 start_line_index: config.start_line_index.unwrap_or(0),
             };

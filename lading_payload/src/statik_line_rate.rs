@@ -46,8 +46,7 @@ impl StaticLinesPerSecond {
     ///
     /// See documentation for [`Error`]
     pub fn new(path: &Path, lines_per_second: u32) -> Result<Self, Error> {
-        let lines_per_block =
-            NonZeroU32::new(lines_per_second).ok_or(Error::ZeroLinesPerSecond)?;
+        let lines_per_block = NonZeroU32::new(lines_per_second).ok_or(Error::ZeroLinesPerSecond)?;
 
         let mut sources = Vec::with_capacity(16);
 

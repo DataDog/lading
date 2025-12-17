@@ -27,8 +27,8 @@ pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
 pub use statik::Static;
-pub use statik_second::StaticSecond;
 pub use statik_line_rate::StaticLinesPerSecond;
+pub use statik_second::StaticSecond;
 pub use syslog::Syslog5424;
 
 pub mod apache_common;
@@ -42,8 +42,8 @@ pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod statik;
-pub mod statik_second;
 pub mod statik_line_rate;
+pub mod statik_second;
 pub mod syslog;
 pub mod trace_agent;
 
