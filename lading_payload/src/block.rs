@@ -23,6 +23,9 @@ pub enum SpinError {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// `StaticChunks` payload creation error
+    #[error(transparent)]
+    StaticChunks(#[from] crate::static_chunks::Error),
     /// rng slice is Empty
     #[error("RNG slice is empty")]
     EmptyRng,
@@ -55,6 +58,9 @@ pub enum Error {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
+    /// `StaticChunks` payload creation error
+    #[error(transparent)]
+    StaticChunks(#[from] crate::static_chunks::Error),
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
@@ -333,6 +339,17 @@ impl Cache {
                 construct_block_cache_inner(
                     &mut rng,
                     &mut static_serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
+            crate::Config::StaticChunks { static_path } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-chunks");
+                let _guard = span.enter();
+                let mut serializer = crate::StaticChunks::new(static_path)?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
                     maximum_block_bytes,
                     total_bytes.get(),
                 )?
