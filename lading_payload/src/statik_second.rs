@@ -235,8 +235,12 @@ mod tests {
             writeln!(f, "2024-01-01T00:00:01 third").unwrap();
         }
 
-        let mut serializer =
-            StaticSecond::new(&path, "%Y-%m-%dT%H:%M:%S", /* emit_placeholder */ false).unwrap();
+        let mut serializer = StaticSecond::new(
+            &path,
+            "%Y-%m-%dT%H:%M:%S",
+            /* emit_placeholder */ false,
+        )
+        .unwrap();
         let mut rng = StdRng::seed_from_u64(7);
         let mut buf = Vec::new();
 
