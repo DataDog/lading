@@ -76,6 +76,36 @@ pub(super) struct ThroughputThrottle {
     pub mode: ThrottleMode,
 }
 
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+#[serde(deny_unknown_fields)]
+/// Unified throughput profile for file generators.
+pub enum ThroughputProfile {
+    /// Byte-oriented throttling (default).
+    Bytes {
+        /// Standard throttle configuration.
+        #[serde(default)]
+        throttle: Option<BytesThrottleConfig>,
+        /// Legacy shorthand for a stable bytes-per-second throttle.
+        #[serde(default)]
+        bytes_per_second: Option<byte_unit::Byte>,
+    },
+    /// Block-oriented throttling; each emitted block costs one token.
+    Blocks {
+        /// Blocks allowed per second.
+        blocks_per_second: NonZeroU32,
+    },
+}
+
+impl Default for ThroughputProfile {
+    fn default() -> Self {
+        Self::Bytes {
+            throttle: None,
+            bytes_per_second: None,
+        }
+    }
+}
+
 /// Create a throttle from optional config and `bytes_per_second` fallback
 ///
 /// This function implements the standard throttle creation logic for
@@ -123,36 +153,35 @@ pub(super) fn create_throttle(
     Ok(lading_throttle::Throttle::new_with_config(throttle_config))
 }
 
-/// Create a throttle that can be interpreted either as bytes-per-second
-/// or blocks-per-second.
-///
-/// Blocks-based throttling conflicts with byte-based throttling; providing both
-/// will result in [`ThrottleConversionError::ConflictingConfig`].
-pub(super) fn create_block_or_byte_throttle(
-    config: Option<&BytesThrottleConfig>,
-    bytes_per_second: Option<&byte_unit::Byte>,
-    blocks_per_second: Option<NonZeroU32>,
+/// Create a throttle from a unified throughput profile.
+pub(super) fn create_throughput_throttle(
+    profile: Option<&ThroughputProfile>,
 ) -> Result<ThroughputThrottle, ThrottleConversionError> {
-    if let Some(blocks) = blocks_per_second {
-        if config.is_some() || bytes_per_second.is_some() {
-            return Err(ThrottleConversionError::ConflictingConfig);
-        }
-        let throttle =
-            lading_throttle::Throttle::new_with_config(lading_throttle::Config::Stable {
-                maximum_capacity: blocks,
-                timeout_micros: 0,
-            });
-        return Ok(ThroughputThrottle {
+    match profile.unwrap_or(&ThroughputProfile::default()) {
+        ThroughputProfile::Bytes {
             throttle,
-            mode: ThrottleMode::Blocks,
-        });
+            bytes_per_second,
+        } => {
+            let throttle = create_throttle(throttle.as_ref(), bytes_per_second.as_ref())?;
+            Ok(ThroughputThrottle {
+                throttle,
+                mode: ThrottleMode::Bytes,
+            })
+        }
+        ThroughputProfile::Blocks {
+            blocks_per_second,
+        } => {
+            let throttle =
+                lading_throttle::Throttle::new_with_config(lading_throttle::Config::Stable {
+                    maximum_capacity: *blocks_per_second,
+                    timeout_micros: 0,
+                });
+            Ok(ThroughputThrottle {
+                throttle,
+                mode: ThrottleMode::Blocks,
+            })
+        }
     }
-
-    let throttle = create_throttle(config, bytes_per_second)?;
-    Ok(ThroughputThrottle {
-        throttle,
-        mode: ThrottleMode::Bytes,
-    })
 }
 
 impl TryFrom<&BytesThrottleConfig> for lading_throttle::Config {

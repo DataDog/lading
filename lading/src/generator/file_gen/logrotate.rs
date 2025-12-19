@@ -36,8 +36,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, ThrottleMode,
-    create_block_or_byte_throttle,
+    MetricsBuilder, ThrottleConversionError, ThrottleMode, ThroughputProfile,
+    create_throughput_throttle,
 };
 
 /// An enum to allow us to determine what operation caused an IO errror as the
@@ -138,6 +138,7 @@ pub struct Config {
     /// Sets the [`crate::payload::Config`] of this template.
     pub variant: lading_payload::Config,
     /// Defines the number of bytes that written in each log file.
+    #[deprecated(note = "Use load_profile.bytes.bytes_per_second instead")]
     bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
@@ -148,11 +149,9 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
-    /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
-    /// Optional blocks-per-second throttle. Conflicts with byte-based throttles.
+    /// Throughput profile controlling emission rate (bytes or blocks).
     #[serde(default)]
-    pub blocks_per_second: Option<NonZeroU32>,
+    pub load_profile: Option<ThroughputProfile>,
 }
 
 #[derive(Debug)]
@@ -218,11 +217,17 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throughput_throttle = create_block_or_byte_throttle(
-                config.throttle.as_ref(),
-                config.bytes_per_second.as_ref(),
-                config.blocks_per_second,
-            )?;
+            let throughput_throttle =
+                create_throughput_throttle(config.load_profile.as_ref()).or_else(|e| {
+                    if config.bytes_per_second.is_some() {
+                        create_throughput_throttle(Some(&ThroughputProfile::Bytes {
+                            throttle: None,
+                            bytes_per_second: config.bytes_per_second,
+                        }))
+                    } else {
+                        Err(e)
+                    }
+                })?;
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);

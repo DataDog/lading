@@ -38,8 +38,8 @@ use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, ThrottleMode,
-    create_block_or_byte_throttle,
+    MetricsBuilder, ThrottleConversionError, ThrottleMode, ThroughputProfile,
+    create_throughput_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -105,6 +105,7 @@ pub struct Config {
     /// written _continuously_ per second from this target. Higher bursts are
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
+    #[deprecated(note = "Use load_profile.bytes.bytes_per_second instead")]
     bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
@@ -120,11 +121,9 @@ pub struct Config {
     /// tailing software to remove old files.
     #[serde(default = "default_rotation")]
     rotate: bool,
-    /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
-    /// Optional blocks-per-second throttle. Conflicts with byte-based throttles.
+    /// Throughput profile controlling emission rate (bytes or blocks).
     #[serde(default)]
-    pub blocks_per_second: Option<NonZeroU32>,
+    pub load_profile: Option<ThroughputProfile>,
     /// Optional fixed interval between blocks. When set, the generator waits
     /// this duration before emitting the next block, regardless of byte size.
     pub block_interval_millis: Option<u64>,
@@ -183,11 +182,18 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throughput_throttle = create_block_or_byte_throttle(
-                config.throttle.as_ref(),
-                config.bytes_per_second.as_ref(),
-                config.blocks_per_second,
-            )?;
+            let throughput_throttle =
+                create_throughput_throttle(config.load_profile.as_ref()).or_else(|e| {
+                    // Backwards compatibility: fall back to deprecated fields.
+                    if config.bytes_per_second.is_some() {
+                        create_throughput_throttle(Some(&ThroughputProfile::Bytes {
+                            throttle: None,
+                            bytes_per_second: config.bytes_per_second,
+                        }))
+                    } else {
+                        Err(e)
+                    }
+                })?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(

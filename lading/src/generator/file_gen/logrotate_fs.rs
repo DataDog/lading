@@ -76,10 +76,15 @@ pub enum LoadProfile {
         /// Amount to increase per second
         rate: byte_unit::Byte,
     },
+    /// Constant blocks per second (derived to bytes via average block size).
+    Blocks {
+        /// Blocks per second
+        blocks_per_second: NonZeroU32,
+    },
 }
 
 impl LoadProfile {
-    fn to_model(self) -> model::LoadProfile {
+    fn to_model(self, average_block_size: u64) -> model::LoadProfile {
         // For now, one tick is one second.
         match self {
             LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.as_u128() as u64),
@@ -90,6 +95,12 @@ impl LoadProfile {
                 start: initial_bytes_per_second.as_u128() as u64,
                 rate: rate.as_u128() as u64,
             },
+            LoadProfile::Blocks { blocks_per_second } => {
+                let bytes = average_block_size
+                    .saturating_mul(u64::from(blocks_per_second.get()))
+                    .max(1);
+                model::LoadProfile::Constant(bytes)
+            }
         }
     }
 }
@@ -190,7 +201,7 @@ impl Server {
             block_cache,
             config.max_depth,
             config.concurrent_logs,
-            load_profile.to_model(),
+            load_profile.to_model(average_block_size),
         );
 
         info!(
