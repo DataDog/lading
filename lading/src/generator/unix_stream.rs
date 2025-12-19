@@ -27,7 +27,7 @@ use tracing::{debug, error, info, warn};
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -59,7 +59,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// Errors produced by [`UnixStream`].

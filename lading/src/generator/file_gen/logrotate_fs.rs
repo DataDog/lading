@@ -5,6 +5,9 @@
 #![allow(clippy::cast_possible_wrap)]
 
 use crate::generator;
+use crate::generator::common::{
+    BytesThrottleConfig, RateSpec, ThrottleConversionError, ThrottleMode,
+};
 use fuser::{
     BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
     ReplyEntry, Request, spawn_mount2,
@@ -61,6 +64,10 @@ pub struct Config {
     /// to a constant rate derived from the average block size.
     #[serde(default)]
     blocks_per_second: Option<NonZeroU32>,
+    /// Unified throttle profile (bytes or blocks). If set to blocks, overrides
+    /// `load_profile` / `blocks_per_second` and derives bytes via average block size.
+    #[serde(default)]
+    pub load_throttle: Option<BytesThrottleConfig>,
 }
 
 /// Profile for load in this filesystem.
@@ -114,6 +121,9 @@ pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] ThrottleConversionError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -177,7 +187,38 @@ impl Server {
                 block_cache.total_size().saturating_div(len).max(1)
             }
         };
-        let load_profile = if let Some(blocks_per_second) = config.blocks_per_second {
+        let load_profile = if let Some(throttle) = &config.load_throttle {
+            match throttle {
+                BytesThrottleConfig::Stable { rate, .. } => {
+                    let (mode, cap) = rate.resolve()?;
+                    match mode {
+                        ThrottleMode::Bytes => {
+                            LoadProfile::Constant(byte_unit::Byte::from_u64(cap.get().into()))
+                        }
+                        ThrottleMode::Blocks => {
+                            let bytes = average_block_size
+                                .saturating_mul(u64::from(cap.get()))
+                                .max(1);
+                            info!(
+                                blocks_per_second = cap.get(),
+                                average_block_size,
+                                derived_bytes_per_second = bytes,
+                                "logrotate_fs using block-based throttle derived from average block size"
+                            );
+                            LoadProfile::Constant(byte_unit::Byte::from_u64(bytes))
+                        }
+                    }
+                }
+                BytesThrottleConfig::AllOut => LoadProfile::Blocks {
+                    blocks_per_second: NonZeroU32::new(1).unwrap(),
+                },
+                BytesThrottleConfig::Linear { .. } => {
+                    return Err(Error::ThrottleConversion(
+                        ThrottleConversionError::MixedModes,
+                    ));
+                }
+            }
+        } else if let Some(blocks_per_second) = config.blocks_per_second {
             let bytes = average_block_size.saturating_mul(u64::from(blocks_per_second.get()));
             info!(
                 blocks_per_second = blocks_per_second.get(),

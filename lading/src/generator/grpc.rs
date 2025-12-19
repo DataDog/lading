@@ -36,7 +36,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 /// Errors produced by [`Grpc`]
@@ -115,7 +115,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.

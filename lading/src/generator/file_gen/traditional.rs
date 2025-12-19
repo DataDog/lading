@@ -38,7 +38,7 @@ use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConversionError, ThrottleMode, ThroughputProfile,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, ThrottleMode,
     create_throughput_throttle,
 };
 
@@ -123,7 +123,7 @@ pub struct Config {
     rotate: bool,
     /// Throughput profile controlling emission rate (bytes or blocks).
     #[serde(default)]
-    pub load_profile: Option<ThroughputProfile>,
+    pub load_profile: Option<ThrottleConfig>,
     /// Optional fixed interval between blocks. When set, the generator waits
     /// this duration before emitting the next block, regardless of byte size.
     pub block_interval_millis: Option<u64>,
@@ -182,18 +182,14 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
+            let legacy_bps = {
+                #[allow(deprecated)]
+                {
+                    config.bytes_per_second.as_ref()
+                }
+            };
             let throughput_throttle =
-                create_throughput_throttle(config.load_profile.as_ref()).or_else(|e| {
-                    // Backwards compatibility: fall back to deprecated fields.
-                    if config.bytes_per_second.is_some() {
-                        create_throughput_throttle(Some(&ThroughputProfile::Bytes {
-                            throttle: None,
-                            bytes_per_second: config.bytes_per_second,
-                        }))
-                    } else {
-                        Err(e)
-                    }
-                })?;
+                create_throughput_throttle(config.load_profile.as_ref(), legacy_bps, None)?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
@@ -216,8 +212,7 @@ impl Server {
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
-                throttle: throughput_throttle.throttle,
-                throttle_mode: throughput_throttle.mode,
+                throttle: throughput_throttle,
                 block_cache: Arc::new(block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
@@ -294,8 +289,7 @@ impl Server {
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    throttle: lading_throttle::Throttle,
-    throttle_mode: ThrottleMode,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
@@ -331,8 +325,8 @@ impl Child {
                 let _ = self.block_cache.advance(&mut handle);
             }
         }
-        let buffer_capacity = match self.throttle_mode {
-            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+        let buffer_capacity = match self.throttle.mode {
+            ThrottleMode::Bytes => self.throttle.throttle.maximum_capacity() as usize,
             ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
         };
         let mut fp = BufWriter::with_capacity(
@@ -360,11 +354,11 @@ impl Child {
             .as_ref()
             .map(|dur| Instant::now() + *dur);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-            let tokens = self.throttle_mode.tokens_for_block(total_bytes);
+            let block = self.block_cache.advance(&mut handle);
+            let total_bytes = u64::from(block.total_bytes.get());
 
             tokio::select! {
-                result = self.throttle.wait_for(tokens) => {
+                result = self.throttle.wait_for_block(block) => {
                     match result {
                         Ok(()) => {
                             if let Some(dur) = self.block_interval {
@@ -382,9 +376,6 @@ impl Child {
                                     next_tick = Some(Instant::now() + dur);
                                 }
                             }
-
-                            let block = self.block_cache.advance(&mut handle);
-                            let total_bytes = u64::from(total_bytes.get());
 
                             {
                                 fp.write_all(&block.bytes).await?;
@@ -428,7 +419,7 @@ impl Child {
                         }
                         Err(err) => {
                             error!(
-                                "Throttle request of {tokens} token(s) for block size {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}"
+                                "Throttle request for block size {total_bytes} failed. Block will be discarded. Error: {err}"
                             );
                         }
                     }

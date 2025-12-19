@@ -24,7 +24,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -45,7 +45,7 @@ pub struct Config {
     /// The maximum size in bytes of the cache of prebuilt messages
     pub maximum_prebuild_cache_size_bytes: Byte,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// Errors produced by [`PassthruFile`].

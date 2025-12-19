@@ -32,8 +32,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
-    create_throttle,
+    ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -61,7 +60,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]

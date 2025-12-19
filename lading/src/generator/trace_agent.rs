@@ -17,8 +17,7 @@
 //! Additional metrics may be emitted by this generator's [throttle].
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
-    create_throttle,
+    ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
@@ -175,7 +174,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 #[derive(thiserror::Error, Debug)]
