@@ -1,7 +1,7 @@
 /// Sampler implementation for procfs filesystems
-mod memory;
-mod stat;
-mod uptime;
+pub mod memory;
+pub mod stat;
+pub mod uptime;
 mod vmstat;
 
 use std::io;
@@ -80,13 +80,13 @@ struct ProcessInfo {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     parent: Process,
     process_info: FxHashMap<i32, ProcessInfo>,
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
+    pub fn new(parent_pid: i32) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let process_info = FxHashMap::default();
 
@@ -104,7 +104,7 @@ impl Sampler {
         clippy::cast_possible_wrap,
         clippy::cast_lossless
     )]
-    pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
+    pub async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = smaps_rollup::Aggregator::default();

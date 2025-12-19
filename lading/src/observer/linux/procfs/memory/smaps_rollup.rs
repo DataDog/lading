@@ -6,7 +6,7 @@ use super::{BYTES_PER_KIBIBYTE, next_token};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
-pub(crate) enum Error {
+pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -17,13 +17,13 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Aggregator {
-    pub(crate) rss: u64,
-    pub(crate) pss: u64,
+pub struct Aggregator {
+    pub rss: u64,
+    pub pss: u64,
 }
 
 // Read `/proc/{pid}/smaps_rollup` and parse it directly into metrics.
-pub(crate) async fn poll(
+pub async fn poll(
     pid: i32,
     labels: &[(&'static str, String)],
     aggr: &mut Aggregator,

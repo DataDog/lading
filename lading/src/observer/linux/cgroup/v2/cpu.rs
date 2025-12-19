@@ -5,7 +5,7 @@ use tokio::fs;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
-pub(crate) enum Error {
+pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -24,12 +24,12 @@ struct Stats {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     prev: Stats,
 }
 
 impl Sampler {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             prev: Stats {
                 usage_usec: 0,
@@ -41,7 +41,7 @@ impl Sampler {
     }
 
     // Read cgroup CPU data and calculate a percentage of usage.
-    pub(crate) async fn poll(
+    pub async fn poll(
         &mut self,
         group_prefix: &Path,
         labels: &[(String, String)],

@@ -1,5 +1,5 @@
-mod cgroup;
-mod procfs;
+pub mod cgroup;
+pub mod procfs;
 mod utils;
 mod wss;
 
@@ -20,7 +20,7 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     procfs: procfs::Sampler,
     cgroup: cgroup::Sampler,
     wss: Option<wss::Sampler>,
@@ -28,7 +28,7 @@ pub(crate) struct Sampler {
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
+    pub fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
         let procfs_sampler = procfs::Sampler::new(parent_pid)?;
         let cgroup_sampler = cgroup::Sampler::new(parent_pid, labels)?;
         let wss_sampler = if wss::Sampler::is_available() {
@@ -64,7 +64,7 @@ ls -l /sys/kernel/mm/page_idle/bitmap
         })
     }
 
-    pub(crate) async fn sample(&mut self) -> Result<(), Error> {
+    pub async fn sample(&mut self) -> Result<(), Error> {
         let sample_smaps = self.tick_counter.is_multiple_of(10);
         let sample_wss = self.tick_counter.is_multiple_of(60);
         self.tick_counter += 1;

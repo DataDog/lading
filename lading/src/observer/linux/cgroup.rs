@@ -1,5 +1,5 @@
 /// Code to read cgroup information.
-pub(crate) mod v2;
+pub mod v2;
 
 use std::{collections::VecDeque, io, path::PathBuf};
 
@@ -34,14 +34,14 @@ struct CgroupInfo {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     parent: Process,
     cgroup_info: FxHashMap<PathBuf, CgroupInfo>,
     labels: Vec<(String, String)>,
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
+    pub fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let cgroup_info = FxHashMap::default();
 
@@ -53,7 +53,7 @@ impl Sampler {
     }
 
     #[allow(clippy::cast_possible_wrap)]
-    pub(crate) async fn poll(&mut self) -> Result<(), Error> {
+    pub async fn poll(&mut self) -> Result<(), Error> {
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
         // dereferencing the `/proc/<pid>/root` symlink.

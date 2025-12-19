@@ -36,13 +36,13 @@ struct CpuUtilization {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     ticks_per_second: f64,
     prev: Stats,
 }
 
 impl Sampler {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             ticks_per_second: unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64,
             prev: Stats::default(),
@@ -50,7 +50,7 @@ impl Sampler {
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub(crate) async fn poll(
+    pub async fn poll(
         &mut self,
         pid: i32,
         uptime_secs: f64,
