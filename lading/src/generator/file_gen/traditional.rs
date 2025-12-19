@@ -38,7 +38,8 @@ use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, ThrottleMode,
+    create_block_or_byte_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -121,6 +122,9 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     pub throttle: Option<BytesThrottleConfig>,
+    /// Optional blocks-per-second throttle. Conflicts with byte-based throttles.
+    #[serde(default)]
+    pub blocks_per_second: Option<NonZeroU32>,
     /// Optional fixed interval between blocks. When set, the generator waits
     /// this duration before emitting the next block, regardless of byte size.
     pub block_interval_millis: Option<u64>,
@@ -179,8 +183,11 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+            let throughput_throttle = create_block_or_byte_throttle(
+                config.throttle.as_ref(),
+                config.bytes_per_second.as_ref(),
+                config.blocks_per_second,
+            )?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
@@ -203,7 +210,8 @@ impl Server {
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
-                throttle,
+                throttle: throughput_throttle.throttle,
+                throttle_mode: throughput_throttle.mode,
                 block_cache: Arc::new(block_cache),
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
@@ -281,6 +289,7 @@ struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
     throttle: lading_throttle::Throttle,
+    throttle_mode: ThrottleMode,
     block_cache: Arc<block::Cache>,
     rotate: bool,
     file_index: Arc<AtomicU32>,
@@ -292,31 +301,11 @@ struct Child {
 
 impl Child {
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = self.throttle.maximum_capacity() as usize;
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
         let mut file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
         let mut path = path_from_template(&self.path_template, file_index);
-
-        let mut fp = BufWriter::with_capacity(
-            buffer_capacity,
-            fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open(&path)
-                .await
-                .map_err(|source| {
-                    error!(
-                        "Failed to open file {path:?}: {source}. Ensure parent directory exists."
-                    );
-                    Error::FileOpen {
-                        path: path.clone(),
-                        source,
-                    }
-                })?,
-        );
 
         let mut handle = self.block_cache.handle();
         if self.start_line_index > 0 {
@@ -336,6 +325,28 @@ impl Child {
                 let _ = self.block_cache.advance(&mut handle);
             }
         }
+        let buffer_capacity = match self.throttle_mode {
+            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+            ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
+        };
+        let mut fp = BufWriter::with_capacity(
+            buffer_capacity,
+            fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&path)
+                .await
+                .map_err(|source| {
+                    error!(
+                        "Failed to open file {path:?}: {source}. Ensure parent directory exists."
+                    );
+                    Error::FileOpen {
+                        path: path.clone(),
+                        source,
+                    }
+                })?,
+        );
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         let mut next_tick = self
@@ -344,9 +355,10 @@ impl Child {
             .map(|dur| Instant::now() + *dur);
         loop {
             let total_bytes = self.block_cache.peek_next_size(&handle);
+            let tokens = self.throttle_mode.tokens_for_block(total_bytes);
 
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for(tokens) => {
                     match result {
                         Ok(()) => {
                             if let Some(dur) = self.block_interval {
@@ -409,7 +421,9 @@ impl Child {
                             }
                         }
                         Err(err) => {
-                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                            error!(
+                                "Throttle request of {tokens} token(s) for block size {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}"
+                            );
                         }
                     }
                 }

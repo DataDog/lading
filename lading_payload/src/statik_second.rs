@@ -47,12 +47,14 @@ impl StaticSecond {
     /// timestamp is parsed from the start of the line up to the first
     /// whitespace, using `timestamp_format` (chrono strftime syntax). The
     /// parsed timestamp is removed from the emitted line, leaving only the
-    /// remainder of the message.
+    /// remainder of the message. `start_line_index`, when provided, skips that
+    /// many lines (modulo the total number of available lines) before
+    /// returning payloads.
     pub fn new(
         path: &Path,
         timestamp_format: &str,
         emit_placeholder: bool,
-        start_line_index: u64,
+        start_line_index: Option<u64>,
     ) -> Result<Self, Error> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -128,6 +130,7 @@ impl StaticSecond {
             return Err(Error::NoLines);
         }
 
+        let start_line_index = start_line_index.unwrap_or(0);
         // Apply starting line offset by trimming leading lines across buckets.
         let total_lines: u64 = blocks.iter().map(|b| b.lines.len() as u64).sum();
         let mut start_idx = 0usize;
@@ -239,6 +242,7 @@ mod tests {
             &path,
             "%Y-%m-%dT%H:%M:%S",
             /* emit_placeholder */ false,
+            None,
         )
         .unwrap();
         let mut rng = StdRng::seed_from_u64(7);
@@ -250,5 +254,59 @@ mod tests {
         buf.clear();
         serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
         assert_eq!(buf, b"third\n");
+    }
+
+    #[test]
+    fn emits_placeholders_for_missing_seconds() {
+        let temp_dir = tempdir().unwrap();
+        let path = temp_dir.path().join("placeholder_test.log");
+        {
+            let mut f = File::create(&path).unwrap();
+            writeln!(f, "2024-01-01T00:00:00 first").unwrap();
+            // Intentionally skip 00:00:01
+            writeln!(f, "2024-01-01T00:00:02 third").unwrap();
+        }
+
+        let mut serializer = StaticSecond::new(&path, "%Y-%m-%dT%H:%M:%S", true, None).unwrap();
+        let mut rng = StdRng::seed_from_u64(7);
+
+        let mut buf = Vec::new();
+        serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        assert_eq!(buf, b"first\n");
+
+        buf.clear();
+        serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        // Placeholder newline for the missing second
+        assert_eq!(buf, b"\n");
+
+        buf.clear();
+        serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        assert_eq!(buf, b"third\n");
+    }
+
+    #[test]
+    fn honors_start_line_index_with_wraparound() {
+        let temp_dir = tempdir().unwrap();
+        let path = temp_dir.path().join("start_index_test.log");
+        {
+            let mut f = File::create(&path).unwrap();
+            // Two lines in the first second, one in the second second.
+            writeln!(f, "2024-01-01T00:00:00 first").unwrap();
+            writeln!(f, "2024-01-01T00:00:00 second").unwrap();
+            writeln!(f, "2024-01-01T00:00:01 third").unwrap();
+        }
+
+        // Skip the first two lines; the stream should begin with "third".
+        let mut serializer = StaticSecond::new(&path, "%Y-%m-%dT%H:%M:%S", false, Some(2)).unwrap();
+        let mut rng = StdRng::seed_from_u64(7);
+
+        let mut buf = Vec::new();
+        serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        assert_eq!(buf, b"third\n");
+
+        buf.clear();
+        serializer.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        // After wrapping, we return to the beginning of the stream.
+        assert_eq!(buf, b"first\nsecond\n");
     }
 }

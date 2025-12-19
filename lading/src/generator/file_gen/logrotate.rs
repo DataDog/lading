@@ -36,7 +36,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, ThrottleMode,
+    create_block_or_byte_throttle,
 };
 
 /// An enum to allow us to determine what operation caused an IO errror as the
@@ -149,6 +150,9 @@ pub struct Config {
     block_cache_method: block::CacheMethod,
     /// The load throttle configuration
     pub throttle: Option<BytesThrottleConfig>,
+    /// Optional blocks-per-second throttle. Conflicts with byte-based throttles.
+    #[serde(default)]
+    pub blocks_per_second: Option<NonZeroU32>,
 }
 
 #[derive(Debug)]
@@ -214,8 +218,11 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+            let throughput_throttle = create_block_or_byte_throttle(
+                config.throttle.as_ref(),
+                config.bytes_per_second.as_ref(),
+                config.blocks_per_second,
+            )?;
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);
@@ -235,7 +242,8 @@ impl Server {
                 config.total_rotations,
                 maximum_bytes_per_log,
                 Arc::clone(&block_cache),
-                throttle,
+                throughput_throttle.throttle,
+                throughput_throttle.mode,
                 shutdown.clone(),
                 child_labels,
             );
@@ -285,6 +293,7 @@ struct Child {
     maximum_bytes_per_log: NonZeroU32,
     block_cache: Arc<block::Cache>,
     throttle: lading_throttle::Throttle,
+    throttle_mode: ThrottleMode,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
 }
@@ -297,6 +306,7 @@ impl Child {
         maximum_bytes_per_log: NonZeroU32,
         block_cache: Arc<block::Cache>,
         throttle: lading_throttle::Throttle,
+        throttle_mode: ThrottleMode,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
     ) -> Self {
@@ -318,13 +328,18 @@ impl Child {
             maximum_bytes_per_log,
             block_cache,
             throttle,
+            throttle_mode,
             shutdown,
             labels,
         }
     }
 
     async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = self.throttle.maximum_capacity() as usize;
+        let mut handle = self.block_cache.handle();
+        let buffer_capacity = match self.throttle_mode {
+            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+            ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
+        };
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
 
@@ -357,17 +372,16 @@ impl Child {
                 })?,
         );
 
-        let mut handle = self.block_cache.handle();
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
             let total_bytes = self.block_cache.peek_next_size(&handle);
+            let tokens = self.throttle_mode.tokens_for_block(total_bytes);
 
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for(tokens) => {
                     match result {
                         Ok(()) => {
                             let block = self.block_cache.advance(&mut handle);
@@ -382,7 +396,9 @@ impl Child {
                                     &self.labels).await?;
                         }
                         Err(err) => {
-                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", total_bytes, err);
+                            error!(
+                                "Throttle request of {tokens} token(s) for block size {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}"
+                            );
                         }
                     }
                 }

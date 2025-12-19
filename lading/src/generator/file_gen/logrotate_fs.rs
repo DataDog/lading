@@ -57,6 +57,10 @@ pub struct Config {
     mount_point: PathBuf,
     /// The load profile, controlling bytes per second as a function of time.
     load_profile: LoadProfile,
+    /// Optional blocks-per-second throttle. When set, overrides `load_profile`
+    /// to a constant rate derived from the average block size.
+    #[serde(default)]
+    blocks_per_second: Option<NonZeroU32>,
 }
 
 /// Profile for load in this filesystem.
@@ -154,6 +158,26 @@ impl Server {
             // divvy this up in the future.
             total_bytes.get() as usize,
         )?;
+        let average_block_size = {
+            let len = block_cache.len() as u64;
+            if len == 0 {
+                1
+            } else {
+                block_cache.total_size().saturating_div(len).max(1)
+            }
+        };
+        let load_profile = if let Some(blocks_per_second) = config.blocks_per_second {
+            let bytes = average_block_size.saturating_mul(u64::from(blocks_per_second.get()));
+            info!(
+                blocks_per_second = blocks_per_second.get(),
+                average_block_size,
+                derived_bytes_per_second = bytes,
+                "logrotate_fs using block-based throttle derived from average block size"
+            );
+            LoadProfile::Constant(byte_unit::Byte::from_u64(bytes))
+        } else {
+            config.load_profile
+        };
 
         let start_time = Instant::now();
         let start_time_system = SystemTime::now();
@@ -166,7 +190,7 @@ impl Server {
             block_cache,
             config.max_depth,
             config.concurrent_logs,
-            config.load_profile.to_model(),
+            load_profile.to_model(),
         );
 
         info!(

@@ -393,7 +393,7 @@ impl Cache {
                     static_path,
                     &timestamp_format,
                     *emit_placeholder,
-                    start_line_index.unwrap_or(0),
+                    *start_line_index,
                 )?;
                 construct_block_cache_inner(
                     &mut rng,
