@@ -1,6 +1,8 @@
 /// Sampler implementation for procfs filesystems
 pub mod memory;
+/// Per-process CPU statistics from /proc/<pid>/stat
 pub mod stat;
+/// System uptime from /proc/uptime
 pub mod uptime;
 mod vmstat;
 

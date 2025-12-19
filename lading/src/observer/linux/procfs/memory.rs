@@ -1,4 +1,6 @@
+/// Per-process memory regions from /proc/<pid>/smaps
 pub mod smaps;
+/// Rolled-up memory statistics from /proc/<pid>/smaps_rollup
 pub mod smaps_rollup;
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;

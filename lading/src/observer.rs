@@ -13,6 +13,7 @@ use std::io;
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
+/// Linux-specific observer implementation using procfs and cgroups
 #[cfg(target_os = "linux")]
 pub mod linux;
 

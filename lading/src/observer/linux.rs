@@ -1,4 +1,6 @@
+/// Cgroup metrics collection
 pub mod cgroup;
+/// Procfs metrics collection
 pub mod procfs;
 mod utils;
 mod wss;
