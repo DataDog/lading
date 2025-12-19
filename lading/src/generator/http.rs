@@ -30,7 +30,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError,
+    create_throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -122,7 +123,7 @@ pub struct Http {
     method: hyper::Method,
     headers: hyper::HeaderMap,
     concurrency: ConcurrencyStrategy,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -149,8 +150,7 @@ impl Http {
 
         let labels = MetricsBuilder::new("http").with_id(general.id).build();
 
-        let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         match config.method {
             Method::Post {
@@ -225,9 +225,8 @@ impl Http {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let block = self.block_cache.advance(&mut handle);
@@ -285,6 +284,7 @@ impl Http {
 
                         }
                         Err(err) => {
+                            let total_bytes: std::num::NonZero<u32> = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }

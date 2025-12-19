@@ -290,6 +290,7 @@ struct Child {
     maximum_bytes_per_file: NonZeroU32,
     throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
+    maximum_block_size: u64,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
@@ -325,8 +326,8 @@ impl Child {
             }
         }
         let buffer_capacity = match self.throttle.mode {
-            ThrottleMode::Bytes => self.throttle.inner.maximum_capacity() as usize,
-            ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
+            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+            ThrottleMode::Blocks => self.maximum_block_size as usize,
         };
         let mut fp = BufWriter::with_capacity(
             buffer_capacity,
@@ -353,13 +354,12 @@ impl Child {
             .as_ref()
             .map(|dur| Instant::now() + *dur);
         loop {
-            let block = self.block_cache.advance(&mut handle);
-            let total_bytes = u64::from(block.total_bytes.get());
-
             tokio::select! {
-                result = self.throttle.wait_for_block(block) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
+                            let block = self.block_cache.advance(&mut handle);
+                            let total_bytes = u64::from(block.total_bytes.get());
                             if let Some(dur) = self.block_interval {
                                 if let Some(deadline) = next_tick {
                                     tokio::select! {
@@ -417,6 +417,7 @@ impl Child {
                             }
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!(
                                 "Throttle request for block size {total_bytes} failed. Block will be discarded. Error: {err}"
                             );

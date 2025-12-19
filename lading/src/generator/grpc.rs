@@ -36,7 +36,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 /// Errors produced by [`Grpc`]
@@ -175,7 +175,7 @@ pub struct Grpc {
     target_uri: Uri,
     rpc_path: PathAndQuery,
     shutdown: lading_signal::Watcher,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
 }
@@ -201,7 +201,7 @@ impl Grpc {
         let labels = MetricsBuilder::new("grpc").with_id(general.id).build();
 
         let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
+            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let maximum_prebuild_cache_size_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -305,10 +305,9 @@ impl Grpc {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
+                    let _ = result;
                     let block = self.block_cache.advance(&mut handle);
                     let block_length = block.bytes.len();
                     counter!("requests_sent", &self.metric_labels).increment(1);

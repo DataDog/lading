@@ -14,7 +14,6 @@
 use byte_unit::{Byte, Unit};
 use futures::future::join_all;
 use lading_payload::block;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,7 @@ use tracing::{debug, error, info};
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -186,8 +185,7 @@ impl UnixDatagram {
         let mut handles = Vec::new();
         for _ in 0..config.parallel_connections {
             let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?
-                    .inner;
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let child = Child {
                 path: config.path.clone(),
@@ -234,7 +232,7 @@ impl UnixDatagram {
 #[derive(Debug)]
 struct Child {
     path: PathBuf,
-    throttle: Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -270,10 +268,8 @@ impl Child {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             // NOTE When we write into a unix socket it may be that only
@@ -299,6 +295,7 @@ impl Child {
                             }
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }

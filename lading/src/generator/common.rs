@@ -1,7 +1,6 @@
 //! Common types for generators
 
 use byte_unit::Byte;
-use lading_payload::block::Block;
 use serde::{Deserialize, Serialize};
 use std::num::{NonZeroU16, NonZeroU32};
 
@@ -106,7 +105,7 @@ pub enum ThrottleMode {
 #[derive(Debug)]
 pub(super) struct BlockThrottle {
     /// Underlying throttle instance.
-    pub inner: lading_throttle::Throttle,
+    inner: lading_throttle::Throttle,
     /// Token interpretation mode.
     pub mode: ThrottleMode,
 }
@@ -115,10 +114,11 @@ impl BlockThrottle {
     /// Wait for capacity for a block, interpreting tokens according to `mode`.
     pub(super) async fn wait_for_block(
         &mut self,
-        block: &Block,
+        block_cache: &lading_payload::block::Cache,
+        handle: &lading_payload::block::Handle,
     ) -> Result<(), lading_throttle::Error> {
         let tokens: NonZeroU32 = match self.mode {
-            ThrottleMode::Bytes => block.total_bytes,
+            ThrottleMode::Bytes => block_cache.peek_next_size(handle),
             ThrottleMode::Blocks => NonZeroU32::new(1).expect("non-zero"),
         };
         self.inner.wait_for(tokens).await
@@ -131,6 +131,11 @@ impl BlockThrottle {
             inner: throttle,
             mode: self.mode,
         })
+    }
+
+    /// Get the maximum capacity of the underlying throttle
+    pub(super) fn maximum_capacity(&self) -> u32 {
+        self.inner.maximum_capacity()
     }
 }
 

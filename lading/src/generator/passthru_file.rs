@@ -14,7 +14,6 @@ use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 use tokio::{fs, io::AsyncWriteExt};
 
 use byte_unit::Byte;
-use lading_throttle::Throttle;
 use metrics::{counter, gauge};
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
@@ -24,7 +23,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -74,7 +73,7 @@ pub enum Error {
 /// This generator is responsible for sending data to a file on disk.
 pub struct PassthruFile {
     path: PathBuf,
-    throttle: Throttle,
+    throttle: BlockThrottle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -103,7 +102,7 @@ impl PassthruFile {
             .build();
 
         let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
+            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         if let Some(bytes_per_second) = config.bytes_per_second {
             gauge!("bytes_per_second", &labels).set(bytes_per_second.as_u128() as f64 / 1000.0);
@@ -184,9 +183,9 @@ impl PassthruFile {
                 continue;
             };
 
-            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
+                    let _ = result;
                     let block = self.block_cache.advance(&mut handle);
                     match current_file.write_all(&block.bytes).await {
                         Ok(()) => {

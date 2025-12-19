@@ -12,7 +12,6 @@
 //!
 
 use lading_payload::block;
-use lading_throttle::Throttle;
 use metrics::counter;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,7 @@ use tracing::{debug, error, info, warn};
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -161,7 +160,7 @@ impl UnixStream {
         let mut handles = JoinSet::new();
         for _ in 0..config.parallel_connections {
             let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)
@@ -229,7 +228,7 @@ impl UnixStream {
 #[derive(Debug)]
 struct Child {
     path: PathBuf,
-    throttle: Throttle,
+    throttle: BlockThrottle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -268,10 +267,8 @@ impl Child {
                 continue;
             };
 
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             // NOTE When we write into a unix stream it may be that only
@@ -321,7 +318,10 @@ impl Child {
                             }
                         }
                         Err(err) => {
-                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
+                            error!(
+                                "Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}"
+                            );
                         }
                     }
                 }

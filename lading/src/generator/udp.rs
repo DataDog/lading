@@ -32,7 +32,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError,
+    create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -181,7 +182,7 @@ impl Udp {
 
             let worker = UdpWorker {
                 addr,
-                throttle: throttle.inner,
+                throttle,
                 block_cache: Arc::clone(&block_cache),
                 metric_labels: worker_labels,
                 shutdown: shutdown.clone(),
@@ -218,7 +219,7 @@ impl Udp {
 
 struct UdpWorker {
     addr: SocketAddr,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -233,8 +234,6 @@ impl UdpWorker {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
                 conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
                     match conn {
@@ -252,7 +251,7 @@ impl UdpWorker {
                         }
                     }
                 }
-                result = self.throttle.wait_for(total_bytes), if connection.is_some() => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle), if connection.is_some() => {
                     match result {
                         Ok(()) => {
                             let sock = connection.expect("connection failed");
@@ -274,6 +273,7 @@ impl UdpWorker {
                             }
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }

@@ -32,7 +32,8 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError,
+    create_throttle,
 };
 
 fn default_parallel_connections() -> u16 {
@@ -178,7 +179,7 @@ impl Tcp {
 
             let worker = TcpWorker {
                 addr,
-                throttle: throttle.inner,
+                throttle,
                 block_cache: Arc::clone(&block_cache),
                 metric_labels: worker_labels,
                 shutdown: shutdown.clone(),
@@ -215,7 +216,7 @@ impl Tcp {
 
 struct TcpWorker {
     addr: SocketAddr,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -249,9 +250,8 @@ impl TcpWorker {
                 continue;
             };
 
-            let total_bytes = self.block_cache.peek_next_size(&handle);
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let block = self.block_cache.advance(&mut handle);
@@ -271,6 +271,7 @@ impl TcpWorker {
                             }
                         }
                         Err(err) => {
+                            let total_bytes: std::num::NonZero<u32> = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }

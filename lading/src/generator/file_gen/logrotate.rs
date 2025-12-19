@@ -374,14 +374,11 @@ impl Child {
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
-            let block = self.block_cache.advance(&mut handle);
-            let total_bytes = u64::from(block.total_bytes.get());
-
             tokio::select! {
-                result = self.throttle.wait_for_block(block) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
-                            write_bytes(block,
+                            write_bytes(self.block_cache.advance(&mut handle),
                                     &mut fp,
                                     &mut total_bytes_written,
                                     buffer_capacity,
@@ -392,6 +389,7 @@ impl Child {
                                     &self.labels).await?;
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!(
                                 "Throttle request for block size {total_bytes} failed. Block will be discarded. Error: {err}"
                             );

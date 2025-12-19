@@ -45,7 +45,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 static CONNECTION_SEMAPHORE: OnceCell<Semaphore> = OnceCell::new();
@@ -152,7 +152,7 @@ pub struct SplunkHec {
     uri: Uri,
     token: String,
     parallel_connections: u16,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     channels: Channels,
@@ -202,8 +202,7 @@ impl SplunkHec {
             .with_id(general.id)
             .build();
 
-        let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 
@@ -289,10 +288,9 @@ impl SplunkHec {
                 .next()
                 .expect("channel should never be empty")
                 .clone();
-            let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let client = client.clone();
@@ -320,6 +318,7 @@ impl SplunkHec {
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
                             error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
                         }
                     }
