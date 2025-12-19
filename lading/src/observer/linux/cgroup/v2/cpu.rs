@@ -9,8 +9,10 @@ pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Float parsing error
     #[error("Float Parsing: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Integer parsing error
     #[error("Integer Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
 }
@@ -23,12 +25,14 @@ struct Stats {
     last_instant: Instant,
 }
 
+/// Samples CPU statistics from cgroup v2 with delta calculations
 #[derive(Debug)]
 pub struct Sampler {
     prev: Stats,
 }
 
 impl Sampler {
+    /// Create a new CPU Sampler
     pub fn new() -> Self {
         Self {
             prev: Stats {
@@ -40,7 +44,7 @@ impl Sampler {
         }
     }
 
-    // Read cgroup CPU data and calculate a percentage of usage.
+    /// Read cgroup CPU data and calculate a percentage of usage.
     pub async fn poll(
         &mut self,
         group_prefix: &Path,

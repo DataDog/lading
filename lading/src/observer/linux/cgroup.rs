@@ -33,6 +33,7 @@ struct CgroupInfo {
     cpu_sampler: cpu::Sampler,
 }
 
+/// Samples cgroup metrics for a process tree
 #[derive(Debug)]
 pub struct Sampler {
     parent: Process,
@@ -41,6 +42,7 @@ pub struct Sampler {
 }
 
 impl Sampler {
+    /// Create a new cgroup Sampler for the given parent PID
     pub fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let cgroup_info = FxHashMap::default();
@@ -52,6 +54,7 @@ impl Sampler {
         })
     }
 
+    /// Poll cgroup metrics for all processes in the tree
     #[allow(clippy::cast_possible_wrap)]
     pub async fn poll(&mut self) -> Result<(), Error> {
         // Every sample run we collect all the child processes rooted at the

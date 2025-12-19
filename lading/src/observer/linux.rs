@@ -19,6 +19,7 @@ pub enum Error {
     Wss(#[from] wss::Error),
 }
 
+/// Combined sampler for procfs, cgroup, and WSS metrics
 #[derive(Debug)]
 pub struct Sampler {
     procfs: procfs::Sampler,
@@ -28,6 +29,7 @@ pub struct Sampler {
 }
 
 impl Sampler {
+    /// Create a new Sampler for the given parent PID
     pub fn new(parent_pid: i32, labels: Vec<(String, String)>) -> Result<Self, Error> {
         let procfs_sampler = procfs::Sampler::new(parent_pid)?;
         let cgroup_sampler = cgroup::Sampler::new(parent_pid, labels)?;
@@ -64,6 +66,7 @@ ls -l /sys/kernel/mm/page_idle/bitmap
         })
     }
 
+    /// Sample all metrics (procfs, cgroup, and optionally WSS)
     pub async fn sample(&mut self) -> Result<(), Error> {
         let sample_smaps = self.tick_counter.is_multiple_of(10);
         let sample_wss = self.tick_counter.is_multiple_of(60);

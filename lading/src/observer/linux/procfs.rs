@@ -79,6 +79,7 @@ struct ProcessInfo {
     stat_sampler: stat::Sampler,
 }
 
+/// Samples procfs metrics for a process tree
 #[derive(Debug)]
 pub struct Sampler {
     parent: Process,
@@ -86,6 +87,7 @@ pub struct Sampler {
 }
 
 impl Sampler {
+    /// Create a new procfs Sampler for the given parent PID
     pub fn new(parent_pid: i32) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let process_info = FxHashMap::default();
@@ -96,6 +98,7 @@ impl Sampler {
         })
     }
 
+    /// Poll procfs metrics for all processes in the tree
     #[allow(
         clippy::similar_names,
         clippy::too_many_lines,

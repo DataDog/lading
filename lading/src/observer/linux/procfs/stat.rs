@@ -3,16 +3,22 @@ use tokio::fs;
 
 use crate::observer::linux::cgroup;
 
+/// Errors produced by functions in this module
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Float parsing error
     #[error("Float Parsing: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Integer parsing error
     #[error("Integer Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+    /// Stat file format error
     #[error("Stat Malformed: {0}")]
     StatMalformed(&'static str),
+    /// Cgroup path resolution error
     #[error("Cgroup get_path: {0}")]
     Cgroup(#[from] cgroup::v2::Error),
 }
@@ -35,13 +41,15 @@ struct CpuUtilization {
     system_cpu_millicores: f64,
 }
 
-#[derive(Debug)]
+/// Samples CPU statistics from /proc/<pid>/stat with delta calculations
+#[derive(Debug, Clone, Copy)]
 pub struct Sampler {
     ticks_per_second: f64,
     prev: Stats,
 }
 
 impl Sampler {
+    /// Create a new Sampler
     pub fn new() -> Self {
         Self {
             ticks_per_second: unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64,
@@ -49,6 +57,7 @@ impl Sampler {
         }
     }
 
+    /// Poll CPU statistics and emit metrics
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub async fn poll(
         &mut self,
