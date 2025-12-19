@@ -71,7 +71,7 @@ pub enum ThrottleConfig {
     },
 }
 
-/// Error converting `BytesThrottleConfig` to internal throttle config
+/// Error converting `ThrottleConfig` to internal throttle config
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ThrottleConversionError {
     /// Value exceeds u32 capacity
@@ -106,7 +106,7 @@ pub enum ThrottleMode {
 #[derive(Debug)]
 pub(super) struct BlockThrottle {
     /// Underlying throttle instance.
-    pub throttle: lading_throttle::Throttle,
+    pub inner: lading_throttle::Throttle,
     /// Token interpretation mode.
     pub mode: ThrottleMode,
 }
@@ -121,114 +121,41 @@ impl BlockThrottle {
             ThrottleMode::Bytes => block.total_bytes,
             ThrottleMode::Blocks => NonZeroU32::new(1).expect("non-zero"),
         };
-        self.throttle.wait_for(tokens).await
+        self.inner.wait_for(tokens).await
+    }
+
+    /// Divide the underlying throttle capacity by `n`, preserving mode.
+    pub(super) fn divide(self, n: NonZeroU32) -> Result<Self, lading_throttle::Error> {
+        let throttle = self.inner.divide(n)?;
+        Ok(Self {
+            inner: throttle,
+            mode: self.mode,
+        })
     }
 }
 
-/// Create a throttle from optional config and `bytes_per_second` fallback
+/// Create a throttle from config plus optional legacy bytes-per-second fallback.
 ///
-/// This function implements the standard throttle creation logic for
-/// byte-oriented generators. It handles the interaction between the new
-/// `BytesThrottleConfig` and the legacy `bytes_per_second` field.
-///
-/// # Decision Logic
-///
-/// | `BytesThrottleConfig` | `bytes_per_second` | Result |
-/// |---------------------|------------------|--------|
-/// | Some(config)        | Some(bps)        | Error - Conflicting configuration |
-/// | Some(config)        | None             | Use `BytesThrottleConfig` |
-/// | None                | Some(bps)        | Create Stable throttle with `timeout_micros`: 0 |
-/// | None                | None             | `AllOut` throttle (no rate limiting) |
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Both config and `bytes_per_second` are provided (conflicting configuration)
-/// - The `bytes_per_second` value exceeds `u32::MAX`
-/// - The `bytes_per_second` value is zero
+/// Returns a [`BlockThrottle`] that carries both the throttle and its mode
+/// (bytes vs blocks).
 pub(super) fn create_throttle(
     config: Option<&ThrottleConfig>,
-    bytes_per_second: Option<&byte_unit::Byte>,
-) -> Result<lading_throttle::Throttle, ThrottleConversionError> {
-    // Bytes-only helper for legacy callers. Reject block-mode usage here.
-    if let Some(ThrottleConfig::Stable { rate, .. }) = config {
-        if matches!(
-            rate.mode.unwrap_or(ThrottleMode::Bytes),
-            ThrottleMode::Blocks
-        ) {
-            return Err(ThrottleConversionError::ConflictingConfig);
-        }
-    }
-    if let Some(ThrottleConfig::Linear {
-        initial,
-        maximum,
-        rate_of_change,
-    }) = config
-    {
-        let modes = [
-            initial.mode.unwrap_or(ThrottleMode::Bytes),
-            maximum.mode.unwrap_or(ThrottleMode::Bytes),
-            rate_of_change.mode.unwrap_or(ThrottleMode::Bytes),
-        ];
-        if modes.iter().any(|m| *m == ThrottleMode::Blocks) {
-            return Err(ThrottleConversionError::ConflictingConfig);
-        }
-    }
-
-    let throttle_config = match (config, bytes_per_second) {
-        (Some(_), Some(_)) => {
-            return Err(ThrottleConversionError::ConflictingConfig);
-        }
-        (Some(tc), None) => tc.try_into()?,
-        (None, Some(bps)) => {
-            let bps_value = bps.as_u128();
-            if bps_value > u128::from(u32::MAX) {
-                return Err(ThrottleConversionError::ValueTooLarge(*bps));
-            }
-            #[allow(clippy::cast_possible_truncation)]
-            let bps_u32 = NonZeroU32::new(bps_value as u32).ok_or(ThrottleConversionError::Zero)?;
-            lading_throttle::Config::Stable {
-                maximum_capacity: bps_u32,
-                timeout_micros: 0,
-            }
-        }
-        (None, None) => lading_throttle::Config::AllOut,
-    };
-    Ok(lading_throttle::Throttle::new_with_config(throttle_config))
-}
-
-/// Create a throttle from a unified config plus optional legacy fallbacks.
-pub(super) fn create_throughput_throttle(
-    profile: Option<&ThrottleConfig>,
     legacy_bytes_per_second: Option<&byte_unit::Byte>,
-    legacy_blocks_per_second: Option<NonZeroU32>,
 ) -> Result<BlockThrottle, ThrottleConversionError> {
-    let fallback = if let Some(bps) = legacy_bytes_per_second {
-        Some(ThrottleConfig::Stable {
-            rate: RateSpec {
-                mode: Some(ThrottleMode::Bytes),
-                bytes_per_second: Some(*bps),
-                blocks_per_second: None,
-            },
-            timeout_millis: 0,
-        })
-    } else if let Some(bps) = legacy_blocks_per_second {
-        Some(ThrottleConfig::Stable {
-            rate: RateSpec {
-                mode: Some(ThrottleMode::Blocks),
-                bytes_per_second: None,
-                blocks_per_second: Some(bps),
-            },
-            timeout_millis: 0,
-        })
-    } else {
-        None
-    };
+    let fallback = legacy_bytes_per_second.map(|bps| ThrottleConfig::Stable {
+        rate: RateSpec {
+            mode: Some(ThrottleMode::Bytes),
+            bytes_per_second: Some(*bps),
+            blocks_per_second: None,
+        },
+        timeout_millis: 0,
+    });
 
-    let cfg = profile.copied().or(fallback);
-    let throttle_cfg = cfg.ok_or(ThrottleConversionError::MissingRate)?;
-
-    let throttle = match throttle_cfg {
+    let cfg = config
+        .copied()
+        .or(fallback)
+        .unwrap_or(ThrottleConfig::AllOut);
+    let throttle = match cfg {
         ThrottleConfig::AllOut => {
             lading_throttle::Throttle::new_with_config(lading_throttle::Config::AllOut)
         }
@@ -261,8 +188,7 @@ pub(super) fn create_throughput_throttle(
         }
     };
 
-    // Mode from the first rate in the config (AllOut => default to bytes mode)
-    let mode = match throttle_cfg {
+    let mode = match cfg {
         ThrottleConfig::AllOut => ThrottleMode::Bytes,
         ThrottleConfig::Stable { rate, .. } => rate.resolve()?.0,
         ThrottleConfig::Linear {
@@ -280,7 +206,10 @@ pub(super) fn create_throughput_throttle(
         }
     };
 
-    Ok(BlockThrottle { throttle, mode })
+    Ok(BlockThrottle {
+        inner: throttle,
+        mode,
+    })
 }
 
 impl TryFrom<&ThrottleConfig> for lading_throttle::Config {

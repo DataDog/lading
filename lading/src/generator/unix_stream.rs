@@ -161,7 +161,7 @@ impl UnixStream {
         let mut handles = JoinSet::new();
         for _ in 0..config.parallel_connections {
             let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
 
             let total_bytes =
                 NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)

@@ -202,7 +202,8 @@ impl SplunkHec {
             .with_id(general.id)
             .build();
 
-        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+        let throttle =
+            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
 
         let uri = get_uri_by_format(&config.target_uri, config.format)?;
 

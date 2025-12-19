@@ -178,7 +178,7 @@ impl Tcp {
 
             let worker = TcpWorker {
                 addr,
-                throttle,
+                throttle: throttle.inner,
                 block_cache: Arc::clone(&block_cache),
                 metric_labels: worker_labels,
                 shutdown: shutdown.clone(),

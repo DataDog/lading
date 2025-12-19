@@ -275,7 +275,8 @@ impl TraceAgent {
             .with_id(general.id)
             .build();
 
-        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+        let throttle =
+            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?.inner;
 
         let maximum_prebuild_cache_size_bytes =
             validate_cache_size(config.maximum_prebuild_cache_size_bytes)?;

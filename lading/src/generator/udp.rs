@@ -181,7 +181,7 @@ impl Udp {
 
             let worker = UdpWorker {
                 addr,
-                throttle,
+                throttle: throttle.inner,
                 block_cache: Arc::clone(&block_cache),
                 metric_labels: worker_labels,
                 shutdown: shutdown.clone(),

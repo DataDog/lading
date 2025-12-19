@@ -37,7 +37,7 @@ use lading_payload::block;
 use super::General;
 use crate::generator::common::{
     BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, ThrottleMode,
-    create_throughput_throttle,
+    create_throttle,
 };
 
 /// An enum to allow us to determine what operation caused an IO errror as the
@@ -223,8 +223,7 @@ impl Server {
                     config.bytes_per_second.as_ref()
                 }
             };
-            let throughput_throttle =
-                create_throughput_throttle(config.load_profile.as_ref(), legacy_bps, None)?;
+            let throughput_throttle = create_throttle(config.load_profile.as_ref(), legacy_bps)?;
 
             let mut dir_path = config.root.clone();
             let depth = rng.random_range(0..config.max_depth);
@@ -335,7 +334,7 @@ impl Child {
     async fn spin(mut self) -> Result<(), Error> {
         let mut handle = self.block_cache.handle();
         let buffer_capacity = match self.throttle.mode {
-            ThrottleMode::Bytes => self.throttle.throttle.maximum_capacity() as usize,
+            ThrottleMode::Bytes => self.throttle.inner.maximum_capacity() as usize,
             ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
         };
         let mut total_bytes_written: u64 = 0;

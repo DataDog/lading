@@ -39,7 +39,7 @@ use lading_payload::{self, block};
 use super::General;
 use crate::generator::common::{
     BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, ThrottleMode,
-    create_throughput_throttle,
+    create_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -188,8 +188,7 @@ impl Server {
                     config.bytes_per_second.as_ref()
                 }
             };
-            let throughput_throttle =
-                create_throughput_throttle(config.load_profile.as_ref(), legacy_bps, None)?;
+            let throughput_throttle = create_throttle(config.load_profile.as_ref(), legacy_bps)?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
@@ -326,7 +325,7 @@ impl Child {
             }
         }
         let buffer_capacity = match self.throttle.mode {
-            ThrottleMode::Bytes => self.throttle.throttle.maximum_capacity() as usize,
+            ThrottleMode::Bytes => self.throttle.inner.maximum_capacity() as usize,
             ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
         };
         let mut fp = BufWriter::with_capacity(
