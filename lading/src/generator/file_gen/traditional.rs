@@ -213,6 +213,7 @@ impl Server {
                 maximum_bytes_per_file,
                 throttle: throughput_throttle,
                 block_cache: Arc::new(block_cache),
+                maximum_block_size: maximum_block_size as u64,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),

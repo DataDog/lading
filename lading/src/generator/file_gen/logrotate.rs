@@ -242,6 +242,7 @@ impl Server {
                 &basename,
                 config.total_rotations,
                 maximum_bytes_per_log,
+                maximum_block_size.get(),
                 Arc::clone(&block_cache),
                 throughput_throttle,
                 shutdown.clone(),
@@ -291,6 +292,7 @@ struct Child {
     names: Vec<PathBuf>,
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
+    maximum_block_size: u32,
     block_cache: Arc<block::Cache>,
     throttle: BlockThrottle,
     shutdown: lading_signal::Watcher,
@@ -303,6 +305,7 @@ impl Child {
         basename: &Path,
         total_rotations: u8,
         maximum_bytes_per_log: NonZeroU32,
+        maximum_block_size: u32,
         block_cache: Arc<block::Cache>,
         throttle: BlockThrottle,
         shutdown: lading_signal::Watcher,
@@ -324,6 +327,7 @@ impl Child {
         Self {
             names,
             maximum_bytes_per_log,
+            maximum_block_size,
             block_cache,
             throttle,
             shutdown,
@@ -334,8 +338,8 @@ impl Child {
     async fn spin(mut self) -> Result<(), Error> {
         let mut handle = self.block_cache.handle();
         let buffer_capacity = match self.throttle.mode {
-            ThrottleMode::Bytes => self.throttle.inner.maximum_capacity() as usize,
-            ThrottleMode::Blocks => self.block_cache.peek_next_size(&handle).get() as usize,
+            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+            ThrottleMode::Blocks => self.maximum_block_size as usize,
         };
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
