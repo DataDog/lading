@@ -13,6 +13,7 @@ use std::path::Path;
 use arrow_array::{
     Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
 };
+use lading_capture_schema::columns;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use crate::validate::ValidationResult;
@@ -94,46 +95,51 @@ pub fn validate_parquet<P: AsRef<Path>>(
         }
 
         let time_array = batch
-            .column_by_name("time")
-            .ok_or_else(|| Error::MissingColumn("time".to_string()))?
+            .column_by_name(columns::TIME)
+            .ok_or_else(|| Error::MissingColumn(columns::TIME.to_string()))?
             .as_any()
             .downcast_ref::<TimestampMillisecondArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType("'time' column is not TimestampMillisecond".to_string())
+                Error::InvalidColumnType(format!(
+                    "'{}' column is not TimestampMillisecond",
+                    columns::TIME
+                ))
             })?;
 
         let fetch_index_array = batch
-            .column_by_name("fetch_index")
-            .ok_or_else(|| Error::MissingColumn("fetch_index".to_string()))?
+            .column_by_name(columns::FETCH_INDEX)
+            .ok_or_else(|| Error::MissingColumn(columns::FETCH_INDEX.to_string()))?
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| {
-                Error::InvalidColumnType("'fetch_index' column is not UInt64".to_string())
+                Error::InvalidColumnType(format!("'{}' column is not UInt64", columns::FETCH_INDEX))
             })?;
 
         let metric_name_array = batch
-            .column_by_name("metric_name")
-            .ok_or_else(|| Error::MissingColumn("metric_name".to_string()))?
+            .column_by_name(columns::METRIC_NAME)
+            .ok_or_else(|| Error::MissingColumn(columns::METRIC_NAME.to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType("'metric_name' column is not String".to_string())
+                Error::InvalidColumnType(format!("'{}' column is not String", columns::METRIC_NAME))
             })?;
 
         let labels_array = batch
-            .column_by_name("labels")
-            .ok_or_else(|| Error::MissingColumn("labels".to_string()))?
+            .column_by_name(columns::LABELS)
+            .ok_or_else(|| Error::MissingColumn(columns::LABELS.to_string()))?
             .as_any()
             .downcast_ref::<MapArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'labels' column is not Map".to_string()))?;
+            .ok_or_else(|| {
+                Error::InvalidColumnType(format!("'{}' column is not Map", columns::LABELS))
+            })?;
 
         let metric_kind_array = batch
-            .column_by_name("metric_kind")
-            .ok_or_else(|| Error::MissingColumn("metric_kind".to_string()))?
+            .column_by_name(columns::METRIC_KIND)
+            .ok_or_else(|| Error::MissingColumn(columns::METRIC_KIND.to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType("'metric_kind' column is not String".to_string())
+                Error::InvalidColumnType(format!("'{}' column is not String", columns::METRIC_KIND))
             })?;
 
         // Validate invariants: fetch_index uniquely maps to time,

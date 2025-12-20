@@ -14,6 +14,7 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 lading-signal = { version = "0.1", path = "../lading_signal" }
+lading-capture-schema = { path = "../lading_capture_schema" }
 
 arc-swap = { workspace = true }
 arrow = { workspace = true }
