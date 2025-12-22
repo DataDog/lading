@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 # Download pre-built sccache binary
 RUN case "$(uname -m)" in \
-    x86_64) ARCH=x86_64-unknown-linux-musl ;; \
-    aarch64) ARCH=aarch64-unknown-linux-musl ;; \
-    *) echo "Unsupported architecture" && exit 1 ;; \
+        x86_64) ARCH=x86_64-unknown-linux-musl ;; \
+        aarch64) ARCH=aarch64-unknown-linux-musl ;; \
+        *) echo "Unsupported architecture" && exit 1 ;; \
     esac && \
     curl -L https://github.com/mozilla/sccache/releases/download/v0.8.2/sccache-v0.8.2-${ARCH}.tar.gz | tar xz && \
     mv sccache-v0.8.2-${ARCH}/sccache /usr/local/cargo/bin/ && \
