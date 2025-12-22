@@ -33,6 +33,7 @@ chrono = "0.4.42"
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = { workspace = true }
 
 [features]
 default = []
