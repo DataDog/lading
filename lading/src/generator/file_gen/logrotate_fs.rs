@@ -115,12 +115,12 @@ enum LoadProfileCompat {
 }
 
 impl LoadProfile {
-    fn from_legacy(profile: LegacyLoadProfile) -> Self {
+    fn from_legacy(profile: &LegacyLoadProfile) -> Self {
         match profile {
             LegacyLoadProfile::Constant(bps) => LoadProfile::Constant {
                 rate: RateSpec {
                     mode: None,
-                    bytes_per_second: Some(bps),
+                    bytes_per_second: Some(*bps),
                     blocks_per_second: None,
                 },
             },
@@ -130,12 +130,12 @@ impl LoadProfile {
             } => LoadProfile::Linear {
                 initial: RateSpec {
                     mode: None,
-                    bytes_per_second: Some(initial_bytes_per_second),
+                    bytes_per_second: Some(*initial_bytes_per_second),
                     blocks_per_second: None,
                 },
                 rate_of_change: RateSpec {
                     mode: None,
-                    bytes_per_second: Some(rate),
+                    bytes_per_second: Some(*rate),
                     blocks_per_second: None,
                 },
             },
@@ -143,7 +143,7 @@ impl LoadProfile {
                 rate: RateSpec {
                     mode: Some(ThrottleMode::Blocks),
                     bytes_per_second: None,
-                    blocks_per_second: Some(blocks_per_second),
+                    blocks_per_second: Some(*blocks_per_second),
                 },
             },
         }
@@ -167,7 +167,7 @@ impl<'de> Deserialize<'de> for LoadProfile {
                     rate_of_change,
                 },
             },
-            LoadProfileCompat::Legacy(profile) => LoadProfile::from_legacy(profile),
+            LoadProfileCompat::Legacy(profile) => LoadProfile::from_legacy(&profile),
         })
     }
 }

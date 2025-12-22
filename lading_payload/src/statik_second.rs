@@ -228,7 +228,7 @@ mod tests {
     use super::*;
     use crate::Serialize;
     use rand::{SeedableRng, rngs::StdRng};
-    use std::{fs::File, io::Write as IoWrite};
+    use std::{fs::File, io::Write};
     use tempfile::tempdir;
 
     #[test]

@@ -13,6 +13,17 @@ pub(crate) type Tick = u64;
 /// The identification node number
 pub(crate) type Inode = usize;
 
+/// Parameters describing a file's position in the rotation hierarchy
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FileHierarchy {
+    /// The parent node of this file
+    pub(crate) parent: Inode,
+    /// The peer of this file (next in rotation sequence)
+    pub(crate) peer: Option<Inode>,
+    /// The group ID shared by all files in the same rotation group
+    pub(crate) group_id: u16,
+}
+
 /// Model representation of a `File`. Does not actually contain any bytes but
 /// stores sufficient metadata to determine access patterns over time.
 #[derive(Debug, Clone)]
@@ -134,17 +145,15 @@ impl File {
     /// Create a new instance of `File`
     pub(crate) fn new(
         mut rng: SmallRng,
-        parent: Inode,
-        group_id: u16,
+        hierarchy: FileHierarchy,
         bytes_per_tick: u64,
         now: Tick,
-        peer: Option<Inode>,
         total_cache_size: u64,
         block_handle: block::Handle,
     ) -> Self {
         let cache_offset = generate_cache_offset(&mut rng, total_cache_size);
         Self {
-            parent,
+            parent: hierarchy.parent,
             bytes_written: 0,
             bytes_read: 0,
             access_tick: now,
@@ -155,8 +164,8 @@ impl File {
             read_only: false,
             read_only_since: None,
             ordinal: 0,
-            peer,
-            group_id,
+            peer: hierarchy.peer,
+            group_id: hierarchy.group_id,
             open_handles: 0,
             unlinked: false,
             max_offset_observed: 0,
@@ -540,13 +549,16 @@ impl State {
             let mut child_rng = SmallRng::from_seed(child_seed);
             let block_handle = generate_block_handle(&mut child_rng, &state.block_cache);
 
+            let hierarchy = FileHierarchy {
+                parent: current_inode,
+                peer: None,
+                group_id,
+            };
             let file = File::new(
                 child_rng,
-                current_inode,
-                group_id,
+                hierarchy,
                 0,
                 state.now,
-                None,
                 state.total_cache_size,
                 block_handle,
             );
@@ -755,13 +767,16 @@ impl State {
             let new_file_inode = self.next_inode;
             let mut file_rng = file_rng;
             let block_handle = generate_block_handle(&mut file_rng, &self.block_cache);
+            let hierarchy = FileHierarchy {
+                parent: parent_inode,
+                peer: Some(rotated_inode),
+                group_id,
+            };
             let mut new_file = File::new(
                 file_rng,
-                parent_inode,
-                group_id,
+                hierarchy,
                 bytes_per_tick,
                 self.now.saturating_sub(1),
-                Some(rotated_inode),
                 self.total_cache_size,
                 block_handle,
             );

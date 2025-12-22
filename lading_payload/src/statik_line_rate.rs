@@ -153,7 +153,7 @@ mod tests {
     use super::*;
     use crate::Serialize;
     use rand::{SeedableRng, rngs::StdRng};
-    use std::{env, fs::File, io::Write as IoWrite};
+    use std::{env, fs::File, io::Write};
 
     #[test]
     fn writes_requested_number_of_lines() {
