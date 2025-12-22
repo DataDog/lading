@@ -30,6 +30,7 @@ use tokio::{
     fs,
     io::{AsyncWriteExt, BufWriter},
     task::{JoinError, JoinSet},
+    time::{Duration, Instant},
 };
 use tracing::{error, info};
 
@@ -37,7 +38,8 @@ use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, ThrottleMode,
+    create_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -103,6 +105,7 @@ pub struct Config {
     /// written _continuously_ per second from this target. Higher bursts are
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
+    #[deprecated(note = "Use load_profile.bytes.bytes_per_second instead")]
     bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
@@ -118,8 +121,21 @@ pub struct Config {
     /// tailing software to remove old files.
     #[serde(default = "default_rotation")]
     rotate: bool,
-    /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    /// Throughput profile controlling emission rate (bytes or blocks).
+    #[serde(default)]
+    pub load_profile: Option<ThrottleConfig>,
+    /// Optional fixed interval between blocks. When set, the generator waits
+    /// this duration before emitting the next block, regardless of byte size.
+    pub block_interval_millis: Option<u64>,
+    /// Flush after each block. Useful when block intervals are large and the
+    /// buffered writer would otherwise delay writes to disk.
+    #[serde(default)]
+    pub flush_each_block: bool,
+    /// Optional starting line offset into the block cache. This advances
+    /// through blocks until the cumulative line count reaches this value,
+    /// then begins emitting from that block. If data point counts are not
+    /// available for a payload, this setting is effectively ignored.
+    pub start_line_index: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -166,8 +182,13 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
-            let throttle =
-                create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+            let legacy_bps = {
+                #[allow(deprecated)]
+                {
+                    config.bytes_per_second.as_ref()
+                }
+            };
+            let throughput_throttle = create_throttle(config.load_profile.as_ref(), legacy_bps)?;
 
             let block_cache = match config.block_cache_method {
                 block::CacheMethod::Fixed => block::Cache::fixed_with_max_overhead(
@@ -190,11 +211,15 @@ impl Server {
             let child = Child {
                 path_template: config.path_template.clone(),
                 maximum_bytes_per_file,
-                throttle,
+                throttle: throughput_throttle,
                 block_cache: Arc::new(block_cache),
+                maximum_block_size: maximum_block_size as u64,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
+                block_interval: config.block_interval_millis.map(Duration::from_millis),
+                flush_each_block: config.flush_each_block,
+                start_line_index: config.start_line_index.unwrap_or(0),
             };
 
             handles.spawn(child.spin());
@@ -264,22 +289,48 @@ impl Server {
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
+    maximum_block_size: u64,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
+    block_interval: Option<Duration>,
+    flush_each_block: bool,
+    start_line_index: u64,
 }
 
 impl Child {
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = self.throttle.maximum_capacity() as usize;
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
         let mut file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
         let mut path = path_from_template(&self.path_template, file_index);
 
+        let mut handle = self.block_cache.handle();
+        if self.start_line_index > 0 {
+            let mut remaining = self.start_line_index;
+            // Walk blocks until we reach or surpass the requested line offset.
+            // If metadata is missing, assume at least one data point to ensure progress.
+            loop {
+                let md = self.block_cache.peek_next_metadata(&handle);
+                let mut lines = md.data_points.unwrap_or(1);
+                if lines == 0 {
+                    lines = 1;
+                }
+                if lines >= remaining {
+                    break;
+                }
+                remaining = remaining.saturating_sub(lines);
+                let _ = self.block_cache.advance(&mut handle);
+            }
+        }
+        let buffer_capacity = match self.throttle.mode {
+            ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
+            ThrottleMode::Blocks => usize::try_from(self.maximum_block_size).unwrap_or(usize::MAX),
+        };
         let mut fp = BufWriter::with_capacity(
             buffer_capacity,
             fs::OpenOptions::new()
@@ -298,25 +349,42 @@ impl Child {
                     }
                 })?,
         );
-
-        let mut handle = self.block_cache.handle();
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut next_tick = self
+            .block_interval
+            .as_ref()
+            .map(|dur| Instant::now() + *dur);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let block = self.block_cache.advance(&mut handle);
-                            let total_bytes = u64::from(total_bytes.get());
+                            let total_bytes = u64::from(block.total_bytes.get());
+                            if let Some(dur) = self.block_interval {
+                                if let Some(deadline) = next_tick {
+                                    tokio::select! {
+                                        () = tokio::time::sleep_until(deadline) => {},
+                                        () = &mut shutdown_wait => {
+                                            fp.flush().await?;
+                                            info!("shutdown signal received");
+                                            return Ok(());
+                                        },
+                                    }
+                                    next_tick = Some(deadline + dur);
+                                } else {
+                                    next_tick = Some(Instant::now() + dur);
+                                }
+                            }
 
                             {
                                 fp.write_all(&block.bytes).await?;
                                 counter!("bytes_written").increment(total_bytes);
                                 total_bytes_written += total_bytes;
+                            }
+                            if self.flush_each_block {
+                                fp.flush().await?;
                             }
 
                             if total_bytes_written > maximum_bytes_per_file {
@@ -351,7 +419,10 @@ impl Child {
                             }
                         }
                         Err(err) => {
-                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}");
+                            let total_bytes = self.block_cache.peek_next_size(&handle);
+                            error!(
+                                "Throttle request for block size {total_bytes} failed. Block will be discarded. Error: {err}"
+                            );
                         }
                     }
                 }

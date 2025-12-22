@@ -9,7 +9,9 @@ generator:
         max_depth: 0
         variant: "ascii"
         load_profile:
-          constant: 1.3MiB
+          constant:
+            rate:
+              bytes_per_second: 1.3MiB
         maximum_prebuild_cache_size_bytes: 1GiB
         mount_point: /tmp/logrotate
 

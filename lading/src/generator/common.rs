@@ -4,34 +4,72 @@ use byte_unit::Byte;
 use serde::{Deserialize, Serialize};
 use std::num::{NonZeroU16, NonZeroU32};
 
-/// Generator-specific throttle configuration with field names that are specific
-/// to byte-oriented generators.
+/// Unified rate specification; defaults to bytes when `mode` is unset.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RateSpec {
+    /// Throttle mode; defaults to bytes when absent.
+    #[serde(default)]
+    pub mode: Option<ThrottleMode>,
+    /// Bytes per second (bytes mode only).
+    #[serde(default)]
+    pub bytes_per_second: Option<Byte>,
+    /// Blocks per second (blocks mode only).
+    #[serde(default)]
+    pub blocks_per_second: Option<NonZeroU32>,
+}
+
+impl RateSpec {
+    fn resolve(&self) -> Result<(ThrottleMode, NonZeroU32), ThrottleConversionError> {
+        let mode = self.mode.unwrap_or(ThrottleMode::Bytes);
+        match mode {
+            ThrottleMode::Bytes => {
+                let bps = self
+                    .bytes_per_second
+                    .ok_or(ThrottleConversionError::MissingRate)?;
+                let val = bps.as_u128();
+                let val =
+                    u32::try_from(val).map_err(|_| ThrottleConversionError::ValueTooLarge(bps))?;
+                NonZeroU32::new(val)
+                    .map(|n| (ThrottleMode::Bytes, n))
+                    .ok_or(ThrottleConversionError::Zero)
+            }
+            ThrottleMode::Blocks => self
+                .blocks_per_second
+                .map(|n| (ThrottleMode::Blocks, n))
+                .ok_or(ThrottleConversionError::MissingRate),
+        }
+    }
+}
+
+/// Generator-specific throttle configuration unified for bytes or blocks.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
-pub enum BytesThrottleConfig {
+pub enum ThrottleConfig {
     /// A throttle that allows the generator to produce as fast as possible
     AllOut,
     /// A throttle that attempts stable load
     Stable {
-        /// The bytes per second rate limit (e.g., "1MB", "512KiB")
-        bytes_per_second: Byte,
+        /// Rate specification (bytes or blocks). Defaults to bytes when mode is unset.
+        #[serde(default)]
+        rate: RateSpec,
         /// The timeout in milliseconds for IO operations. Default is 0.
         #[serde(default)]
         timeout_millis: u64,
     },
     /// A throttle that linearly increases load over time
     Linear {
-        /// The initial bytes per second (e.g., "100KB")
-        initial_bytes_per_second: Byte,
-        /// The maximum bytes per second (e.g., "10MB")
-        maximum_bytes_per_second: Byte,
-        /// The rate of change in bytes per second per second
-        rate_of_change: Byte,
+        /// The initial rate (bytes or blocks per second)
+        initial: RateSpec,
+        /// The maximum rate (bytes or blocks per second)
+        maximum: RateSpec,
+        /// The rate of change per second (bytes or blocks per second)
+        rate_of_change: RateSpec,
     },
 }
 
-/// Error converting `BytesThrottleConfig` to internal throttle config
+/// Error converting `ThrottleConfig` to internal throttle config
 #[derive(Debug, thiserror::Error, Clone, Copy)]
 pub enum ThrottleConversionError {
     /// Value exceeds u32 capacity
@@ -43,110 +81,176 @@ pub enum ThrottleConversionError {
     /// Conflicting configuration provided
     #[error("Cannot specify both throttle config and bytes_per_second")]
     ConflictingConfig,
+    /// Missing rate specification
+    #[error("Rate must be specified for the selected throttle mode")]
+    MissingRate,
+    /// Mixed throttle modes in a linear profile
+    #[error("All rate specs in a linear throttle must use the same mode")]
+    MixedModes,
 }
 
-/// Create a throttle from optional config and `bytes_per_second` fallback
+/// Indicates how a throttle should interpret its token units.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub enum ThrottleMode {
+    /// Throttle tokens represent bytes.
+    Bytes,
+    /// Throttle tokens represent block counts.
+    Blocks,
+}
+
+/// Wrapper around a throttle and how its tokens should be interpreted.
+#[derive(Debug)]
+pub(super) struct BlockThrottle {
+    /// Underlying throttle instance.
+    inner: lading_throttle::Throttle,
+    /// Token interpretation mode.
+    pub mode: ThrottleMode,
+}
+
+impl BlockThrottle {
+    /// Wait for capacity for a block, interpreting tokens according to `mode`.
+    pub(super) async fn wait_for_block(
+        &mut self,
+        block_cache: &lading_payload::block::Cache,
+        handle: &lading_payload::block::Handle,
+    ) -> Result<(), lading_throttle::Error> {
+        let tokens: NonZeroU32 = match self.mode {
+            ThrottleMode::Bytes => block_cache.peek_next_size(handle),
+            ThrottleMode::Blocks => NonZeroU32::new(1).expect("non-zero"),
+        };
+        self.inner.wait_for(tokens).await
+    }
+
+    /// Divide the underlying throttle capacity by `n`, preserving mode.
+    pub(super) fn divide(self, n: NonZeroU32) -> Result<Self, lading_throttle::Error> {
+        let throttle = self.inner.divide(n)?;
+        Ok(Self {
+            inner: throttle,
+            mode: self.mode,
+        })
+    }
+
+    /// Get the maximum capacity of the underlying throttle
+    pub(super) fn maximum_capacity(&self) -> u32 {
+        self.inner.maximum_capacity()
+    }
+}
+
+/// Create a throttle from config plus optional legacy bytes-per-second fallback.
 ///
-/// This function implements the standard throttle creation logic for
-/// byte-oriented generators. It handles the interaction between the new
-/// `BytesThrottleConfig` and the legacy `bytes_per_second` field.
-///
-/// # Decision Logic
-///
-/// | `BytesThrottleConfig` | `bytes_per_second` | Result |
-/// |---------------------|------------------|--------|
-/// | Some(config)        | Some(bps)        | Error - Conflicting configuration |
-/// | Some(config)        | None             | Use `BytesThrottleConfig` |
-/// | None                | Some(bps)        | Create Stable throttle with `timeout_micros`: 0 |
-/// | None                | None             | `AllOut` throttle (no rate limiting) |
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Both config and `bytes_per_second` are provided (conflicting configuration)
-/// - The `bytes_per_second` value exceeds `u32::MAX`
-/// - The `bytes_per_second` value is zero
+/// Returns a [`BlockThrottle`] that carries both the throttle and its mode
+/// (bytes vs blocks).
 pub(super) fn create_throttle(
-    config: Option<&BytesThrottleConfig>,
-    bytes_per_second: Option<&byte_unit::Byte>,
-) -> Result<lading_throttle::Throttle, ThrottleConversionError> {
-    let throttle_config = match (config, bytes_per_second) {
-        (Some(_), Some(_)) => {
-            return Err(ThrottleConversionError::ConflictingConfig);
+    config: Option<&ThrottleConfig>,
+    legacy_bytes_per_second: Option<&byte_unit::Byte>,
+) -> Result<BlockThrottle, ThrottleConversionError> {
+    let fallback = legacy_bytes_per_second.map(|bps| ThrottleConfig::Stable {
+        rate: RateSpec {
+            mode: Some(ThrottleMode::Bytes),
+            bytes_per_second: Some(*bps),
+            blocks_per_second: None,
+        },
+        timeout_millis: 0,
+    });
+
+    let cfg = config
+        .copied()
+        .or(fallback)
+        .unwrap_or(ThrottleConfig::AllOut);
+    let throttle = match cfg {
+        ThrottleConfig::AllOut => {
+            lading_throttle::Throttle::new_with_config(lading_throttle::Config::AllOut)
         }
-        (Some(tc), None) => tc.try_into()?,
-        (None, Some(bps)) => {
-            let bps_value = bps.as_u128();
-            if bps_value > u128::from(u32::MAX) {
-                return Err(ThrottleConversionError::ValueTooLarge(*bps));
-            }
-            #[allow(clippy::cast_possible_truncation)]
-            let bps_u32 = NonZeroU32::new(bps_value as u32).ok_or(ThrottleConversionError::Zero)?;
-            lading_throttle::Config::Stable {
-                maximum_capacity: bps_u32,
-                timeout_micros: 0,
-            }
+        ThrottleConfig::Stable {
+            rate,
+            timeout_millis,
+        } => {
+            let (_mode, cap) = rate.resolve()?;
+            lading_throttle::Throttle::new_with_config(lading_throttle::Config::Stable {
+                maximum_capacity: cap,
+                timeout_micros: timeout_millis.saturating_mul(1000),
+            })
         }
-        (None, None) => lading_throttle::Config::AllOut,
+        ThrottleConfig::Linear {
+            initial,
+            maximum,
+            rate_of_change,
+        } => {
+            let (m1, init) = initial.resolve()?;
+            let (m2, max) = maximum.resolve()?;
+            let (m3, rate) = rate_of_change.resolve()?;
+            if m1 != m2 || m1 != m3 {
+                return Err(ThrottleConversionError::MixedModes);
+            }
+            lading_throttle::Throttle::new_with_config(lading_throttle::Config::Linear {
+                initial_capacity: init.get(),
+                maximum_capacity: max,
+                rate_of_change: rate.get(),
+            })
+        }
     };
-    Ok(lading_throttle::Throttle::new_with_config(throttle_config))
+
+    let mode = match cfg {
+        ThrottleConfig::AllOut => ThrottleMode::Bytes,
+        ThrottleConfig::Stable { rate, .. } => rate.resolve()?.0,
+        ThrottleConfig::Linear {
+            initial,
+            maximum,
+            rate_of_change,
+        } => {
+            let (m1, _) = initial.resolve()?;
+            let (m2, _) = maximum.resolve()?;
+            let (m3, _) = rate_of_change.resolve()?;
+            if m1 != m2 || m1 != m3 {
+                return Err(ThrottleConversionError::MixedModes);
+            }
+            m1
+        }
+    };
+
+    Ok(BlockThrottle {
+        inner: throttle,
+        mode,
+    })
 }
 
-impl TryFrom<&BytesThrottleConfig> for lading_throttle::Config {
+impl TryFrom<&ThrottleConfig> for lading_throttle::Config {
     type Error = ThrottleConversionError;
 
     #[allow(clippy::cast_possible_truncation)]
-    fn try_from(config: &BytesThrottleConfig) -> Result<Self, Self::Error> {
+    fn try_from(config: &ThrottleConfig) -> Result<Self, Self::Error> {
         match config {
-            BytesThrottleConfig::AllOut => Ok(lading_throttle::Config::AllOut),
-            BytesThrottleConfig::Stable {
-                bytes_per_second,
+            ThrottleConfig::AllOut => Ok(lading_throttle::Config::AllOut),
+            ThrottleConfig::Stable {
+                rate,
                 timeout_millis,
             } => {
-                let value = bytes_per_second.as_u128();
-                if value > u128::from(u32::MAX) {
-                    return Err(ThrottleConversionError::ValueTooLarge(*bytes_per_second));
+                let (mode, cap) = rate.resolve()?;
+                if mode != ThrottleMode::Bytes {
+                    return Err(ThrottleConversionError::MixedModes);
                 }
-                let value = value as u32;
-                let value = NonZeroU32::new(value).ok_or(ThrottleConversionError::Zero)?;
                 Ok(lading_throttle::Config::Stable {
-                    maximum_capacity: value,
+                    maximum_capacity: cap,
                     timeout_micros: timeout_millis.saturating_mul(1000),
                 })
             }
-            BytesThrottleConfig::Linear {
-                initial_bytes_per_second,
-                maximum_bytes_per_second,
+            ThrottleConfig::Linear {
+                initial,
+                maximum,
                 rate_of_change,
             } => {
-                let initial = initial_bytes_per_second.as_u128();
-                let maximum = maximum_bytes_per_second.as_u128();
-                let rate = rate_of_change.as_u128();
-
-                if initial > u128::from(u32::MAX) {
-                    return Err(ThrottleConversionError::ValueTooLarge(
-                        *initial_bytes_per_second,
-                    ));
+                let (m1, init) = initial.resolve()?;
+                let (m2, max) = maximum.resolve()?;
+                let (m3, rate) = rate_of_change.resolve()?;
+                if m1 != m2 || m1 != m3 || m1 != ThrottleMode::Bytes {
+                    return Err(ThrottleConversionError::MixedModes);
                 }
-                if maximum > u128::from(u32::MAX) {
-                    return Err(ThrottleConversionError::ValueTooLarge(
-                        *maximum_bytes_per_second,
-                    ));
-                }
-                if rate > u128::from(u32::MAX) {
-                    return Err(ThrottleConversionError::ValueTooLarge(*rate_of_change));
-                }
-
-                let initial = initial as u32;
-                let maximum = maximum as u32;
-                let rate = rate as u32;
-
-                let maximum = NonZeroU32::new(maximum).ok_or(ThrottleConversionError::Zero)?;
-
                 Ok(lading_throttle::Config::Linear {
-                    initial_capacity: initial,
-                    maximum_capacity: maximum,
-                    rate_of_change: rate,
+                    initial_capacity: init.get(),
+                    maximum_capacity: max,
+                    rate_of_change: rate.get(),
                 })
             }
         }
@@ -161,7 +265,7 @@ impl TryFrom<&BytesThrottleConfig> for lading_throttle::Config {
 /// - Pooled: Multiple concurrent requests with semaphore limiting (HTTP/Splunk
 ///   HEC pattern)
 /// - Workers: Multiple persistent worker tasks (TCP/UDP/Unix pattern)
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(super) enum ConcurrencyStrategy {
     /// Pool of connections with semaphore limiting concurrent requests
     Pooled {
@@ -193,7 +297,7 @@ impl ConcurrencyStrategy {
     }
 
     /// Get the number of parallel connections for this strategy
-    pub(super) fn connection_count(&self) -> u16 {
+    pub(super) fn connection_count(self) -> u16 {
         match self {
             Self::Pooled { max_connections } => max_connections.get(),
             Self::Workers { count } => count.get(),
