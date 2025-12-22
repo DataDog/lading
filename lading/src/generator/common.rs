@@ -28,10 +28,9 @@ impl RateSpec {
                     .bytes_per_second
                     .ok_or(ThrottleConversionError::MissingRate)?;
                 let val = bps.as_u128();
-                if val > u128::from(u32::MAX) {
-                    return Err(ThrottleConversionError::ValueTooLarge(bps));
-                }
-                NonZeroU32::new(val as u32)
+                let val =
+                    u32::try_from(val).map_err(|_| ThrottleConversionError::ValueTooLarge(bps))?;
+                NonZeroU32::new(val)
                     .map(|n| (ThrottleMode::Bytes, n))
                     .ok_or(ThrottleConversionError::Zero)
             }
@@ -298,7 +297,7 @@ impl ConcurrencyStrategy {
     }
 
     /// Get the number of parallel connections for this strategy
-    pub(super) fn connection_count(&self) -> u16 {
+    pub(super) fn connection_count(self) -> u16 {
         match self {
             Self::Pooled { max_connections } => max_connections.get(),
             Self::Workers { count } => count.get(),

@@ -200,8 +200,7 @@ impl Grpc {
         let mut rng = StdRng::from_seed(config.seed);
         let labels = MetricsBuilder::new("grpc").with_id(general.id).build();
 
-        let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         let maximum_prebuild_cache_size_bytes =
             NonZeroU32::new(config.maximum_prebuild_cache_size_bytes.as_u128() as u32)

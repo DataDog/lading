@@ -50,6 +50,11 @@ impl StaticSecond {
     /// remainder of the message. `start_line_index`, when provided, skips that
     /// many lines (modulo the total number of available lines) before
     /// returning payloads.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, contains no lines, or a
+    /// timestamp fails to parse.
     pub fn new(
         path: &Path,
         timestamp_format: &str,
@@ -144,9 +149,8 @@ impl StaticSecond {
                     }
                     if remaining >= len {
                         remaining -= len;
-                        continue;
                     } else {
-                        let cut = remaining as usize;
+                        let cut = usize::try_from(remaining).unwrap_or(block.lines.len());
                         block.lines.drain(0..cut);
                         start_idx = idx;
                         break;

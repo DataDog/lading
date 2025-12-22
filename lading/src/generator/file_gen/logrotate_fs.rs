@@ -85,7 +85,9 @@ pub enum LoadProfile {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LoadProfileWire {
-    Constant { rate: RateSpec },
+    Constant {
+        rate: RateSpec,
+    },
     Linear {
         initial: RateSpec,
         rate_of_change: RateSpec,
@@ -100,7 +102,9 @@ enum LegacyLoadProfile {
         initial_bytes_per_second: byte_unit::Byte,
         rate: byte_unit::Byte,
     },
-    Blocks { blocks_per_second: NonZeroU32 },
+    Blocks {
+        blocks_per_second: NonZeroU32,
+    },
 }
 
 #[derive(Debug, Deserialize)]

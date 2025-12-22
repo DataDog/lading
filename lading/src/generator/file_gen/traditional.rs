@@ -301,6 +301,7 @@ struct Child {
 }
 
 impl Child {
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
@@ -328,7 +329,9 @@ impl Child {
         }
         let buffer_capacity = match self.throttle.mode {
             ThrottleMode::Bytes => self.throttle.maximum_capacity() as usize,
-            ThrottleMode::Blocks => self.maximum_block_size as usize,
+            ThrottleMode::Blocks => {
+                usize::try_from(self.maximum_block_size).unwrap_or(usize::MAX)
+            }
         };
         let mut fp = BufWriter::with_capacity(
             buffer_capacity,
@@ -364,7 +367,7 @@ impl Child {
                             if let Some(dur) = self.block_interval {
                                 if let Some(deadline) = next_tick {
                                     tokio::select! {
-                                        _ = tokio::time::sleep_until(deadline) => {},
+                                        () = tokio::time::sleep_until(deadline) => {},
                                         () = &mut shutdown_wait => {
                                             fp.flush().await?;
                                             info!("shutdown signal received");

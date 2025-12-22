@@ -615,21 +615,26 @@ impl State {
         }
     }
 
-    fn blocks_to_bytes(&self, handle: &mut block::Handle, blocks_per_tick: u64) -> u64 {
+    fn blocks_to_bytes(
+        block_cache: &block::Cache,
+        blocks_len: u64,
+        total_cache_size: u64,
+        handle: &mut block::Handle,
+        blocks_per_tick: u64,
+    ) -> u64 {
         if blocks_per_tick == 0 {
             return 0;
         }
-        let blocks_len = self.block_cache.len() as u64;
         if blocks_len == 0 {
             return 0;
         }
         let cycles = blocks_per_tick / blocks_len;
         let remainder = blocks_per_tick % blocks_len;
-        let mut bytes = self.block_cache.total_size().saturating_mul(cycles);
+        let mut bytes = total_cache_size.saturating_mul(cycles);
         for _ in 0..remainder {
-            let size = self.block_cache.peek_next_size(handle);
+            let size = block_cache.peek_next_size(handle);
             bytes = bytes.saturating_add(u64::from(size.get()));
-            let _ = self.block_cache.advance(handle);
+            let _ = block_cache.advance(handle);
         }
         bytes
     }
@@ -642,6 +647,9 @@ impl State {
         // Compute new global throughput, at now - 1.
         let elapsed_ticks = now.saturating_sub(self.initial_tick).saturating_sub(1);
 
+        let block_cache = &self.block_cache;
+        let blocks_len = block_cache.len() as u64;
+        let total_cache_size = block_cache.total_size();
         // Update each File's bytes_per_tick but do not advance time, as that is
         // done later.
         for node in self.nodes.values_mut() {
@@ -654,13 +662,23 @@ impl State {
                     LoadProfile::Linear { start, rate } => {
                         start.saturating_add(rate.saturating_mul(elapsed_ticks))
                     }
-                    LoadProfile::Blocks { blocks_per_tick } => {
-                        self.blocks_to_bytes(&mut file.block_handle, *blocks_per_tick)
-                    }
+                    LoadProfile::Blocks { blocks_per_tick } => Self::blocks_to_bytes(
+                        block_cache,
+                        blocks_len,
+                        total_cache_size,
+                        &mut file.block_handle,
+                        *blocks_per_tick,
+                    ),
                     LoadProfile::BlocksLinear { start, rate } => {
                         let blocks_per_tick =
                             start.saturating_add(rate.saturating_mul(elapsed_ticks));
-                        self.blocks_to_bytes(&mut file.block_handle, blocks_per_tick)
+                        Self::blocks_to_bytes(
+                            block_cache,
+                            blocks_len,
+                            total_cache_size,
+                            &mut file.block_handle,
+                            blocks_per_tick,
+                        )
                     }
                 };
             }

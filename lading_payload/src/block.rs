@@ -391,7 +391,7 @@ impl Cache {
                 let _guard = span.enter();
                 let mut serializer = crate::StaticSecond::new(
                     static_path,
-                    &timestamp_format,
+                    timestamp_format,
                     *emit_placeholder,
                     *start_line_index,
                 )?;
@@ -480,6 +480,12 @@ impl Cache {
         match self {
             Self::Fixed { blocks, .. } => blocks.len(),
         }
+    }
+
+    /// Returns true if the cache has no blocks.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Get metadata of the next block without advancing.

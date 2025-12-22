@@ -34,7 +34,7 @@ pub enum Error {
     /// No lines were discovered in the provided path
     #[error("No lines found in static path")]
     NoLines,
-    /// The provided lines_per_second value was zero
+    /// The provided `lines_per_second` value was zero
     #[error("lines_per_second must be greater than zero")]
     ZeroLinesPerSecond,
 }

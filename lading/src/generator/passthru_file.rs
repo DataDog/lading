@@ -101,8 +101,7 @@ impl PassthruFile {
             .with_id(general.id)
             .build();
 
-        let throttle =
-            create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
+        let throttle = create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
         if let Some(bytes_per_second) = config.bytes_per_second {
             gauge!("bytes_per_second", &labels).set(bytes_per_second.as_u128() as f64 / 1000.0);
