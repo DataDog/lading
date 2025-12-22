@@ -188,7 +188,7 @@ pub enum Cache {
 /// Each independent consumer should create its own Handle by calling
 /// `Cache::handle()`. Handles maintain their own position in the cache
 /// and advance independently.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(missing_copy_implementations)] // intentionally not Copy to force callers to call `handle`.
 pub struct Handle {
     idx: usize,

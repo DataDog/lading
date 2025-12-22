@@ -82,6 +82,9 @@ pub(crate) struct File {
     /// starting positions in the cache.
     cache_offset: u64,
 
+    /// Handle for iterating block sizes when simulating block-based writes.
+    block_handle: block::Handle,
+
     /// The random number generator used to generate the cache offset.
     rng: SmallRng,
 }
@@ -112,6 +115,21 @@ pub(crate) fn generate_cache_offset(rng: &mut SmallRng, total_cache_size: u64) -
     rng.random_range(0..total_cache_size)
 }
 
+fn generate_block_handle<R>(rng: &mut R, block_cache: &block::Cache) -> block::Handle
+where
+    R: Rng + ?Sized,
+{
+    let mut handle = block_cache.handle();
+    let len = block_cache.len();
+    if len == 0 {
+        return handle;
+    }
+    let offset = rng.random_range(0..len);
+    for _ in 0..offset {
+        let _ = block_cache.advance(&mut handle);
+    }
+    handle
+}
 impl File {
     /// Create a new instance of `File`
     pub(crate) fn new(
@@ -122,6 +140,7 @@ impl File {
         now: Tick,
         peer: Option<Inode>,
         total_cache_size: u64,
+        block_handle: block::Handle,
     ) -> Self {
         let cache_offset = generate_cache_offset(&mut rng, total_cache_size);
         Self {
@@ -142,6 +161,7 @@ impl File {
             unlinked: false,
             max_offset_observed: 0,
             cache_offset,
+            block_handle,
             rng,
         }
     }
@@ -291,6 +311,18 @@ pub(crate) enum LoadProfile {
     /// Linear growth of bytes per tick
     Linear {
         /// Starting point for bytes per tick
+        start: u64,
+        /// Amount to increase per tick
+        rate: u64,
+    },
+    /// Constant blocks per tick
+    Blocks {
+        /// Blocks per tick
+        blocks_per_tick: u64,
+    },
+    /// Linear growth of blocks per tick
+    BlocksLinear {
+        /// Starting point for blocks per tick
         start: u64,
         /// Amount to increase per tick
         rate: u64,
@@ -505,7 +537,8 @@ impl State {
 
             // Generate a new SmallRng instance from the states rng to be used in deterministic offset generation
             let child_seed: [u8; 32] = rng.random();
-            let child_rng = SmallRng::from_seed(child_seed);
+            let mut child_rng = SmallRng::from_seed(child_seed);
+            let block_handle = generate_block_handle(&mut child_rng, &state.block_cache);
 
             let file = File::new(
                 child_rng,
@@ -515,6 +548,7 @@ impl State {
                 state.now,
                 None,
                 state.total_cache_size,
+                block_handle,
             );
             state.nodes.insert(file_inode, Node::File { file });
 
@@ -581,19 +615,32 @@ impl State {
         }
     }
 
+    fn blocks_to_bytes(&self, handle: &mut block::Handle, blocks_per_tick: u64) -> u64 {
+        if blocks_per_tick == 0 {
+            return 0;
+        }
+        let blocks_len = self.block_cache.len() as u64;
+        if blocks_len == 0 {
+            return 0;
+        }
+        let cycles = blocks_per_tick / blocks_len;
+        let remainder = blocks_per_tick % blocks_len;
+        let mut bytes = self.block_cache.total_size().saturating_mul(cycles);
+        for _ in 0..remainder {
+            let size = self.block_cache.peek_next_size(handle);
+            bytes = bytes.saturating_add(u64::from(size.get()));
+            let _ = self.block_cache.advance(handle);
+        }
+        bytes
+    }
+
     #[inline]
     #[allow(clippy::too_many_lines)]
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
-        // Compute new global bytes_per_tick, at now - 1.
+        // Compute new global throughput, at now - 1.
         let elapsed_ticks = now.saturating_sub(self.initial_tick).saturating_sub(1);
-        let bytes_per_tick = match &self.load_profile {
-            LoadProfile::Constant(bytes) => *bytes,
-            LoadProfile::Linear { start, rate } => {
-                start.saturating_add(rate.saturating_mul(elapsed_ticks))
-            }
-        };
 
         // Update each File's bytes_per_tick but do not advance time, as that is
         // done later.
@@ -602,7 +649,20 @@ impl State {
                 && !file.read_only
                 && !file.unlinked
             {
-                file.bytes_per_tick = bytes_per_tick;
+                file.bytes_per_tick = match &self.load_profile {
+                    LoadProfile::Constant(bytes) => *bytes,
+                    LoadProfile::Linear { start, rate } => {
+                        start.saturating_add(rate.saturating_mul(elapsed_ticks))
+                    }
+                    LoadProfile::Blocks { blocks_per_tick } => {
+                        self.blocks_to_bytes(&mut file.block_handle, *blocks_per_tick)
+                    }
+                    LoadProfile::BlocksLinear { start, rate } => {
+                        let blocks_per_tick =
+                            start.saturating_add(rate.saturating_mul(elapsed_ticks));
+                        self.blocks_to_bytes(&mut file.block_handle, blocks_per_tick)
+                    }
+                };
             }
         }
 
@@ -611,7 +671,15 @@ impl State {
         }
 
         for inode in self.inode_scratch.drain(..) {
-            let (rotated_inode, parent_inode, group_id, ordinal, file_rng, cache_offset) = {
+            let (
+                rotated_inode,
+                parent_inode,
+                group_id,
+                ordinal,
+                file_rng,
+                cache_offset,
+                bytes_per_tick,
+            ) = {
                 // If the node pointed to by inode doesn't exist, that's a
                 // catastrophic programming error. We just copied all inode to node
                 // pairs.
@@ -656,6 +724,7 @@ impl State {
                     file.ordinal,
                     file.rng.clone(),
                     file.cache_offset,
+                    file.bytes_per_tick,
                 )
             };
 
@@ -666,6 +735,8 @@ impl State {
             // Set bytes_per_tick to current and now to now-1 else we'll never
             // ramp properly.
             let new_file_inode = self.next_inode;
+            let mut file_rng = file_rng;
+            let block_handle = generate_block_handle(&mut file_rng, &self.block_cache);
             let mut new_file = File::new(
                 file_rng,
                 parent_inode,
@@ -674,6 +745,7 @@ impl State {
                 self.now.saturating_sub(1),
                 Some(rotated_inode),
                 self.total_cache_size,
+                block_handle,
             );
 
             let new_file_cache_offset = new_file.cache_offset;
@@ -1277,20 +1349,25 @@ mod test {
         }
 
         // Property 7: bytes_written are tick accurate
-        for (&inode, node) in &state.nodes {
-            if let Node::File { file } = node {
-                let end_tick = file.read_only_since.unwrap_or(state.now);
-                let expected_bytes = compute_expected_bytes_written(
-                    &state.load_profile,
-                    state.initial_tick,
-                    file.created_tick,
-                    end_tick,
-                );
-                assert_eq!(
-                    file.bytes_written, expected_bytes,
-                    "bytes_written ({}) does not match expected_bytes_written ({expected_bytes}) for file with inode {inode}",
-                    file.bytes_written,
-                );
+        if !matches!(
+            state.load_profile,
+            LoadProfile::Blocks { .. } | LoadProfile::BlocksLinear { .. }
+        ) {
+            for (&inode, node) in &state.nodes {
+                if let Node::File { file } = node {
+                    let end_tick = file.read_only_since.unwrap_or(state.now);
+                    let expected_bytes = compute_expected_bytes_written(
+                        &state.load_profile,
+                        state.initial_tick,
+                        file.created_tick,
+                        end_tick,
+                    );
+                    assert_eq!(
+                        file.bytes_written, expected_bytes,
+                        "bytes_written ({}) does not match expected_bytes_written ({expected_bytes}) for file with inode {inode}",
+                        file.bytes_written,
+                    );
+                }
             }
         }
 
@@ -1392,6 +1469,7 @@ mod test {
                     .saturating_add(rate.saturating_mul(sum_of_terms));
                 total_bytes
             }
+            LoadProfile::Blocks { .. } | LoadProfile::BlocksLinear { .. } => 0,
         }
     }
 
