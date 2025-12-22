@@ -346,6 +346,13 @@ impl Server {
         let start_time = Instant::now();
         let start_time_system = SystemTime::now();
 
+        let block_cache_size = block_cache.total_size();
+        info!(
+            "LogrotateFS block cache initialized: requested={}, actual={} bytes, blocks={}",
+            config.maximum_prebuild_cache_size_bytes,
+            block_cache_size,
+            block_cache.len()
+        );
         let state = model::State::new(
             &mut rng,
             start_time.elapsed().as_secs(),

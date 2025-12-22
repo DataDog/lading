@@ -10,7 +10,7 @@ use std::{
 
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use rand::Rng;
-use tracing::debug;
+use tracing::{debug, info};
 
 #[derive(Debug)]
 struct BlockLines {
@@ -62,6 +62,7 @@ impl StaticSecond {
         start_line_index: Option<u64>,
     ) -> Result<Self, Error> {
         let file = File::open(path)?;
+        let file_size_bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
         let reader = BufReader::new(file);
 
         let mut blocks: Vec<BlockLines> = Vec::new();
@@ -159,10 +160,13 @@ impl StaticSecond {
             }
         }
 
-        debug!(
-            "StaticSecond loaded {} second-buckets from {}",
+        info!(
+            "StaticSecond loaded {} second-buckets ({} total lines) from {} ({} bytes, emit_placeholder={})",
             blocks.len(),
-            path.display()
+            total_lines,
+            path.display(),
+            file_size_bytes,
+            emit_placeholder
         );
 
         Ok(Self {
