@@ -31,12 +31,7 @@ arbitrary = { version = "1", optional = true, features = ["derive"] }
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
-<<<<<<< HEAD
 criterion = { version = "0.8", features = ["html_reports"] }
-=======
-criterion = { version = "0.7", features = ["html_reports"] }
-tempfile = { workspace = true }
->>>>>>> ac30b30 (omit timestamp)
 
 [features]
 default = []

@@ -1966,7 +1966,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tuple",
- "tempfile",
  "thiserror 2.0.17",
  "time",
  "tokio",
