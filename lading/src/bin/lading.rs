@@ -716,6 +716,12 @@ fn main() -> Result<(), Error> {
         "Lading running with {limit} amount of memory.",
         limit = memory_limit.to_string()
     );
+    if let Ok(limit_v1) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+        info!("cgroup v1 memory.limit_in_bytes: {}", limit_v1.trim());
+    }
+    if let Ok(max_v2) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+        info!("cgroup v2 memory.max: {}", max_v2.trim());
+    }
 
     // Two-parser fallback logic until CliFlatLegacy is removed
     let args = match CliWithSubcommands::try_parse() {

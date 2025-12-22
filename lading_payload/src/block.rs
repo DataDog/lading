@@ -26,6 +26,12 @@ pub enum SpinError {
     /// `StaticChunks` payload creation error
     #[error(transparent)]
     StaticChunks(#[from] crate::static_chunks::Error),
+    /// Static line-rate payload creation error
+    #[error(transparent)]
+    StaticLinesPerSecond(#[from] crate::statik_line_rate::Error),
+    /// Static second-grouped payload creation error
+    #[error(transparent)]
+    StaticSecond(#[from] crate::statik_second::Error),
     /// rng slice is Empty
     #[error("RNG slice is empty")]
     EmptyRng,
@@ -61,6 +67,12 @@ pub enum Error {
     /// `StaticChunks` payload creation error
     #[error(transparent)]
     StaticChunks(#[from] crate::static_chunks::Error),
+    /// Static line-rate payload creation error
+    #[error(transparent)]
+    StaticLinesPerSecond(#[from] crate::statik_line_rate::Error),
+    /// Static second-grouped payload creation error
+    #[error(transparent)]
+    StaticSecond(#[from] crate::statik_second::Error),
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
@@ -176,7 +188,7 @@ pub enum Cache {
 /// Each independent consumer should create its own Handle by calling
 /// `Cache::handle()`. Handles maintain their own position in the cache
 /// and advance independently.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(missing_copy_implementations)] // intentionally not Copy to force callers to call `handle`.
 pub struct Handle {
     idx: usize,
@@ -354,6 +366,42 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
+            crate::Config::StaticLinesPerSecond {
+                static_path,
+                lines_per_second,
+            } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-lines-per-second");
+                let _guard = span.enter();
+                let mut serializer =
+                    crate::StaticLinesPerSecond::new(static_path, *lines_per_second)?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
+            crate::Config::StaticSecond {
+                static_path,
+                timestamp_format,
+                emit_placeholder,
+                start_line_index,
+            } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-second");
+                let _guard = span.enter();
+                let mut serializer = crate::StaticSecond::new(
+                    static_path,
+                    timestamp_format,
+                    *emit_placeholder,
+                    *start_line_index,
+                )?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
             crate::Config::OpentelemetryTraces(config) => {
                 let mut pyld = crate::OpentelemetryTraces::with_config(*config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-traces");
@@ -424,6 +472,20 @@ impl Cache {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
         }
+    }
+
+    /// Get the number of blocks in the cache.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Fixed { blocks, .. } => blocks.len(),
+        }
+    }
+
+    /// Returns true if the cache has no blocks.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Get metadata of the next block without advancing.

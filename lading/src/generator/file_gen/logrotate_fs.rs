@@ -5,6 +5,7 @@
 #![allow(clippy::cast_possible_wrap)]
 
 use crate::generator;
+use crate::generator::common::{RateSpec, ThrottleConfig, ThrottleConversionError, ThrottleMode};
 use fuser::{
     BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
     ReplyEntry, Request, spawn_mount2,
@@ -13,7 +14,7 @@ use lading_payload::block;
 use metrics::counter;
 use nix::libc::{self, ENOENT};
 use rand::{SeedableRng, rngs::SmallRng};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -55,37 +56,216 @@ pub struct Config {
     maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
-    /// The load profile, controlling bytes per second as a function of time.
+    /// The load profile, controlling bytes or blocks per second as a function of time.
     load_profile: LoadProfile,
+    /// Optional throttle profile (bytes or blocks). When set, overrides
+    /// `load_profile`.
+    #[serde(default)]
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// Profile for load in this filesystem.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadProfile {
-    /// Constant bytes per second
-    Constant(byte_unit::Byte),
-    /// Linear growth of bytes per second
+    /// Constant rate (bytes or blocks per second).
+    Constant {
+        /// Rate specification (bytes or blocks).
+        rate: RateSpec,
+    },
+    /// Linear growth of rate (bytes or blocks per second).
     Linear {
-        /// Starting point for bytes per second
-        initial_bytes_per_second: byte_unit::Byte,
-        /// Amount to increase per second
-        rate: byte_unit::Byte,
+        /// Starting point for the rate.
+        initial: RateSpec,
+        /// Amount to increase per second.
+        rate_of_change: RateSpec,
     },
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LoadProfileWire {
+    Constant {
+        rate: RateSpec,
+    },
+    Linear {
+        initial: RateSpec,
+        rate_of_change: RateSpec,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LegacyLoadProfile {
+    Constant(byte_unit::Byte),
+    Linear {
+        initial_bytes_per_second: byte_unit::Byte,
+        rate: byte_unit::Byte,
+    },
+    Blocks {
+        blocks_per_second: NonZeroU32,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LoadProfileCompat {
+    New(LoadProfileWire),
+    Legacy(LegacyLoadProfile),
+}
+
 impl LoadProfile {
-    fn to_model(self) -> model::LoadProfile {
-        // For now, one tick is one second.
-        match self {
-            LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.as_u128() as u64),
-            LoadProfile::Linear {
+    fn from_legacy(profile: &LegacyLoadProfile) -> Self {
+        match profile {
+            LegacyLoadProfile::Constant(bps) => LoadProfile::Constant {
+                rate: RateSpec {
+                    mode: None,
+                    bytes_per_second: Some(*bps),
+                    blocks_per_second: None,
+                },
+            },
+            LegacyLoadProfile::Linear {
                 initial_bytes_per_second,
                 rate,
-            } => model::LoadProfile::Linear {
-                start: initial_bytes_per_second.as_u128() as u64,
-                rate: rate.as_u128() as u64,
+            } => LoadProfile::Linear {
+                initial: RateSpec {
+                    mode: None,
+                    bytes_per_second: Some(*initial_bytes_per_second),
+                    blocks_per_second: None,
+                },
+                rate_of_change: RateSpec {
+                    mode: None,
+                    bytes_per_second: Some(*rate),
+                    blocks_per_second: None,
+                },
             },
+            LegacyLoadProfile::Blocks { blocks_per_second } => LoadProfile::Constant {
+                rate: RateSpec {
+                    mode: Some(ThrottleMode::Blocks),
+                    bytes_per_second: None,
+                    blocks_per_second: Some(*blocks_per_second),
+                },
+            },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LoadProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let compat = LoadProfileCompat::deserialize(deserializer)?;
+        Ok(match compat {
+            LoadProfileCompat::New(profile) => match profile {
+                LoadProfileWire::Constant { rate } => LoadProfile::Constant { rate },
+                LoadProfileWire::Linear {
+                    initial,
+                    rate_of_change,
+                } => LoadProfile::Linear {
+                    initial,
+                    rate_of_change,
+                },
+            },
+            LoadProfileCompat::Legacy(profile) => LoadProfile::from_legacy(&profile),
+        })
+    }
+}
+
+impl LoadProfile {
+    fn to_model(self) -> Result<model::LoadProfile, ThrottleConversionError> {
+        // For now, one tick is one second.
+        match self {
+            LoadProfile::Constant { rate } => {
+                let (mode, cap) = resolve_rate(&rate)?;
+                match mode {
+                    ThrottleMode::Bytes => Ok(model::LoadProfile::Constant(u64::from(cap.get()))),
+                    ThrottleMode::Blocks => Ok(model::LoadProfile::Blocks {
+                        blocks_per_tick: u64::from(cap.get()),
+                    }),
+                }
+            }
+            LoadProfile::Linear {
+                initial,
+                rate_of_change,
+            } => {
+                let (m1, init) = resolve_rate(&initial)?;
+                let (m2, rate) = resolve_rate(&rate_of_change)?;
+                if m1 != m2 {
+                    return Err(ThrottleConversionError::MixedModes);
+                }
+                match m1 {
+                    ThrottleMode::Bytes => Ok(model::LoadProfile::Linear {
+                        start: u64::from(init.get()),
+                        rate: u64::from(rate.get()),
+                    }),
+                    ThrottleMode::Blocks => Ok(model::LoadProfile::BlocksLinear {
+                        start: u64::from(init.get()),
+                        rate: u64::from(rate.get()),
+                    }),
+                }
+            }
+        }
+    }
+}
+
+fn resolve_rate(rate: &RateSpec) -> Result<(ThrottleMode, NonZeroU32), ThrottleConversionError> {
+    let mode = rate.mode.unwrap_or(ThrottleMode::Bytes);
+    match mode {
+        ThrottleMode::Bytes => {
+            let bps = rate
+                .bytes_per_second
+                .ok_or(ThrottleConversionError::MissingRate)?;
+            let val = bps.as_u128();
+            if val > u128::from(u32::MAX) {
+                return Err(ThrottleConversionError::ValueTooLarge(bps));
+            }
+            NonZeroU32::new(val as u32)
+                .map(|n| (ThrottleMode::Bytes, n))
+                .ok_or(ThrottleConversionError::Zero)
+        }
+        ThrottleMode::Blocks => rate
+            .blocks_per_second
+            .map(|n| (ThrottleMode::Blocks, n))
+            .ok_or(ThrottleConversionError::MissingRate),
+    }
+}
+
+fn load_profile_from_throttle(
+    throttle: &ThrottleConfig,
+) -> Result<model::LoadProfile, ThrottleConversionError> {
+    match throttle {
+        ThrottleConfig::AllOut => Ok(model::LoadProfile::Blocks { blocks_per_tick: 1 }),
+        ThrottleConfig::Stable { rate, .. } => {
+            let (mode, cap) = resolve_rate(rate)?;
+            match mode {
+                ThrottleMode::Bytes => Ok(model::LoadProfile::Constant(u64::from(cap.get()))),
+                ThrottleMode::Blocks => Ok(model::LoadProfile::Blocks {
+                    blocks_per_tick: u64::from(cap.get()),
+                }),
+            }
+        }
+        ThrottleConfig::Linear {
+            initial,
+            maximum,
+            rate_of_change,
+        } => {
+            let (m1, init) = resolve_rate(initial)?;
+            let (m2, _max) = resolve_rate(maximum)?;
+            let (m3, rate) = resolve_rate(rate_of_change)?;
+            if m1 != m2 || m1 != m3 {
+                return Err(ThrottleConversionError::MixedModes);
+            }
+            match m1 {
+                ThrottleMode::Bytes => Ok(model::LoadProfile::Linear {
+                    start: u64::from(init.get()),
+                    rate: u64::from(rate.get()),
+                }),
+                ThrottleMode::Blocks => Ok(model::LoadProfile::BlocksLinear {
+                    start: u64::from(init.get()),
+                    rate: u64::from(rate.get()),
+                }),
+            }
         }
     }
 }
@@ -99,6 +279,9 @@ pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] ThrottleConversionError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -154,10 +337,22 @@ impl Server {
             // divvy this up in the future.
             total_bytes.get() as usize,
         )?;
+        let load_profile = if let Some(throttle) = &config.throttle {
+            load_profile_from_throttle(throttle)?
+        } else {
+            config.load_profile.to_model()?
+        };
 
         let start_time = Instant::now();
         let start_time_system = SystemTime::now();
 
+        let block_cache_size = block_cache.total_size();
+        info!(
+            "LogrotateFS block cache initialized: requested={}, actual={} bytes, blocks={}",
+            config.maximum_prebuild_cache_size_bytes,
+            block_cache_size,
+            block_cache.len()
+        );
         let state = model::State::new(
             &mut rng,
             start_time.elapsed().as_secs(),
@@ -166,7 +361,7 @@ impl Server {
             block_cache,
             config.max_depth,
             config.concurrent_logs,
-            config.load_profile.to_model(),
+            load_profile,
         );
 
         info!(

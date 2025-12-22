@@ -14,21 +14,16 @@ pub struct Output {
     pub stdout: Behavior,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
 /// Defines the [`Output`] behavior for stderr and stdout.
 pub enum Behavior {
     /// Redirect stdout, stderr to /dev/null
+    #[default]
     Quiet,
     /// Write to a location on-disk.
     Log(PathBuf),
-}
-
-impl Default for Behavior {
-    fn default() -> Self {
-        Self::Quiet
-    }
 }
 
 impl fmt::Display for Behavior {
