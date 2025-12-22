@@ -1,8 +1,9 @@
-FROM docker.io/rust:1.90.0-bookworm AS chef
-RUN cargo install cargo-chef
-WORKDIR /app
+# Update the rust version in-sync with the version in rust-toolchain.toml
 
-FROM chef AS planner
+# Stage 0: Planner - Extract dependency metadata
+FROM docker.io/rust:1.90.0-slim-bookworm AS planner
+WORKDIR /app
+RUN cargo install cargo-chef --version 0.1.73
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
