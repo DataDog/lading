@@ -45,7 +45,8 @@ struct CpuUtilization {
 #[derive(Debug, Clone, Copy)]
 pub struct Sampler {
     ticks_per_second: f64,
-    prev: Stats,
+    /// Previous stats for delta calculation. None on first poll.
+    prev: Option<Stats>,
 }
 
 impl Sampler {
@@ -53,7 +54,7 @@ impl Sampler {
     pub fn new() -> Self {
         Self {
             ticks_per_second: unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64,
-            prev: Stats::default(),
+            prev: None,
         }
     }
 
@@ -87,16 +88,20 @@ impl Sampler {
         let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
         assert!(cur_pid == pid);
 
-        // Get or initialize the previous stats. Note that the first time this is
-        // initialized we intentionally set last_instance to now to avoid scheduling
-        // shenanigans.
         let cur_stats = Stats {
             user_ticks: utime_ticks,
             system_ticks: stime_ticks,
             uptime_ticks: (uptime_secs * self.ticks_per_second).round() as u64,
         };
 
-        if let Some(util) = compute_cpu_usage(self.prev, cur_stats, allowed_cores) {
+        // On first poll, just record baseline stats without emitting metrics.
+        // This avoids a spike where delta = (cumulative_since_process_start - 0).
+        let Some(ref prev) = self.prev else {
+            self.prev = Some(cur_stats);
+            return Ok(());
+        };
+
+        if let Some(util) = compute_cpu_usage(*prev, cur_stats, allowed_cores) {
             // NOTE these metric names are paired with names in cgroup/v2/cpu.rs and
             // must remain consistent. If you change these, change those.
             gauge!("stat.total_cpu_percentage", labels).set(util.total_cpu_percentage);
@@ -112,7 +117,7 @@ impl Sampler {
             gauge!("stat.cpu_limit_millicores", labels).set(limit_millicores);
         }
 
-        self.prev = cur_stats;
+        self.prev = Some(cur_stats);
 
         Ok(())
     }
