@@ -1,6 +1,7 @@
-pub(crate) mod cpu;
-pub(crate) mod io;
-pub(crate) mod memory;
+/// CPU metrics from cgroup v2
+pub mod cpu;
+pub mod io;
+pub mod memory;
 
 use core::f64;
 use std::{
@@ -12,22 +13,28 @@ use metrics::{counter, gauge};
 use tokio::fs;
 use tracing::{debug, error, warn};
 
+/// Errors produced by cgroup v2 functions
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Integer parsing error
     #[error("Parse int error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+    /// Float parsing error
     #[error("Parse float error: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Cgroup v2 hierarchy not found for process
     #[error("Cgroup v2 not found")]
     CgroupV2NotFound,
+    /// PSI (Pressure Stall Information) parsing error
     #[error("Parsing PSI error: {0}")]
     ParsingPsi(String),
 }
 
 /// Determines the cgroup v2 path for a given PID.
-pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
+pub async fn get_path(pid: i32) -> Result<PathBuf, Error> {
     let path = format!("/proc/{pid}/cgroup");
     let content = fs::read_to_string(path).await?;
 
@@ -52,7 +59,7 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 /// Polls for any cgroup metrics that can be read, v2 version.
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_lines)]
-pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
+pub async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
     // Read all files in the cgroup `path` and create metrics for them. If we
     // lack permissions to read we skip the file. We do not use ? to allow for
     // the maximal number of files to be read.

@@ -3,16 +3,22 @@ use tokio::fs;
 
 use crate::observer::linux::cgroup;
 
+/// Errors produced by functions in this module
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Float parsing error
     #[error("Float Parsing: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Integer parsing error
     #[error("Integer Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+    /// Stat file format error
     #[error("Stat Malformed: {0}")]
     StatMalformed(&'static str),
+    /// Cgroup path resolution error
     #[error("Cgroup get_path: {0}")]
     Cgroup(#[from] cgroup::v2::Error),
 }
@@ -35,22 +41,26 @@ struct CpuUtilization {
     system_cpu_millicores: f64,
 }
 
-#[derive(Debug)]
-pub(crate) struct Sampler {
+/// Samples CPU statistics from /proc/<pid>/stat with delta calculations
+#[derive(Debug, Clone, Copy)]
+pub struct Sampler {
     ticks_per_second: f64,
-    prev: Stats,
+    /// Previous stats for delta calculation. None on first poll.
+    prev: Option<Stats>,
 }
 
 impl Sampler {
-    pub(crate) fn new() -> Self {
+    /// Create a new Sampler
+    pub fn new() -> Self {
         Self {
             ticks_per_second: unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) } as f64,
-            prev: Stats::default(),
+            prev: None,
         }
     }
 
+    /// Poll CPU statistics and emit metrics
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub(crate) async fn poll(
+    pub async fn poll(
         &mut self,
         pid: i32,
         uptime_secs: f64,
@@ -78,16 +88,20 @@ impl Sampler {
         let (cur_pid, utime_ticks, stime_ticks) = parse(&stat_contents)?;
         assert!(cur_pid == pid);
 
-        // Get or initialize the previous stats. Note that the first time this is
-        // initialized we intentionally set last_instance to now to avoid scheduling
-        // shenanigans.
         let cur_stats = Stats {
             user_ticks: utime_ticks,
             system_ticks: stime_ticks,
             uptime_ticks: (uptime_secs * self.ticks_per_second).round() as u64,
         };
 
-        if let Some(util) = compute_cpu_usage(self.prev, cur_stats, allowed_cores) {
+        // On first poll, just record baseline stats without emitting metrics.
+        // This avoids a spike where delta = (cumulative_since_process_start - 0).
+        let Some(ref prev) = self.prev else {
+            self.prev = Some(cur_stats);
+            return Ok(());
+        };
+
+        if let Some(util) = compute_cpu_usage(*prev, cur_stats, allowed_cores) {
             // NOTE these metric names are paired with names in cgroup/v2/cpu.rs and
             // must remain consistent. If you change these, change those.
             gauge!("stat.total_cpu_percentage", labels).set(util.total_cpu_percentage);
@@ -103,7 +117,7 @@ impl Sampler {
             gauge!("stat.cpu_limit_millicores", labels).set(limit_millicores);
         }
 
-        self.prev = cur_stats;
+        self.prev = Some(cur_stats);
 
         Ok(())
     }

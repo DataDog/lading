@@ -24,7 +24,7 @@ use tracing::warn;
 /// * `pgdeactivate`
 /// * `pglazyfree`
 /// * `pglazyfreed`
-pub(crate) fn stat(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
+pub fn stat(content: &str, metric_prefix: &str, labels: &[(String, String)]) {
     let counter_keys = [
         "pgfault",
         "pgmajfault",

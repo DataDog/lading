@@ -258,6 +258,39 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         Ok(Operation::Exit)
     }
 
+    /// Replace the current format with a new one, returning the old format.
+    ///
+    /// This method flushes any buffered data before returning the old format.
+    /// The caller is responsible for closing the old format (to write any
+    /// footer/metadata) and providing a properly initialized new format.
+    ///
+    /// This enables file rotation: the caller can close the old format (writing
+    /// the Parquet footer), create a new file, and provide the new format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing the current format fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called when no format is present (after shutdown).
+    pub(crate) fn replace_format(&mut self, new_format: F) -> Result<F, Error> {
+        // Flush any buffered data in the current format
+        self.format
+            .as_mut()
+            .expect("format must be present during operation")
+            .flush()?;
+
+        // Swap in the new format and return the old one
+        let old_format = self
+            .format
+            .replace(new_format)
+            .expect("format must be present during operation");
+
+        info!("Format replaced for file rotation");
+        Ok(old_format)
+    }
+
     /// Convert an Instant timestamp to `Accumulator` logical tick time.
     #[inline]
     fn instant_to_tick(&self, timestamp: Instant) -> u64 {

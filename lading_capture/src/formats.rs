@@ -24,6 +24,9 @@ pub enum Error {
     /// IO errors during write operations
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Rotation not supported for this format
+    #[error("File rotation not supported for this format")]
+    RotationNotSupported,
 }
 
 /// Trait for output format implementations
@@ -63,6 +66,29 @@ pub trait OutputFormat {
     ///
     /// Returns an error if closing fails.
     fn close(self) -> Result<(), Error>;
+
+    /// Rotate to a new output file
+    ///
+    /// Flushes and closes the current file (writing footer for Parquet), then
+    /// opens a new file at the specified path. This allows continuous metrics
+    /// collection while producing multiple readable output files.
+    ///
+    /// The default implementation returns `RotationNotSupported`. Formats that
+    /// support rotation (like Parquet with file-based writers) should override.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path for the new output file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if rotation is not supported or if file operations fail.
+    fn rotate(self, _path: std::path::PathBuf) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        Err(Error::RotationNotSupported)
+    }
 }
 
 #[cfg(test)]
