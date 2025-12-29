@@ -1874,6 +1874,7 @@ dependencies = [
  "kube",
  "kube-core",
  "lading-capture",
+ "lading-capture-schema",
  "lading-payload",
  "lading-signal",
  "lading-throttle",
@@ -1929,6 +1930,7 @@ dependencies = [
  "bytes",
  "datadog-protos",
  "ddsketch-agent",
+ "lading-capture-schema",
  "lading-fuzz",
  "lading-signal",
  "metrics",
@@ -1946,6 +1948,13 @@ dependencies = [
  "tracing",
  "ustr",
  "uuid",
+]
+
+[[package]]
+name = "lading-capture-schema"
+version = "0.1.0"
+dependencies = [
+ "arrow-schema",
 ]
 
 [[package]]
