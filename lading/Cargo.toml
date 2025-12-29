@@ -23,7 +23,7 @@ lading-signal = { version = "0.1", path = "../lading_signal" }
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
-async-compression = { version = "0.4.35", features = ["tokio", "zstd"] }
+async-compression = { version = "0.4.36", features = ["tokio", "zstd"] }
 bollard = { version = "0.19" }
 parquet = { workspace = true, features = ["arrow"] }
 byte-unit = { workspace = true, features = ["std"] }
