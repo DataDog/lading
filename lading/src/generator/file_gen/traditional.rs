@@ -37,7 +37,7 @@ use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -103,6 +103,7 @@ pub struct Config {
     /// written _continuously_ per second from this target. Higher bursts are
     /// possible as the internal governor accumulates, up to
     /// `maximum_bytes_burst`.
+    #[deprecated(note = "Use throttle.stable.bytes_per_second instead")]
     bytes_per_second: Option<Byte>,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
@@ -119,7 +120,7 @@ pub struct Config {
     #[serde(default = "default_rotation")]
     rotate: bool,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 #[derive(Debug)]
@@ -166,6 +167,9 @@ impl Server {
         let file_index = Arc::new(AtomicU32::new(0));
 
         for _ in 0..config.duplicates {
+            // Accept the deprecated `bytes_per_second` path for legacy configs while
+            // newer callers migrate to `throttle`.
+            #[allow(deprecated)]
             let throttle =
                 create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
@@ -192,6 +196,7 @@ impl Server {
                 maximum_bytes_per_file,
                 throttle,
                 block_cache: Arc::new(block_cache),
+                maximum_block_size: maximum_block_size as u32,
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
@@ -264,22 +269,29 @@ impl Server {
 struct Child {
     path_template: String,
     maximum_bytes_per_file: NonZeroU32,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
+    maximum_block_size: u32,
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
 }
 
 impl Child {
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = self.throttle.maximum_capacity() as usize;
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_file: u64 = u64::from(self.maximum_bytes_per_file.get());
 
         let mut file_index = self.file_index.fetch_add(1, Ordering::Relaxed);
         let mut path = path_from_template(&self.path_template, file_index);
 
+        let mut handle = self.block_cache.handle();
+        // Setting write buffer capacity (per second) approximately equal to the throttle's maximum capacity
+        // (converted to bytes if necessary) to approximate flush every second.
+        let buffer_capacity = self
+            .throttle
+            .maximum_capacity_bytes(self.maximum_block_size);
         let mut fp = BufWriter::with_capacity(
             buffer_capacity,
             fs::OpenOptions::new()
@@ -298,20 +310,15 @@ impl Child {
                     }
                 })?,
         );
-
-        let mut handle = self.block_cache.handle();
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
                             let block = self.block_cache.advance(&mut handle);
-                            let total_bytes = u64::from(total_bytes.get());
+                            let total_bytes = u64::from(block.total_bytes.get());
 
                             {
                                 fp.write_all(&block.bytes).await?;
