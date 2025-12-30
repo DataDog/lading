@@ -15,7 +15,7 @@ pub enum Error {
 /// Read `/proc/uptime`
 ///
 /// Only the first field is used, which is the total uptime in seconds.
-pub(crate) async fn poll() -> Result<f64, Error> {
+pub async fn poll() -> Result<f64, Error> {
     let buf = tokio::fs::read_to_string("/proc/uptime").await?;
     let uptime_secs = proc_uptime_inner(&buf)?;
     Ok(uptime_secs)

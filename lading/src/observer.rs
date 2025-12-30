@@ -13,8 +13,9 @@ use std::io;
 use crate::target::TargetPidReceiver;
 use serde::Deserialize;
 
+/// Linux-specific observer implementation using procfs and cgroups
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]

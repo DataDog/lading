@@ -17,7 +17,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use tokio::{fs, sync::mpsc, time};
+use tokio::{fs, sync::mpsc, sync::oneshot, time};
 
 use crate::{
     accumulator,
@@ -445,6 +445,27 @@ impl CaptureManager<formats::jsonl::Format<BufWriter<std::fs::File>>, RealClock>
     }
 }
 
+/// Request to rotate to a new output file
+///
+/// Contains the path for the new file and a channel to send the result.
+pub struct RotationRequest {
+    /// Path for the new output file
+    pub path: PathBuf,
+    /// Channel to send rotation result (Ok on success, Err on failure)
+    pub response: oneshot::Sender<Result<(), formats::Error>>,
+}
+
+impl std::fmt::Debug for RotationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RotationRequest")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Handle for sending rotation requests to a running CaptureManager
+pub type RotationSender = mpsc::Sender<RotationRequest>;
+
 impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealClock> {
     /// Create a new [`CaptureManager`] with file-based Parquet writer
     ///
@@ -477,6 +498,162 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
             expiration,
             RealClock::default(),
         ))
+    }
+
+    /// Run [`CaptureManager`] with file rotation support
+    ///
+    /// Similar to [`start`](CaptureManager::start), but also provides a channel
+    /// for rotation requests. When a rotation request is received, the current
+    /// Parquet file is finalized (footer written) and a new file is created at
+    /// the specified path.
+    ///
+    /// Returns a [`RotationSender`] immediately that can be used to trigger
+    /// rotations while the event loop runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is already a global recorder set.
+    #[allow(clippy::cast_possible_truncation)]
+    pub async fn start_with_rotation(mut self) -> Result<RotationSender, Error> {
+        // Create rotation channel - return the sender immediately
+        let (rotation_tx, rotation_rx) = mpsc::channel::<RotationRequest>(4);
+
+        // Initialize historical sender
+        HISTORICAL_SENDER.store(Arc::new(Some(Arc::new(Sender {
+            snd: self.snd.clone(),
+        }))));
+
+        self.install()?;
+        info!("Capture manager installed with rotation support, recording to capture file.");
+
+        // Wait until the target is running then mark time-zero
+        self.target_running.recv().await;
+        self.clock.mark_start();
+
+        let compression_level = self.format.compression_level();
+
+        // Run the event loop in a spawned task so we can return the sender immediately
+        let expiration = self.expiration;
+        let format = self.format;
+        let flush_seconds = self.flush_seconds;
+        let registry = self.registry;
+        let accumulator = self.accumulator;
+        let global_labels = self.global_labels;
+        let clock = self.clock;
+        let recv = self.recv;
+        let shutdown = self.shutdown.take().expect("shutdown watcher must be present");
+
+        tokio::spawn(async move {
+            if let Err(e) = Self::rotation_event_loop(
+                expiration,
+                format,
+                flush_seconds,
+                registry,
+                accumulator,
+                global_labels,
+                clock,
+                recv,
+                shutdown,
+                rotation_rx,
+                compression_level,
+            )
+            .await
+            {
+                error!(error = %e, "CaptureManager rotation event loop error");
+            }
+        });
+
+        Ok(rotation_tx)
+    }
+
+    /// Internal event loop with rotation support
+    #[allow(clippy::too_many_arguments)]
+    async fn rotation_event_loop(
+        expiration: Duration,
+        format: formats::parquet::Format<BufWriter<std::fs::File>>,
+        flush_seconds: u64,
+        registry: Arc<Registry<Key, AtomicStorage>>,
+        accumulator: Accumulator,
+        global_labels: FxHashMap<String, String>,
+        clock: RealClock,
+        mut recv: mpsc::Receiver<Metric>,
+        shutdown: lading_signal::Watcher,
+        mut rotation_rx: mpsc::Receiver<RotationRequest>,
+        compression_level: i32,
+    ) -> Result<(), Error> {
+        let mut flush_interval = clock.interval(Duration::from_millis(TICK_DURATION_MS as u64));
+        let shutdown_wait = shutdown.recv();
+        tokio::pin!(shutdown_wait);
+
+        // Create state machine with owned state
+        let mut state_machine = StateMachine::new(
+            expiration,
+            format,
+            flush_seconds,
+            registry,
+            accumulator,
+            global_labels,
+            clock,
+        );
+
+        // Event loop with rotation support
+        loop {
+            let event = tokio::select! {
+                val = recv.recv() => {
+                    match val {
+                        Some(metric) => Event::MetricReceived(metric),
+                        None => Event::ChannelClosed,
+                    }
+                }
+                () = flush_interval.tick() => Event::FlushTick,
+                Some(rotation_req) = rotation_rx.recv() => {
+                    // Handle rotation inline since it's not a state machine event
+                    let result = Self::handle_rotation(
+                        &mut state_machine,
+                        rotation_req.path,
+                        compression_level,
+                    ).await;
+                    // Send result back to caller (ignore send error if receiver dropped)
+                    let _ = rotation_req.response.send(result);
+                    continue;
+                }
+                () = &mut shutdown_wait => Event::ShutdownSignaled,
+            };
+
+            match state_machine.next(event)? {
+                Operation::Continue => {}
+                Operation::Exit => return Ok(()),
+            }
+        }
+    }
+
+    /// Handle a rotation request
+    async fn handle_rotation(
+        state_machine: &mut StateMachine<
+            formats::parquet::Format<BufWriter<std::fs::File>>,
+            RealClock,
+        >,
+        new_path: PathBuf,
+        compression_level: i32,
+    ) -> Result<(), formats::Error> {
+        // Create new file and format
+        let fp = fs::File::create(&new_path)
+            .await
+            .map_err(formats::Error::Io)?;
+        let fp = fp.into_std().await;
+        let writer = BufWriter::new(fp);
+        let new_format = parquet::Format::new(writer, compression_level)?;
+
+        // Swap formats - this flushes any buffered data
+        let old_format = state_machine
+            .replace_format(new_format)
+            .map_err(|e| formats::Error::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+
+        // Close old format to write Parquet footer
+        old_format.close()?;
+
+        info!(path = %new_path.display(), "Rotated to new capture file");
+        Ok(())
     }
 }
 

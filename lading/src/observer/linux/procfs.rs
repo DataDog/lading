@@ -1,7 +1,9 @@
 /// Sampler implementation for procfs filesystems
-mod memory;
-mod stat;
-mod uptime;
+pub mod memory;
+/// Per-process CPU statistics from /proc/<pid>/stat
+pub mod stat;
+/// System uptime from /proc/uptime
+pub mod uptime;
 mod vmstat;
 
 use std::io;
@@ -79,14 +81,16 @@ struct ProcessInfo {
     stat_sampler: stat::Sampler,
 }
 
+/// Samples procfs metrics for a process tree
 #[derive(Debug)]
-pub(crate) struct Sampler {
+pub struct Sampler {
     parent: Process,
     process_info: FxHashMap<i32, ProcessInfo>,
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
+    /// Create a new procfs Sampler for the given parent PID
+    pub fn new(parent_pid: i32) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let process_info = FxHashMap::default();
 
@@ -96,6 +100,7 @@ impl Sampler {
         })
     }
 
+    /// Poll procfs metrics for all processes in the tree
     #[allow(
         clippy::similar_names,
         clippy::too_many_lines,
@@ -104,7 +109,7 @@ impl Sampler {
         clippy::cast_possible_wrap,
         clippy::cast_lossless
     )]
-    pub(crate) async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
+    pub async fn poll(&mut self, include_smaps: bool) -> Result<(), Error> {
         // A tally of the total RSS and PSS consumed by the parent process and
         // its children.
         let mut aggr = smaps_rollup::Aggregator::default();

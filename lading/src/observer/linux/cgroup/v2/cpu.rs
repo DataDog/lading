@@ -5,12 +5,14 @@ use tokio::fs;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
-pub(crate) enum Error {
+pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Float parsing error
     #[error("Float Parsing: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Integer parsing error
     #[error("Integer Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
 }
@@ -23,25 +25,22 @@ struct Stats {
     last_instant: Instant,
 }
 
-#[derive(Debug)]
-pub(crate) struct Sampler {
-    prev: Stats,
+/// Samples CPU statistics from cgroup v2 with delta calculations
+#[derive(Debug, Default)]
+pub struct Sampler {
+    /// Previous stats for delta calculation. None on first poll.
+    prev: Option<Stats>,
 }
 
 impl Sampler {
-    pub(crate) fn new() -> Self {
-        Self {
-            prev: Stats {
-                usage_usec: 0,
-                user_usec: 0,
-                system_usec: 0,
-                last_instant: Instant::now(),
-            },
-        }
+    /// Create a new CPU Sampler
+    #[must_use]
+    pub fn new() -> Self {
+        Self { prev: None }
     }
 
-    // Read cgroup CPU data and calculate a percentage of usage.
-    pub(crate) async fn poll(
+    /// Read cgroup CPU data and calculate a percentage of usage.
+    pub async fn poll(
         &mut self,
         group_prefix: &Path,
         labels: &[(String, String)],
@@ -80,17 +79,29 @@ impl Sampler {
         }
 
         let now = Instant::now();
-        let delta_time = now.duration_since(self.prev.last_instant).as_micros();
-        let delta_usage = usage_usec.saturating_sub(self.prev.usage_usec);
-        let delta_user = user_usec.saturating_sub(self.prev.user_usec);
-        let delta_system = system_usec.saturating_sub(self.prev.system_usec);
+        let current = Stats {
+            usage_usec,
+            user_usec,
+            system_usec,
+            last_instant: now,
+        };
 
-        // Update previous stats and if there's a time delta calculate the CPU
-        // usage.
-        self.prev.usage_usec = usage_usec;
-        self.prev.user_usec = user_usec;
-        self.prev.system_usec = system_usec;
-        self.prev.last_instant = now;
+        // On first poll, just record baseline stats without emitting metrics.
+        // This avoids a spike where delta = (cumulative_since_container_start - 0).
+        let Some(ref prev) = self.prev else {
+            self.prev = Some(current);
+            return Ok(());
+        };
+
+        let delta_time = now.duration_since(prev.last_instant).as_micros();
+        let delta_usage = usage_usec.saturating_sub(prev.usage_usec);
+        let delta_user = user_usec.saturating_sub(prev.user_usec);
+        let delta_system = system_usec.saturating_sub(prev.system_usec);
+
+        // Update previous stats for next poll
+        self.prev = Some(current);
+
+        // Emit metrics if there's a time delta
         if delta_time > 0 {
             let delta_time = delta_time as f64;
 
