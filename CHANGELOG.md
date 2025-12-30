@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compressed.
 - New "Static Chunks" generator that divides static files by lines into blocks
   (as opposed to static which turns each file into a block).
+- Add support for throttling based on block rate instead of bytes. This can be useful
+  for generators (like "Static Chunks") that output variably sized blocks intentionally.
 
 ## [0.30.0]
 ## Added
