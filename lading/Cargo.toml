@@ -96,6 +96,10 @@ tonic-prost = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter"] }
 zstd = "0.13.3"
+signal-hook = { version = "0.3", optional = true }
+tikv-jemalloc-ctl = { version = "0.6", optional = true, features = ["profiling"] }
+tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
+tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.18", default-features = false, features = [] }
@@ -111,8 +115,14 @@ prost-build = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [features]
-default = []
+default = ["jemalloc_profiling"]
 logrotate_fs = ["fuser"]
+jemalloc_profiling = [
+  "tikv-jemallocator/profiling",
+  "tikv-jemalloc-ctl/profiling",
+  "tikv-jemalloc-sys/profiling",
+  "signal-hook",
+]
 
 [lib]
 doctest = false

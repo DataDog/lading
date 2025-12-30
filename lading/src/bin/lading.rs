@@ -1,5 +1,10 @@
 //! Main lading binary for load testing.
 
+// Force jemalloc as global allocator (unix only)
+#[cfg(unix)]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use std::{
     env,
     fmt::{self, Display},
@@ -67,6 +72,32 @@ enum Error {
     MissingTelemetry,
     #[error(transparent)]
     Registration(#[from] lading_signal::RegisterError),
+}
+
+/// Read current process RSS in bytes from /proc/self/statm (Linux only).
+/// Returns 0 on non-Linux or if reading fails.
+#[cfg(target_os = "linux")]
+fn get_rss_bytes() -> u64 {
+    use std::fs;
+    let page_size = 4096u64; // Typical page size
+    fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|s| s.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|pages| pages * page_size)
+        .unwrap_or(0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_rss_bytes() -> u64 {
+    0
+}
+
+fn log_rss_main(label: &str) {
+    let rss = get_rss_bytes();
+    if rss > 0 {
+        let rss_mb = rss / (1024 * 1024);
+        info!("[MEMORY] {}: RSS = {} MB ({} bytes)", label, rss_mb, rss);
+    }
 }
 
 fn default_config_path() -> String {
@@ -395,6 +426,9 @@ async fn inner_main(
     let (experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
     let (target_running_watcher, target_running_broadcast) = lading_signal::signal();
 
+    #[cfg(all(feature = "jemalloc_profiling", unix))]
+    lading::install_jemalloc_profiling_handler();
+
     // Set up the telemetry sub-system.
     //
     // We support two methods to exflitrate telemetry about the target from rig:
@@ -531,11 +565,23 @@ async fn inner_main(
     //
     // GENERATOR
     //
-    for cfg in config.generator {
+    log_rss_main("Before creating generators");
+    lading::log_jemalloc_stats("Before creating generators");
+    let generator_count = config.generator.len();
+    for (i, cfg) in config.generator.into_iter().enumerate() {
+        info!("[STARTUP] Creating generator {}/{}", i + 1, generator_count);
         let tgt_rcv = tgt_snd.subscribe();
         let generator_server = generator::Server::new(cfg, shutdown_watcher.clone())?;
+        log_rss_main(&format!(
+            "After creating generator {}/{}",
+            i + 1,
+            generator_count
+        ));
+        lading::log_jemalloc_stats(&format!("After generator {}/{}", i + 1, generator_count));
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
+    log_rss_main("After all generators created");
+    lading::log_jemalloc_stats("After all generators created");
 
     //
     // INSPECTOR

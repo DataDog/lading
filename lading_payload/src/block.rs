@@ -14,6 +14,34 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};
 
+/// Read current process RSS in bytes from /proc/self/statm (Linux only).
+/// Returns 0 on non-Linux or if reading fails.
+#[cfg(target_os = "linux")]
+fn get_rss_bytes() -> u64 {
+    use std::fs;
+    let page_size = 4096u64; // Typical page size
+    fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|s| s.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|pages| pages * page_size)
+        .unwrap_or(0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_rss_bytes() -> u64 {
+    0
+}
+
+fn log_rss(label: &str) {
+    let rss = get_rss_bytes();
+    if rss > 0 {
+        let rss_str = Byte::from_u64(rss)
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
+        info!("[MEMORY] {}: RSS = {}", label, rss_str);
+    }
+}
+
 /// Error for block construction
 #[derive(Debug, thiserror::Error)]
 pub enum SpinError {
@@ -98,6 +126,22 @@ pub struct Block {
     pub bytes: Bytes,
     /// Optional metadata for the block
     pub metadata: BlockMetadata,
+}
+
+impl Block {
+    /// Estimate the actual heap memory used by this block.
+    /// This includes the Block struct, Bytes overhead, and payload.
+    pub fn estimated_heap_bytes(&self) -> usize {
+        // Block struct size (stack/inline)
+        let block_struct_size = std::mem::size_of::<Block>();
+        // Bytes payload (actual data)
+        let payload_size = self.bytes.len();
+        // Bytes has internal Arc overhead (~32 bytes on 64-bit)
+        let bytes_overhead = 32;
+        // jemalloc has ~16 bytes overhead per allocation
+        let alloc_overhead = 16;
+        block_struct_size + payload_size + bytes_overhead + alloc_overhead
+    }
 }
 
 /// Metadata associated with a Block
@@ -212,6 +256,9 @@ impl Cache {
     where
         R: Rng + ?Sized,
     {
+        let payload_name = format!("{:?}", payload).chars().take(50).collect::<String>();
+        log_rss(&format!("Before cache construction for {}", payload_name));
+
         let maximum_block_bytes = if (maximum_block_bytes > u128::from(u32::MAX))
             || (maximum_block_bytes > u128::from(total_bytes.get()))
         {
@@ -426,6 +473,30 @@ impl Cache {
             .map(|block| u64::from(block.total_bytes.get()))
             .sum();
 
+        // Log cache stats and memory after construction
+        let block_count = blocks.len();
+        let cache_size_str = Byte::from_u64(total_cycle_size)
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
+        
+        // Estimate actual heap usage
+        let estimated_heap: usize = blocks.iter().map(|b| b.estimated_heap_bytes()).sum();
+        let vec_capacity_bytes = blocks.capacity() * std::mem::size_of::<Block>();
+        let total_estimated = estimated_heap + vec_capacity_bytes;
+        let estimated_str = Byte::from_u64(total_estimated as u64)
+            .get_appropriate_unit(byte_unit::UnitType::Binary)
+            .to_string();
+        
+        info!(
+            "[CACHE] Constructed {} blocks, payload size: {}, estimated heap: {}, vec capacity: {} blocks ({} bytes)",
+            block_count,
+            cache_size_str,
+            estimated_str,
+            blocks.capacity(),
+            vec_capacity_bytes
+        );
+        log_rss(&format!("After cache construction ({} blocks)", block_count));
+
         Ok(Self::Fixed {
             idx: 0,
             blocks,
@@ -592,16 +663,28 @@ where
     let mut rejected_block_sizes = 0;
     let mut success_block_sizes = 0;
 
+    // Estimate block count: use conservative 4KB average for small-block payloads
+    // (like static_second), but cap at 1/4 max_block_size for large-block payloads.
+    // This reduces Vec reallocations during cache construction.
+    let conservative_avg = 4096u32; // 4 KB - typical for static_second
+    let optimistic_avg = max_block_size / 4;
+    let avg_block_estimate = conservative_avg.min(optimistic_avg).max(1);
+    let estimated_blocks = (total_bytes / avg_block_estimate).max(128) as usize;
     info!(
         ?max_block_size,
         ?total_bytes,
+        ?estimated_blocks,
+        ?avg_block_estimate,
         "Constructing requested block cache"
     );
-    let mut block_cache: Vec<Block> = Vec::with_capacity(128);
+    let mut block_cache: Vec<Block> = Vec::with_capacity(estimated_blocks);
     let mut bytes_remaining = total_bytes;
 
     let start = Instant::now();
     let mut next_minute = 1;
+    let mut next_rss_log_blocks = 1000; // Log RSS every 1000 blocks
+
+    log_rss("Start of cache construction loop");
 
     // Build out the blocks.
     //
@@ -625,6 +708,15 @@ where
                 min_actual_block_size = min_actual_block_size.min(total_bytes);
                 bytes_remaining = bytes_remaining.saturating_sub(total_bytes);
                 block_cache.push(block);
+
+                // Periodic RSS logging during construction
+                if success_block_sizes == next_rss_log_blocks {
+                    log_rss(&format!(
+                        "After {} blocks, {} remaining, vec cap={}",
+                        success_block_sizes, bytes_remaining, block_cache.capacity()
+                    ));
+                    next_rss_log_blocks *= 2; // Log at 1000, 2000, 4000, 8000...
+                }
             }
             Err(SpinError::EmptyBlock) => {
                 debug!(?block_size, "rejected block");
@@ -698,6 +790,26 @@ where
             );
         }
 
+        log_rss(&format!(
+            "End of cache loop: {} blocks, filled={}, vec_cap={}",
+            block_cache.len(),
+            filled_sum_str,
+            block_cache.capacity()
+        ));
+
+        // Release excess Vec capacity to reduce memory footprint
+        let old_cap = block_cache.capacity();
+        block_cache.shrink_to_fit();
+        if block_cache.capacity() < old_cap {
+            info!(
+                "Shrunk block_cache Vec from {} to {} capacity (saved {} bytes)",
+                old_cap,
+                block_cache.capacity(),
+                (old_cap - block_cache.capacity()) * std::mem::size_of::<Block>()
+            );
+            log_rss("After shrink_to_fit");
+        }
+
         Ok(block_cache)
     }
 }
@@ -720,7 +832,16 @@ where
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
     serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
-    let bytes: Bytes = block.into_inner().freeze();
+    let inner = block.into_inner();
+    // Shrink allocation to actual size to avoid holding onto excess capacity.
+    // This is critical for small-block payloads like static_second where
+    // requested chunk_size (up to 5MB) >> actual data (often <10KB).
+    let bytes: Bytes = if inner.len() < inner.capacity() / 2 {
+        // Copy to right-sized allocation when we'd waste >50% capacity
+        Bytes::copy_from_slice(&inner)
+    } else {
+        inner.freeze()
+    };
     if bytes.is_empty() {
         // Blocks should not be empty and if they are empty this is an
         // error. Caller may choose to handle this however they wish, often it

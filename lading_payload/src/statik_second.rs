@@ -5,7 +5,7 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use chrono::{NaiveDateTime, TimeZone, Utc};
@@ -34,10 +34,17 @@ pub enum Error {
 #[derive(Debug)]
 /// Static payload grouped by second boundaries.
 pub struct StaticSecond {
-    blocks: Vec<BlockLines>,
-    idx: usize,
-    last_lines_generated: u64,
+    path: PathBuf,
+    timestamp_format: String,
     emit_placeholder: bool,
+    initial_offset: u64,
+    lines_to_skip_remaining: u64,
+    offset_consumed: bool,
+    reader: BufReader<File>,
+    carry_first_line: Option<(i64, Vec<u8>)>,
+    pending_gap: u64,
+    next_block: Option<BlockLines>,
+    last_lines_generated: u64,
 }
 
 impl StaticSecond {
@@ -61,120 +68,168 @@ impl StaticSecond {
         emit_placeholder: bool,
         start_line_index: Option<u64>,
     ) -> Result<Self, Error> {
-        let file = File::open(path)?;
-        let file_size_bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
-        let reader = BufReader::new(file);
+        let file_size_bytes = File::open(path)
+            .ok()
+            .and_then(|f| f.metadata().ok())
+            .map(|m| m.len())
+            .unwrap_or(0);
 
-        let mut blocks: Vec<BlockLines> = Vec::new();
-        let mut current_sec: Option<i64> = None;
-        let mut current_lines: Vec<Vec<u8>> = Vec::new();
-
-        for line_res in reader.lines() {
-            let line = line_res?;
-            if line.trim().is_empty() {
+        // Validation + counting pass; keeps memory usage low while preserving eager error detection.
+        let mut validation_reader = BufReader::new(File::open(path)?);
+        let mut total_lines: u64 = 0;
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            let bytes = validation_reader.read_line(&mut buf)?;
+            if bytes == 0 {
+                break;
+            }
+            if buf.trim().is_empty() {
                 continue;
             }
-
-            // Take prefix until first whitespace as the timestamp segment and
-            // drop it from the payload we store.
-            let mut parts = line.splitn(2, char::is_whitespace);
-            let ts_token = parts.next().unwrap_or("");
-            let payload = parts.next().unwrap_or("").trim_start().as_bytes().to_vec();
-            let ts = NaiveDateTime::parse_from_str(ts_token, timestamp_format)
-                .map_err(|_| Error::Timestamp(line.clone()))?;
-            let sec = Utc.from_utc_datetime(&ts).timestamp();
-
-            match current_sec {
-                Some(s) if s == sec => {
-                    current_lines.push(payload);
-                }
-                Some(s) if s < sec => {
-                    // Close out the previous second.
-                    blocks.push(BlockLines {
-                        lines: current_lines,
-                    });
-                    // Fill missing seconds with empty buckets when placeholders
-                    // are requested.
-                    if emit_placeholder {
-                        let mut missing = s + 1;
-                        while missing < sec {
-                            blocks.push(BlockLines { lines: Vec::new() });
-                            missing += 1;
-                        }
-                    }
-                    current_lines = vec![payload];
-                    current_sec = Some(sec);
-                }
-                Some(s) => {
-                    // Unexpected time travel backwards; treat as new bucket to
-                    // preserve ordering.
-                    blocks.push(BlockLines {
-                        lines: current_lines,
-                    });
-                    current_lines = vec![payload];
-                    current_sec = Some(sec);
-                    debug!("Encountered out-of-order timestamp: current {s}, new {sec}");
-                }
-                None => {
-                    current_sec = Some(sec);
-                    current_lines.push(payload);
-                }
-            }
+            Self::parse_line_with_format(&buf, timestamp_format)?;
+            total_lines += 1;
         }
 
-        if !current_lines.is_empty() {
-            blocks.push(BlockLines {
-                lines: current_lines,
-            });
-        } else if emit_placeholder && current_sec.is_some() {
-            // If the file ended right after emitting placeholders, ensure the
-            // last bucket is represented.
-            blocks.push(BlockLines { lines: Vec::new() });
-        }
-
-        if blocks.is_empty() {
+        if total_lines == 0 {
             return Err(Error::NoLines);
         }
 
-        let start_line_index = start_line_index.unwrap_or(0);
-        // Apply starting line offset by trimming leading lines across buckets.
-        let total_lines: u64 = blocks.iter().map(|b| b.lines.len() as u64).sum();
-        let mut start_idx = 0usize;
-        if total_lines > 0 && start_line_index > 0 {
-            let mut remaining = start_line_index % total_lines;
-            if remaining > 0 {
-                for (idx, block) in blocks.iter_mut().enumerate() {
-                    let len = block.lines.len() as u64;
-                    if len == 0 {
-                        continue;
+        let initial_offset = start_line_index.unwrap_or(0) % total_lines;
+        let reader = BufReader::new(File::open(path)?);
+
+        info!(
+            "StaticSecond streaming from {} ({} bytes, {} total lines, emit_placeholder={}, start_line_index={})",
+            path.display(),
+            file_size_bytes,
+            total_lines,
+            emit_placeholder,
+            initial_offset
+        );
+
+        let mut this = Self {
+            path: path.to_path_buf(),
+            timestamp_format: timestamp_format.to_owned(),
+            emit_placeholder,
+            initial_offset,
+            lines_to_skip_remaining: initial_offset,
+            offset_consumed: initial_offset == 0,
+            reader,
+            carry_first_line: None,
+            pending_gap: 0,
+            next_block: None,
+            last_lines_generated: 0,
+        };
+
+        // Preload first block so we can fail fast on empty/invalid content.
+        this.fill_next_block()?;
+        if this.next_block.is_none() {
+            return Err(Error::NoLines);
+        }
+
+        Ok(this)
+    }
+
+    fn parse_line_with_format(line: &str, timestamp_format: &str) -> Result<(i64, Vec<u8>), Error> {
+        let mut parts = line.splitn(2, char::is_whitespace);
+        let ts_token = parts.next().unwrap_or("");
+        let payload = parts
+            .next()
+            .unwrap_or("")
+            .trim_start()
+            // Strip trailing newlines so we don't double-append in `to_bytes`.
+            .trim_end_matches(['\r', '\n'])
+            .as_bytes()
+            .to_vec();
+        let ts = NaiveDateTime::parse_from_str(ts_token, timestamp_format)
+            .map_err(|_| Error::Timestamp(line.to_string()))?;
+        let sec = Utc.from_utc_datetime(&ts).timestamp();
+        Ok((sec, payload))
+    }
+
+    fn reset_reader(&mut self) -> Result<(), Error> {
+        let file = File::open(&self.path)?;
+        self.reader = BufReader::new(file);
+        self.carry_first_line = None;
+        self.pending_gap = 0;
+        self.next_block = None;
+        self.lines_to_skip_remaining = if self.offset_consumed {
+            0
+        } else {
+            self.initial_offset
+        };
+        Ok(())
+    }
+
+    fn fill_next_block(&mut self) -> Result<(), Error> {
+        if self.next_block.is_none() {
+            self.next_block = self.read_next_block()?;
+        }
+        Ok(())
+    }
+
+    fn read_next_block(&mut self) -> Result<Option<BlockLines>, Error> {
+        if self.pending_gap > 0 {
+            self.pending_gap -= 1;
+            return Ok(Some(BlockLines { lines: Vec::new() }));
+        }
+
+        // Pre-allocate for typical log density (reduces reallocation during push)
+        let mut lines: Vec<Vec<u8>> = Vec::with_capacity(256);
+        let mut sec: Option<i64> = None;
+
+        if let Some((carry_sec, payload)) = self.carry_first_line.take() {
+            sec = Some(carry_sec);
+            lines.push(payload);
+        }
+
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            let bytes = self.reader.read_line(&mut buf)?;
+            if bytes == 0 {
+                break;
+            }
+            if buf.trim().is_empty() {
+                continue;
+            }
+
+            if self.lines_to_skip_remaining > 0 {
+                self.lines_to_skip_remaining -= 1;
+                continue;
+            }
+
+            let (line_sec, payload) = Self::parse_line_with_format(&buf, &self.timestamp_format)?;
+
+            match sec {
+                None => {
+                    sec = Some(line_sec);
+                    lines.push(payload);
+                    self.offset_consumed = true;
+                }
+                Some(s) if s == line_sec => {
+                    lines.push(payload);
+                }
+                Some(s) if s < line_sec => {
+                    if self.emit_placeholder && line_sec > s + 1 {
+                        self.pending_gap = (line_sec - s - 1) as u64;
                     }
-                    if remaining >= len {
-                        remaining -= len;
-                    } else {
-                        let cut = usize::try_from(remaining).unwrap_or(block.lines.len());
-                        block.lines.drain(0..cut);
-                        start_idx = idx;
-                        break;
-                    }
+                    self.carry_first_line = Some((line_sec, payload));
+                    break;
+                }
+                Some(s) => {
+                    debug!("Encountered out-of-order timestamp: current {s}, new {line_sec}");
+                    self.carry_first_line = Some((line_sec, payload));
+                    break;
                 }
             }
         }
 
-        info!(
-            "StaticSecond loaded {} second-buckets ({} total lines) from {} ({} bytes, emit_placeholder={})",
-            blocks.len(),
-            total_lines,
-            path.display(),
-            file_size_bytes,
-            emit_placeholder
-        );
+        if sec.is_none() && lines.is_empty() {
+            return Ok(None);
+        }
 
-        Ok(Self {
-            blocks,
-            idx: start_idx,
-            last_lines_generated: 0,
-            emit_placeholder,
-        })
+        Ok(Some(BlockLines { lines }))
     }
 }
 
@@ -190,12 +245,16 @@ impl crate::Serialize for StaticSecond {
         W: Write,
     {
         self.last_lines_generated = 0;
-        if self.blocks.is_empty() {
-            return Ok(());
+
+        self.fill_next_block()?;
+        if self.next_block.is_none() {
+            self.reset_reader()?;
+            self.fill_next_block()?;
         }
 
-        // Choose blocks strictly sequentially to preserve chronological replay (no rng based on seed)
-        let block = &self.blocks[self.idx];
+        let Some(block) = self.next_block.take() else {
+            return Ok(());
+        };
 
         let mut bytes_written = 0usize;
         if block.lines.is_empty() {
@@ -217,13 +276,20 @@ impl crate::Serialize for StaticSecond {
                 self.last_lines_generated += 1;
             }
         }
-
-        self.idx = (self.idx + 1) % self.blocks.len();
         Ok(())
     }
 
     fn data_points_generated(&self) -> Option<u64> {
         Some(self.last_lines_generated)
+    }
+}
+
+impl From<Error> for crate::Error {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::Io(e) => crate::Error::Io(e),
+            Error::NoLines | Error::Timestamp(_) => crate::Error::Serialize,
+        }
     }
 }
 

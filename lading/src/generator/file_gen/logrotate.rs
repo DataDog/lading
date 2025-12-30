@@ -212,6 +212,10 @@ impl Server {
                 maximum_prebuild_cache_size_bytes.get() as usize,
             )?,
         };
+        info!(
+            cache_bytes = block_cache.total_size(),
+            "logrotate block cache initialized"
+        );
         let block_cache = Arc::new(block_cache);
 
         let mut handles = Vec::new();
