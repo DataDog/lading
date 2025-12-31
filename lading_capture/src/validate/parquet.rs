@@ -10,10 +10,7 @@ use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
-use arrow_array::{
-    Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
-};
-use lading_capture_schema::columns;
+use arrow_array::{Array, StringArray, TimestampMillisecondArray, UInt64Array};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use crate::validate::ValidationResult;
@@ -95,51 +92,57 @@ pub fn validate_parquet<P: AsRef<Path>>(
         }
 
         let time_array = batch
-            .column_by_name(columns::TIME)
-            .ok_or_else(|| Error::MissingColumn(columns::TIME.to_string()))?
+            .column_by_name("time")
+            .ok_or_else(|| Error::MissingColumn("time".to_string()))?
             .as_any()
             .downcast_ref::<TimestampMillisecondArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType(format!(
-                    "'{}' column is not TimestampMillisecond",
-                    columns::TIME
-                ))
+                Error::InvalidColumnType("'time' column is not TimestampMillisecond".to_string())
             })?;
 
         let fetch_index_array = batch
-            .column_by_name(columns::FETCH_INDEX)
-            .ok_or_else(|| Error::MissingColumn(columns::FETCH_INDEX.to_string()))?
+            .column_by_name("fetch_index")
+            .ok_or_else(|| Error::MissingColumn("fetch_index".to_string()))?
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| {
-                Error::InvalidColumnType(format!("'{}' column is not UInt64", columns::FETCH_INDEX))
+                Error::InvalidColumnType("'fetch_index' column is not UInt64".to_string())
             })?;
 
         let metric_name_array = batch
-            .column_by_name(columns::METRIC_NAME)
-            .ok_or_else(|| Error::MissingColumn(columns::METRIC_NAME.to_string()))?
+            .column_by_name("metric_name")
+            .ok_or_else(|| Error::MissingColumn("metric_name".to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType(format!("'{}' column is not String", columns::METRIC_NAME))
+                Error::InvalidColumnType("'metric_name' column is not String".to_string())
             })?;
 
-        let labels_array = batch
-            .column_by_name(columns::LABELS)
-            .ok_or_else(|| Error::MissingColumn(columns::LABELS.to_string()))?
-            .as_any()
-            .downcast_ref::<MapArray>()
-            .ok_or_else(|| {
-                Error::InvalidColumnType(format!("'{}' column is not Map", columns::LABELS))
-            })?;
+        // Collect l_* columns for label extraction (new schema uses flat columns)
+        let schema = batch.schema();
+        let l_columns: Vec<(&str, &StringArray)> = schema
+            .fields()
+            .iter()
+            .filter_map(|field| {
+                let name = field.name();
+                if name.starts_with("l_") {
+                    batch
+                        .column_by_name(name)
+                        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                        .map(|arr| (name.strip_prefix("l_").unwrap_or(name), arr))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         let metric_kind_array = batch
-            .column_by_name(columns::METRIC_KIND)
-            .ok_or_else(|| Error::MissingColumn(columns::METRIC_KIND.to_string()))?
+            .column_by_name("metric_kind")
+            .ok_or_else(|| Error::MissingColumn("metric_kind".to_string()))?
             .as_any()
             .downcast_ref::<StringArray>()
             .ok_or_else(|| {
-                Error::InvalidColumnType(format!("'{}' column is not String", columns::METRIC_KIND))
+                Error::InvalidColumnType("'metric_kind' column is not String".to_string())
             })?;
 
         // Validate invariants: fetch_index uniquely maps to time,
@@ -178,27 +181,13 @@ pub fn validate_parquet<P: AsRef<Path>>(
                 fetch_index_to_time.insert(fetch_index, time);
             }
 
-            let labels_slice: StructArray = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels keys are not StringArray".to_string())
-                })?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels values are not StringArray".to_string())
-                })?;
-
+            // Extract labels from l_* columns
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-            for i in 0..key_array.len() {
-                let key = key_array.value(i);
-                let value = value_array.value(i);
-                sorted_labels.insert(format!("{key}:{value}"));
+            for (key, arr) in &l_columns {
+                if !arr.is_null(row) {
+                    let value = arr.value(row);
+                    sorted_labels.insert(format!("{key}:{value}"));
+                }
             }
 
             let mut hasher = hash_builder.build_hasher();

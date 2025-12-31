@@ -463,7 +463,7 @@ impl std::fmt::Debug for RotationRequest {
     }
 }
 
-/// Handle for sending rotation requests to a running CaptureManager
+/// Handle for sending rotation requests to a running [`CaptureManager`]
 pub type RotationSender = mpsc::Sender<RotationRequest>;
 
 impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealClock> {
@@ -512,6 +512,10 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
     /// the event loop runs. The `JoinHandle` can be awaited to ensure the
     /// CaptureManager has fully drained and closed before shutdown.
     ///
+    /// # Panics
+    ///
+    /// Panics if the shutdown watcher is missing (should never happen in normal use).
+    ///
     /// # Errors
     ///
     /// Returns an error if there is already a global recorder set.
@@ -545,7 +549,10 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         let global_labels = self.global_labels;
         let clock = self.clock;
         let recv = self.recv;
-        let shutdown = self.shutdown.take().expect("shutdown watcher must be present");
+        let shutdown = self
+            .shutdown
+            .take()
+            .expect("shutdown watcher must be present");
 
         let handle = tokio::spawn(async move {
             if let Err(e) = Self::rotation_event_loop(
@@ -572,6 +579,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
 
     /// Internal event loop with rotation support
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_possible_truncation)]
     async fn rotation_event_loop(
         expiration: Duration,
         format: formats::parquet::Format<BufWriter<std::fs::File>>,
@@ -651,7 +659,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         // Swap formats - this flushes any buffered data
         let old_format = state_machine
             .replace_format(new_format)
-            .map_err(|e| formats::Error::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| formats::Error::Io(io::Error::other(e.to_string())))?;
 
         // Close old format to write Parquet footer
         old_format.close()?;
