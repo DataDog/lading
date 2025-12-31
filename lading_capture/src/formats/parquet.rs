@@ -3,18 +3,27 @@
 //! This format buffers metrics in memory and periodically writes them as
 //! Parquet row groups, providing better compression and query performance than
 //! JSONL.
+//!
+//! Labels are stored as top-level columns with `l_` prefix (e.g., `l_container_id`,
+//! `l_namespace`). This enables Parquet predicate pushdown for efficient filtering
+//! by any label key, unlike the previous `MapArray` approach which required post-read
+//! filtering.
+//!
+//! Schema is determined dynamically at first flush based on label keys discovered
+//! in the buffered data. All label columns are nullable Utf8 strings.
 
 use std::{
-    io::{Seek, Write},
+    collections::{BTreeMap, BTreeSet},
+    fs::File,
+    io::{BufWriter, Seek, Write},
     sync::Arc,
 };
 
 use arrow_array::{
-    ArrayRef, BinaryArray, Float64Array, MapArray, RecordBatch, StringArray, StructArray,
-    TimestampMillisecondArray, UInt64Array,
+    ArrayRef, BinaryArray, Float64Array, RecordBatch, StringArray, TimestampMillisecondArray,
+    UInt64Array,
 };
-use arrow_buffer::OffsetBuffer;
-use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, TimeUnit};
+use arrow_schema::{ArrowError, DataType, Field, Schema, TimeUnit};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
@@ -43,6 +52,9 @@ pub enum Error {
 /// Holds reusable allocations for all columns to avoid repeated allocation
 /// during flush operations. Buffers are cleared after each write, preserving
 /// capacity for the next batch.
+///
+/// Labels are stored per-row as a map, with all unique keys tracked separately
+/// to enable dynamic schema generation with `l_<key>` columns.
 #[derive(Debug)]
 struct ColumnBuffers {
     run_ids: Vec<String>,
@@ -52,9 +64,12 @@ struct ColumnBuffers {
     metric_kinds: Vec<&'static str>,
     values_int: Vec<Option<u64>>,
     values_float: Vec<Option<f64>>,
-    label_keys: Vec<String>,
-    label_values: Vec<String>,
-    label_offsets: Vec<i32>,
+    /// Per-row label maps. Each entry contains the labels for one metric row.
+    /// Using `BTreeMap` for consistent ordering when iterating.
+    row_labels: Vec<BTreeMap<String, String>>,
+    /// All unique label keys seen in this batch. Used to generate schema.
+    /// `BTreeSet` ensures consistent column ordering across runs.
+    unique_label_keys: BTreeSet<String>,
     values_histogram: Vec<Vec<u8>>,
 }
 
@@ -71,9 +86,8 @@ impl ColumnBuffers {
             metric_kinds: Vec::with_capacity(INITIAL_CAPACITY),
             values_int: Vec::with_capacity(INITIAL_CAPACITY),
             values_float: Vec::with_capacity(INITIAL_CAPACITY),
-            label_keys: Vec::with_capacity(INITIAL_CAPACITY * 2),
-            label_values: Vec::with_capacity(INITIAL_CAPACITY * 2),
-            label_offsets: Vec::with_capacity(INITIAL_CAPACITY + 1),
+            row_labels: Vec::with_capacity(INITIAL_CAPACITY),
+            unique_label_keys: BTreeSet::new(),
             values_histogram: Vec::with_capacity(INITIAL_CAPACITY),
         }
     }
@@ -87,9 +101,9 @@ impl ColumnBuffers {
         self.metric_kinds.clear();
         self.values_int.clear();
         self.values_float.clear();
-        self.label_keys.clear();
-        self.label_values.clear();
-        self.label_offsets.clear();
+        self.row_labels.clear();
+        // Note: unique_label_keys is NOT cleared - it accumulates across flushes
+        // to maintain consistent schema within a file
         self.values_histogram.clear();
     }
 
@@ -117,13 +131,13 @@ impl ColumnBuffers {
             }
         }
 
-        // Add labels for this row
+        // Store labels for this row and track unique keys
+        let mut row_map = BTreeMap::new();
         for (k, v) in &line.labels {
-            self.label_keys.push(k.clone());
-            self.label_values.push(v.clone());
+            self.unique_label_keys.insert(k.clone());
+            row_map.insert(k.clone(), v.clone());
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-        self.label_offsets.push(self.label_keys.len() as i32);
+        self.row_labels.push(row_map);
 
         self.values_histogram.push(line.value_histogram.clone());
     }
@@ -144,17 +158,28 @@ impl ColumnBuffers {
 ///
 /// Buffers metrics in memory. Calling `flush()` writes accumulated metrics as a
 /// Parquet row group.
+///
+/// The schema is determined dynamically at first flush based on label keys
+/// discovered in the buffered data. Label columns use the `l_` prefix
+/// (e.g., `l_container_id`).
 #[derive(Debug)]
 pub struct Format<W: Write + Seek + Send> {
     /// Reusable column buffers for building Arrow arrays
     buffers: ColumnBuffers,
-    /// Parquet writer
-    writer: ArrowWriter<W>,
-    /// Pre-computed Arrow schema
-    schema: Arc<Schema>,
+    /// Parquet writer - created lazily on first flush when schema is known
+    writer: Option<ArrowWriter<W>>,
+    /// The underlying writer, stored until `ArrowWriter` is created
+    raw_writer: Option<W>,
+    /// Arrow schema - created on first flush based on discovered label keys
+    schema: Option<Arc<Schema>>,
+    /// Ordered list of label keys in schema (for consistent column ordering)
+    schema_label_keys: Vec<String>,
     /// Compression level for Zstd (stored for rotation)
     compression_level: i32,
 }
+
+/// Label column prefix for flattened labels
+const LABEL_COLUMN_PREFIX: &str = "l_";
 
 impl<W: Write + Seek + Send> Format<W> {
     /// Create a new Parquet format writer
@@ -166,9 +191,28 @@ impl<W: Write + Seek + Send> Format<W> {
     ///
     /// # Errors
     ///
-    /// Returns error if Arrow writer creation fails
+    /// Returns error if compression level is invalid
     pub fn new(writer: W, compression_level: i32) -> Result<Self, Error> {
-        let schema = Arc::new(Schema::new(vec![
+        // Validate compression level early
+        let _ = ZstdLevel::try_new(compression_level)?;
+
+        Ok(Self {
+            buffers: ColumnBuffers::new(),
+            writer: None,
+            raw_writer: Some(writer),
+            schema: None,
+            schema_label_keys: Vec::new(),
+            compression_level,
+        })
+    }
+
+    /// Generate schema based on discovered label keys
+    ///
+    /// Creates base columns plus `l_<key>` columns for each unique label key.
+    /// Label columns are nullable Utf8 strings, sorted alphabetically for
+    /// consistent ordering.
+    fn generate_schema(label_keys: &BTreeSet<String>) -> (Arc<Schema>, Vec<String>) {
+        let mut fields = vec![
             Field::new("run_id", DataType::Utf8, false),
             Field::new(
                 "time",
@@ -180,24 +224,28 @@ impl<W: Write + Seek + Send> Format<W> {
             Field::new("metric_kind", DataType::Utf8, false),
             Field::new("value_int", DataType::UInt64, true),
             Field::new("value_float", DataType::Float64, true),
-            Field::new(
-                "labels",
-                DataType::Map(
-                    Arc::new(Field::new(
-                        "entries",
-                        DataType::Struct(Fields::from(vec![
-                            Field::new("key", DataType::Utf8, false),
-                            Field::new("value", DataType::Utf8, false),
-                        ])),
-                        false,
-                    )),
-                    false,
-                ),
-                false,
-            ),
-            Field::new("value_histogram", DataType::Binary, true),
-        ]));
+        ];
 
+        // Add l_<key> columns for each label key (sorted by BTreeSet)
+        let ordered_keys: Vec<String> = label_keys.iter().cloned().collect();
+        for key in &ordered_keys {
+            fields.push(Field::new(
+                format!("{LABEL_COLUMN_PREFIX}{key}"),
+                DataType::Utf8,
+                true, // nullable - not all rows have all labels
+            ));
+        }
+
+        fields.push(Field::new("value_histogram", DataType::Binary, true));
+
+        (Arc::new(Schema::new(fields)), ordered_keys)
+    }
+
+    /// Create writer properties with dictionary encoding for appropriate columns
+    fn create_writer_properties(
+        compression_level: i32,
+        label_keys: &[String],
+    ) -> Result<WriterProperties, Error> {
         // Use Parquet v2 format for better encodings and compression:
         //
         // - DELTA_BINARY_PACKED encoding for integers (timestamps, fetch_index)
@@ -206,23 +254,45 @@ impl<W: Write + Seek + Send> Format<W> {
         //
         // Dictionary encoding for low-cardinality columns:
         //
-        // - metric_kind: only 2 values ("counter", "gauge")
+        // - metric_kind: only 3 values ("counter", "gauge", "histogram")
         // - run_id: one UUID per run
-        let props = WriterProperties::builder()
+        // - label columns: often low cardinality (container_id, namespace, etc.)
+        let mut builder = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression_level)?))
             .set_column_dictionary_enabled(ColumnPath::from("metric_kind"), true)
-            .set_column_dictionary_enabled(ColumnPath::from("run_id"), true)
-            .build();
+            .set_column_dictionary_enabled(ColumnPath::from("run_id"), true);
 
-        let arrow_writer = ArrowWriter::try_new(writer, schema.clone(), Some(props))?;
+        // Enable dictionary encoding for all label columns
+        for key in label_keys {
+            builder = builder.set_column_dictionary_enabled(
+                ColumnPath::from(format!("{LABEL_COLUMN_PREFIX}{key}")),
+                true,
+            );
+        }
 
-        Ok(Self {
-            buffers: ColumnBuffers::new(),
-            writer: arrow_writer,
-            schema,
-            compression_level,
-        })
+        Ok(builder.build())
+    }
+
+    /// Initialize the writer with schema based on discovered label keys
+    ///
+    /// Called on first flush when we know what label keys exist.
+    fn initialize_writer(&mut self) -> Result<(), Error> {
+        let raw_writer = self
+            .raw_writer
+            .take()
+            .expect("raw_writer should be present before initialization");
+
+        let (schema, ordered_keys) = Self::generate_schema(&self.buffers.unique_label_keys);
+        let props = Self::create_writer_properties(self.compression_level, &ordered_keys)?;
+
+        let arrow_writer = ArrowWriter::try_new(raw_writer, schema.clone(), Some(props))?;
+
+        self.schema = Some(schema);
+        self.schema_label_keys = ordered_keys;
+        self.writer = Some(arrow_writer);
+
+        Ok(())
     }
 
     /// Convert buffered data to Arrow `RecordBatch`
@@ -231,43 +301,19 @@ impl<W: Write + Seek + Send> Format<W> {
     ///
     /// Returns error if `RecordBatch` construction fails
     fn buffers_to_record_batch(&self) -> Result<RecordBatch, Error> {
+        let schema = self
+            .schema
+            .as_ref()
+            .expect("schema should be initialized before creating record batch");
+
         if self.buffers.is_empty() {
-            return Ok(RecordBatch::new_empty(self.schema.clone()));
+            return Ok(RecordBatch::new_empty(schema.clone()));
         }
 
-        // Prepare label offsets with initial 0
-        let mut label_offsets = Vec::with_capacity(self.buffers.label_offsets.len() + 1);
-        label_offsets.push(0i32);
-        label_offsets.extend_from_slice(&self.buffers.label_offsets);
+        let num_rows = self.buffers.run_ids.len();
 
-        // Build the labels map array using pre-allocated buffers
-        let keys_array = Arc::new(StringArray::from(self.buffers.label_keys.clone()));
-        let values_array = Arc::new(StringArray::from(self.buffers.label_values.clone()));
-        let struct_array = StructArray::from(vec![
-            (
-                Arc::new(Field::new("key", DataType::Utf8, false)),
-                keys_array as ArrayRef,
-            ),
-            (
-                Arc::new(Field::new("value", DataType::Utf8, false)),
-                values_array as ArrayRef,
-            ),
-        ]);
-
-        let field = Arc::new(Field::new(
-            "entries",
-            DataType::Struct(Fields::from(vec![
-                Field::new("key", DataType::Utf8, false),
-                Field::new("value", DataType::Utf8, false),
-            ])),
-            false,
-        ));
-
-        let offsets = OffsetBuffer::new(label_offsets.into());
-        let labels_map = MapArray::new(field, offsets, struct_array, None, false);
-
-        // Build arrays directly from pre-allocated buffers
-        let arrays: Vec<ArrayRef> = vec![
+        // Build base column arrays
+        let mut arrays: Vec<ArrayRef> = vec![
             Arc::new(StringArray::from(self.buffers.run_ids.clone())),
             Arc::new(TimestampMillisecondArray::from(self.buffers.times.clone())),
             Arc::new(UInt64Array::from(self.buffers.fetch_indices.clone())),
@@ -275,23 +321,47 @@ impl<W: Write + Seek + Send> Format<W> {
             Arc::new(StringArray::from(self.buffers.metric_kinds.clone())),
             Arc::new(UInt64Array::from(self.buffers.values_int.clone())),
             Arc::new(Float64Array::from(self.buffers.values_float.clone())),
-            Arc::new(labels_map),
-            Arc::new(BinaryArray::from_opt_vec(
-                self.buffers
-                    .values_histogram
-                    .iter()
-                    .map(|v| {
-                        if v.is_empty() {
-                            None
-                        } else {
-                            Some(v.as_slice())
-                        }
-                    })
-                    .collect(),
-            )),
         ];
 
-        Ok(RecordBatch::try_new(self.schema.clone(), arrays)?)
+        // Build l_<key> columns for each label key in schema order
+        for key in &self.schema_label_keys {
+            let values: Vec<Option<&str>> = self
+                .buffers
+                .row_labels
+                .iter()
+                .map(|row_map| row_map.get(key).map(String::as_str))
+                .collect();
+            arrays.push(Arc::new(StringArray::from(values)));
+        }
+
+        // Add histogram column last
+        arrays.push(Arc::new(
+            self.buffers
+                .values_histogram
+                .iter()
+                .map(|v| {
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.as_slice())
+                    }
+                })
+                .collect::<BinaryArray>(),
+        ));
+
+        debug_assert_eq!(
+            arrays.len(),
+            schema.fields().len(),
+            "array count ({}) must match schema field count ({})",
+            arrays.len(),
+            schema.fields().len()
+        );
+        debug_assert!(
+            arrays.iter().all(|a| a.len() == num_rows),
+            "all arrays must have {num_rows} rows",
+        );
+
+        Ok(RecordBatch::try_new(schema.clone(), arrays)?)
     }
 
     /// Write buffered metrics as a Parquet row group
@@ -304,8 +374,16 @@ impl<W: Write + Seek + Send> Format<W> {
             return Ok(());
         }
 
+        // Initialize writer on first flush when we know the label keys
+        if self.writer.is_none() {
+            self.initialize_writer()?;
+        }
+
         let batch = self.buffers_to_record_batch()?;
-        self.writer.write(&batch)?;
+        self.writer
+            .as_mut()
+            .expect("writer should be initialized")
+            .write(&batch)?;
         self.buffers.clear();
         Ok(())
     }
@@ -348,8 +426,12 @@ impl<W: Write + Seek + Send> Format<W> {
     pub fn close(mut self) -> Result<(), Error> {
         // Write any remaining buffered data as a final row group
         self.write_parquet()?;
-        // Close the ArrowWriter which consumes it
-        self.writer.close()?;
+
+        // Close the ArrowWriter if it was created
+        if let Some(writer) = self.writer {
+            writer.close()?;
+        }
+        // If writer was never created (no data written), nothing to close
         Ok(())
     }
 }
@@ -377,7 +459,7 @@ impl Format<std::io::BufWriter<std::fs::File>> {
     /// # Errors
     ///
     /// Returns an error if closing the current file or creating the new file fails.
-    pub fn rotate_to(self, path: std::path::PathBuf) -> Result<Self, Error> {
+    pub fn rotate_to(self, path: &std::path::Path) -> Result<Self, Error> {
         // Store compression level before closing
         let compression_level = self.compression_level;
 
@@ -385,14 +467,15 @@ impl Format<std::io::BufWriter<std::fs::File>> {
         self.close()?;
 
         // Create new file and writer
-        let file = std::fs::File::create(&path)?;
-        let writer = std::io::BufWriter::new(file);
+        let file = File::create(path)?;
+        let writer = BufWriter::new(file);
         let format = Self::new(writer, compression_level)?;
 
         Ok(format)
     }
 
     /// Get the compression level for this format
+    #[must_use]
     pub fn compression_level(&self) -> i32 {
         self.compression_level
     }
@@ -488,5 +571,115 @@ mod tests {
         }
 
         assert!(!buffer.get_ref().is_empty(), "should have written data");
+    }
+
+    #[test]
+    fn writes_label_columns() {
+        use arrow_array::{Array, RecordBatchReader};
+        use bytes::Bytes;
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+        let mut buffer = Cursor::new(Vec::new());
+
+        {
+            let mut format = Format::new(&mut buffer, 3).expect("create format");
+
+            // Write metric with labels
+            let mut labels = FxHashMap::default();
+            labels.insert("container_id".to_string(), "abc123".to_string());
+            labels.insert("namespace".to_string(), "default".to_string());
+            labels.insert("qos_class".to_string(), "Guaranteed".to_string());
+
+            let line = Line {
+                run_id: Uuid::new_v4(),
+                time: 1000,
+                fetch_index: 0,
+                metric_name: "test_metric".into(),
+                metric_kind: MetricKind::Gauge,
+                value: LineValue::Float(42.0),
+                labels,
+                value_histogram: Vec::new(),
+            };
+
+            format.write_metric(&line).expect("write should succeed");
+
+            // Write another metric with different labels
+            let mut labels2 = FxHashMap::default();
+            labels2.insert("container_id".to_string(), "def456".to_string());
+            labels2.insert("namespace".to_string(), "kube-system".to_string());
+            // Note: no qos_class label
+
+            let line2 = Line {
+                run_id: Uuid::new_v4(),
+                time: 2000,
+                fetch_index: 1,
+                metric_name: "test_metric".into(),
+                metric_kind: MetricKind::Gauge,
+                value: LineValue::Float(100.0),
+                labels: labels2,
+                value_histogram: Vec::new(),
+            };
+
+            format.write_metric(&line2).expect("write should succeed");
+            format.close().expect("close should succeed");
+        }
+
+        // Read back and verify schema has l_* columns
+        let data = Bytes::from(buffer.into_inner());
+        let reader = ParquetRecordBatchReaderBuilder::try_new(data)
+            .expect("create reader")
+            .build()
+            .expect("build reader");
+
+        let schema = reader.schema();
+
+        // Check that l_* columns exist (sorted alphabetically)
+        assert!(
+            schema.field_with_name("l_container_id").is_ok(),
+            "should have l_container_id column"
+        );
+        assert!(
+            schema.field_with_name("l_namespace").is_ok(),
+            "should have l_namespace column"
+        );
+        assert!(
+            schema.field_with_name("l_qos_class").is_ok(),
+            "should have l_qos_class column"
+        );
+
+        // Check no labels MapArray column
+        assert!(
+            schema.field_with_name("labels").is_err(),
+            "should NOT have labels column (replaced by l_* columns)"
+        );
+
+        // Read data and verify values
+        let batches: Vec<_> = reader.into_iter().collect();
+        assert_eq!(batches.len(), 1, "should have one batch");
+        let batch = batches[0].as_ref().expect("batch should be ok");
+
+        assert_eq!(batch.num_rows(), 2, "should have 2 rows");
+
+        // Check l_container_id values
+        let container_col = batch
+            .column_by_name("l_container_id")
+            .expect("l_container_id column");
+        let container_arr = container_col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("string array");
+        assert_eq!(container_arr.value(0), "abc123");
+        assert_eq!(container_arr.value(1), "def456");
+
+        // Check l_qos_class values (second row should be null)
+        let qos_col = batch
+            .column_by_name("l_qos_class")
+            .expect("l_qos_class column");
+        let qos_arr = qos_col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("string array");
+        assert_eq!(qos_arr.value(0), "Guaranteed");
+        assert!(qos_arr.is_null(1), "second row should have null qos_class");
     }
 }

@@ -10,9 +10,7 @@ use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
-use arrow_array::{
-    Array, MapArray, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
-};
+use arrow_array::{Array, StringArray, TimestampMillisecondArray, UInt64Array};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use crate::validate::ValidationResult;
@@ -120,12 +118,23 @@ pub fn validate_parquet<P: AsRef<Path>>(
                 Error::InvalidColumnType("'metric_name' column is not String".to_string())
             })?;
 
-        let labels_array = batch
-            .column_by_name("labels")
-            .ok_or_else(|| Error::MissingColumn("labels".to_string()))?
-            .as_any()
-            .downcast_ref::<MapArray>()
-            .ok_or_else(|| Error::InvalidColumnType("'labels' column is not Map".to_string()))?;
+        // Collect l_* columns for label extraction (new schema uses flat columns)
+        let schema = batch.schema();
+        let l_columns: Vec<(&str, &StringArray)> = schema
+            .fields()
+            .iter()
+            .filter_map(|field| {
+                let name = field.name();
+                if name.starts_with("l_") {
+                    batch
+                        .column_by_name(name)
+                        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                        .map(|arr| (name.strip_prefix("l_").unwrap_or(name), arr))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         let metric_kind_array = batch
             .column_by_name("metric_kind")
@@ -172,27 +181,13 @@ pub fn validate_parquet<P: AsRef<Path>>(
                 fetch_index_to_time.insert(fetch_index, time);
             }
 
-            let labels_slice: StructArray = labels_array.value(row);
-            let key_array = labels_slice
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels keys are not StringArray".to_string())
-                })?;
-            let value_array = labels_slice
-                .column(1)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    Error::InvalidColumnType("Labels values are not StringArray".to_string())
-                })?;
-
+            // Extract labels from l_* columns
             let mut sorted_labels: BTreeSet<String> = BTreeSet::new();
-            for i in 0..key_array.len() {
-                let key = key_array.value(i);
-                let value = value_array.value(i);
-                sorted_labels.insert(format!("{key}:{value}"));
+            for (key, arr) in &l_columns {
+                if !arr.is_null(row) {
+                    let value = arr.value(row);
+                    sorted_labels.insert(format!("{key}:{value}"));
+                }
             }
 
             let mut hasher = hash_builder.build_hasher();

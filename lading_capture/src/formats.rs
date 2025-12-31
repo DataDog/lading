@@ -97,8 +97,7 @@ mod tests {
     use crate::line::{Line, LineValue, MetricKind};
     use approx::relative_eq;
     use arrow_array::{
-        Array, BinaryArray, Float64Array, MapArray, StringArray, StructArray,
-        TimestampMillisecondArray, UInt64Array,
+        Array, BinaryArray, Float64Array, StringArray, TimestampMillisecondArray, UInt64Array,
     };
     use bytes::Bytes;
     use datadog_protos::metrics::Dogsketch;
@@ -487,12 +486,23 @@ mod tests {
                 .downcast_ref::<Float64Array>()
                 .expect("value_float is Float64Array");
 
-            let labels_array = batch
-                .column_by_name("labels")
-                .expect("labels column")
-                .as_any()
-                .downcast_ref::<MapArray>()
-                .expect("labels is MapArray");
+            // Collect l_* columns for label extraction (new schema uses flat columns)
+            let schema = batch.schema();
+            let l_columns: Vec<(&str, &StringArray)> = schema
+                .fields()
+                .iter()
+                .filter_map(|field| {
+                    let name = field.name();
+                    if name.starts_with("l_") {
+                        batch
+                            .column_by_name(name)
+                            .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                            .map(|arr| (name.strip_prefix("l_").unwrap_or(name), arr))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
             let value_histogram_array = batch
                 .column_by_name("value_histogram")
@@ -524,21 +534,12 @@ mod tests {
                     LineValue::Int(value_int_array.value(row_idx))
                 };
 
-                let labels_slice: StructArray = labels_array.value(row_idx);
-                let keys = labels_slice
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label keys are strings");
-                let values = labels_slice
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .expect("label values are strings");
-
+                // Extract labels from l_* columns
                 let mut labels = FxHashMap::default();
-                for i in 0..keys.len() {
-                    labels.insert(keys.value(i).to_string(), values.value(i).to_string());
+                for (key, arr) in &l_columns {
+                    if !arr.is_null(row_idx) {
+                        labels.insert((*key).to_string(), arr.value(row_idx).to_string());
+                    }
                 }
 
                 let value_histogram = if value_histogram_array.is_null(row_idx) {
