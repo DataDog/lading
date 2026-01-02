@@ -482,12 +482,54 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         target_running: lading_signal::Watcher,
         expiration: Duration,
     ) -> Result<Self, formats::Error> {
+        Self::new_parquet_with_bloom_filter(
+            capture_path,
+            flush_seconds,
+            compression_level,
+            parquet::BloomFilterConfig::default(),
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+        )
+        .await
+    }
+
+    /// Create a new [`CaptureManager`] with file-based Parquet writer and bloom filter config
+    ///
+    /// # Arguments
+    ///
+    /// * `capture_path` - Path to the output Parquet file
+    /// * `flush_seconds` - How often to flush buffered data
+    /// * `compression_level` - Zstd compression level (1-22)
+    /// * `bloom_filter_config` - Configuration for bloom filters on label columns
+    /// * `shutdown` - Signal to gracefully shut down the capture manager
+    /// * `experiment_started` - Signal that the experiment has started
+    /// * `target_running` - Signal that the target is running
+    /// * `expiration` - Duration after which metrics expire
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the underlying capture file cannot be opened or
+    /// if Parquet writer creation fails.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_parquet_with_bloom_filter(
+        capture_path: PathBuf,
+        flush_seconds: u64,
+        compression_level: i32,
+        bloom_filter_config: parquet::BloomFilterConfig,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, formats::Error> {
         let fp = fs::File::create(&capture_path)
             .await
             .map_err(formats::Error::Io)?;
         let fp = fp.into_std().await;
         let writer = BufWriter::new(fp);
-        let format = parquet::Format::new(writer, compression_level)?;
+        let format =
+            parquet::Format::with_bloom_filter(writer, compression_level, bloom_filter_config)?;
 
         Ok(Self::new_with_format(
             format,
@@ -539,6 +581,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         self.clock.mark_start();
 
         let compression_level = self.format.compression_level();
+        let bloom_filter_config = self.format.bloom_filter_config().clone();
 
         // Run the event loop in a spawned task so we can return the sender immediately
         let expiration = self.expiration;
@@ -567,6 +610,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
                 shutdown,
                 rotation_rx,
                 compression_level,
+                bloom_filter_config,
             )
             .await
             {
@@ -592,6 +636,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         shutdown: lading_signal::Watcher,
         mut rotation_rx: mpsc::Receiver<RotationRequest>,
         compression_level: i32,
+        bloom_filter_config: parquet::BloomFilterConfig,
     ) -> Result<(), Error> {
         let mut flush_interval = clock.interval(Duration::from_millis(TICK_DURATION_MS as u64));
         let shutdown_wait = shutdown.recv();
@@ -624,6 +669,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
                         &mut state_machine,
                         rotation_req.path,
                         compression_level,
+                        &bloom_filter_config,
                     ).await;
                     // Send result back to caller (ignore send error if receiver dropped)
                     let _ = rotation_req.response.send(result);
@@ -647,14 +693,19 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         >,
         new_path: PathBuf,
         compression_level: i32,
+        bloom_filter_config: &parquet::BloomFilterConfig,
     ) -> Result<(), formats::Error> {
-        // Create new file and format
+        // Create new file and format with same settings
         let fp = fs::File::create(&new_path)
             .await
             .map_err(formats::Error::Io)?;
         let fp = fp.into_std().await;
         let writer = BufWriter::new(fp);
-        let new_format = parquet::Format::new(writer, compression_level)?;
+        let new_format = parquet::Format::with_bloom_filter(
+            writer,
+            compression_level,
+            bloom_filter_config.clone(),
+        )?;
 
         // Swap formats - this flushes any buffered data
         let old_format = state_machine
@@ -694,6 +745,40 @@ impl
         target_running: lading_signal::Watcher,
         expiration: Duration,
     ) -> Result<Self, formats::Error> {
+        Self::new_multi_with_bloom_filter(
+            base_path,
+            flush_seconds,
+            compression_level,
+            parquet::BloomFilterConfig::default(),
+            shutdown,
+            experiment_started,
+            target_running,
+            expiration,
+        )
+        .await
+    }
+
+    /// Create a new [`CaptureManager`] with file-based multi-format writer and bloom filter config
+    ///
+    /// Writes to both JSONL and Parquet formats simultaneously. The base path
+    /// is used to generate two output files: `{base_path}.jsonl` and
+    /// `{base_path}.parquet`.
+    ///
+    /// # Errors
+    ///
+    /// Function will error if either capture file cannot be opened or if
+    /// format creation fails.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_multi_with_bloom_filter(
+        base_path: PathBuf,
+        flush_seconds: u64,
+        compression_level: i32,
+        bloom_filter_config: parquet::BloomFilterConfig,
+        shutdown: lading_signal::Watcher,
+        experiment_started: lading_signal::Watcher,
+        target_running: lading_signal::Watcher,
+        expiration: Duration,
+    ) -> Result<Self, formats::Error> {
         let jsonl_path = base_path.with_extension("jsonl");
         let parquet_path = base_path.with_extension("parquet");
 
@@ -709,7 +794,11 @@ impl
             .map_err(formats::Error::Io)?;
         let parquet_file = parquet_file.into_std().await;
         let parquet_writer = BufWriter::new(parquet_file);
-        let parquet_format = parquet::Format::new(parquet_writer, compression_level)?;
+        let parquet_format = parquet::Format::with_bloom_filter(
+            parquet_writer,
+            compression_level,
+            bloom_filter_config,
+        )?;
 
         let format = multi::Format::new(jsonl_format, parquet_format);
 

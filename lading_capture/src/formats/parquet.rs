@@ -33,6 +33,52 @@ use parquet::{
 
 use crate::line;
 
+/// Configuration for a single bloom filter column
+#[derive(Debug, Clone)]
+pub struct BloomFilterColumn {
+    /// Label name (e.g., `container_id` will be applied to `l_container_id` column)
+    pub label_name: String,
+    /// Expected number of distinct values (NDV) for sizing the bloom filter.
+    /// Higher values create larger filters with lower false positive rates.
+    pub ndv: u64,
+}
+
+impl BloomFilterColumn {
+    /// Create a new bloom filter column configuration
+    #[must_use]
+    pub fn new(label_name: impl Into<String>, ndv: u64) -> Self {
+        Self {
+            label_name: label_name.into(),
+            ndv,
+        }
+    }
+}
+
+/// Configuration for bloom filters on label columns
+///
+/// Bloom filters enable efficient query-time filtering by allowing readers
+/// to skip row groups that definitely don't contain a target value.
+/// This is especially useful for high-cardinality label columns like
+/// `container_id` where queries often filter for a specific value.
+///
+/// # Example
+///
+/// ```
+/// use lading_capture::formats::parquet::{BloomFilterConfig, BloomFilterColumn};
+///
+/// let config = BloomFilterConfig {
+///     columns: vec![
+///         BloomFilterColumn::new("container_id", 100),
+///     ],
+/// };
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct BloomFilterConfig {
+    /// Label columns to enable bloom filters on.
+    /// Each column specifies the label name (without `l_` prefix) and expected NDV.
+    pub columns: Vec<BloomFilterColumn>,
+}
+
 /// Parquet format errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -176,6 +222,8 @@ pub struct Format<W: Write + Seek + Send> {
     schema_label_keys: Vec<String>,
     /// Compression level for Zstd (stored for rotation)
     compression_level: i32,
+    /// Bloom filter configuration (stored for rotation)
+    bloom_filter_config: BloomFilterConfig,
 }
 
 /// Label column prefix for flattened labels
@@ -193,6 +241,25 @@ impl<W: Write + Seek + Send> Format<W> {
     ///
     /// Returns error if compression level is invalid
     pub fn new(writer: W, compression_level: i32) -> Result<Self, Error> {
+        Self::with_bloom_filter(writer, compression_level, BloomFilterConfig::default())
+    }
+
+    /// Create a new Parquet format writer with bloom filter configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - Writer implementing Write + Seek for Parquet output
+    /// * `compression_level` - Zstd compression level (1-22)
+    /// * `bloom_filter_config` - Configuration for bloom filters on label columns
+    ///
+    /// # Errors
+    ///
+    /// Returns error if compression level is invalid
+    pub fn with_bloom_filter(
+        writer: W,
+        compression_level: i32,
+        bloom_filter_config: BloomFilterConfig,
+    ) -> Result<Self, Error> {
         // Validate compression level early
         let _ = ZstdLevel::try_new(compression_level)?;
 
@@ -203,6 +270,7 @@ impl<W: Write + Seek + Send> Format<W> {
             schema: None,
             schema_label_keys: Vec::new(),
             compression_level,
+            bloom_filter_config,
         })
     }
 
@@ -245,6 +313,7 @@ impl<W: Write + Seek + Send> Format<W> {
     fn create_writer_properties(
         compression_level: i32,
         label_keys: &[String],
+        bloom_filter_config: &BloomFilterConfig,
     ) -> Result<WriterProperties, Error> {
         // Use Parquet v2 format for better encodings and compression:
         //
@@ -271,6 +340,17 @@ impl<W: Write + Seek + Send> Format<W> {
             );
         }
 
+        // Enable bloom filters for configured label columns
+        // Bloom filters allow readers to skip row groups that definitely don't
+        // contain the target value, improving query performance significantly.
+        for bloom_col in &bloom_filter_config.columns {
+            let column_name = format!("{LABEL_COLUMN_PREFIX}{}", bloom_col.label_name);
+            let column_path = ColumnPath::from(column_name);
+
+            builder = builder.set_column_bloom_filter_enabled(column_path.clone(), true);
+            builder = builder.set_column_bloom_filter_ndv(column_path, bloom_col.ndv);
+        }
+
         Ok(builder.build())
     }
 
@@ -284,7 +364,11 @@ impl<W: Write + Seek + Send> Format<W> {
             .expect("raw_writer should be present before initialization");
 
         let (schema, ordered_keys) = Self::generate_schema(&self.buffers.unique_label_keys);
-        let props = Self::create_writer_properties(self.compression_level, &ordered_keys)?;
+        let props = Self::create_writer_properties(
+            self.compression_level,
+            &ordered_keys,
+            &self.bloom_filter_config,
+        )?;
 
         let arrow_writer = ArrowWriter::try_new(raw_writer, schema.clone(), Some(props))?;
 
@@ -454,22 +538,23 @@ impl Format<std::io::BufWriter<std::fs::File>> {
     /// Rotate to a new output file
     ///
     /// Closes the current Parquet file (writing footer) and opens a new file
-    /// at the specified path with the same compression settings.
+    /// at the specified path with the same compression and bloom filter settings.
     ///
     /// # Errors
     ///
     /// Returns an error if closing the current file or creating the new file fails.
     pub fn rotate_to(self, path: &std::path::Path) -> Result<Self, Error> {
-        // Store compression level before closing
+        // Store settings before closing
         let compression_level = self.compression_level;
+        let bloom_filter_config = self.bloom_filter_config.clone();
 
         // Close current file (writes footer)
         self.close()?;
 
-        // Create new file and writer
+        // Create new file and writer with same settings
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        let format = Self::new(writer, compression_level)?;
+        let format = Self::with_bloom_filter(writer, compression_level, bloom_filter_config)?;
 
         Ok(format)
     }
@@ -478,6 +563,12 @@ impl Format<std::io::BufWriter<std::fs::File>> {
     #[must_use]
     pub fn compression_level(&self) -> i32 {
         self.compression_level
+    }
+
+    /// Get the bloom filter configuration for this format
+    #[must_use]
+    pub fn bloom_filter_config(&self) -> &BloomFilterConfig {
+        &self.bloom_filter_config
     }
 }
 
