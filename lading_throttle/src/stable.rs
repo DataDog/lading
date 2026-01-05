@@ -10,8 +10,13 @@ use super::{Clock, INTERVAL_TICKS, RealClock};
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq)]
 pub enum Error {
     /// Requested capacity is greater than maximum allowed capacity.
-    #[error("Capacity")]
-    Capacity,
+    #[error("capacity request {requested} exceeds throttle's maximum {maximum}")]
+    Capacity {
+        /// The requested capacity that exceeded the maximum.
+        requested: u32,
+        /// The maximum capacity permitted by the throttle.
+        maximum: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -144,7 +149,10 @@ impl Valve {
         // ticker if the caller makes a zero request. It's strange but it's a
         // valid thing to do.
         if capacity_request > self.maximum_capacity {
-            return Err(Error::Capacity);
+            return Err(Error::Capacity {
+                requested: capacity_request,
+                maximum: self.maximum_capacity,
+            });
         }
 
         let current_interval = tick_to_interval(ticks_elapsed);
@@ -353,7 +361,10 @@ mod verification {
             capacity_request: u32,
         ) -> Result<u64, super::Error> {
             if capacity_request > self.maximum_capacity {
-                return Err(super::Error::Capacity);
+                return Err(super::Error::Capacity {
+                    requested: capacity_request,
+                    maximum: self.maximum_capacity,
+                });
             }
 
             let current_interval = tick_to_interval(ticks_elapsed);
