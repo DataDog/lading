@@ -382,7 +382,7 @@ impl Child {
                                     &self.labels).await?;
                         }
                         Err(err) => {
-                            error!("Throttle request of {} is larger than throttle capacity. Block will be discarded. Error: {}", total_bytes, err);
+                            error!("Discarding block due to throttle error: {err}");
                         }
                     }
                 }
