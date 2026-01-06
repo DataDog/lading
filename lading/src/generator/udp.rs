@@ -32,7 +32,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, ConcurrencyStrategy, MetricsBuilder, ThrottleConversionError,
+    BlockThrottle, ConcurrencyStrategy, MetricsBuilder, ThrottleConfig, ThrottleConversionError,
     create_throttle,
 };
 
@@ -66,7 +66,7 @@ pub struct Config {
     #[serde(default = "default_parallel_connections")]
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// Errors produced by [`Udp`].
@@ -219,7 +219,7 @@ impl Udp {
 
 struct UdpWorker {
     addr: SocketAddr,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
     shutdown: lading_signal::Watcher,
@@ -234,8 +234,6 @@ impl UdpWorker {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
                 conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
                     match conn {
@@ -253,7 +251,7 @@ impl UdpWorker {
                         }
                     }
                 }
-                result = self.throttle.wait_for(total_bytes), if connection.is_some() => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle), if connection.is_some() => {
                     match result {
                         Ok(()) => {
                             let sock = connection.expect("connection failed");

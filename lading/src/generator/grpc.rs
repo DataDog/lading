@@ -36,7 +36,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 /// Errors produced by [`Grpc`]
@@ -115,7 +115,7 @@ pub struct Config {
     /// The total number of parallel connections to maintain
     pub parallel_connections: u16,
     /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    pub throttle: Option<ThrottleConfig>,
 }
 
 /// No-op tonic codec. Sends raw bytes and returns the number of bytes received.
@@ -175,7 +175,7 @@ pub struct Grpc {
     target_uri: Uri,
     rpc_path: PathAndQuery,
     shutdown: lading_signal::Watcher,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     block_cache: block::Cache,
     metric_labels: Vec<(String, String)>,
 }
@@ -304,10 +304,9 @@ impl Grpc {
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                _ = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
+                    let _ = result;
                     let block = self.block_cache.advance(&mut handle);
                     let block_length = block.bytes.len();
                     counter!("requests_sent", &self.metric_labels).increment(1);
