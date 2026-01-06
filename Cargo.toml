@@ -54,7 +54,7 @@ parquet = { version = "57.0", default-features = false }
 proptest = "1.9"
 proptest-derive = { version = "0.7" }
 approx = "0.5"
-tempfile = "3.23"
+tempfile = "3.24"
 http = "1.3"
 http-body-util = { version = "0.1" }
 http-serde = { version = "2.1" }
