@@ -1,3 +1,5 @@
+//! Benchmarks for Fluent payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use lading_payload::{Fluent, Serialize};
@@ -22,7 +24,7 @@ fn fluent_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let ta = Fluent::new(&mut rng);
+                let mut ta = Fluent::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
                 ta.to_bytes(rng, size, &mut writer)

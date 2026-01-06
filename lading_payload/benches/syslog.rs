@@ -1,34 +1,33 @@
-//! Benchmarks for DogStatsD payload generation.
+//! Benchmarks for Syslog 5424 payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
-use lading_payload::{Serialize, dogstatsd};
+use lading_payload::{Serialize, Syslog5424};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
-fn dogstatsd_setup(c: &mut Criterion) {
-    c.bench_function("dogstatsd_setup", |b| {
+fn syslog_setup(c: &mut Criterion) {
+    c.bench_function("syslog_setup", |b| {
         b.iter(|| {
-            let mut rng = SmallRng::seed_from_u64(19690716);
-            let _dd = dogstatsd::DogStatsD::default(&mut rng);
+            let _syslog = Syslog5424::default();
         })
     });
 }
 
-fn dogstatsd_all(c: &mut Criterion) {
+fn syslog_all(c: &mut Criterion) {
     let mb = 1_000_000; // 1 MiB
 
-    let mut group = c.benchmark_group("dogstatsd_all");
+    let mut group = c.benchmark_group("syslog_all");
     for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut rng = SmallRng::seed_from_u64(19690716);
-                let mut dd =
-                    dogstatsd::DogStatsD::default(&mut rng).expect("failed to create DogStatsD");
+                let rng = SmallRng::seed_from_u64(19690716);
+                let mut syslog = Syslog5424::default();
                 let mut writer = Vec::with_capacity(size);
 
-                dd.to_bytes(rng, size, &mut writer)
+                syslog
+                    .to_bytes(rng, size, &mut writer)
                     .expect("failed to convert to bytes");
             });
         });
@@ -39,5 +38,5 @@ fn dogstatsd_all(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = dogstatsd_setup, dogstatsd_all
+    targets = syslog_setup, syslog_all
 );

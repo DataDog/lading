@@ -1,3 +1,5 @@
+//! Benchmarks for ASCII payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use lading_payload::{Serialize, ascii};
@@ -22,7 +24,7 @@ fn ascii_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let asc = ascii::Ascii::new(&mut rng);
+                let mut asc = ascii::Ascii::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
                 asc.to_bytes(rng, size, &mut writer)

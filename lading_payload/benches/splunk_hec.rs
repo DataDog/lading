@@ -1,34 +1,32 @@
-//! Benchmarks for DogStatsD payload generation.
+//! Benchmarks for Splunk HEC payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
-use lading_payload::{Serialize, dogstatsd};
+use lading_payload::{Serialize, SplunkHec};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
-fn dogstatsd_setup(c: &mut Criterion) {
-    c.bench_function("dogstatsd_setup", |b| {
+fn splunk_hec_setup(c: &mut Criterion) {
+    c.bench_function("splunk_hec_setup", |b| {
         b.iter(|| {
-            let mut rng = SmallRng::seed_from_u64(19690716);
-            let _dd = dogstatsd::DogStatsD::default(&mut rng);
+            let _hec = SplunkHec::default();
         })
     });
 }
 
-fn dogstatsd_all(c: &mut Criterion) {
+fn splunk_hec_all(c: &mut Criterion) {
     let mb = 1_000_000; // 1 MiB
 
-    let mut group = c.benchmark_group("dogstatsd_all");
+    let mut group = c.benchmark_group("splunk_hec_all");
     for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut rng = SmallRng::seed_from_u64(19690716);
-                let mut dd =
-                    dogstatsd::DogStatsD::default(&mut rng).expect("failed to create DogStatsD");
+                let rng = SmallRng::seed_from_u64(19690716);
+                let mut hec = SplunkHec::default();
                 let mut writer = Vec::with_capacity(size);
 
-                dd.to_bytes(rng, size, &mut writer)
+                hec.to_bytes(rng, size, &mut writer)
                     .expect("failed to convert to bytes");
             });
         });
@@ -39,5 +37,5 @@ fn dogstatsd_all(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = dogstatsd_setup, dogstatsd_all
+    targets = splunk_hec_setup, splunk_hec_all
 );

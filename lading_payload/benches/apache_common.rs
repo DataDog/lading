@@ -1,3 +1,5 @@
+//! Benchmarks for Apache Common log payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use lading_payload::{Serialize, apache_common};
@@ -22,7 +24,7 @@ fn apache_common_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let ac = apache_common::ApacheCommon::new(&mut rng);
+                let mut ac = apache_common::ApacheCommon::new(&mut rng);
                 let mut writer = Vec::with_capacity(size);
 
                 ac.to_bytes(rng, size, &mut writer)
