@@ -20,7 +20,10 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
+    time::Duration,
 };
+
+use tokio::time::Instant;
 
 use byte_unit::Byte;
 use metrics::counter;
@@ -78,6 +81,11 @@ fn default_rotation() -> bool {
     true
 }
 
+#[allow(clippy::unnecessary_wraps)]
+fn default_flush_every() -> Option<Duration> {
+    Some(Duration::from_secs(1))
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
@@ -121,6 +129,10 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     pub throttle: Option<ThrottleConfig>,
+    /// Force flush at a regular interval. Defaults to 1 second.
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
+    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    pub flush_every: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -200,6 +212,7 @@ impl Server {
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
+                flush_every: config.flush_every,
             };
 
             handles.spawn(child.spin());
@@ -275,6 +288,7 @@ struct Child {
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
+    flush_every: Option<Duration>,
 }
 
 impl Child {
@@ -287,8 +301,6 @@ impl Child {
         let mut path = path_from_template(&self.path_template, file_index);
 
         let mut handle = self.block_cache.handle();
-        // Setting write buffer capacity (per second) approximately equal to the throttle's maximum capacity
-        // (converted to bytes if necessary) to approximate flush every second.
         let buffer_capacity = self
             .throttle
             .maximum_capacity_bytes(self.maximum_block_size);
@@ -312,6 +324,7 @@ impl Child {
         );
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut last_flush = Instant::now();
         loop {
             tokio::select! {
                 result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
@@ -328,6 +341,7 @@ impl Child {
 
                             if total_bytes_written > maximum_bytes_per_file {
                                 fp.flush().await?;
+                                last_flush = Instant::now();
                                 if self.rotate {
                                     // Delete file, leaving any open file handlers intact. This
                                     // includes our own `fp` for the time being.
@@ -355,6 +369,9 @@ impl Child {
                                         })?,
                                 );
                                 total_bytes_written = 0;
+                            } else if self.flush_every.is_some_and(|d| last_flush.elapsed() >= d) {
+                                fp.flush().await?;
+                                last_flush = Instant::now();
                             }
                         }
                         Err(err) => {
