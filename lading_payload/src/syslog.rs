@@ -1,6 +1,6 @@
 //! Syslog payload.
 
-use std::{io::Write, time::SystemTime};
+use std::io::Write;
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -66,7 +66,16 @@ impl Distribution<Member> for StandardUniform {
         Member {
             priority: rng.random_range(0..=191),
             syslog_version: rng.random_range(1..=3),
-            timestamp: to_rfc3339(SystemTime::now()),
+            timestamp: {
+                // Generate deterministic timestamp from RNG for reproducibility.
+                // Range: 2020-01-01 to 2030-01-01 (10 years of timestamps)
+                let base_ts: i64 = 1_577_836_800; // 2020-01-01 00:00:00 UTC
+                let range: i64 = 315_360_000; // ~10 years in seconds
+                let offset: i64 = rng.random_range(0..range);
+                let ts = OffsetDateTime::from_unix_timestamp(base_ts + offset)
+                    .expect("timestamp in valid range");
+                ts.format(&Rfc3339).expect("failed to format timestamp")
+            },
             hostname: (*HOSTNAMES.choose(rng).expect("failed to choose hostnanme")).to_string(),
             app_name: (*APP_NAMES.choose(rng).expect("failed to choose app name")).to_string(),
             procid: rng.random_range(100..=9999),
@@ -74,13 +83,6 @@ impl Distribution<Member> for StandardUniform {
             message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
         }
     }
-}
-
-fn to_rfc3339<T>(dt: T) -> String
-where
-    T: Into<OffsetDateTime>,
-{
-    dt.into().format(&Rfc3339).expect("failed to format")
 }
 
 impl Member {
