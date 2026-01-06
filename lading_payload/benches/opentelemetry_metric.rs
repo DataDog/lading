@@ -1,3 +1,5 @@
+//! Benchmarks for OpenTelemetry metric payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 use lading_payload::common::config::ConfRange;
@@ -27,7 +29,7 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
                     attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
                 },
             };
-            let _ot = OpentelemetryMetrics::new(config, &mut rng)
+            let _ot = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)
                 .expect("failed to create metrics generator");
         })
     });
@@ -57,7 +59,7 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
                         attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
                     },
                 };
-                let ot = OpentelemetryMetrics::new(config, &mut rng)
+                let mut ot = OpentelemetryMetrics::new(config, size, &mut rng)
                     .expect("failed to create metrics generator");
                 let mut writer = Vec::with_capacity(size);
 
@@ -74,5 +76,4 @@ criterion_group!(
     config = Criterion::default().measurement_time(Duration::from_secs(90));
     targets = opentelemetry_metric_setup, opentelemetry_metric_all
 );
-
 criterion_main!(benches);

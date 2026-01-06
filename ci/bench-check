@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check that all benchmarks compile without running them.
+# This catches API breakage in benchmark code that would otherwise go undetected.
+
+echo "Checking benchmark compilation..."
+cargo bench --no-run --all-targets
+
+echo "Benchmark compilation check passed!"
