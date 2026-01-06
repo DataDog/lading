@@ -296,4 +296,64 @@ mod tests {
         let pooled = ConcurrencyStrategy::new(None, false);
         assert_eq!(pooled.connection_count(), 1);
     }
+
+    mod throttle_config_parsing {
+        use crate::generator::common::BytesThrottleConfig;
+        use serde_yaml::with::singleton_map_recursive;
+
+        /// Helper to deserialize ThrottleConfig using singleton_map_recursive
+        /// (matches how the main config deserializes it)
+        fn parse_throttle_config(yaml: &str) -> BytesThrottleConfig {
+            let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            singleton_map_recursive::deserialize(value).unwrap()
+        }
+
+        #[test]
+        fn parse_all_out() {
+            let yaml = r#"all_out"#;
+            let config = parse_throttle_config(yaml);
+            assert!(matches!(config, BytesThrottleConfig::AllOut));
+        }
+
+        #[test]
+        fn parse_stable_bytes_per_second() {
+            let yaml = r#"
+                stable:
+                    bytes_per_second: "10 MiB"
+                    timeout_millis: 100
+            "#;
+            let config = parse_throttle_config(yaml);
+            assert!(matches!(config, BytesThrottleConfig::Stable { .. }));
+            if let BytesThrottleConfig::Stable {
+                bytes_per_second,
+                timeout_millis,
+            } = config
+            {
+                assert_eq!(timeout_millis, 100);
+                assert_eq!(bytes_per_second.as_u64(), 10 * 1024 * 1024);
+            }
+        }
+
+        #[test]
+        fn parse_linear_bytes_per_second() {
+            let yaml = r#"
+                linear:
+                    initial_bytes_per_second: "10 MiB"
+                    maximum_bytes_per_second: "100 MiB"
+                    rate_of_change: "1 MiB"
+            "#;
+            let config = parse_throttle_config(yaml);
+            assert!(matches!(config, BytesThrottleConfig::Linear { .. }));
+            if let BytesThrottleConfig::Linear {
+                initial_bytes_per_second,
+                maximum_bytes_per_second,
+                rate_of_change,
+            } = config
+            {
+                assert_eq!(initial_bytes_per_second.as_u64(), 10 * 1024 * 1024);
+                assert_eq!(maximum_bytes_per_second.as_u64(), 100 * 1024 * 1024);
+                assert_eq!(rate_of_change.as_u64(), 1 * 1024 * 1024);
+            }
+        }
+    }
 }
