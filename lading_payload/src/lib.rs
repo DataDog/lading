@@ -27,6 +27,7 @@ pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
 pub use splunk_hec::SplunkHec;
 pub use static_chunks::StaticChunks;
+pub use static_timestamped::StaticTimestamped;
 pub use statik::Static;
 pub use syslog::Syslog5424;
 
@@ -41,6 +42,7 @@ pub mod opentelemetry;
 pub mod procfs;
 pub mod splunk_hec;
 pub mod static_chunks;
+pub mod static_timestamped;
 pub mod statik;
 pub mod syslog;
 pub mod trace_agent;
@@ -139,6 +141,23 @@ pub enum Config {
         /// all files under it (non-recursively) will be read line by line.
         static_path: PathBuf,
     },
+    /// Generates static data grouped by second; each block contains one
+    /// second's worth of logs as determined by a parsed timestamp prefix.
+    StaticTimestamped {
+        /// Defines the file path to read static variant data from. Content is
+        /// assumed to be line-oriented.
+        static_path: PathBuf,
+        /// Chrono-compatible timestamp format string used to parse the leading
+        /// timestamp in each line.
+        timestamp_format: String,
+        /// Emit a minimal placeholder block (single newline) for seconds with
+        /// no lines. When false, empty seconds are skipped.
+        #[serde(default)]
+        emit_placeholder: bool,
+        /// Optional starting line offset; lines before this index are skipped.
+        #[serde(default)]
+        start_line_index: Option<u64>,
+    },
     /// Generates a line of printable ascii characters
     Ascii,
     /// Generates a json encoded line
@@ -179,6 +198,8 @@ pub enum Payload {
     Static(Static),
     /// Static file content, chunked into lines that fill blocks as closely as possible.
     StaticChunks(StaticChunks),
+    /// Static file content grouped into one-second blocks based on timestamps
+    StaticTimestamped(StaticTimestamped),
     /// Syslog RFC 5424 format
     Syslog(Syslog5424),
     /// OpenTelemetry traces
@@ -208,6 +229,7 @@ impl Serialize for Payload {
             Payload::SplunkHec(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Static(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::StaticChunks(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::StaticTimestamped(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Syslog(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
