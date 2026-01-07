@@ -1,5 +1,9 @@
 [advisories]
-ignore = ["RUSTSEC-2020-0159"]
+ignore = [
+    "RUSTSEC-2020-0159",
+    "RUSTSEC-2026-0001",  # rkyv 0.7.46 UB in Arc/Rc - transitive via rust_decimal <- byte-unit
+    "RUSTSEC-2024-0436",  # paste unmaintained - transitive via parquet
+]
 
 [output]
 deny = ["unmaintained", "unsound", "yanked"]
