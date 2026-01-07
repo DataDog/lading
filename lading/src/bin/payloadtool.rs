@@ -18,6 +18,73 @@ use lading::generator::{self, http::Method};
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
+
+/// Fingerprint result containing both hash and entropy metrics.
+#[derive(Debug)]
+struct Fingerprint {
+    /// SHA256 hash of the payload bytes
+    hash: String,
+    /// Shannon entropy in bits per byte
+    entropy: f64,
+}
+
+impl Fingerprint {
+    /// Parse a fingerprint from a string in the format: "<hash> entropy=<value>"
+    fn parse(s: &str) -> Option<Self> {
+        let parts: Vec<&str> = s.split_whitespace().collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let hash = parts[0].to_string();
+        let entropy_part = parts[1].strip_prefix("entropy=")?;
+        let entropy: f64 = entropy_part.parse().ok()?;
+        Some(Self { hash, entropy })
+    }
+
+    /// Compare with another fingerprint. Hash must match exactly, entropy
+    /// must be within tolerance (0.01 bits).
+    fn matches(&self, other: &Fingerprint) -> bool {
+        self.hash == other.hash && (self.entropy - other.entropy).abs() < 0.01
+    }
+
+    /// Compare with an expected string, parsing it first.
+    fn matches_str(&self, expected: &str) -> bool {
+        if let Some(expected_fp) = Self::parse(expected) {
+            self.matches(&expected_fp)
+        } else {
+            // Fall back to hash-only comparison for backward compatibility
+            self.hash == expected
+        }
+    }
+}
+
+impl std::fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} entropy={:.4}", self.hash, self.entropy)
+    }
+}
+
+/// Compute Shannon entropy (bits per byte) of a byte sequence.
+#[allow(clippy::cast_precision_loss)]
+fn shannon_entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut freq = [0u64; 256];
+    for &b in data {
+        freq[b as usize] += 1;
+    }
+    let len = data.len() as f64;
+    let mut entropy = 0.0;
+    for &count in &freq {
+        if count > 0 {
+            let p = count as f64 / len;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
 use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -46,7 +113,7 @@ fn generate_and_check(
     total_bytes: NonZeroU32,
     max_block_size: Byte,
     compute_fingerprint: bool,
-) -> Result<Option<String>> {
+) -> Result<Option<Fingerprint>> {
     let mut rng = StdRng::from_seed(seed);
     let start = Instant::now();
     let blocks = match block::Cache::fixed_with_max_overhead(
@@ -68,15 +135,18 @@ fn generate_and_check(
     info!("Payload generation took {:?}", start.elapsed());
     trace!("Payload: {:#?}", blocks);
 
-    // Compute fingerprint if requested, done by iterating the generated blocks
-    // to the end and sha256'ing the blocks.
+    // Compute fingerprint if requested: SHA256 hash and Shannon entropy.
     let fingerprint = if compute_fingerprint {
         let mut hasher = Sha256::new();
+        let mut all_bytes = Vec::new();
         for block in &blocks {
             hasher.update(&block.bytes);
+            all_bytes.extend_from_slice(&block.bytes);
         }
         let result = hasher.finalize();
-        Some(format!("{result:x}"))
+        let hash = format!("{result:x}");
+        let entropy = shannon_entropy(&all_bytes);
+        Some(Fingerprint { hash, entropy })
     } else {
         None
     };
@@ -110,7 +180,7 @@ fn generate_and_check(
 fn check_generator(
     config: &generator::Config,
     compute_fingerprint: bool,
-) -> Result<Option<String>> {
+) -> Result<Option<Fingerprint>> {
     match &config.inner {
         generator::Inner::FileGen(_) => {
             if compute_fingerprint {
@@ -341,12 +411,12 @@ async fn inner_main() -> Result<()> {
                         )
                     })?;
 
-                if fp == expected {
+                if fp.matches_str(expected) {
                     info!("✓ Fingerprint matches expected value");
                 } else {
                     error!("✗ Fingerprint mismatch!");
-                    error!("  Expected: {}", expected);
-                    error!("  Got:      {}", fp);
+                    error!("  Expected: {expected}");
+                    error!("  Got:      {fp}");
                     return Err(anyhow!("Fingerprint verification failed"));
                 }
             } else {
@@ -380,16 +450,16 @@ async fn inner_main() -> Result<()> {
                         .and_then(|line| line.split(": ").nth(1));
 
                     if let Some(expected) = expected {
-                        if fp == expected {
-                            info!("✓ {} fingerprint matches", id);
+                        if fp.matches_str(expected) {
+                            info!("✓ {id} fingerprint matches");
                         } else {
-                            error!("✗ {} fingerprint mismatch!", id);
-                            error!("  Expected: {}", expected);
-                            error!("  Got:      {}", fp);
+                            error!("✗ {id} fingerprint mismatch!");
+                            error!("  Expected: {expected}");
+                            error!("  Got:      {fp}");
                             all_passed = false;
                         }
                     } else {
-                        warn!("No expected fingerprint found for {}", id);
+                        warn!("No expected fingerprint found for {id}");
                     }
                 }
 

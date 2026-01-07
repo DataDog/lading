@@ -1,0 +1,16 @@
+generator:
+  - id: "splunk_hec_tcp"
+    tcp:
+      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12]
+      addr: "127.0.0.1:8080"
+      variant:
+        splunk_hec:
+          encoding: json
+      bytes_per_second: "100 Mb"
+      maximum_block_size: "1 Mb"
+      maximum_prebuild_cache_size_bytes: "10 Mb"
+      parallel_connections: 1
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9999"

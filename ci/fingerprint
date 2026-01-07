@@ -3,7 +3,28 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# This script runs fingerprint verification for payload determinism.
+# Fingerprint Verification for Payload Determinism
+#
+# This script verifies that payload generators produce deterministic output.
+# Each payload type has a "golden" fingerprint containing:
+#   - A SHA256 hash of the generated output
+#   - The Shannon entropy of the output
+#
+# POLICY:
+#   1. UNINTENDED fingerprint changes are not acceptable. If a change causes
+#      fingerprints to differ unexpectedly, the change must be investigated.
+#
+#   2. ENTROPY DECREASES are never acceptable. Lower entropy means less
+#      randomness in the payload, which defeats the purpose of load testing.
+#
+#   3. INTENTIONAL fingerprint changes are acceptable when:
+#      - The change deliberately alters RNG usage or payload structure
+#      - Entropy does not decrease
+#      - The new fingerprint is committed alongside the code change
+#
+# To update a fingerprint after an intentional change:
+#   cargo run --release --bin payloadtool -- ci/fingerprints/<type>/lading.yaml --fingerprint > ci/fingerprints/<type>/fingerprint.txt
+
 echo "=== Running fingerprint verification ==="
 echo
 
@@ -12,6 +33,7 @@ CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failed=0
 total=0
 passed=0
+entropy_decreased=0
 
 echo "Building payloadtool..."
 cargo build --release --bin payloadtool --quiet 2>/dev/null || cargo build --release --bin payloadtool
@@ -19,6 +41,12 @@ cargo build --release --bin payloadtool --quiet 2>/dev/null || cargo build --rel
 echo
 echo "Checking fingerprints..."
 echo
+
+# Extract entropy value from a fingerprint line
+# Format: "name: hash entropy=X.XXXX"
+extract_entropy() {
+    echo "$1" | grep -oE 'entropy=[0-9]+\.[0-9]+' | cut -d= -f2
+}
 
 for dir in "$CI_DIR"/fingerprints/*/; do
     if [ ! -d "$dir" ]; then
@@ -50,7 +78,7 @@ for dir in "$CI_DIR"/fingerprints/*/; do
         echo "  Generated fingerprint:"
         echo "$actual" | while IFS= read -r line; do echo "    $line"; done
         echo "  To save as golden, run:"
-        echo "    echo '$actual' > $fingerprint_file"
+        echo "    cargo run --release --bin payloadtool -- $config_file --fingerprint > $fingerprint_file"
         failed=$((failed + 1))
         continue
     fi
@@ -60,11 +88,35 @@ for dir in "$CI_DIR"/fingerprints/*/; do
         echo "PASSED"
         passed=$((passed + 1))
     else
-        echo "FAILED"
+        # Check if entropy decreased (never acceptable)
+        expected_entropy=$(extract_entropy "$expected")
+        actual_entropy=$(extract_entropy "$actual")
+
+        if [ -n "$expected_entropy" ] && [ -n "$actual_entropy" ]; then
+            # Use awk for floating point comparison
+            entropy_decreased_check=$(awk -v a="$actual_entropy" -v e="$expected_entropy" 'BEGIN { print (a < e) ? "yes" : "no" }')
+            if [ "$entropy_decreased_check" = "yes" ]; then
+                echo "FAILED (ENTROPY DECREASED - never acceptable)"
+                echo "  Expected entropy: $expected_entropy"
+                echo "  Actual entropy:   $actual_entropy"
+                echo "  Entropy decrease indicates less randomness in payload."
+                echo "  This change MUST be reverted."
+                entropy_decreased=$((entropy_decreased + 1))
+                failed=$((failed + 1))
+                continue
+            fi
+        fi
+
+        echo "CHANGED"
         echo "  Expected:"
         echo "$expected" | while IFS= read -r line; do echo "    $line"; done
         echo "  Actual:"
         echo "$actual" | while IFS= read -r line; do echo "    $line"; done
+        echo
+        echo "  If this change is INTENTIONAL, update the fingerprint:"
+        echo "    cargo run --release --bin payloadtool -- $config_file --fingerprint > $fingerprint_file"
+        echo
+        echo "  If this change is UNINTENDED, investigate and fix the cause."
         failed=$((failed + 1))
     fi
 done
@@ -73,11 +125,20 @@ echo
 echo "=== Summary ==="
 echo "Total: $total"
 echo "Passed: $passed"
-echo "Failed: $failed"
+echo "Changed: $((failed - entropy_decreased))"
+if [ $entropy_decreased -gt 0 ]; then
+    echo "Entropy decreased: $entropy_decreased (MUST REVERT)"
+fi
 
-if [ $failed -gt 0 ]; then
+if [ $entropy_decreased -gt 0 ]; then
     echo
-    echo "Fingerprint verification FAILED"
+    echo "CRITICAL: Entropy decreased in $entropy_decreased payload(s)."
+    echo "Changes that reduce entropy are NEVER acceptable and must be reverted."
+    exit 1
+elif [ $failed -gt 0 ]; then
+    echo
+    echo "Fingerprint verification found changes."
+    echo "If intentional, update the fingerprint files as shown above."
     exit 1
 else
     echo
