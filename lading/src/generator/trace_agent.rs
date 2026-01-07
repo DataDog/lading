@@ -378,7 +378,7 @@ impl TraceAgent {
                             });
                         }
                         Err(err) => {
-                            error!("Throttle request of {total_bytes} is larger than throttle capacity. Block will be discarded. Error: {err}", total_bytes = total_bytes);
+                            error!("Discarding block due to throttle error: {err}");
                         }
                     }
                 },
