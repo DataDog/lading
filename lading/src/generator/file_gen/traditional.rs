@@ -31,13 +31,14 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     task::{JoinError, JoinSet},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use lading_payload::{self, block};
 
 use super::General;
 use crate::generator::common::{
-    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, ThrottleMode,
+    create_throttle,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -121,6 +122,14 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     pub throttle: Option<ThrottleConfig>,
+    /// Force flush every n blocks. This generator uses a `BufWriter` with capacity
+    /// based on the throttle's maximum capacity. So when the block cache outputs data roughly
+    /// equal to the throttle's max rate, the `BufWriter` will flush roughly every second.
+    /// However when blocks are small relative to the maximum possible rate, the `BufWriter`
+    /// will flush less frequently. This setting allows you to force a flush after writing to N blocks
+    /// to create a more consistent flush interval.
+    #[serde(default)]
+    pub flush_every_n_blocks: Option<NonZeroU32>,
 }
 
 #[derive(Debug)]
@@ -200,6 +209,7 @@ impl Server {
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
+                flush_every_n_blocks: config.flush_every_n_blocks,
             };
 
             handles.spawn(child.spin());
@@ -275,6 +285,7 @@ struct Child {
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
+    flush_every_n_blocks: Option<NonZeroU32>,
 }
 
 impl Child {
@@ -288,7 +299,16 @@ impl Child {
 
         let mut handle = self.block_cache.handle();
         // Setting write buffer capacity (per second) approximately equal to the throttle's maximum capacity
-        // (converted to bytes if necessary) to approximate flush every second.
+        // (converted to bytes if necessary) to approximate flush every second (ASSUMING that throttler will write
+        // bytes at the throttle's maximum byte rate. When using a block throttler with blocks smaller than
+        // the throttle's maximum block size, this will flush less frequently and thus it's reccomended to use
+        // the flush_every_n_blocks setting).
+        if self.throttle.mode == ThrottleMode::Blocks && self.flush_every_n_blocks.is_none() {
+            warn!(
+                "BufWriter flush frequency can be inconsistent when using block-based throttling - 
+                    consider setting flush_every_n_blocks in your generator config"
+            );
+        }
         let buffer_capacity = self
             .throttle
             .maximum_capacity_bytes(self.maximum_block_size);
@@ -312,6 +332,7 @@ impl Child {
         );
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut blocks_since_flush = 0;
         loop {
             tokio::select! {
                 result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
@@ -324,10 +345,12 @@ impl Child {
                                 fp.write_all(&block.bytes).await?;
                                 counter!("bytes_written").increment(total_bytes);
                                 total_bytes_written += total_bytes;
+                                blocks_since_flush += 1;
                             }
 
                             if total_bytes_written > maximum_bytes_per_file {
                                 fp.flush().await?;
+                                blocks_since_flush = 0;
                                 if self.rotate {
                                     // Delete file, leaving any open file handlers intact. This
                                     // includes our own `fp` for the time being.
@@ -355,6 +378,9 @@ impl Child {
                                         })?,
                                 );
                                 total_bytes_written = 0;
+                            } else if self.flush_every_n_blocks.is_some_and(|n| blocks_since_flush == n.get()) {
+                                fp.flush().await?;
+                                blocks_since_flush = 0;
                             }
                         }
                         Err(err) => {
