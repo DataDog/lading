@@ -549,8 +549,10 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
     /// Parquet file is finalized (footer written) and a new file is created at
     /// the specified path.
     ///
-    /// Returns a [`RotationSender`] immediately that can be used to trigger
-    /// rotations while the event loop runs.
+    /// Returns a tuple of ([`RotationSender`], [`JoinHandle`](tokio::task::JoinHandle))
+    /// immediately. The `RotationSender` can be used to trigger rotations while
+    /// the event loop runs. The `JoinHandle` can be awaited to ensure the
+    /// CaptureManager has fully drained and closed before shutdown.
     ///
     /// # Panics
     ///
@@ -560,7 +562,9 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
     ///
     /// Returns an error if there is already a global recorder set.
     #[allow(clippy::cast_possible_truncation)]
-    pub async fn start_with_rotation(mut self) -> Result<RotationSender, Error> {
+    pub async fn start_with_rotation(
+        mut self,
+    ) -> Result<(RotationSender, tokio::task::JoinHandle<()>), Error> {
         // Create rotation channel - return the sender immediately
         let (rotation_tx, rotation_rx) = mpsc::channel::<RotationRequest>(4);
 
@@ -593,7 +597,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
             .take()
             .expect("shutdown watcher must be present");
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             if let Err(e) = Self::rotation_event_loop(
                 expiration,
                 format,
@@ -614,7 +618,7 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
             }
         });
 
-        Ok(rotation_tx)
+        Ok((rotation_tx, handle))
     }
 
     /// Internal event loop with rotation support
