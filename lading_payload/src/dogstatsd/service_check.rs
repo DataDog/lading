@@ -1,9 +1,12 @@
 //! `DogStatsD` service check.
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
-use crate::{Error, Generator, common::strings::choose_or_not_ref};
+use crate::{
+    Error, Generator,
+    common::strings::{self, choose_or_not_ref},
+};
 
 use super::common::{self, tags::Tagset};
 
@@ -13,6 +16,7 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
     pub(crate) tags_generator: common::tags::Generator,
+    pub(crate) str_pool: Rc<strings::Pool>,
 }
 
 impl<'a> Generator<'a> for ServiceCheckGenerator {
@@ -39,6 +43,7 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
             hostname,
             tags,
             message,
+            str_pool: &self.str_pool,
         })
     }
 }
@@ -55,9 +60,11 @@ pub struct ServiceCheck<'a> {
     /// Hostname of the service check.
     pub hostname: Option<&'a str>,
     /// Tags of the service check.
-    pub tags: Option<Tagset>,
+    pub(crate) tags: Option<Tagset>,
     /// Message of the service check.
     pub message: Option<&'a str>,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
 }
 
 impl fmt::Display for ServiceCheck<'_> {
@@ -81,7 +88,15 @@ impl fmt::Display for ServiceCheck<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;

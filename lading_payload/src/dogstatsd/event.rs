@@ -62,6 +62,7 @@ impl<'a> Generator<'a> for EventGenerator {
             }),
             alert_type: rng.random_bool(0.5).then(|| rng.random()),
             tags,
+            str_pool: &self.str_pool,
         })
     }
 }
@@ -89,8 +90,10 @@ pub struct Event<'a> {
     pub source_type_name: Option<&'a str>,
     /// Alert type of the event.
     pub alert_type: Option<Alert>,
-    /// Tags of the event.
-    pub tags: Option<common::tags::Tagset>,
+    /// Tags of the event
+    pub(crate) tags: Option<common::tags::Tagset>,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
 }
 
 impl fmt::Display for Event<'_> {
@@ -128,7 +131,15 @@ impl fmt::Display for Event<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
