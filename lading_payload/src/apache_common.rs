@@ -347,13 +347,19 @@ impl crate::Serialize for ApacheCommon {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        // Each log line is formatted here, measured, then written to the output.
+        let mut buffer: Vec<u8> = Vec::with_capacity(256);
         loop {
             let member: Member = self.generate(&mut rng)?;
-            let encoding = format!("{member}");
-            let line_length = encoding.len() + 1; // add one for the newline
+            buffer.clear();
+            // Format into the reusable buffer - write! on Vec<u8> is infallible
+            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
