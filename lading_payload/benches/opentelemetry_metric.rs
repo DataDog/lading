@@ -1,7 +1,6 @@
 //! Benchmarks for OpenTelemetry metric payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-
 use lading_payload::common::config::ConfRange;
 use lading_payload::{
     OpentelemetryMetrics, Serialize,
@@ -9,6 +8,8 @@ use lading_payload::{
 };
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
+
+const MIB: usize = 1_048_576;
 
 fn opentelemetry_metric_setup(c: &mut Criterion) {
     c.bench_function("opentelemetry_metric_setup", |b| {
@@ -29,17 +30,15 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
                     attributes_per_metric: ConfRange::Inclusive { min: 0, max: 255 },
                 },
             };
-            let _ot = OpentelemetryMetrics::new(config, 1_000_000, &mut rng)
+            let _ot = OpentelemetryMetrics::new(config, MIB, &mut rng)
                 .expect("failed to create metrics generator");
         })
     });
 }
 
 fn opentelemetry_metric_all(c: &mut Criterion) {
-    let mb = 1_000_000; // 1 MiB
-
     let mut group = c.benchmark_group("opentelemetry_metric_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {

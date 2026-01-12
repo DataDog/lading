@@ -1,10 +1,11 @@
 //! Benchmarks for Datadog trace agent payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-
 use lading_payload::{Serialize, trace_agent::v04};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
+
+const MIB: usize = 1_048_576;
 
 fn trace_agent_setup(c: &mut Criterion) {
     c.bench_function("trace_agent_setup", |b| {
@@ -17,10 +18,8 @@ fn trace_agent_setup(c: &mut Criterion) {
 }
 
 fn trace_agent_all(c: &mut Criterion) {
-    let mb = 1_000_000; // 1 MiB
-
     let mut group = c.benchmark_group("trace_agent_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {

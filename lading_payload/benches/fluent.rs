@@ -1,10 +1,11 @@
 //! Benchmarks for Fluent payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-
 use lading_payload::{Fluent, Serialize};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
+
+const MIB: usize = 1_048_576;
 
 fn fluent_setup(c: &mut Criterion) {
     c.bench_function("fluent_setup", |b| {
@@ -16,10 +17,8 @@ fn fluent_setup(c: &mut Criterion) {
 }
 
 fn fluent_all(c: &mut Criterion) {
-    let mb = 1_000_000; // 1 MiB
-
     let mut group = c.benchmark_group("fluent_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {

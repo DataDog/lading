@@ -1,10 +1,11 @@
 //! Benchmarks for Syslog 5424 payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-
 use lading_payload::{Serialize, Syslog5424};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
+
+const MIB: usize = 1_048_576;
 
 fn syslog_setup(c: &mut Criterion) {
     c.bench_function("syslog_setup", |b| {
@@ -15,10 +16,8 @@ fn syslog_setup(c: &mut Criterion) {
 }
 
 fn syslog_all(c: &mut Criterion) {
-    let mb = 1_000_000; // 1 MiB
-
     let mut group = c.benchmark_group("syslog_all");
-    for size in &[mb, 10 * mb, 100 * mb, 1_000 * mb] {
+    for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
