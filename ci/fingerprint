@@ -14,12 +14,12 @@ set -o pipefail
 #   1. UNINTENDED fingerprint changes are not acceptable. If a change causes
 #      fingerprints to differ unexpectedly, the change must be investigated.
 #
-#   2. ENTROPY DECREASES are never acceptable. Lower entropy means less
-#      randomness in the payload, which defeats the purpose of load testing.
+#   2. UNINTENDED entropy changes are not acceptable. If a change causes
+#      fingerprints to differ unexpectedly, the change must be investigated.
 #
 #   3. INTENTIONAL fingerprint changes are acceptable when:
 #      - The change deliberately alters RNG usage or payload structure
-#      - Entropy does not decrease
+#      - Entropy is knowingly altered and can be socially agreed to
 #      - The new fingerprint is committed alongside the code change
 #
 # To update a fingerprint after an intentional change:
