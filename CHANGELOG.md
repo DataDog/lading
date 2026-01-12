@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compressed.
 - New "Static Chunks" generator that divides static files by lines into blocks
   (as opposed to static which turns each file into a block).
+- Fingerprint mechanism now calculates Shannon entropy.
 
 ## [0.30.0]
 ## Added

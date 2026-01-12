@@ -18,6 +18,82 @@ use lading::generator::{self, http::Method};
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
+
+/// Fingerprint result containing both hash and entropy metrics.
+#[derive(Debug)]
+struct Fingerprint {
+    /// SHA256 hash of the payload bytes
+    hash: String,
+    /// Shannon entropy in bits per byte
+    entropy: f64,
+}
+
+impl Fingerprint {
+    /// Parse a fingerprint from a string in the format: "<hash> entropy=<value>"
+    fn parse(s: &str) -> Option<Self> {
+        let parts: Vec<&str> = s.split_whitespace().collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let hash = parts[0].to_string();
+        let entropy_part = parts[1].strip_prefix("entropy=")?;
+        let entropy: f64 = entropy_part.parse().ok()?;
+        Some(Self { hash, entropy })
+    }
+
+    /// Compare with another fingerprint. Hash must match exactly, entropy
+    /// must be within tolerance (0.01 bits).
+    fn matches(&self, other: &Fingerprint) -> bool {
+        self.hash == other.hash && (self.entropy - other.entropy).abs() < 0.01
+    }
+
+    /// Compare with an expected string, parsing it first.
+    fn matches_str(&self, expected: &str) -> bool {
+        if let Some(expected_fp) = Self::parse(expected) {
+            self.matches(&expected_fp)
+        } else {
+            // Fall back to hash-only comparison for backward compatibility
+            self.hash == expected
+        }
+    }
+}
+
+impl std::fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} entropy={:.4}", self.hash, self.entropy)
+    }
+}
+
+/// Compute Shannon entropy (bits per byte) of a byte sequence.
+///
+/// Returns a value in the range [0.0, 8.0] where 0.0 indicates all bytes are
+/// identical and 8.0 indicates all 256 byte values appear with equal frequency.
+///
+/// # Precision
+///
+/// For data larger than 2^53 bytes (~9 petabytes), floating-point precision
+/// limits may affect results due to the `len as f64` cast. This is not a
+/// concern for typical payload sizes.
+#[allow(clippy::cast_precision_loss)]
+fn shannon_entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut freq = [0u64; 256];
+    for &b in data {
+        freq[b as usize] += 1;
+    }
+    let len = data.len() as f64;
+    let mut entropy = 0.0;
+    for &count in &freq {
+        if count > 0 {
+            let p = count as f64 / len;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
 use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -46,7 +122,7 @@ fn generate_and_check(
     total_bytes: NonZeroU32,
     max_block_size: Byte,
     compute_fingerprint: bool,
-) -> Result<Option<String>> {
+) -> Result<Option<Fingerprint>> {
     let mut rng = StdRng::from_seed(seed);
     let start = Instant::now();
     let blocks = match block::Cache::fixed_with_max_overhead(
@@ -68,15 +144,18 @@ fn generate_and_check(
     info!("Payload generation took {:?}", start.elapsed());
     trace!("Payload: {:#?}", blocks);
 
-    // Compute fingerprint if requested, done by iterating the generated blocks
-    // to the end and sha256'ing the blocks.
+    // Compute fingerprint if requested: SHA256 hash and Shannon entropy.
     let fingerprint = if compute_fingerprint {
         let mut hasher = Sha256::new();
+        let mut all_bytes = Vec::new();
         for block in &blocks {
             hasher.update(&block.bytes);
+            all_bytes.extend_from_slice(&block.bytes);
         }
         let result = hasher.finalize();
-        Some(format!("{result:x}"))
+        let hash = format!("{result:x}");
+        let entropy = shannon_entropy(&all_bytes);
+        Some(Fingerprint { hash, entropy })
     } else {
         None
     };
@@ -110,7 +189,7 @@ fn generate_and_check(
 fn check_generator(
     config: &generator::Config,
     compute_fingerprint: bool,
-) -> Result<Option<String>> {
+) -> Result<Option<Fingerprint>> {
     match &config.inner {
         generator::Inner::FileGen(_) => {
             if compute_fingerprint {
@@ -341,12 +420,12 @@ async fn inner_main() -> Result<()> {
                         )
                     })?;
 
-                if fp == expected {
+                if fp.matches_str(expected) {
                     info!("✓ Fingerprint matches expected value");
                 } else {
                     error!("✗ Fingerprint mismatch!");
-                    error!("  Expected: {}", expected);
-                    error!("  Got:      {}", fp);
+                    error!("  Expected: {expected}");
+                    error!("  Got:      {fp}");
                     return Err(anyhow!("Fingerprint verification failed"));
                 }
             } else {
@@ -380,16 +459,16 @@ async fn inner_main() -> Result<()> {
                         .and_then(|line| line.split(": ").nth(1));
 
                     if let Some(expected) = expected {
-                        if fp == expected {
-                            info!("✓ {} fingerprint matches", id);
+                        if fp.matches_str(expected) {
+                            info!("✓ {id} fingerprint matches");
                         } else {
-                            error!("✗ {} fingerprint mismatch!", id);
-                            error!("  Expected: {}", expected);
-                            error!("  Got:      {}", fp);
+                            error!("✗ {id} fingerprint mismatch!");
+                            error!("  Expected: {expected}");
+                            error!("  Got:      {fp}");
                             all_passed = false;
                         }
                     } else {
-                        warn!("No expected fingerprint found for {}", id);
+                        warn!("No expected fingerprint found for {id}");
                     }
                 }
 
@@ -410,4 +489,156 @@ async fn inner_main() -> Result<()> {
 fn main() -> Result<()> {
     let runtime = Builder::new_multi_thread().enable_io().build()?;
     runtime.block_on(inner_main())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shannon_entropy;
+    use proptest::prelude::*;
+
+    // === Known Value Tests ===
+    //
+    // These verify mathematical correctness against known entropy values.
+
+    #[test]
+    fn empty_slice_returns_zero() {
+        assert_eq!(shannon_entropy(&[]), 0.0);
+    }
+
+    #[test]
+    fn single_byte_returns_zero() {
+        // A single byte has probability 1.0, and -1.0 * log2(1.0) = 0
+        assert_eq!(shannon_entropy(&[0x42]), 0.0);
+    }
+
+    #[test]
+    fn two_different_bytes_returns_one_bit() {
+        // Two equally likely values: entropy = -2 * (0.5 * log2(0.5)) = 1 bit
+        let entropy = shannon_entropy(&[0x00, 0xFF]);
+        assert!(
+            (entropy - 1.0).abs() < 1e-10,
+            "Expected 1.0 bit, got {entropy}"
+        );
+    }
+
+    #[test]
+    fn all_256_values_equal_returns_eight_bits() {
+        // Maximum entropy: all 256 byte values with equal probability
+        // entropy = -256 * (1/256 * log2(1/256)) = log2(256) = 8 bits
+        let data: Vec<u8> = (0..=255u8).collect();
+        let entropy = shannon_entropy(&data);
+        assert!(
+            (entropy - 8.0).abs() < 1e-10,
+            "Expected 8.0 bits, got {entropy}"
+        );
+    }
+
+    #[test]
+    fn four_equally_likely_values_returns_two_bits() {
+        // Four equally likely values: entropy = log2(4) = 2 bits
+        let data: Vec<u8> = (0..100).flat_map(|_| [0u8, 1, 2, 3]).collect();
+        let entropy = shannon_entropy(&data);
+        assert!(
+            (entropy - 2.0).abs() < 1e-10,
+            "Expected 2.0 bits, got {entropy}"
+        );
+    }
+
+    #[test]
+    fn rare_symbol_low_entropy() {
+        // When one symbol dominates, entropy approaches zero. 255 zeros + 1
+        // one: p(0)=255/256≈0.996, p(1)=1/256≈0.004 H ≈ -(0.996*log2(0.996) +
+        // 0.004*log2(0.004)) ≈ 0.037 bits
+        let mut data = vec![0u8; 255];
+        data.push(1u8);
+        let entropy = shannon_entropy(&data);
+        assert!(
+            entropy < 0.1,
+            "Rare symbol should yield low entropy, got {entropy}"
+        );
+        assert!(entropy > 0.0, "Entropy should be positive with two symbols");
+    }
+
+    // === Property Tests ===
+    //
+    // Tolerance of 1e-10 is used for floating-point comparisons:
+    //
+    // - IEEE 754 f64 has ~15-17 digits of precision
+    // - Shannon entropy sums up to 256 terms, accumulating ~256 * 1e-16 ≈ 1e-13 error
+    // - 1e-10 provides margin while catching real bugs (wrong log base, sign errors)
+    proptest! {
+        #[test]
+        fn entropy_bounded(data: Vec<u8>) {
+            let entropy = shannon_entropy(&data);
+            // Shannon entropy for bytes is bounded [0, 8]
+            prop_assert!(entropy >= 0.0, "Entropy must be non-negative, got {entropy}");
+            prop_assert!(entropy <= 8.0, "Entropy must be <= 8 bits, got {entropy}");
+            // Verify no floating-point anomalies
+            prop_assert!(!entropy.is_nan(), "Entropy must not be NaN");
+            prop_assert!(!entropy.is_infinite(), "Entropy must be finite");
+        }
+
+        #[test]
+        fn uniform_data_zero_entropy(byte: u8, len in 1..1000usize) {
+            // Data with a single repeated byte value has zero entropy
+            let data = vec![byte; len];
+            let entropy = shannon_entropy(&data);
+            prop_assert_eq!(entropy, 0.0, "Uniform data must have zero entropy");
+        }
+
+        #[test]
+        fn order_invariant(mut data in prop::collection::vec(any::<u8>(), 1..1000)) {
+            // Shannon entropy is defined as H = -Σ p(x) * log2(p(x)) where p(x) depends
+            // only on frequency counts, not on the order bytes appear. Sorting the data
+            // preserves frequencies, so entropy must be identical.
+            let original = shannon_entropy(&data);
+            data.sort();
+            let sorted_entropy = shannon_entropy(&data);
+            prop_assert!(
+                (original - sorted_entropy).abs() < 1e-10,
+                "Entropy should be order-invariant: original={original}, sorted={sorted_entropy}"
+            );
+        }
+
+        #[test]
+        fn self_concatenation_invariant(data in prop::collection::vec(any::<u8>(), 1..500)) {
+            // Doubling data doubles all frequency counts: freq'[i] = 2 * freq[i].
+            // Probabilities remain unchanged: p'[i] = 2*freq[i] / 2*len = freq[i] / len.
+            // Since entropy depends only on probabilities, H(D||D) = H(D).
+            let original = shannon_entropy(&data);
+            let doubled: Vec<u8> = data.iter().chain(data.iter()).copied().collect();
+            let doubled_entropy = shannon_entropy(&doubled);
+            prop_assert!(
+                (original - doubled_entropy).abs() < 1e-10,
+                "Self-concatenation should preserve entropy: original={original}, doubled={doubled_entropy}"
+            );
+        }
+
+        #[test]
+        fn equiprobable_entropy(n in 2u16..=256, repetitions in 1..50usize) {
+            // For n equally likely symbols, maximum entropy theorem gives H = log2(n).
+            // This is the theoretical upper bound for any distribution over n symbols.
+            // Testing the full byte range (2..=256) verifies we handle all byte values
+            // correctly, including high bytes (128-255) that could expose indexing bugs.
+            let data: Vec<u8> = (0..n).map(|i| i as u8).cycle().take(n as usize * repetitions).collect();
+            let expected = (n as f64).log2();
+            let actual = shannon_entropy(&data);
+            prop_assert!(
+                (actual - expected).abs() < 1e-10,
+                "Expected {expected} bits for {n} equiprobable values, got {actual}"
+            );
+        }
+
+        #[test]
+        fn large_data_stability(data in prop::collection::vec(any::<u8>(), 10_000..20_000)) {
+            // Verify numerical stability with realistic payload sizes. The 10K-20K range
+            // exercises floating-point accumulation across many frequency buckets without
+            // excessive CI runtime. The entropy calculation sums 256 terms; larger data
+            // means smaller per-bucket probabilities, testing precision at small p values.
+            let entropy = shannon_entropy(&data);
+            prop_assert!(entropy >= 0.0 && entropy <= 8.0, "Bounds violated for large data: {entropy}");
+            prop_assert!(!entropy.is_nan(), "NaN for large data");
+            prop_assert!(!entropy.is_infinite(), "Infinity for large data");
+        }
+    }
 }

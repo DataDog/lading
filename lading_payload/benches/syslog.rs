@@ -1,32 +1,32 @@
-//! Benchmarks for Apache Common log payload generation.
+//! Benchmarks for Syslog 5424 payload generation.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-use lading_payload::{Serialize, apache_common};
+use lading_payload::{Serialize, Syslog5424};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 const MIB: usize = 1_048_576;
 
-fn apache_common_setup(c: &mut Criterion) {
-    c.bench_function("apache_common_setup", |b| {
+fn syslog_setup(c: &mut Criterion) {
+    c.bench_function("syslog_setup", |b| {
         b.iter(|| {
-            let mut rng = SmallRng::seed_from_u64(19690716);
-            let _ac = apache_common::ApacheCommon::new(&mut rng);
+            let _syslog = Syslog5424::default();
         })
     });
 }
 
-fn apache_common_all(c: &mut Criterion) {
-    let mut group = c.benchmark_group("apache_common_all");
+fn syslog_all(c: &mut Criterion) {
+    let mut group = c.benchmark_group("syslog_all");
     for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut rng = SmallRng::seed_from_u64(19690716);
-                let mut ac = apache_common::ApacheCommon::new(&mut rng);
+                let rng = SmallRng::seed_from_u64(19690716);
+                let mut syslog = Syslog5424::default();
                 let mut writer = Vec::with_capacity(size);
 
-                ac.to_bytes(rng, size, &mut writer)
+                syslog
+                    .to_bytes(rng, size, &mut writer)
                     .expect("failed to convert to bytes");
             });
         });
@@ -37,5 +37,5 @@ fn apache_common_all(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = apache_common_setup, apache_common_all,
+    targets = syslog_setup, syslog_all
 );

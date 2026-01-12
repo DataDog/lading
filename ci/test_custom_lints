@@ -4,4 +4,4 @@ set -o nounset
 set -o pipefail
 
 # The purpose of this script is to test our utility ci/custom_lints.
-sg test
+ast-grep test
