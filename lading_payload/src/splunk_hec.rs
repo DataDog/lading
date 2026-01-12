@@ -32,19 +32,19 @@ const MESSAGES: [&str; 5] = [
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Attrs {
     #[serde(rename = "systemid")]
-    pub(crate) system_id: String,
-    pub(crate) stage: String,
+    pub(crate) system_id: &'static str,
+    pub(crate) stage: &'static str,
     #[serde(rename = "type")]
-    pub(crate) event_type: String,
+    pub(crate) event_type: &'static str,
     #[serde(rename = "c2cService")]
-    pub(crate) c2c_service: String,
+    pub(crate) c2c_service: &'static str,
     #[serde(rename = "c2cPartition")]
-    pub(crate) c2c_partition: String,
+    pub(crate) c2c_partition: &'static str,
     #[serde(rename = "c2cStage")]
-    pub(crate) c2c_stage: String, // same as
+    pub(crate) c2c_stage: &'static str, // same as
     #[serde(rename = "c2cContainerType")]
-    pub(crate) c2c_container_type: String,
-    pub(crate) aws_account: String,
+    pub(crate) c2c_container_type: &'static str,
+    pub(crate) aws_account: &'static str,
 }
 
 impl Distribution<Attrs> for StandardUniform {
@@ -53,24 +53,18 @@ impl Distribution<Attrs> for StandardUniform {
         R: Rng + ?Sized,
     {
         Attrs {
-            system_id: String::from(*SYSTEM_IDS.choose(rng).expect("failed to choose system ids")),
-            stage: String::from(*STAGES.choose(rng).expect("failed to choose stages")),
-            event_type: String::from(
-                *EVENT_TYPES
-                    .choose(rng)
-                    .expect("failed to choose event types"),
-            ),
-            c2c_service: String::from(*SERVICES.choose(rng).expect("failed to choose services")),
-            c2c_partition: String::from(
-                *PARTITIONS.choose(rng).expect("failed to choose partitions"),
-            ),
-            c2c_stage: String::from(*STAGES.choose(rng).expect("failed to choose stages")),
-            c2c_container_type: String::from(
-                *CONTAINER_TYPES
-                    .choose(rng)
-                    .expect("failed to choose container types"),
-            ),
-            aws_account: String::from("verymodelofthemodernmajor"),
+            system_id: SYSTEM_IDS.choose(rng).expect("failed to choose system ids"),
+            stage: STAGES.choose(rng).expect("failed to choose stages"),
+            event_type: EVENT_TYPES
+                .choose(rng)
+                .expect("failed to choose event types"),
+            c2c_service: SERVICES.choose(rng).expect("failed to choose services"),
+            c2c_partition: PARTITIONS.choose(rng).expect("failed to choose partitions"),
+            c2c_stage: STAGES.choose(rng).expect("failed to choose stages"),
+            c2c_container_type: CONTAINER_TYPES
+                .choose(rng)
+                .expect("failed to choose container types"),
+            aws_account: "verymodelofthemodernmajor",
         }
     }
 }
@@ -78,7 +72,7 @@ impl Distribution<Attrs> for StandardUniform {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Event {
     pub(crate) timestamp: f64,
-    pub(crate) message: String,
+    pub(crate) message: &'static str,
     attrs: Attrs,
 }
 
@@ -89,7 +83,7 @@ impl Distribution<Event> for StandardUniform {
     {
         Event {
             timestamp: 1_606_215_269.333_915,
-            message: String::from(*MESSAGES.choose(rng).expect("failed to choose messages")),
+            message: MESSAGES.choose(rng).expect("failed to choose messages"),
             attrs: rng.random(),
         }
     }
@@ -99,8 +93,8 @@ impl Distribution<Event> for StandardUniform {
 struct Member {
     pub(crate) event: Event,
     pub(crate) time: f64,
-    pub(crate) host: String,
-    pub(crate) index: String,
+    pub(crate) host: &'static str,
+    pub(crate) index: &'static str,
 }
 
 impl Distribution<Member> for StandardUniform {
@@ -111,8 +105,8 @@ impl Distribution<Member> for StandardUniform {
         Member {
             event: rng.random(),
             time: rng.random(),
-            host: String::from(*SYSTEM_IDS.choose(rng).expect("failed to choose system ids")),
-            index: String::from(*PARTITIONS.choose(rng).expect("failed to choose partitions")),
+            host: SYSTEM_IDS.choose(rng).expect("failed to choose system ids"),
+            index: PARTITIONS.choose(rng).expect("failed to choose partitions"),
         }
     }
 }
@@ -158,24 +152,30 @@ impl crate::Serialize for SplunkHec {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        let mut buffer: Vec<u8> = Vec::with_capacity(1024);
         loop {
             let member: Member = rng.random();
-            let encoding = match self.encoding {
+            buffer.clear();
+            match self.encoding {
                 Encoding::Text => {
                     let event = member.event;
-                    format!(
-                        "{} {} {}",
-                        event.timestamp,
-                        event.message,
-                        serde_json::to_string(&event.attrs)?
+                    write!(
+                        &mut buffer,
+                        "{timestamp} {message} ",
+                        timestamp = event.timestamp,
+                        message = event.message
                     )
+                    .expect("formatting to Vec<u8> cannot fail");
+                    serde_json::to_writer(&mut buffer, &event.attrs)?;
                 }
-                Encoding::Json => serde_json::to_string(&member)?,
-            };
-            let line_length = encoding.len() + 1; // add one for the newline
+                Encoding::Json => serde_json::to_writer(&mut buffer, &member)?,
+            }
+            let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
@@ -190,7 +190,6 @@ mod test {
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
-    use super::Member;
     use crate::{Serialize, SplunkHec};
 
     // We want to be sure that the serialized size of the payload does not
@@ -222,7 +221,8 @@ mod test {
 
             let payload = std::str::from_utf8(&bytes).expect("failed to convert from utf-8 to str");
             for msg in payload.lines() {
-                let _members: Member = serde_json::from_str(msg).expect("failed to deserialize from str");
+                // Use Value since Member has &'static str fields that can't be deserialized
+                let _: serde_json::Value = serde_json::from_str(msg).expect("failed to deserialize from str");
             }
         }
     }
