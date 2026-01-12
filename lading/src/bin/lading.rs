@@ -137,6 +137,9 @@ impl FromStr for CliKeyValues {
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
 struct CliWithSubcommands {
+    /// output logs in JSON format instead of text
+    #[clap(long)]
+    json_logs: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -145,6 +148,9 @@ struct CliWithSubcommands {
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
 struct CliFlatLegacy {
+    /// output logs in JSON format instead of text
+    #[clap(long)]
+    json_logs: bool,
     #[command(flatten)]
     args: LadingArgs,
 }
@@ -699,30 +705,32 @@ async fn inner_main(
     res
 }
 
+fn init_tracing(json_output: bool) {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
+
+    if json_output {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .json()
+            .finish()
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_ansi(false)
+            .finish()
+            .init();
+    }
+}
+
 fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error")),
-        )
-        .with_ansi(false)
-        .finish()
-        .init();
-
-    let version = env!("CARGO_PKG_VERSION");
-    info!("Starting lading {version} run.");
-    let memory_limit =
-        lading::get_available_memory().get_appropriate_unit(byte_unit::UnitType::Binary);
-    info!(
-        "Lading running with {limit} amount of memory.",
-        limit = memory_limit.to_string()
-    );
-
     // Two-parser fallback logic until CliFlatLegacy is removed
-    let args = match CliWithSubcommands::try_parse() {
+    let (json_output, args) = match CliWithSubcommands::try_parse() {
         Ok(cli) => match cli.command {
-            Commands::Run(run_cmd) => run_cmd.args,
+            Commands::Run(run_cmd) => (cli.json_logs, run_cmd.args),
             Commands::ConfigCheck(config_check_cmd) => {
                 // Handle config-check command
+                init_tracing(cli.json_logs);
                 match validate_config(&config_check_cmd.config_path) {
                     Ok(_) => std::process::exit(0),
                     Err(_) => std::process::exit(1),
@@ -732,11 +740,22 @@ fn main() -> Result<(), Error> {
         Err(_) => {
             // Fall back to legacy parsing
             match CliFlatLegacy::try_parse() {
-                Ok(legacy) => legacy.args,
+                Ok(legacy) => (legacy.json_logs, legacy.args),
                 Err(err) => err.exit(),
             }
         }
     };
+
+    init_tracing(json_output);
+
+    let version = env!("CARGO_PKG_VERSION");
+    info!("Starting lading {version} run.");
+    let memory_limit =
+        lading::get_available_memory().get_appropriate_unit(byte_unit::UnitType::Binary);
+    info!(
+        "Lading running with {limit} amount of memory.",
+        limit = memory_limit.to_string()
+    );
 
     let config = get_config(&args, None);
 
