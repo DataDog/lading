@@ -28,13 +28,19 @@ impl Distribution<Member> for StandardUniform {
     where
         R: Rng + ?Sized,
     {
-        let max = SIZES.choose(rng).expect("failed to choose size");
+        let max = *SIZES.choose(rng).expect("failed to choose size");
+
+        // Pre-allocate and fill in one operation rather than iterator-collect.
+        // Using fill() is faster than sample_iter().take().collect() because
+        // it generates random bytes in bulk without iterator overhead.
+        let mut byte_parade = vec![0u8; max];
+        rng.fill(&mut byte_parade[..]);
 
         Member {
             id: rng.random(),
             name: rng.random(),
             seed: rng.random(),
-            byte_parade: rng.sample_iter(StandardUniform).take(*max).collect(),
+            byte_parade,
         }
     }
 }
@@ -63,15 +69,19 @@ impl crate::Serialize for Json {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        let mut buffer: Vec<u8> = Vec::with_capacity(4096);
 
         loop {
-            let member = self.generate(&mut rng);
-            let encoding = serde_json::to_string(&member?)?;
-            let line_length = encoding.len() + 1; // add one for the newline
+            let member = self.generate(&mut rng)?;
+            buffer.clear();
+            serde_json::to_writer(&mut buffer, &member)?;
+            let line_length = buffer.len() + 1; // add one for the newline
 
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
