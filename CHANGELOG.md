@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New "Static Chunks" generator that divides static files by lines into blocks
   (as opposed to static which turns each file into a block).
 - Fingerprint mechanism now calculates Shannon entropy.
+- Lading now supports a '--json-logs' flag to output logs in structured JSON
+  format.
 
 ## [0.30.0]
 ## Added
