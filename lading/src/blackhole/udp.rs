@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `packet_received`: Total packets received
 //!
 
@@ -14,6 +15,7 @@ use tokio::net::UdpSocket;
 use tracing::info;
 
 use super::General;
+use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Udp`].
@@ -109,6 +111,7 @@ impl Udp {
                     })?;
                     counter!("packet_received", &self.metric_labels).increment(1);
                     counter!("bytes_received", &self.metric_labels).increment(bytes as u64);
+                    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(bytes as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

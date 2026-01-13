@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total requests received
 //!
 
@@ -19,7 +20,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::General;
-use crate::blackhole::common;
+use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -102,7 +103,9 @@ async fn srv(
 
     let (parts, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &*labels).increment(bytes.len() as u64);
+    let bytes_len = bytes.len() as u64;
+    counter!("bytes_received", &*labels).increment(bytes_len);
+    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(bytes_len);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(*response),
