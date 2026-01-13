@@ -215,10 +215,22 @@ impl Iterator for DrainIter {
         let interval = interval_idx(tick_to_flush);
 
         for (key, values) in &self.accumulator.counters {
+            // Skip ticks before this key was first written
+            if let Some(&first_tick) = self.accumulator.counter_first_tick.get(key) {
+                if tick_to_flush < first_tick {
+                    continue;
+                }
+            }
             let value = values[interval];
             metrics.push((key.clone(), MetricValue::Counter(value), tick_to_flush));
         }
         for (key, values) in &self.accumulator.gauges {
+            // Skip ticks before this key was first written
+            if let Some(&first_tick) = self.accumulator.gauge_first_tick.get(key) {
+                if tick_to_flush < first_tick {
+                    continue;
+                }
+            }
             let value = values[interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), tick_to_flush));
         }
@@ -295,6 +307,10 @@ pub(crate) struct Accumulator {
     counters: FxHashMap<Key, [u64; BUFFER_SIZE]>,
     gauges: FxHashMap<Key, [f64; BUFFER_SIZE]>,
     histograms: FxHashMap<Key, [DDSketch; BUFFER_SIZE]>,
+    /// Tick when each counter key was first written (for delta counter support)
+    counter_first_tick: FxHashMap<Key, u64>,
+    /// Tick when each gauge key was first written
+    gauge_first_tick: FxHashMap<Key, u64>,
     pub(crate) current_tick: u64,
     last_flushed_tick: Option<u64>,
 }
@@ -320,6 +336,8 @@ impl Accumulator {
             counters: FxHashMap::default(),
             gauges: FxHashMap::default(),
             histograms: FxHashMap::default(),
+            counter_first_tick: FxHashMap::default(),
+            gauge_first_tick: FxHashMap::default(),
             current_tick: 0,
             last_flushed_tick: None,
         }
@@ -350,6 +368,10 @@ impl Accumulator {
             );
             return Err(Error::TickTooOld { tick });
         }
+
+        // Track when this key was first written
+        let key_clone = c.key.clone();
+        self.counter_first_tick.entry(key_clone).or_insert(tick);
 
         let values = self.counters.entry(c.key).or_insert([0; BUFFER_SIZE]);
 
@@ -391,6 +413,10 @@ impl Accumulator {
             );
             return Err(Error::TickTooOld { tick });
         }
+
+        // Track when this key was first written
+        let key_clone = g.key.clone();
+        self.gauge_first_tick.entry(key_clone).or_insert(tick);
 
         let values = self.gauges.entry(g.key).or_insert([0.0; BUFFER_SIZE]);
 
@@ -505,11 +531,23 @@ impl Accumulator {
         let flush_interval = interval_idx(flush_tick);
 
         for (key, values) in &self.counters {
+            // Skip ticks before this key was first written
+            if let Some(&first_tick) = self.counter_first_tick.get(key) {
+                if flush_tick < first_tick {
+                    continue;
+                }
+            }
             let value = values[flush_interval];
             metrics.push((key.clone(), MetricValue::Counter(value), flush_tick));
         }
 
         for (key, values) in &self.gauges {
+            // Skip ticks before this key was first written
+            if let Some(&first_tick) = self.gauge_first_tick.get(key) {
+                if flush_tick < first_tick {
+                    continue;
+                }
+            }
             let value = values[flush_interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
         }
