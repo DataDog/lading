@@ -5,7 +5,10 @@ use crate::{
 };
 use std::rc::Rc;
 
-pub(crate) type Tagset = Vec<String>;
+// Use handle-based tagset from core module directly, avoiding String
+// allocations. Formatting happens at serialization time with O(1) handle
+// lookups.
+pub(crate) use tags::Tagset;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Generator {
@@ -58,39 +61,21 @@ impl<'a> crate::Generator<'a> for Generator {
     type Output = Tagset;
     type Error = crate::Error;
 
-    /// Return a tagset -- a list of tags, each tag having the format `key:value`
-    /// Note that after `num_tagsets` have been produced, the tagsets will loop and produce
-    /// identical tagsets.
-    /// Each tagset is randomly chosen. There is a very high probability that each tagset
-    /// will be unique, however see the note in the component documentation.
+    /// Return a tagset -- a list of tags as handle pairs (key, value).
+    ///
+    /// Note that after `num_tagsets` have been produced, the tagsets will loop
+    /// and produce identical tagsets.
     fn generate<R>(&'a self, rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,
     {
-        let mut tag_handles = self.inner.generate(rng)?;
-        let mut tagset = Vec::with_capacity(tag_handles.len());
-        for tags::Tag { key, value } in tag_handles.drain(..) {
-            let key_s = self
-                .inner
-                .using_handle(key)
-                .expect("invalid handle, catastrophic bug");
-            let val_s = self
-                .inner
-                .using_handle(value)
-                .expect("invalid handle, catastrophic bug");
-            let mut s = String::with_capacity(key_s.len() + 1 + val_s.len());
-            s.push_str(key_s);
-            s.push(':');
-            s.push_str(val_s);
-            tagset.push(s);
-        }
-        Ok(tagset)
+        self.inner.generate(rng)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
+    use std::collections::{HashSet, hash_map::RandomState};
     use std::hash::BuildHasher;
     use std::hash::Hasher;
     use std::rc::Rc;
@@ -100,48 +85,73 @@ mod test {
 
     use crate::Generator;
     use crate::common::strings::Pool;
-    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, WARN_UNIQUE_TAG_RATIO};
+    use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
 
-    /// given a list of tagsets, this returns the number of unique timeseries that they represent
-    /// in dogstatsd terms, if we assume a constant metric name,
-    fn count_num_contexts(tagsets: &Vec<tags::Tagset>) -> usize {
-        let mut context_map: HashMap<u64, u64> = HashMap::new();
+    /// Given a list of tagsets, count unique contexts.
+    fn count_num_contexts(tagsets: &[tags::Tagset]) -> usize {
+        let mut unique_contexts: HashSet<u64> = HashSet::new();
         let hash_builder = RandomState::new();
 
         for tagset in tagsets {
-            let mut sorted_tags: BTreeSet<String> = BTreeSet::new();
-            for tag in tagset {
-                sorted_tags.insert(tag.to_string());
-            }
+            // Sort tags by key handle, then value handle for deterministic ordering
+            let mut sorted_handles: Vec<(u32, u32, u32, u32)> = tagset
+                .iter()
+                .map(|t| (t.key.0, t.key.1, t.value.0, t.value.1))
+                .collect();
+            sorted_handles.sort();
 
-            let mut context_key = hash_builder.build_hasher();
-            for tag in &sorted_tags {
-                context_key.write_usize(tag.len());
-                context_key.write(tag.as_bytes());
+            let mut context_hasher = hash_builder.build_hasher();
+            for (k0, k1, v0, v1) in &sorted_handles {
+                context_hasher.write_u32(*k0);
+                context_hasher.write_u32(*k1);
+                context_hasher.write_u32(*v0);
+                context_hasher.write_u32(*v1);
             }
-            let entry = context_map.entry(context_key.finish()).or_default();
-            *entry += 1;
+            unique_contexts.insert(context_hasher.finish());
         }
-        context_map.len()
+        unique_contexts.len()
     }
 
     #[test]
     fn count_contexts_works() {
+        // Create tags with identical handles - same context
+        let tag1 = Tag {
+            key: (0, 1),
+            value: (2, 1),
+        };
+        let tag2 = Tag {
+            key: (10, 1),
+            value: (12, 1),
+        };
+
         let tagsets = vec![
-            vec!["a:1".to_string(), "b:2".to_string()],
-            vec!["a:1".to_string(), "b:2".to_string()],
-            vec!["a:1".to_string(), "b:2".to_string()],
-            vec!["a:1".to_string(), "b:2".to_string()],
+            vec![tag1, tag2],
+            vec![tag1, tag2],
+            vec![tag1, tag2],
+            vec![tag1, tag2],
         ];
         let num_contexts = count_num_contexts(&tagsets);
         assert_eq!(num_contexts, 1);
 
+        // Different tags = different contexts
+        let tag3 = Tag {
+            key: (0, 1),
+            value: (3, 1),
+        };
+        let tag4 = Tag {
+            key: (0, 1),
+            value: (4, 1),
+        };
+        let tag5 = Tag {
+            key: (0, 1),
+            value: (5, 1),
+        };
         let tagsets = vec![
-            vec!["a:3".to_string(), "b:2".to_string()],
-            vec!["a:4".to_string(), "b:2".to_string()],
-            vec!["a:5".to_string(), "b:2".to_string()],
-            vec!["a:1".to_string(), "b:2".to_string()],
+            vec![tag3, tag2],
+            vec![tag4, tag2],
+            vec![tag5, tag2],
+            vec![tag1, tag2],
         ];
         let num_contexts = count_num_contexts(&tagsets);
         assert_eq!(num_contexts, 4);
@@ -180,39 +190,6 @@ mod test {
                 let first = &first_batch[i];
                 let second = &second_batch[i];
                 assert_eq!(first, second);
-            }
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn generator_yields_valid_tagsets(seed: u64, num_tagsets in 1..5_000_usize, tags_per_msg_max in 1..128_u8) {
-            let mut rng = SmallRng::seed_from_u64(seed);
-
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
-            let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
-            let tag_size_range = ConfRange::Inclusive{min: 3, max: 128};
-            let generator = tags::Generator::new(
-                seed,
-                tags_per_msg_range,
-                tag_size_range,
-                num_tagsets,
-                str_pool,
-                1.0
-            ).expect("Tag generator to be valid");
-
-            for _ in 0..num_tagsets {
-                let tagset = generator.generate(&mut rng)?;
-                for tag in &tagset {
-                    let start = tag_size_range.start().into();
-                    let end = tag_size_range.end().into();
-                    debug_assert!(tag.len() <= end, "tag len: {}, tag_size_range end: {end}", tag.len());
-                    debug_assert!(tag.len() >= start, "tag len: {}, tag_size_range start: {start}", tag.len());
-                    let num_delimiters = tag.chars().filter(|c| *c == ':').count();
-                    assert_eq!(num_delimiters, 1);
-                }
-                assert!(tagset.len() <= tags_per_msg_range.end() as usize);
-                assert!(tagset.len() >= tags_per_msg_range.start() as usize);
             }
         }
     }

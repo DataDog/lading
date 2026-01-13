@@ -30,9 +30,10 @@ pub(crate) struct MetricGenerator {
     pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
     pub(crate) str_pool: Rc<strings::Pool>,
-    /// Tags for each template. Each position in this Vec corresponds to the same
-    /// position in the templates Vec.
-    pub(crate) tags: Vec<Vec<String>>,
+    /// Tags for each template. Each position in this Vec corresponds to the
+    /// same position in the templates Vec. The handles are resolved to strings
+    /// via `str_pool` during serialization.
+    pub(crate) tags: Vec<common::tags::Tagset>,
 }
 
 impl MetricGenerator {
@@ -144,6 +145,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     values,
                     sample_rate,
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -156,6 +158,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     name,
                     values,
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -169,6 +172,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     values,
                     sample_rate,
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -182,6 +186,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     values,
                     sample_rate,
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -195,6 +200,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     values,
                     sample_rate,
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -207,6 +213,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     name,
                     value: values.pop().expect("failed to pop value from Vec"),
                     tags,
+                    str_pool: &self.str_pool,
                     container_id,
                 }))
             }
@@ -267,7 +274,9 @@ pub struct Count<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -288,7 +297,16 @@ impl fmt::Display for Count<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                // Format tag from handles: "key:value"
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
@@ -311,7 +329,9 @@ pub struct Gauge<'a> {
     /// Values of the metric.
     pub values: Vec<common::NumValue>,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -329,7 +349,15 @@ impl fmt::Display for Gauge<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
@@ -354,7 +382,9 @@ pub struct Timer<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -375,7 +405,15 @@ impl fmt::Display for Timer<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
@@ -400,7 +438,9 @@ pub struct Dist<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -421,7 +461,15 @@ impl fmt::Display for Dist<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
@@ -444,7 +492,9 @@ pub struct Set<'a> {
     /// Value of the metric.
     pub value: common::NumValue,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -458,7 +508,15 @@ impl fmt::Display for Set<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;
@@ -483,7 +541,9 @@ pub struct Histogram<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset,
+    /// String pool for tag handle lookups during serialization.
+    pub(crate) str_pool: &'a strings::Pool,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -504,7 +564,15 @@ impl fmt::Display for Histogram<'_> {
             write!(f, "|#")?;
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
-                write!(f, "{tag}")?;
+                let key = self
+                    .str_pool
+                    .using_handle(tag.key)
+                    .expect("invalid tag key handle");
+                let value = self
+                    .str_pool
+                    .using_handle(tag.value)
+                    .expect("invalid tag value handle");
+                write!(f, "{key}:{value}")?;
                 if commas_remaining != 0 {
                     write!(f, ",")?;
                     commas_remaining -= 1;

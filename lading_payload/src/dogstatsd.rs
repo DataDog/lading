@@ -419,6 +419,7 @@ impl MemberGenerator {
             small_strings: small_strings.clone(),
             texts_or_messages,
             tags_generator: tags_generator.clone(),
+            str_pool: Rc::clone(&pool),
         };
 
         let metric_generator = MetricGenerator::new(
