@@ -14,7 +14,7 @@ members = [
 [workspace.dependencies]
 anyhow = "1.0"
 arc-swap = { version = "1.8" }
-arrow-array = { version = "57.0", default-features = false }
+arrow-array = { version = "57.2", default-features = false }
 arrow-buffer = { version = "57.0", default-features = false }
 arrow-schema = { version = "57.0", default-features = false }
 bytes = "1.10"
