@@ -8,7 +8,7 @@ use std::rc::Rc;
 // Use handle-based tagset from core module directly, avoiding String
 // allocations. Formatting happens at serialization time with O(1) handle
 // lookups.
-pub(crate) type Tagset = crate::common::tags::Tagset;
+pub(crate) use tags::Tagset;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Generator {
