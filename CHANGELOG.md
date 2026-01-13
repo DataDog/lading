@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - dogstatsd generator can be configured to use metric names, tag names and tag
   values from a configured list. Configured with `metric_names`, `tag_names` and
   `tag_values`.
+- All blackholes now emit a `total_bytes_received` metric with a single
+  `component:blackhole` label, providing an aggregated byte count across all
+  blackhole types and IDs.
 ## Fixed
 - Fixed a race condition in `lading_signal` that caused lading to hang on shutdown.
 

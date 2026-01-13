@@ -16,6 +16,12 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
+/// Labels shared by all blackholes to ensure a single aggregated `total_bytes_received` series.
+///
+/// Note: the meaning of "bytes" varies by transport — HTTP-based blackholes report wire bytes,
+/// while gRPC-based blackholes (OTLP gRPC, Datadog Stateful Logs) report protobuf `encoded_len()`.
+pub(super) static COMMON_BLACKHOLE_LABELS: &[(&str, &str)] = &[("component", "blackhole")];
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper for [`std::io::Error`].
