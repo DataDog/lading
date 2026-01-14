@@ -1,7 +1,143 @@
 //! Payload generation tool for lading configurations.
 
 #![allow(clippy::print_stdout)]
+#![allow(clippy::print_stderr)]
 
+/// Memory allocation tracking for payloadtool statistics.
+///
+/// This module provides a thin wrapper around the system allocator that tracks
+/// allocation counts and bytes. The design uses lock-free atomic operations
+/// to minimize measurement overhead.
+///
+/// # Tracked Metrics
+///
+/// - Total allocations count
+/// - Total deallocations count
+/// - Total bytes allocated (cumulative)
+/// - Peak bytes live at any time
+mod alloc_tracker {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Statistics from the tracking allocator.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct AllocStats {
+        /// Total number of allocations performed
+        pub(super) allocs: u64,
+        /// Total number of deallocations performed
+        pub(super) frees: u64,
+        /// Total bytes allocated (cumulative, not accounting for frees)
+        pub(super) bytes_allocated: u64,
+        /// Peak bytes live at any point during execution
+        pub(super) peak_bytes_live: u64,
+    }
+
+    /// Tracks allocation statistics while delegating to the system allocator.
+    ///
+    /// All counters use relaxed ordering since we only need eventual consistency
+    /// for reporting at program end, not strict synchronization between threads.
+    pub(super) struct TrackingAllocator {
+        allocs: AtomicU64,
+        frees: AtomicU64,
+        bytes_allocated: AtomicU64,
+        current_live: AtomicU64,
+        peak_live: AtomicU64,
+    }
+
+    impl TrackingAllocator {
+        /// Create a new tracking allocator with all counters at zero.
+        pub(super) const fn new() -> Self {
+            Self {
+                allocs: AtomicU64::new(0),
+                frees: AtomicU64::new(0),
+                bytes_allocated: AtomicU64::new(0),
+                current_live: AtomicU64::new(0),
+                peak_live: AtomicU64::new(0),
+            }
+        }
+
+        /// Retrieve current allocation statistics.
+        pub(super) fn stats(&self) -> AllocStats {
+            AllocStats {
+                allocs: self.allocs.load(Ordering::Relaxed),
+                frees: self.frees.load(Ordering::Relaxed),
+                bytes_allocated: self.bytes_allocated.load(Ordering::Relaxed),
+                peak_bytes_live: self.peak_live.load(Ordering::Relaxed),
+            }
+        }
+
+        /// Update peak if current exceeds it.
+        #[inline]
+        fn update_peak(&self, current: u64) {
+            self.peak_live.fetch_max(current, Ordering::Relaxed);
+        }
+    }
+
+    // SAFETY: We delegate all actual allocation to System allocator, only
+    // adding atomic counter updates which cannot corrupt memory.
+    unsafe impl GlobalAlloc for TrackingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            // SAFETY: Delegating to System allocator with same layout
+            let ptr = unsafe { System.alloc(layout) };
+
+            // Only update stats if allocation succeeded. On failure (null),
+            // no memory was allocated so stats should remain unchanged.
+            if !ptr.is_null() {
+                let size = layout.size() as u64;
+                self.allocs.fetch_add(1, Ordering::Relaxed);
+                self.bytes_allocated.fetch_add(size, Ordering::Relaxed);
+                let current = self.current_live.fetch_add(size, Ordering::Relaxed) + size;
+                self.update_peak(current);
+            }
+
+            ptr
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            let size = layout.size() as u64;
+            self.frees.fetch_add(1, Ordering::Relaxed);
+            self.current_live.fetch_sub(size, Ordering::Relaxed);
+
+            // SAFETY: Delegating to System allocator with same ptr and layout
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            // SAFETY: Delegating to System allocator
+            let result = unsafe { System.realloc(ptr, layout, new_size) };
+
+            // Only update stats if realloc succeeded. On failure (null),
+            // the original allocation at ptr remains valid and unchanged.
+            if !result.is_null() {
+                let old_size = layout.size() as u64;
+                let new_size_u64 = new_size as u64;
+
+                // realloc is logically a free + alloc, so we count both operations
+                self.allocs.fetch_add(1, Ordering::Relaxed);
+                self.frees.fetch_add(1, Ordering::Relaxed);
+                self.bytes_allocated
+                    .fetch_add(new_size_u64, Ordering::Relaxed);
+
+                // Update current_live by the net change (new_size - old_size)
+                if new_size_u64 >= old_size {
+                    let delta = new_size_u64 - old_size;
+                    let current = self.current_live.fetch_add(delta, Ordering::Relaxed) + delta;
+                    self.update_peak(current);
+                } else {
+                    let delta = old_size - new_size_u64;
+                    self.current_live.fetch_sub(delta, Ordering::Relaxed);
+                }
+            }
+
+            result
+        }
+    }
+
+    #[global_allocator]
+    pub(super) static ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
+}
+
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::num::NonZeroU32;
@@ -18,6 +154,29 @@ use lading::generator::{self, http::Method};
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
+
+impl fmt::Display for alloc_tracker::AllocStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let total_human =
+            Byte::from_u64(self.bytes_allocated).get_appropriate_unit(UnitType::Binary);
+        let peak_human =
+            Byte::from_u64(self.peak_bytes_live).get_appropriate_unit(UnitType::Binary);
+
+        writeln!(f, "Memory Statistics:")?;
+        writeln!(f, "  Allocations:     {}", self.allocs)?;
+        writeln!(f, "  Deallocations:   {}", self.frees)?;
+        writeln!(
+            f,
+            "  Total allocated: {} bytes ({total_human})",
+            self.bytes_allocated
+        )?;
+        writeln!(
+            f,
+            "  Peak live:       {} bytes ({peak_human})",
+            self.peak_bytes_live
+        )
+    }
+}
 
 /// Fingerprint result containing both hash and entropy metrics.
 #[derive(Debug)]
@@ -114,6 +273,9 @@ struct Args {
     /// Path to file containing expected fingerprints for verification
     #[clap(short, long)]
     verify: Option<PathBuf>,
+    /// Report memory allocation statistics at completion
+    #[clap(short = 'm', long)]
+    memory_stats: bool,
 }
 
 fn generate_and_check(
@@ -487,8 +649,19 @@ async fn inner_main() -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    // Parse args before runtime to access the memory_stats flag after
+    // runtime completes. Args are parsed again in inner_main().
+    let args = Args::parse();
+
     let runtime = Builder::new_multi_thread().enable_io().build()?;
-    runtime.block_on(inner_main())
+    let result = runtime.block_on(inner_main());
+
+    if args.memory_stats {
+        let stats = alloc_tracker::ALLOCATOR.stats();
+        eprintln!("{stats}");
+    }
+
+    result
 }
 
 #[cfg(test)]
