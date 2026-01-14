@@ -8,9 +8,10 @@ members = [
   "lading_capture",
   "lading_fuzz",
   "lading_payload",
-  "lading_observer",
   "lading_throttle",
 ]
+# Note: lading_observer and lading_signal are excluded from workspace
+# to enable standalone consumption via git dependencies (cargo-bazel compatibility)
 
 [workspace.dependencies]
 anyhow = "1.0"
