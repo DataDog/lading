@@ -1,5 +1,5 @@
 /// Sampler implementation for procfs filesystems
-mod memory;
+pub mod memory;
 mod stat;
 mod uptime;
 mod vmstat;

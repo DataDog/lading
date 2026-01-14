@@ -1,5 +1,5 @@
-mod cgroup;
-mod procfs;
+pub mod cgroup;
+pub mod procfs;
 mod utils;
 mod wss;
 

@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast;
 
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 
 /// Type used to receive the target PID once it is running.
 pub type TargetPidReceiver = broadcast::Receiver<Option<i32>>;
