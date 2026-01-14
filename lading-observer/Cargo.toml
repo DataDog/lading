@@ -14,7 +14,7 @@ categories = ["development-tools::profiling"]
 description = "A tool for load testing daemons."
 
 [dependencies]
-lading-signal = { version = "0.1", path = "../lading_signal" }
+lading-signal = { version = "0.1", path = "../lading-signal" }
 metrics = "0.24"
 nix = { version = "0.30", features = ["fs", "signal"] }
 num-traits = { version = "0.2", default-features = false }
