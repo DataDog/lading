@@ -54,7 +54,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util = { workspace = true }
 nix = { workspace = true, features = ["fs", "signal"] }
-num_cpus = { version = "1.17" }
+num_cpus = { workspace = true }
 once_cell = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
