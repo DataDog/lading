@@ -83,10 +83,10 @@ impl Sampler {
                 #[allow(clippy::cast_possible_truncation)]
                 let end = end as usize / page_size;
                 for page in pagemap.get_range_info(begin..end)? {
-                    if let PageInfo::MemoryPage(memory_page_flags) = page
-                        && memory_page_flags.contains(MemoryPageFlags::PRESENT)
-                    {
-                        pfn_set.insert(memory_page_flags.get_page_frame_number());
+                    if let PageInfo::MemoryPage(memory_page_flags) = page {
+                        if memory_page_flags.contains(MemoryPageFlags::PRESENT) {
+                            pfn_set.insert(memory_page_flags.get_page_frame_number());
+                        }
                     }
                 }
             }

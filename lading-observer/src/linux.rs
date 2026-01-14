@@ -65,8 +65,8 @@ ls -l /sys/kernel/mm/page_idle/bitmap
     }
 
     pub(crate) async fn sample(&mut self) -> Result<(), Error> {
-        let sample_smaps = self.tick_counter.is_multiple_of(10);
-        let sample_wss = self.tick_counter.is_multiple_of(60);
+        let sample_smaps = self.tick_counter % 10 == 0;
+        let sample_wss = self.tick_counter % 60 == 0;
         self.tick_counter += 1;
         if self.tick_counter == 60 {
             self.tick_counter = 0;
