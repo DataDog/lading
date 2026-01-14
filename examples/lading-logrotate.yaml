@@ -1,0 +1,44 @@
+# file_to_blackhole_0ms_latency example using logrotate generator
+#
+# This example demonstrates the logrotate generator (NOT logrotate_fs) for
+# environments where FUSE is unavailable (e.g., Kubernetes without privileged
+# containers).
+#
+# Key differences from logrotate_fs:
+# - Uses real filesystem writes to `root` path (not a FUSE mount)
+# - Uses `throttle` config instead of `load_profile`
+# - Works in standard containers without FUSE/privileged mode
+#
+# The "0ms latency" comes from `timeout_millis: 0` in the throttle config,
+# meaning writes return immediately without simulating I/O delay.
+#
+# Throttle options:
+# - all_out: No rate limiting, produce as fast as possible
+# - stable: Fixed rate with optional timeout
+#   - bytes_per_second: Rate limit (e.g., "1 MiB", "10 MB")
+#   - timeout_millis: 0 = immediate writes, >0 = simulate I/O latency
+# - linear: Ramp up from initial to maximum rate over time
+#   - initial_bytes_per_second: Starting rate
+#   - maximum_bytes_per_second: Target rate
+#   - rate_of_change: How fast to increase (bytes/sec per second)
+
+generator:
+  - file_gen:
+      logrotate:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        root: /tmp/logs
+        concurrent_logs: 8
+        maximum_bytes_per_log: 100MiB
+        total_rotations: 4
+        max_depth: 0
+        variant: "ascii"
+        maximum_prebuild_cache_size_bytes: 1GiB
+        throttle:
+          stable:
+            bytes_per_second: "1.3 MiB"
+            timeout_millis: 0
+
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:8080"
