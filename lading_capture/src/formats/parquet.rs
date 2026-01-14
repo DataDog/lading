@@ -153,6 +153,8 @@ pub struct Format<W: Write + Seek + Send> {
     writer: ArrowWriter<W>,
     /// Pre-computed Arrow schema
     schema: Arc<Schema>,
+    /// Compression level for Zstd (stored for rotation)
+    compression_level: i32,
 }
 
 impl<W: Write + Seek + Send> Format<W> {
@@ -192,6 +194,7 @@ impl<W: Write + Seek + Send> Format<W> {
             buffers: ColumnBuffers::new(),
             writer: arrow_writer,
             schema,
+            compression_level,
         })
     }
 
@@ -335,6 +338,36 @@ impl<W: Write + Seek + Send> crate::formats::OutputFormat for Format<W> {
 
     fn close(self) -> Result<(), crate::formats::Error> {
         self.close().map_err(Into::into)
+    }
+}
+
+impl Format<std::io::BufWriter<std::fs::File>> {
+    /// Rotate to a new output file
+    ///
+    /// Closes the current Parquet file (writing footer) and opens a new file
+    /// at the specified path with the same compression settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if closing the current file or creating the new file fails.
+    pub fn rotate_to(self, path: std::path::PathBuf) -> Result<Self, Error> {
+        // Store compression level before closing
+        let compression_level = self.compression_level;
+
+        // Close current file (writes footer)
+        self.close()?;
+
+        // Create new file and writer
+        let file = std::fs::File::create(&path)?;
+        let writer = std::io::BufWriter::new(file);
+        let format = Self::new(writer, compression_level)?;
+
+        Ok(format)
+    }
+
+    /// Get the compression level for this format
+    pub fn compression_level(&self) -> i32 {
+        self.compression_level
     }
 }
 
