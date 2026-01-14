@@ -1,120 +1,36 @@
-[workspace]
-resolver = "2"
-members = [
-  "integration/sheepdog",
-  "integration/ducks",
-  "lading",
-  "lading_capture_schema",
-  "lading_capture",
-  "lading_fuzz",
-  "lading_payload",
-  "lading_throttle",
-  "lading-observer",
-  "lading-signal",
+[package]
+name = "lading-observer"
+version = "0.1.0"
+authors = [
+  "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+  "George Hahn <george.hahn@datadoghq.com>",
 ]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+readme = "lading-observer/README.md"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::profiling"]
+description = "Linux container metrics observer - cgroup v2 and procfs polling"
 
-[workspace.dependencies]
-anyhow = "1.0"
-arc-swap = { version = "1.8" }
-arrow-array = { version = "57.0", default-features = false }
-arrow-buffer = { version = "57.0", default-features = false }
-arrow-schema = { version = "57.0", default-features = false }
-bytes = "1.10"
-byte-unit = { version = "5.2", default-features = false, features = [
-  "byte",
-  "serde",
-] }
-sha2 = { version = "0.10", default-features = false }
-metrics = { version = "0.24" }
-metrics-util = "0.20"
-metrics-exporter-prometheus = { version = "0.18", default-features = false, features = [
-  "uds-listener",
-] }
-prost = "0.14"
-prost-build = "0.14"
-rand = { version = "0.9", default-features = false }
-rustc-hash = "2.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
-tokio = { version = "1.47" }
-tokio-stream = { version = "0.1" }
-tonic = { version = "0.14", default-features = false }
-tonic-prost = { version = "0.14" }
-tonic-prost-build = "0.14"
-tower = { version = "0.5", default-features = false }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3" }
-ustr = { version = "1.1" }
-uuid = { version = "1.18", default-features = false, features = [
-  "serde",
-  "v4",
-] }
-once_cell = "1.21"
-arrow = { version = "57.0", default-features = false }
-parquet = { version = "57.1", default-features = false }
-proptest = "1.9"
-proptest-derive = { version = "0.7" }
-approx = "0.5"
-tempfile = "3.23"
-http = "1.3"
-http-body-util = { version = "0.1" }
-http-serde = { version = "2.1" }
-hyper = { version = "1.7", default-features = false }
-hyper-util = { version = "0.1", default-features = false }
-heck = { version = "0.5", default-features = false }
-nix = { version = "0.30" }
+[dependencies]
+lading-signal = { version = "0.1", path = "./lading-signal" }
+metrics = "0.24"
+nix = { version = "0.30", features = ["fs", "signal"] }
 num-traits = { version = "0.2", default-features = false }
 num_cpus = "1.17"
-regex = { version = "1.12" }
-sysinfo = { version = "0.37", default-features = false }
-opentelemetry-proto = "0.31"
-ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = [
-  "serde",
-] }
-datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
-protobuf = { version = "3.7" }
+procfs = { version = "0.18", default-features = false, features = [] }
+regex = "1.12"
+rustc-hash = "2.1"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["fs", "macros", "sync", "time"] }
+tracing = "0.1"
+heck = { version = "0.5", default-features = false }
 
-[workspace.lints.clippy]
-all = "deny"
-pedantic = "deny"
-perf = "deny"
-suspicious = "deny"
-complexity = "deny"
-unwrap_used = "deny"
-mod_module_files = "deny"
-dbg_macro = "deny"
-print_stdout = "deny"
-print_stderr = "deny"
-redundant_allocation = "deny"
-rc_buffer = "deny"
-large_futures = "deny"
-large_stack_arrays = "deny"
-float_cmp = "deny"
-manual_memcpy = "deny"
-unnecessary_to_owned = "deny"
+[dev-dependencies]
+proptest = "1.9"
 
-[workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }
-unused_extern_crates = "deny"
-unused_allocation = "deny"
-unused_assignments = "deny"
-unused_comparisons = "deny"
-unreachable_pub = "deny"
-missing_copy_implementations = "deny"
-missing_debug_implementations = "deny"
-missing_docs = "deny"
-warnings = "deny"
-
-[profile.release]
-lto = true                   # Optimize our binary at link stage.
-codegen-units = 1            # Increases compile time but improves optimization alternatives.
-opt-level = 3                # Optimize with 'all' optimization flipped on. May produce larger binaries than 's' or 'z'.
-panic = "abort"
-debug = 2                    # keep symbols in release too
-split-debuginfo = "unpacked"
-
-[profile.dev]
-panic = "abort"
-debug = 2
-split-debuginfo = "unpacked" # generates a .dSYM bundle Instruments can use
+[lib]
+path = "lading-observer/src/lib.rs"
+doctest = false
