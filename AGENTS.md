@@ -1,3 +1,7 @@
+# Agent Instructions
+
+This document provides guidelines for AI agents working on the lading codebase.
+
 # Architecture Overview
 
 Lading measures performance of long-running programs (daemons) using synthetic,
@@ -339,7 +343,7 @@ When in doubt, implement rather than import.
 - Add external dependencies without careful consideration
 - Implement complex abstractions for fewer than 3 use cases
 
-# Key Reminders for Claude
+# Key Reminders
 
 1. ALWAYS use `ci/validate` after code changes - never skip this
 2. Do NOT run cargo commands directly - use the ci/ scripts
@@ -359,3 +363,43 @@ When in doubt, implement rather than import.
 16. NEVER place `use` statements inside functions - all imports go at the top of the file
 17. NO internal backward compatibility - freely change ALL internal APIs. ONLY user configs need compatibility
 18. Document "why" not "what" - inline comments explain design decisions, not what the code does
+
+# Issue Tracking with Beads
+
+This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+
+## Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --status in_progress  # Claim work
+bd close <id>         # Complete work
+bd sync               # Sync with git
+```
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
