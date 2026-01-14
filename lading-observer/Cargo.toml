@@ -15,21 +15,21 @@ description = "A tool for load testing daemons."
 
 [dependencies]
 lading-signal = { version = "0.1", path = "../lading-signal" }
-metrics = "0.24"
-nix = { version = "0.30", features = ["fs", "signal"] }
-num-traits = { version = "0.2", default-features = false }
-num_cpus = "1.17"
+metrics = { workspace = true }
+nix = { workspace = true, features = ["fs", "signal"] }
+num-traits = { workspace = true }
+num_cpus = { workspace = true }
 procfs = { version = "0.18", default-features = false, features = [] }
-regex = "1.12"
-rustc-hash = "2.1"
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
-tokio = { version = "1.47", features = ["fs", "macros", "sync", "time"] }
-tracing = "0.1"
-heck = { version = "0.5", default-features = false }
+regex = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "sync", "time"] }
+tracing = { workspace = true }
+heck = { workspace = true }
 
 [dev-dependencies]
-proptest = "1.9"
+proptest = { workspace = true }
 
 [lib]
 doctest = false
