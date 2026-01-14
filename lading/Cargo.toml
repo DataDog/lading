@@ -18,9 +18,9 @@ description = "A tool for load testing daemons."
 lading-capture = { version = "0.2", path = "../lading_capture" }
 lading-capture-schema = { path = "../lading_capture_schema" }
 lading-payload = { version = "0.1", path = "../lading_payload" }
-lading-observer = { version = "0.1", path = "../lading_observer" }
+lading-observer = { version = "0.1", path = "../lading-observer" }
 lading-throttle = { version = "0.1", path = "../lading_throttle" }
-lading-signal = { version = "0.1", path = "../lading_signal" }
+lading-signal = { version = "0.1", path = "../lading-signal" }
 
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
