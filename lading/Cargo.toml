@@ -7,7 +7,7 @@ authors = [
   "Scott Opell <scott.opell@datadoghq.com>",
   "Caleb Metz <caleb.metz@datadoghq.com>",
 ]
-edition = "2024"
+edition = "2021"
 license = "MIT"
 repository = "https://github.com/datadog/lading/"
 keywords = ["random_test", "generator"]
