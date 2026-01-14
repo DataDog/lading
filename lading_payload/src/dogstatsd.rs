@@ -599,39 +599,40 @@ impl DogStatsD {
             return Ok(());
         }
 
-        let mut bytes_remaining = max_bytes.saturating_sub(LENGTH_PREFIX_SIZE);
-        let mut members = Vec::new();
-        // Generate as many messages as we can fit, If we couldn't fit any
-        // members, don't write anything.
+        let content_budget = max_bytes.saturating_sub(LENGTH_PREFIX_SIZE);
+        // Accumulate all content into a single buffer instead of Vec<String>.
+        // This eliminates per-member String allocations.
+        let mut content_buffer: Vec<u8> = Vec::with_capacity(content_budget.min(64 * 1024));
+        // Reuse a formatting buffer across iterations to avoid repeated allocations.
+        let mut format_buffer: Vec<u8> = Vec::with_capacity(256);
+
+        // Generate as many messages as we can fit.
         loop {
             let member: Member = self.member_generator.generate(&mut rng)?;
-            let encoding = format!("{member}");
-            let line_length = encoding.len() + 1; // add one for the newline
-            match bytes_remaining.checked_sub(line_length) {
-                Some(remainder) => {
-                    members.push(encoding);
-                    bytes_remaining = remainder;
-                }
-                None => break,
+            format_buffer.clear();
+            // Format into the reusable buffer - write! on Vec<u8> is infallible
+            write!(&mut format_buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            let line_length = format_buffer.len() + 1; // add one for the newline
+            let bytes_remaining = content_budget.saturating_sub(content_buffer.len());
+            if bytes_remaining >= line_length {
+                content_buffer.extend_from_slice(&format_buffer);
+                content_buffer.push(b'\n');
+            } else {
+                break;
             }
         }
-        if members.is_empty() {
+
+        // If we couldn't fit any members, don't write anything.
+        if content_buffer.is_empty() {
             return Ok(());
         }
 
-        let max_bytes: u32 = max_bytes.try_into().unwrap_or_else(|_| {
+        let length: u32 = content_buffer.len().try_into().unwrap_or_else(|_| {
             panic!(
-                "Could not convert max_bytes to a u32, are you using a block size greater than {}?",
+                "Could not convert content length to a u32, are you using a block size greater than {}?",
                 u32::MAX
             );
         });
-        let bytes_remaining: u32 = bytes_remaining.try_into().unwrap_or_else(|_| {
-            panic!(
-                "Could not convert bytes_remaining to a u32, are you using a block size greater than {}?",
-                u32::MAX
-            );
-        });
-        let length = max_bytes - bytes_remaining;
 
         // write prefix
         writer.write_all(&length.to_le_bytes())?;
@@ -640,10 +641,8 @@ impl DogStatsD {
             length
         );
 
-        // write contents
-        for member in members {
-            writeln!(writer, "{member}")?;
-        }
+        // write contents (single write instead of multiple writeln! calls)
+        writer.write_all(&content_buffer)?;
 
         Ok(())
     }
@@ -659,13 +658,20 @@ impl DogStatsD {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        // Each metric is formatted here, measured, then written to the output.
+        let mut buffer: Vec<u8> = Vec::with_capacity(256);
+
         loop {
             let member: Member = self.member_generator.generate(&mut rng)?;
-            let encoding = format!("{member}");
-            let line_length = encoding.len() + 1; // add one for the newline
+            buffer.clear();
+            // Format into the reusable buffer - write! on Vec<u8> is infallible
+            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
