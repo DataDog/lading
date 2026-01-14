@@ -3,7 +3,7 @@ mod procfs;
 mod utils;
 mod wss;
 
-use tracing::{error, warn};
+use tracing::warn;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
