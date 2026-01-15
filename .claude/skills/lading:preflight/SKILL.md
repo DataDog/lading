@@ -13,12 +13,59 @@ This validates that the environment is properly configured for optimization hunt
 
 ## Execute All Checks
 
-Run each check in order. **STOP on any failure and report the issue.**
+Run all these checks as one BASH script to minimize the number of tool calls. 
+Each check should be done in order and use the Report Format below to report the result.
 
-### Phase 1: Rust Toolchain
+### Phase 1: Main Branch Sync
 
 ```bash
-echo "=== Phase 1: Rust Toolchain ==="
+echo "=== Phase 1: Main Branch Sync ==="
+git fetch origin
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+echo "Current branch: $CURRENT_BRANCH"
+```
+**Expected:** Shows current branch name
+**Action:** Will check if at tip of main only if on main branch
+
+```bash
+if [ "$CURRENT_BRANCH" = "main" ]; then
+    LOCAL_MAIN=$(git rev-parse HEAD)
+    REMOTE_MAIN=$(git rev-parse origin/main)
+
+    if [ "$LOCAL_MAIN" != "$REMOTE_MAIN" ]; then
+        echo "FAIL: Not at tip of main branch"
+        echo "Local main:  $LOCAL_MAIN"
+        echo "Remote main: $REMOTE_MAIN"
+        echo "Fix: git pull origin main"
+        exit 1
+    fi
+    echo "At tip of main branch"
+else
+    echo "Not on main branch - skipping sync check"
+fi
+```
+**Expected:** If on main, must be at tip of origin/main; if on another branch, check is skipped
+**If fails:** Pull latest changes with `git pull origin main`
+
+```bash
+git status --short | head -10
+DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
+if [ "$DIRTY" -gt 0 ]; then
+    echo "WARN: Working tree has $DIRTY uncommitted changes"
+    echo "Consider: git stash or git commit before starting optimization work"
+else
+    echo "Working tree: clean"
+fi
+```
+**Expected:** Report working tree status; dirty is WARNING not failure
+**Note:** Clean working tree is strongly recommended before starting optimization work
+
+---
+
+### Phase 2: Rust Toolchain
+
+```bash
+echo "=== Phase 2: Rust Toolchain ==="
 rustc --version
 ```
 **Expected:** `rustc 1.70.0` or newer (Rust 2024 edition requires 1.82+)
@@ -38,10 +85,10 @@ cargo nextest --version
 
 ---
 
-### Phase 2: CI Scripts
+### Phase 3: CI Scripts
 
 ```bash
-echo "=== Phase 2: CI Scripts ==="
+echo "=== Phase 3: CI Scripts ==="
 test -x ci/validate && echo "ci/validate executable" || echo "FAIL: ci/validate"
 test -x ci/test && echo "ci/test executable" || echo "FAIL: ci/test"
 test -x ci/check && echo "ci/check executable" || echo "FAIL: ci/check"
@@ -54,10 +101,10 @@ test -x ci/kani && echo "ci/kani present" || echo "WARN: ci/kani (optional for p
 
 ---
 
-### Phase 3: Build Verification
+### Phase 4: Build Verification
 
 ```bash
-echo "=== Phase 3: Build Verification ==="
+echo "=== Phase 4: Build Verification ==="
 ci/check
 ```
 **Expected:** Clean compilation with no errors
@@ -71,10 +118,10 @@ cargo build --release --bin payloadtool
 
 ---
 
-### Phase 4: Benchmarking Tools
+### Phase 5: Benchmarking Tools
 
 ```bash
-echo "=== Phase 4: Benchmarking Tools ==="
+echo "=== Phase 5: Benchmarking Tools ==="
 which hyperfine && hyperfine --version || echo "WARN: hyperfine not found"
 ```
 **Expected:** Version like `hyperfine 1.X.X`
@@ -95,10 +142,10 @@ ls lading_payload/benches/*.rs 2>/dev/null | head -3 && echo "criterion benchmar
 
 ---
 
-### Phase 5: Profiling Tools
+### Phase 6: Profiling Tools
 
 ```bash
-echo "=== Phase 5: Profiling Tools ==="
+echo "=== Phase 6: Profiling Tools ==="
 PROFILERS=""
 which samply > /dev/null 2>&1 && PROFILERS="${PROFILERS}samply "
 which cargo-flamegraph > /dev/null 2>&1 && PROFILERS="${PROFILERS}cargo-flamegraph "
@@ -119,10 +166,10 @@ fi
 
 ---
 
-### Phase 6: Memory Tools
+### Phase 7: Memory Tools
 
 ```bash
-echo "=== Phase 6: Memory Tools ==="
+echo "=== Phase 7: Memory Tools ==="
 ./target/release/payloadtool --help 2>&1 | grep -q "memory-stats" && echo "payloadtool --memory-stats: supported" || echo "WARN: payloadtool missing --memory-stats"
 ```
 **Expected:** `payloadtool --memory-stats: supported`
@@ -138,75 +185,24 @@ which valgrind > /dev/null 2>&1 && echo "valgrind: available" || echo "valgrind:
 
 ---
 
-### Phase 7: Git State
+### Phase 8: Git Config
 
 ```bash
-echo "=== Phase 7: Git State ==="
+echo "=== Phase 8: Git Config ==="
 git config user.name || echo "FAIL: git user.name not set"
 git config user.email || echo "FAIL: git user.email not set"
 ```
 **Expected:** Name and email configured
 **If fails:** `git config user.name "Name"` and `git config user.email "email"`
 
-```bash
-git status --short | head -10
-DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
-if [ "$DIRTY" -gt 0 ]; then
-    echo "WARN: Working tree has $DIRTY uncommitted changes"
-else
-    echo "Working tree: clean"
-fi
-```
-**Expected:** Report status; dirty tree is a warning, not a failure
-**Note:** Commit or stash changes before starting optimization work
-
----
-
-## Quick All-in-One Check
+### Phase 9: Print datetime
 
 ```bash
-#!/bin/bash
-set -e  # Exit on ANY error
-
-echo "=== LADING PREFLIGHT START ==="
-
-echo "Phase 1: Rust toolchain..."
-rustc --version > /dev/null
-cargo --version > /dev/null
-cargo nextest --version > /dev/null
-
-echo "Phase 2: CI scripts..."
-test -x ci/validate
-test -x ci/test
-test -x ci/check
-test -x ci/clippy
-test -x ci/fmt
-
-echo "Phase 3: Build..."
-ci/check
-cargo build --release --bin payloadtool
-
-echo "Phase 4: Benchmarking..."
-which hyperfine > /dev/null
-cargo criterion --version > /dev/null
-
-echo "Phase 5: Profiling..."
-which samply > /dev/null || which sample > /dev/null || which perf > /dev/null
-
-echo "Phase 6: Memory tools..."
-./target/release/payloadtool --help | grep -q "memory-stats"
-
-echo "Phase 7: Git..."
-git config user.name > /dev/null
-git config user.email > /dev/null
-
-echo "=== LADING PREFLIGHT PASSED ==="
+echo "=== Phase 9: Print date & time"
+date
 ```
-
-**CRITICAL: The `set -e` ensures the script exits immediately on ANY failure.**
-If you see output stop before "LADING PREFLIGHT PASSED", a check failed.
-
----
+**Expected:** The date & time are printed out
+**NOte:** This should never fail and if it does, something is seriously wrong.`
 
 ## Report Format
 
@@ -215,15 +211,20 @@ After running checks, output:
 ```
 LADING PREFLIGHT REPORT
 =======================
-Timestamp: <current time>
+Timestamp: <current time in format 'YYYY-MM-DD HH:MM:ss'>
 Status: PASS | FAIL
+Legend: [*] present  [ ] missing (optional)  [X] failed
 
-Phase 1 - Rust Toolchain:
+Phase 1 - Main Branch Sync:
+  [*] At tip of main (or "Not on main - check skipped")
+  [*] Working tree: clean (or "N uncommitted changes")
+
+Phase 2 - Rust Toolchain:
   [*] rustc 1.XX.X
   [*] cargo 1.XX.X
   [*] cargo-nextest X.Y.Z
 
-Phase 2 - CI Scripts:
+Phase 3 - CI Scripts:
   [*] ci/validate
   [*] ci/test
   [*] ci/check
@@ -231,25 +232,25 @@ Phase 2 - CI Scripts:
   [*] ci/fmt
   [*] ci/kani
 
-Phase 3 - Build:
+Phase 4 - Build:
   [*] ci/check passes
   [*] payloadtool built
 
-Phase 4 - Benchmarking:
+Phase 5 - Benchmarking:
   [*] hyperfine X.Y.Z
   [*] cargo-criterion X.Y.Z
 
-Phase 5 - Profiling:
+Phase 6 - Profiling:
   [*] samply (or sample/perf)
 
-Phase 6 - Memory:
+Phase 7 - Memory:
   [*] payloadtool --memory-stats
   [ ] heaptrack (optional)
+  [ ] valgrind (optional)
 
-Phase 7 - Git:
+Phase 8 - Git Config:
   [*] user.name configured
   [*] user.email configured
-  [!] Working tree dirty (12 files)
 
 Ready for: /lading:optimize:hunt, /lading:optimize:review, /lading:optimize:rescue
 ```
