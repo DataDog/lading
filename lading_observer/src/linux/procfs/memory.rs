@@ -1,4 +1,5 @@
 pub(crate) mod smaps;
+/// Memory metrics from /proc/[pid]/smaps_rollup.
 pub mod smaps_rollup;
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;

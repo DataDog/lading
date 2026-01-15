@@ -17,6 +17,7 @@ lading-signal = { version = "0.1", path = "../lading_signal" }
 metrics = { workspace = true }
 nix = { workspace = true, features = ["fs", "signal"] }
 num-traits = { workspace = true }
+num_cpus = { workspace = true }
 procfs = { version = "0.18", default-features = false, features = [] }
 regex = { workspace = true }
 rustc-hash = { workspace = true }

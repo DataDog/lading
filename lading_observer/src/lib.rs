@@ -16,6 +16,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast;
 
 #[cfg(target_os = "linux")]
+/// Linux-specific observer functionality for cgroups and procfs.
 pub mod linux;
 
 /// Type used to receive the target PID once it is running.
