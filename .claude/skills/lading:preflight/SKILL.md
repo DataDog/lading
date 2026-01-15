@@ -1,282 +1,43 @@
 ---
 name: lading:preflight
-description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, hyperfine, profilers, payloadtool, git, and database access.
+description: Environment validation checklist. Run FIRST in new sessions.
 ---
 
 # Pre-flight Checklist
 
-**Run this skill FIRST when starting a new session.**
+Run at session start. Stop on first failure.
 
-This validates that the environment is properly configured for optimization hunting, reviewing, and rescuing in lading.
+## Required Tools
 
----
+| Tool | Check | Install if missing |
+|------|-------|-------------------|
+| rustc >= 1.70 | `rustc --version` | rustup |
+| cargo-nextest | `cargo nextest --version` | `cargo install cargo-nextest` |
+| hyperfine | `hyperfine --version` | `brew install hyperfine` |
+| cargo-criterion | `cargo criterion --version` | `cargo install cargo-criterion` |
+| profiler | `which samply \|\| which sample` | `cargo install samply` |
 
-## Execute All Checks
+## CI Scripts
 
-Run each check in order. **STOP on any failure and report the issue.**
+Verify executable: `ci/validate`, `ci/check`, `ci/clippy`, `ci/fmt`, `ci/kani`
 
-### Phase 1: Rust Toolchain
-
-```bash
-echo "=== Phase 1: Rust Toolchain ==="
-rustc --version
-```
-**Expected:** `rustc 1.70.0` or newer (Rust 2024 edition requires 1.82+)
-**If fails:** Install via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-
-```bash
-cargo --version
-```
-**Expected:** Version string like `cargo 1.XX.X`
-**If fails:** Reinstall rustup
+## Build Check
 
 ```bash
-cargo nextest --version
+ci/check && cargo build --release --bin payloadtool
 ```
-**Expected:** Version string like `cargo-nextest nextest X.Y.Z`
-**If fails:** `cargo install cargo-nextest`
 
----
+## Worktree
 
-### Phase 2: CI Scripts
-
+If `../lading-baseline` doesn't exist:
 ```bash
-echo "=== Phase 2: CI Scripts ==="
-test -x ci/validate && echo "ci/validate executable" || echo "FAIL: ci/validate"
-test -x ci/test && echo "ci/test executable" || echo "FAIL: ci/test"
-test -x ci/check && echo "ci/check executable" || echo "FAIL: ci/check"
-test -x ci/clippy && echo "ci/clippy executable" || echo "FAIL: ci/clippy"
-test -x ci/fmt && echo "ci/fmt executable" || echo "FAIL: ci/fmt"
-test -x ci/kani && echo "ci/kani present" || echo "WARN: ci/kani (optional for proofs)"
-```
-**Expected:** All scripts exist and are executable
-**If fails:** Check you're in the lading repo root, run `chmod +x ci/*`
-
----
-
-### Phase 3: Build Verification
-
-```bash
-echo "=== Phase 3: Build Verification ==="
-ci/check
-```
-**Expected:** Clean compilation with no errors
-**If fails:** Check `cargo update`, may need dependency fixes
-
-```bash
-cargo build --release --bin payloadtool
-```
-**Expected:** Successful build, binary at `target/release/payloadtool`
-**If fails:** Missing dependencies or Rust version too old
-
----
-
-### Phase 4: Benchmarking Tools
-
-```bash
-echo "=== Phase 4: Benchmarking Tools ==="
-which hyperfine && hyperfine --version || echo "WARN: hyperfine not found"
-```
-**Expected:** Version like `hyperfine 1.X.X`
-**If missing:** `cargo install hyperfine` or `brew install hyperfine`
-
-```bash
-cargo criterion --version 2>/dev/null || echo "WARN: cargo-criterion not found"
-```
-**Expected:** Version like `cargo-criterion 1.X.X`
-**If missing:** `cargo install cargo-criterion`
-
-```bash
-grep -rq "criterion" lading_payload/Cargo.toml 2>/dev/null && echo "criterion: found in lading_payload" || echo "WARN: criterion not found"
-ls lading_payload/benches/*.rs 2>/dev/null | head -3 && echo "criterion benchmarks: present" || echo "WARN: no criterion benchmarks"
-```
-**Expected:** criterion found, benchmarks present in `lading_payload/benches/`
-**Note:** criterion is for micro-benchmarks; proptest is for property tests (different purposes)
-
----
-
-### Phase 5: Profiling Tools
-
-```bash
-echo "=== Phase 5: Profiling Tools ==="
-PROFILERS=""
-which samply > /dev/null 2>&1 && PROFILERS="${PROFILERS}samply "
-which cargo-flamegraph > /dev/null 2>&1 && PROFILERS="${PROFILERS}cargo-flamegraph "
-which sample > /dev/null 2>&1 && PROFILERS="${PROFILERS}sample(macOS) "
-which perf > /dev/null 2>&1 && PROFILERS="${PROFILERS}perf(linux) "
-
-if [ -n "$PROFILERS" ]; then
-    echo "Available profilers: $PROFILERS"
-else
-    echo "WARN: No profilers found"
-    echo "Install one: cargo install samply OR cargo install flamegraph"
-fi
-```
-**Expected:** At least one profiler available
-**Recommended:**
-- macOS: `cargo install samply` (best option) or use built-in `sample`
-- Linux: `perf` (system package) or `cargo install samply`
-
----
-
-### Phase 6: Memory Tools
-
-```bash
-echo "=== Phase 6: Memory Tools ==="
-./target/release/payloadtool --help 2>&1 | grep -q "memory-stats" && echo "payloadtool --memory-stats: supported" || echo "WARN: payloadtool missing --memory-stats"
-```
-**Expected:** `payloadtool --memory-stats: supported`
-**If fails:** Rebuild payloadtool from current branch
-
-```bash
-# Optional advanced memory tools
-which heaptrack > /dev/null 2>&1 && echo "heaptrack: available" || echo "heaptrack: not found (optional)"
-which valgrind > /dev/null 2>&1 && echo "valgrind: available" || echo "valgrind: not found (optional)"
-```
-**Expected:** Optional tools reported; not required for basic work
-**Note:** `payloadtool --memory-stats` is the primary memory measurement tool
-
----
-
-### Phase 7: Git State
-
-```bash
-echo "=== Phase 7: Git State ==="
-git config user.name || echo "FAIL: git user.name not set"
-git config user.email || echo "FAIL: git user.email not set"
-```
-**Expected:** Name and email configured
-**If fails:** `git config user.name "Name"` and `git config user.email "email"`
-
-```bash
-git status --short | head -10
-DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
-if [ "$DIRTY" -gt 0 ]; then
-    echo "WARN: Working tree has $DIRTY uncommitted changes"
-else
-    echo "Working tree: clean"
-fi
-```
-**Expected:** Report status; dirty tree is a warning, not a failure
-**Note:** Commit or stash changes before starting optimization work
-
----
-
-## Quick All-in-One Check
-
-```bash
-#!/bin/bash
-set -e  # Exit on ANY error
-
-echo "=== LADING PREFLIGHT START ==="
-
-echo "Phase 1: Rust toolchain..."
-rustc --version > /dev/null
-cargo --version > /dev/null
-cargo nextest --version > /dev/null
-
-echo "Phase 2: CI scripts..."
-test -x ci/validate
-test -x ci/test
-test -x ci/check
-test -x ci/clippy
-test -x ci/fmt
-
-echo "Phase 3: Build..."
-ci/check
-cargo build --release --bin payloadtool
-
-echo "Phase 4: Benchmarking..."
-which hyperfine > /dev/null
-cargo criterion --version > /dev/null
-
-echo "Phase 5: Profiling..."
-which samply > /dev/null || which sample > /dev/null || which perf > /dev/null
-
-echo "Phase 6: Memory tools..."
-./target/release/payloadtool --help | grep -q "memory-stats"
-
-echo "Phase 7: Git..."
-git config user.name > /dev/null
-git config user.email > /dev/null
-
-echo "=== LADING PREFLIGHT PASSED ==="
+git worktree add ../lading-baseline main
 ```
 
-**CRITICAL: The `set -e` ensures the script exits immediately on ANY failure.**
-If you see output stop before "LADING PREFLIGHT PASSED", a check failed.
+## Git Config
 
----
+Verify: `git config user.name && git config user.email`
 
-## Report Format
+## Quick Pass/Fail
 
-After running checks, output:
-
-```
-LADING PREFLIGHT REPORT
-=======================
-Timestamp: <current time>
-Status: PASS | FAIL
-
-Phase 1 - Rust Toolchain:
-  [*] rustc 1.XX.X
-  [*] cargo 1.XX.X
-  [*] cargo-nextest X.Y.Z
-
-Phase 2 - CI Scripts:
-  [*] ci/validate
-  [*] ci/test
-  [*] ci/check
-  [*] ci/clippy
-  [*] ci/fmt
-  [*] ci/kani
-
-Phase 3 - Build:
-  [*] ci/check passes
-  [*] payloadtool built
-
-Phase 4 - Benchmarking:
-  [*] hyperfine X.Y.Z
-  [*] cargo-criterion X.Y.Z
-
-Phase 5 - Profiling:
-  [*] samply (or sample/perf)
-
-Phase 6 - Memory:
-  [*] payloadtool --memory-stats
-  [ ] heaptrack (optional)
-
-Phase 7 - Git:
-  [*] user.name configured
-  [*] user.email configured
-  [!] Working tree dirty (12 files)
-
-Ready for: /lading:optimize:hunt, /lading:optimize:review, /lading:optimize:rescue
-```
-
-Or if failed:
-
-```
-LADING PREFLIGHT REPORT
-=======================
-Status: FAIL
-
-Failed checks:
-  [X] cargo-nextest - not found
-      Fix: cargo install cargo-nextest
-
-  [X] ci/validate - not executable
-      Fix: chmod +x ci/validate
-
-DO NOT proceed with optimization skills until all required checks pass.
-```
-
----
-
-## Usage
-
-```
-/lading:preflight             # Run full checklist
-```
-
-**Run this at the start of every new Claude session before any optimization work.**
+All checks pass → Ready for `/lading:optimize:hunt`
