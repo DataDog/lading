@@ -1,0 +1,5 @@
+entries:
+  - target: dogstatsd.rs:to_bytes_unframed,to_bytes_length_prefix_framed
+    technique: buffer-reuse
+    status: success
+    file: db/dogstatsd-buffer-reuse.yaml

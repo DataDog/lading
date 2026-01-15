@@ -1,0 +1,42 @@
+target: dogstatsd.rs:to_bytes_unframed,to_bytes_length_prefix_framed
+technique: buffer-reuse
+status: success
+date: 2026-01-14
+branch: opt/dogstatsd-buffer-reuse
+measurements:
+  micro_benchmarks:
+    dogstatsd_all_1MiB: "-3% time"
+    dogstatsd_all_10MiB: "-9% time"
+    dogstatsd_all_100MiB: "-20% time"
+    dogstatsd_all_1GiB: "-26% time"
+  macro_benchmarks:
+    time: "~2% faster (within noise)"
+    memory: "-12.9% (27.28 MiB -> 23.75 MiB)"
+    allocations: "-8.6% (59,034 -> 53,960)"
+lessons: |
+  Reusing a Vec<u8> buffer instead of allocating new Strings with format!()
+  on each iteration provides significant performance gains that scale with
+  data size. The pattern:
+
+  Before:
+    loop {
+        let encoding = format!("{member}");  // new String each iteration
+        writeln!(writer, "{encoding}")?;
+    }
+
+  After:
+    let mut buffer: Vec<u8> = Vec::with_capacity(256);
+    loop {
+        buffer.clear();
+        write!(&mut buffer, "{member}").expect("...");  // reuse buffer
+        writer.write_all(&buffer)?;
+        writer.write_all(b"\n")?;
+    }
+
+  For framed messages that need to know total length before writing:
+  - Use a single content_buffer Vec<u8> instead of Vec<String>
+  - Use a separate member_buffer for formatting individual items
+  - extend_from_slice to accumulate into content_buffer
+
+  The improvement is most significant at larger data sizes (26% at 1 GiB)
+  because more iterations means more allocations avoided.
