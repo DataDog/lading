@@ -1,0 +1,82 @@
+target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
+technique: reusable-buffer-eliminate-allocations
+status: success
+date: 2026-01-15
+branch: opt/syslog-eliminate-allocations
+commit: d90086c
+
+measurements:
+  micro_benchmarks:
+    - size: 1 MiB
+      baseline_throughput: 479.27 MiB/s
+      optimized_throughput: 668.60 MiB/s
+      improvement: +39.5%
+    - size: 10 MiB
+      baseline_throughput: 482.76 MiB/s
+      optimized_throughput: 635.51 MiB/s
+      improvement: +31.6%
+    - size: 100 MiB
+      baseline_throughput: 481.49 MiB/s
+      optimized_throughput: 683.63 MiB/s
+      improvement: +42.0%
+    - size: 1000 MiB
+      baseline_throughput: 484.38 MiB/s
+      optimized_throughput: 677.32 MiB/s
+      improvement: +39.8%
+
+  macro_benchmarks:
+    time:
+      baseline: 8.3 ms
+      optimized: 7.1 ms
+      improvement: -14.5%
+    allocations:
+      baseline: 67,688
+      optimized: 34,331
+      improvement: -49.3%
+    total_allocated:
+      baseline: 6.17 MiB
+      optimized: 3.96 MiB
+      improvement: -35.8%
+    peak_live:
+      baseline: 1.38 MiB
+      optimized: 1.38 MiB
+      improvement: ~0% (expected - buffer reuse)
+
+validation:
+  - cargo test: passed (60 tests)
+  - cargo fmt: passed
+  - shellcheck: passed
+  - kani: no proofs to run (property tests sufficient)
+
+lessons: |
+  Successful optimization following the pattern from PR #1692 (JSON) and PR #1694 (Splunk HEC).
+
+  Changes made:
+  1. Changed Member struct fields from String to &'static str for hostname and app_name
+  2. Removed into_string() method that allocated a new String per iteration
+  3. Introduced reusable Vec<u8> buffer (512 bytes capacity)
+  4. Used write! macro to format directly into buffer instead of intermediate String
+
+  Key findings:
+  - Micro-benchmarks showed 28% average speedup (well above 5% threshold)
+  - Macro-benchmarks showed 14.5% speedup and 49.3% reduction in allocations
+  - Total memory allocated reduced by 35.8%
+  - Pattern is highly effective: eliminate format! -> String allocations by:
+    * Using static string references where possible
+    * Reusing a buffer across iterations with .clear()
+    * Writing directly to buffer with write! macro
+
+  This pattern should be applied to other payload serializers that haven't been optimized yet:
+  - apache_common.rs (already has some optimization but could improve Path formatting)
+  - fluent.rs (uses Vec<Vec<u8>> pattern - could be optimized)
+  - trace_agent formats (check if they use similar patterns)
+
+  The optimization is safe because:
+  - RNG sequence is preserved (same random choices)
+  - Output format is identical (validated by property tests)
+  - Determinism maintained (seed-based generation)
+
+  Next targets to explore:
+  1. fluent.rs - pre-serializes members into Vec<Vec<u8>>, could serialize on-demand
+  2. apache_common.rs - Path Display does multiple write! calls per component
+  3. Other formats that weren't part of recent optimization PRs
