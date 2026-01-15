@@ -76,8 +76,8 @@ impl Distribution<Member> for StandardUniform {
                     .expect("timestamp in valid range");
                 ts.format(&Rfc3339).expect("failed to format timestamp")
             },
-            hostname: *HOSTNAMES.choose(rng).expect("failed to choose hostname"),
-            app_name: *APP_NAMES.choose(rng).expect("failed to choose app name"),
+            hostname: HOSTNAMES.choose(rng).expect("failed to choose hostname"),
+            app_name: APP_NAMES.choose(rng).expect("failed to choose app name"),
             procid: rng.random_range(100..=9999),
             msgid: rng.random_range(1..=999),
             message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
