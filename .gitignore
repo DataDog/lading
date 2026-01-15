@@ -1,3 +1,5 @@
 /target
-.claude
+.claude/*
+!.claude/skills/
 .docs-cache
+.beads/issues.jsonl

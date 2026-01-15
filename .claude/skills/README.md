@@ -1,0 +1,105 @@
+# Lading Optimization Skills
+
+Systematic optimization hunting for lading. Combines profiling, benchmarking, and rigorous review to find performance improvements while maintaining lading's strict correctness guarantees.
+
+## Quick Start
+
+```
+/lading:preflight
+```
+
+Run preflight first. It validates your environment and tells you what to do next.
+
+## Skills Overview
+
+| Skill | Purpose |
+|-------|---------|
+| `/lading:preflight` | Environment validation - run first every session |
+| `/lading:optimize:hunt` | Find optimization targets using profiling data |
+| `/lading:optimize:review` | 5-persona peer review before merge |
+| `/lading:optimize:validate` | Bug validation with Kani proofs or property tests |
+| `/lading:optimize:rescue` | Salvage optimization work lacking benchmarks |
+
+## Workflow
+
+```
+preflight --> hunt --> [success] --> review --> [approved] --> merge
+                |                       |
+                v                       v
+           [bug found]             [rejected]
+                |                       |
+                v                       v
+            validate                record lesson
+```
+
+## Critical Context for LLMs
+
+Before modifying lading code, understand these non-negotiable constraints:
+
+**Determinism**: Same seed must produce identical output. No `thread_rng()`, no HashMap iteration order dependencies, no timing-based decisions.
+
+**No Panics**: Never use `.unwrap()` or `.expect()`. All errors propagate via `Result<T, E>`.
+
+**Performance Patterns**: Pre-allocate when size is known. No allocations in hot paths. Optimize for worst-case, not average-case.
+
+**Validation**: Run `ci/validate` after every change. Use `ci/` scripts, not raw cargo commands.
+
+**Testing**: Property tests (proptest) over unit tests. Kani proofs for critical code (throttle, payload).
+
+See `CLAUDE.md` for complete project guidelines.
+
+## Benchmark Thresholds
+
+| Metric | Significance Threshold |
+|--------|------------------------|
+| Time | >= 5% improvement |
+| Memory | >= 10% reduction |
+| Allocations | >= 20% reduction |
+
+Changes below these thresholds are noise, not optimization.
+
+## Tracking Results
+
+Each skill maintains its own `db.yaml` index with detailed entries in `db/*.yaml`:
+
+```
+lading:optimize:hunt/
+├── SKILL.md      # Instructions
+├── db.yaml       # Index of all hunts
+└── db/
+    └── payload-prealloc.yaml  # Detailed hunt record
+```
+
+**db.yaml** (index):
+```yaml
+entries:
+  - target: lading_payload::block
+    technique: prealloc
+    status: failure
+    file: db/payload-prealloc.yaml
+```
+
+**db/*.yaml** (detail):
+```yaml
+target: lading_payload::block
+technique: prealloc
+status: failure
+date: 2026-01-14
+reason: cold path
+lessons: |
+  Block construction not in hot path for JSON payloads.
+```
+
+Query past results:
+```bash
+grep "prealloc" .claude/skills/lading:optimize:hunt/db.yaml
+cat .claude/skills/lading:optimize:hunt/db/payload-prealloc.yaml
+```
+
+## Prerequisites
+
+- Rust 1.70+ (1.82+ for Rust 2024 edition)
+- cargo-nextest
+- hyperfine
+- Profiler: samply (recommended), perf, or macOS sample
+- payloadtool built with `--memory-stats` support
