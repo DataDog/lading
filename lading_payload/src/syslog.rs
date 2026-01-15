@@ -48,14 +48,14 @@ impl Distribution<Message> for StandardUniform {
 }
 
 struct Member {
-    priority: u8,       // 0 - 191
-    syslog_version: u8, // 1 - 3
-    timestamp: String,  // seconds format in millis
-    hostname: String,   // name.tld
-    app_name: String,   // shortish string
-    procid: u16,        // 100 - 9999
-    msgid: u16,         // 1 - 999
-    message: String,    // shortish structured string
+    priority: u8,           // 0 - 191
+    syslog_version: u8,     // 1 - 3
+    timestamp: String,      // seconds format in millis
+    hostname: &'static str, // name.tld
+    app_name: &'static str, // shortish string
+    procid: u16,            // 100 - 9999
+    msgid: u16,             // 1 - 999
+    message: String,        // shortish structured string
 }
 
 impl Distribution<Member> for StandardUniform {
@@ -76,28 +76,12 @@ impl Distribution<Member> for StandardUniform {
                     .expect("timestamp in valid range");
                 ts.format(&Rfc3339).expect("failed to format timestamp")
             },
-            hostname: (*HOSTNAMES.choose(rng).expect("failed to choose hostnanme")).to_string(),
-            app_name: (*APP_NAMES.choose(rng).expect("failed to choose app name")).to_string(),
+            hostname: *HOSTNAMES.choose(rng).expect("failed to choose hostname"),
+            app_name: *APP_NAMES.choose(rng).expect("failed to choose app name"),
             procid: rng.random_range(100..=9999),
             msgid: rng.random_range(1..=999),
             message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
         }
-    }
-}
-
-impl Member {
-    fn into_string(self) -> String {
-        format!(
-            "<{}>{} {} {} {} {} ID{} - {}",
-            self.priority,
-            self.syslog_version,
-            self.timestamp,
-            self.hostname,
-            self.app_name,
-            self.procid,
-            self.msgid,
-            self.message
-        )
     }
 }
 
@@ -112,18 +96,37 @@ impl crate::Serialize for Syslog5424 {
             return Ok(());
         }
 
-        let mut written_bytes = 0;
+        let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        // Typical syslog line is ~200-400 bytes depending on message content.
+        let mut buffer: Vec<u8> = Vec::with_capacity(512);
+
         for member in rng.sample_iter::<Member, StandardUniform>(StandardUniform) {
-            let encoded = member.into_string();
+            buffer.clear();
+            write!(
+                &mut buffer,
+                "<{}>{} {} {} {} {} ID{} - {}",
+                member.priority,
+                member.syslog_version,
+                member.timestamp,
+                member.hostname,
+                member.app_name,
+                member.procid,
+                member.msgid,
+                member.message
+            )
+            .expect("formatting to Vec<u8> cannot fail");
 
-            if encoded.len() + 1 + written_bytes > max_bytes {
-                break;
+            let line_length = buffer.len() + 1; // add one for the newline
+
+            match bytes_remaining.checked_sub(line_length) {
+                Some(remainder) => {
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
+                    bytes_remaining = remainder;
+                }
+                None => break,
             }
-
-            writeln!(writer, "{encoded}")?;
-
-            written_bytes += 1; // newline
-            written_bytes += encoded.len();
         }
 
         Ok(())
