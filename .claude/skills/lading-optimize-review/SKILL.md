@@ -1,6 +1,6 @@
 ---
-name: lading:optimize:review
-description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading:optimize:validate to validate them.
+name: lading-optimize-review
+description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
 ---
 
 # Optimization Patch Review
@@ -17,7 +17,7 @@ A rigorous 5-persona peer review system for optimization patches in lading. Requ
 |---------|-------|--------|
 | **Optimization APPROVED** | Improvement validated | Merge |
 | **Optimization REJECTED** | Learned where NOT to optimize | Record lesson |
-| **Bug DISCOVERED** | Found correctness issue | Invoke `/lading:optimize:validate` |
+| **Bug DISCOVERED** | Found correctness issue | Invoke `/lading-optimize-validate` |
 
 **Finding bugs during optimization review is SUCCESS, not failure.**
 
@@ -25,14 +25,14 @@ A rigorous 5-persona peer review system for optimization patches in lading. Requ
 
 ## Phase 0: Pre-flight
 
-Run `/lading:preflight` first. Then check for duplicate work:
+Run `/lading-preflight` first. Then check for duplicate work:
 
 ```bash
 # Check previous reviews
-cat .claude/skills/lading:optimize:review/db.yaml
+cat .claude/skills/lading-optimize-review/db.yaml
 
 # Check previous hunts
-cat .claude/skills/lading:optimize:hunt/db.yaml
+cat .claude/skills/lading-optimize-hunt/db.yaml
 ```
 
 **Check for:**
@@ -143,7 +143,7 @@ cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 - [ ] No semantic changes to output
 - [ ] **Determinism preserved** (same seed -> same output)
 - [ ] No `.unwrap()` or `.expect()` added (lading MUST NOT panic)
-- [ ] **No bugs introduced** (if bug found -> `/lading:optimize:validate`)
+- [ ] **No bugs introduced** (if bug found -> `/lading-optimize-validate`)
 - [ ] Property tests exist for changed code
 
 ### 4. Rust Expert (Lading-Specific Patterns)
@@ -196,14 +196,14 @@ ci/kani lading_payload
 | **APPROVED** | 5/5 APPROVE | Merge, record success |
 | **REJECTED** | Any REJECT | Record lesson, delete branch |
 | **DUPLICATE** | Duplicate Hunter REJECT | Record as DUPLICATE, delete branch |
-| **BUG FOUND** | Correctness issue | Invoke `/lading:optimize:validate` |
+| **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate` |
 
 ### When Bug Is Found
 
 If review discovers a bug instead of an optimization:
 
 ```
-/lading:optimize:validate
+/lading-optimize-validate
 ```
 
 The validate skill will:
@@ -296,5 +296,5 @@ lessons: |
 ## Usage
 
 ```
-/lading:optimize:review
+/lading-optimize-review
 ```

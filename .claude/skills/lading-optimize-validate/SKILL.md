@@ -1,5 +1,5 @@
 ---
-name: lading:optimize:validate
+name: lading-optimize-validate
 description: Validates discovered bugs with reproducing tests and validates fixes with regression tests. Called by other skills when bugs are found during optimization hunting. Creates property tests (proptest) and Kani proofs when feasible.
 ---
 
@@ -9,16 +9,16 @@ When optimization hunting discovers a bug instead of an optimization opportunity
 
 ## When This Skill Is Called
 
-Other skills invoke `/lading:optimize:validate` when:
-- `/lading:optimize:hunt` discovers a bug instead of an optimization
-- `/lading:optimize:rescue` finds broken code during salvage
-- `/lading:optimize:review` identifies correctness issues during review
+Other skills invoke `/lading-optimize-validate` when:
+- `/lading-optimize-hunt` discovers a bug instead of an optimization
+- `/lading-optimize-rescue` finds broken code during salvage
+- `/lading-optimize-review` identifies correctness issues during review
 
 ```
 Optimization hunt discovers bug
             |
             v
-    /lading:optimize:validate
+    /lading-optimize-validate
             |
             +-- Attempt Kani proof (if feasible)
             +-- Create property test (proptest)
@@ -256,8 +256,8 @@ Fix: Changed < to <= in boundary check
 Test: Property test output_length_equals_requested fails before, passes after
 Kani: Proof capacity_never_underflows added (or: Kani not feasible - timeout)
 
-Discovered-by: /lading:optimize:hunt
-Validated-by: /lading:optimize:validate
+Discovered-by: /lading-optimize-hunt
+Validated-by: /lading-optimize-validate
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -333,7 +333,7 @@ The calling skill should:
 ## Usage
 
 ```
-/lading:optimize:validate
+/lading-optimize-validate
 ```
 
 ---

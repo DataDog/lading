@@ -1,6 +1,6 @@
 ---
-name: lading:optimize:hunt
-description: Systematic optimization hunter for lading. Finds memory optimizations AND bugs - both are valuable. Run /lading:optimize:validate when bugs are discovered.
+name: lading-optimize-hunt
+description: Systematic optimization hunter for lading. Finds memory optimizations AND bugs - both are valuable. Run /lading-optimize-validate when bugs are discovered.
 ---
 
 # Optimization Hunt
@@ -11,9 +11,9 @@ Systematically explores the lading codebase, implements optimizations, validates
 
 | Outcome | Value | Action |
 |---------|-------|--------|
-| **Optimization works** | Memory/time improved | Submit to `/lading:optimize:review` |
+| **Optimization works** | Memory/time improved | Submit to `/lading-optimize-review` |
 | **Optimization fails** | Learned cold path | Record, next target |
-| **Bug discovered** | Found correctness issue | Invoke `/lading:optimize:validate` |
+| **Bug discovered** | Found correctness issue | Invoke `/lading-optimize-validate` |
 
 **All three outcomes build institutional knowledge.**
 
@@ -21,14 +21,14 @@ Systematically explores the lading codebase, implements optimizations, validates
 
 ## Phase 0: Pre-flight
 
-Run `/lading:preflight` first. Then check what's already been done:
+Run `/lading-preflight` first. Then check what's already been done:
 
 ```bash
 # Check previous hunts
-cat .claude/skills/lading:optimize:hunt/db.yaml
+cat .claude/skills/lading-optimize-hunt/db.yaml
 
 # Check previous reviews
-cat .claude/skills/lading:optimize:review/db.yaml
+cat .claude/skills/lading-optimize-review/db.yaml
 ```
 
 **If a target/technique combination exists in either db.yaml, SKIP IT.**
@@ -176,9 +176,9 @@ hyperfine --warmup 3 --export-json /tmp/optimized.json \
 
 | Result | Action |
 |--------|--------|
-| Time improved >=5% | Proceed to `/lading:optimize:review` |
-| Memory reduced >=10% | Proceed to `/lading:optimize:review` |
-| Allocations reduced >=20% | Proceed to `/lading:optimize:review` |
+| Time improved >=5% | Proceed to `/lading-optimize-review` |
+| Memory reduced >=10% | Proceed to `/lading-optimize-review` |
+| Allocations reduced >=20% | Proceed to `/lading-optimize-review` |
 | No change or regression | Record FAILURE (micro win, macro loss), next target |
 | **ci/validate fails** | Might be a **BUG** |
 | **Determinism broken** | Might be a **BUG** |
@@ -196,7 +196,7 @@ If during hunting you discover a bug (not an optimization):
 
 ### Invoke Correctness Validation
 ```
-/lading:optimize:validate
+/lading-optimize-validate
 ```
 
 This skill will:
@@ -301,7 +301,7 @@ Target completed -> Back to Phase 1 -> Pick new target -> Never stop
 ## Usage
 
 ```
-/lading:optimize:hunt
+/lading-optimize-hunt
 ```
 
 A 10% combined success rate (optimizations + bugs) is excellent. Most targets are cold paths - that's expected.
