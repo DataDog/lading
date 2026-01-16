@@ -187,10 +187,7 @@ impl<W: Write + Seek + Send> Format<W> {
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression_level)?))
             .set_key_value_metadata(Some(vec![
                 KeyValue::new("lading.schema_version".to_string(), "2".to_string()),
-                KeyValue::new(
-                    "lading.counter_semantics".to_string(),
-                    "delta".to_string(),
-                ),
+                KeyValue::new("lading.counter_semantics".to_string(), "delta".to_string()),
             ]))
             .set_column_dictionary_enabled(ColumnPath::from(columns::METRIC_KIND), true)
             .set_column_dictionary_enabled(ColumnPath::from(columns::RUN_ID), true)

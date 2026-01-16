@@ -216,20 +216,20 @@ impl Iterator for DrainIter {
 
         for (key, values) in &self.accumulator.counters {
             // Skip ticks before this key was first written
-            if let Some(&first_tick) = self.accumulator.counter_first_tick.get(key) {
-                if tick_to_flush < first_tick {
-                    continue;
-                }
+            if let Some(&first_tick) = self.accumulator.counter_first_tick.get(key)
+                && tick_to_flush < first_tick
+            {
+                continue;
             }
             let value = values[interval];
             metrics.push((key.clone(), MetricValue::Counter(value), tick_to_flush));
         }
         for (key, values) in &self.accumulator.gauges {
             // Skip ticks before this key was first written
-            if let Some(&first_tick) = self.accumulator.gauge_first_tick.get(key) {
-                if tick_to_flush < first_tick {
-                    continue;
-                }
+            if let Some(&first_tick) = self.accumulator.gauge_first_tick.get(key)
+                && tick_to_flush < first_tick
+            {
+                continue;
             }
             let value = values[interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), tick_to_flush));
@@ -324,6 +324,8 @@ impl std::fmt::Debug for Accumulator {
                 "histograms",
                 &format!("<{len} histogram keys>", len = self.histograms.len()),
             )
+            .field("counter_first_tick", &self.counter_first_tick)
+            .field("gauge_first_tick", &self.gauge_first_tick)
             .field("current_tick", &self.current_tick)
             .field("last_flushed_tick", &self.last_flushed_tick)
             .finish()
@@ -532,10 +534,10 @@ impl Accumulator {
 
         for (key, values) in &self.counters {
             // Skip ticks before this key was first written
-            if let Some(&first_tick) = self.counter_first_tick.get(key) {
-                if flush_tick < first_tick {
-                    continue;
-                }
+            if let Some(&first_tick) = self.counter_first_tick.get(key)
+                && flush_tick < first_tick
+            {
+                continue;
             }
             let value = values[flush_interval];
             metrics.push((key.clone(), MetricValue::Counter(value), flush_tick));
@@ -543,10 +545,10 @@ impl Accumulator {
 
         for (key, values) in &self.gauges {
             // Skip ticks before this key was first written
-            if let Some(&first_tick) = self.gauge_first_tick.get(key) {
-                if flush_tick < first_tick {
-                    continue;
-                }
+            if let Some(&first_tick) = self.gauge_first_tick.get(key)
+                && flush_tick < first_tick
+            {
+                continue;
             }
             let value = values[flush_interval];
             metrics.push((key.clone(), MetricValue::Gauge(value), flush_tick));
