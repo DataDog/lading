@@ -1,6 +1,6 @@
 ---
-name: lading:optimize:rescue
-description: Salvages optimization work lacking benchmarks. Generates missing evidence, validates claims. Bugs discovered during rescue are valuable - invoke /lading:optimize:validate.
+name: lading-optimize-rescue
+description: Salvages optimization work lacking benchmarks. Generates missing evidence, validates claims. Bugs discovered during rescue are valuable - invoke /lading-optimize-validate.
 ---
 
 # Optimization Rescue
@@ -13,7 +13,7 @@ Salvage optimization work done without proper benchmarks. Generate evidence, val
 |---------|-------|--------|
 | **Change validated** | Real improvement proven | KEEP, include in rescued branch |
 | **Change invalidated** | No improvement | DISCARD, record lesson |
-| **Bug discovered** | Correctness issue found | Invoke `/lading:optimize:validate` |
+| **Bug discovered** | Correctness issue found | Invoke `/lading-optimize-validate` |
 
 **Bugs found during rescue are SUCCESS, not failure.**
 
@@ -21,7 +21,7 @@ Salvage optimization work done without proper benchmarks. Generate evidence, val
 
 ## Phase 0: Pre-flight
 
-Run `/lading:preflight` first.
+Run `/lading-preflight` first.
 
 ---
 
@@ -153,9 +153,9 @@ criterion_main!(benches);
 | Allocations reduced >=20% | KEEP |
 | No significant change | DISCARD |
 | Regression | DISCARD |
-| **ci/validate fails** | Possible BUG -> `/lading:optimize:validate` |
-| **Determinism broken** | Possible BUG -> `/lading:optimize:validate` |
-| **Panic path added** | BUG -> `/lading:optimize:validate` |
+| **ci/validate fails** | Possible BUG -> `/lading-optimize-validate` |
+| **Determinism broken** | Possible BUG -> `/lading-optimize-validate` |
+| **Panic path added** | BUG -> `/lading-optimize-validate` |
 
 ### Verify Determinism
 
@@ -176,11 +176,11 @@ diff /tmp/run1.txt /tmp/run2.txt  # Must be identical
 If rescue uncovers a bug instead of an optimization:
 
 ```
-/lading:optimize:validate
+/lading-optimize-validate
 ```
 
 After validation:
-1. Bug recorded in validate's db.yaml (via /lading:optimize:validate)
+1. Bug recorded in validate's db.yaml (via /lading-optimize-validate)
 2. Record rescue as BUG_FOUND in Phase 7
 3. The bug fix becomes part of rescued branch (with tests!)
 
@@ -195,7 +195,7 @@ git checkout -b opt/<name>-rescued
 
 Apply only:
 - **KEEP** changes (validated optimizations with benchmark proof)
-- **BUG_FOUND** changes (with tests from /lading:optimize:validate)
+- **BUG_FOUND** changes (with tests from /lading-optimize-validate)
 
 Discard everything else.
 
@@ -255,5 +255,5 @@ lessons: |
 ## Usage
 
 ```
-/lading:optimize:rescue
+/lading-optimize-rescue
 ```

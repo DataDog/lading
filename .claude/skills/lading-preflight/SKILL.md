@@ -1,6 +1,7 @@
 ---
-name: lading:preflight
+name: lading-preflight
 description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, hyperfine, profilers, payloadtool, git, and database access.
+allowed-tools: Bash
 ---
 
 # Pre-flight Checklist
@@ -251,7 +252,7 @@ Phase 7 - Git:
   [*] user.email configured
   [!] Working tree dirty (12 files)
 
-Ready for: /lading:optimize:hunt, /lading:optimize:review, /lading:optimize:rescue
+Ready for: /lading-optimize-hunt, /lading-optimize-review, /lading-optimize-rescue
 ```
 
 Or if failed:
@@ -276,7 +277,7 @@ DO NOT proceed with optimization skills until all required checks pass.
 ## Usage
 
 ```
-/lading:preflight             # Run full checklist
+/lading-preflight             # Run full checklist
 ```
 
 **Run this at the start of every new Claude session before any optimization work.**
