@@ -180,7 +180,7 @@ If rescue uncovers a bug instead of an optimization:
 ```
 
 After validation:
-1. Bug recorded in validate's db.yaml (via /lading-optimize-validate)
+1. Bug recorded in validate's assets/db.yaml (via /lading-optimize-validate)
 2. Record rescue as BUG_FOUND in Phase 7
 3. The bug fix becomes part of rescued branch (with tests!)
 
@@ -213,19 +213,19 @@ ci/validate
 
 ### MANDATORY: Update db.yaml
 
-1. Add entry to `db.yaml` index
-2. Create detailed file in `db/` directory
+1. Add entry to `assets/db.yaml` index
+2. Create detailed file in `assets/db/` directory
 
-**db.yaml entry:**
+**assets/db.yaml entry:**
 ```yaml
 entries:
   - original_branch: <opt/original-branch>
     rescued_as: <opt/original-branch-rescued>
     status: <rescued|partial|bug_found>
-    file: db/<branch-name>.yaml
+    file: assets/db/<branch-name>.yaml
 ```
 
-**db/<branch-name>.yaml:**
+**assets/db/<branch-name>.yaml:**
 ```yaml
 original_branch: <opt/original-branch>
 rescued_as: <opt/original-branch-rescued>

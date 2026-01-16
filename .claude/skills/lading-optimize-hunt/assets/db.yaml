@@ -2,8 +2,8 @@ entries:
   - target: dogstatsd.rs:to_bytes_unframed,to_bytes_length_prefix_framed
     technique: buffer-reuse
     status: success
-    file: db/dogstatsd-buffer-reuse.yaml
+    file: assets/db/dogstatsd-buffer-reuse.yaml
   - target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
     technique: reusable-buffer-eliminate-allocations
     status: success
-    file: db/syslog-to_bytes-reusable-buffer.yaml
+    file: assets/db/syslog-to_bytes-reusable-buffer.yaml

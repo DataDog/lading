@@ -29,10 +29,10 @@ Run `/lading-preflight` first. Then check for duplicate work:
 
 ```bash
 # Check previous reviews
-cat .claude/skills/lading-optimize-review/db.yaml
+cat .claude/skills/lading-optimize-review/assets/db.yaml
 
 # Check previous hunts
-cat .claude/skills/lading-optimize-hunt/db.yaml
+cat .claude/skills/lading-optimize-hunt/assets/db.yaml
 ```
 
 **Check for:**
@@ -220,18 +220,18 @@ Then return here to record the finding as BUG_FOUND in Phase 6.
 
 ### Update db.yaml
 
-1. Add entry to `db.yaml` index
-2. Create detailed file in `db/` directory
+1. Add entry to `assets/db.yaml` index
+2. Create detailed file in `assets/db/` directory
 
-**db.yaml entry:**
+**assets/db.yaml entry:**
 ```yaml
 entries:
   - branch: <branch name>
     verdict: <approved|rejected|duplicate|bug_found>
-    file: db/<branch-name>.yaml
+    file: assets/db/<branch-name>.yaml
 ```
 
-**db/<branch-name>.yaml** for APPROVED:
+**assets/db/<branch-name>.yaml** for APPROVED:
 ```yaml
 branch: <branch name>
 verdict: approved
@@ -252,7 +252,7 @@ lessons: |
   <pattern learned>
 ```
 
-**db/<branch-name>.yaml** for REJECTED:
+**assets/db/<branch-name>.yaml** for REJECTED:
 ```yaml
 branch: <branch name>
 verdict: rejected
@@ -269,7 +269,7 @@ lessons: |
   <what NOT to do next time>
 ```
 
-**db/<branch-name>.yaml** for DUPLICATE:
+**assets/db/<branch-name>.yaml** for DUPLICATE:
 ```yaml
 branch: <branch name>
 verdict: duplicate
@@ -279,7 +279,7 @@ reason: |
   <explanation of duplication>
 ```
 
-**db/<branch-name>.yaml** for BUG_FOUND:
+**assets/db/<branch-name>.yaml** for BUG_FOUND:
 ```yaml
 branch: <branch name>
 verdict: bug_found

@@ -23,7 +23,7 @@ Optimization hunt discovers bug
             +-- Attempt Kani proof (if feasible)
             +-- Create property test (proptest)
             +-- Validate fix works
-            +-- Record in db.yaml
+            +-- Record in assets/db.yaml
             |
             v
     Return to calling skill with VALIDATED status
@@ -266,20 +266,20 @@ EOF
 
 ### 5.2 MANDATORY: Update db.yaml
 
-1. Add entry to `db.yaml` index
-2. Create detailed file in `db/` directory
+1. Add entry to `assets/db.yaml` index
+2. Create detailed file in `assets/db/` directory
 
-**db.yaml entry:**
+**assets/db.yaml entry:**
 ```yaml
 entries:
   - file: <file path>
     function: <function name>
     category: <off-by-one|capacity|determinism|overflow|logic|panic>
     status: validated
-    detail_file: db/<file-function>.yaml
+    detail_file: assets/db/<file-function>.yaml
 ```
 
-**db/<file-function>.yaml:**
+**assets/db/<file-function>.yaml:**
 ```yaml
 file: <file path>
 function: <function name>
@@ -350,4 +350,4 @@ Before returning VALIDATED:
 - [ ] `ci/validate` passes
 - [ ] Determinism verified (same seed = same output)
 - [ ] No `.unwrap()` or `.expect()` in fix (use Result)
-- [ ] Recorded in db.yaml with detail file
+- [ ] Recorded in assets/db.yaml with detail file
