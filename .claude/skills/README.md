@@ -60,26 +60,27 @@ Changes below these thresholds are noise, not optimization.
 
 ## Tracking Results
 
-Each skill maintains its own `db.yaml` index with detailed entries in `db/*.yaml`:
+Each skill maintains its own `assets/db.yaml` index with detailed entries in `assets/db/*.yaml`:
 
 ```
 lading:optimize:hunt/
 ├── SKILL.md      # Instructions
-├── db.yaml       # Index of all hunts
-└── db/
-    └── payload-prealloc.yaml  # Detailed hunt record
+└── assets/
+    ├── db.yaml   # Index of all hunts
+    └── db/
+        └── payload-prealloc.yaml  # Detailed hunt record
 ```
 
-**db.yaml** (index):
+**assets/db.yaml** (index):
 ```yaml
 entries:
   - target: lading_payload::block
     technique: prealloc
     status: failure
-    file: db/payload-prealloc.yaml
+    file: assets/db/payload-prealloc.yaml
 ```
 
-**db/*.yaml** (detail):
+**assets/db/*.yaml** (detail):
 ```yaml
 target: lading_payload::block
 technique: prealloc
@@ -92,8 +93,8 @@ lessons: |
 
 Query past results:
 ```bash
-grep "prealloc" .claude/skills/lading:optimize:hunt/db.yaml
-cat .claude/skills/lading:optimize:hunt/db/payload-prealloc.yaml
+grep "prealloc" .claude/skills/lading:optimize:hunt/assets/db.yaml
+cat .claude/skills/lading:optimize:hunt/assets/db/payload-prealloc.yaml
 ```
 
 ## Prerequisites

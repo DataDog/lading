@@ -25,10 +25,10 @@ Run `/lading-preflight` first. Then check what's already been done:
 
 ```bash
 # Check previous hunts
-cat .claude/skills/lading-optimize-hunt/db.yaml
+cat .claude/skills/lading-optimize-hunt/assets/db.yaml
 
 # Check previous reviews
-cat .claude/skills/lading-optimize-review/db.yaml
+cat .claude/skills/lading-optimize-review/assets/db.yaml
 ```
 
 **If a target/technique combination exists in either db.yaml, SKIP IT.**
@@ -240,19 +240,19 @@ Kani is slow and may not compile complex code. If it fails:
 
 ### MANDATORY: Update db.yaml
 
-1. Add entry to `db.yaml` index
-2. Create detailed file in `db/` directory
+1. Add entry to `assets/db.yaml` index
+2. Create detailed file in `assets/db/` directory
 
-**db.yaml entry:**
+**assets/db.yaml entry:**
 ```yaml
 entries:
   - target: <file:function>
     technique: <prealloc|avoid-clone|cache|etc>
     status: <success|failure|bug_found>
-    file: db/<target-technique>.yaml
+    file: assets/db/<target-technique>.yaml
 ```
 
-**db/<target-technique>.yaml** for SUCCESS:
+**assets/db/<target-technique>.yaml** for SUCCESS:
 ```yaml
 target: <file:function>
 technique: <prealloc|avoid-clone|cache|etc>
@@ -267,7 +267,7 @@ lessons: |
   <pattern learned>
 ```
 
-**db/<target-technique>.yaml** for FAILURE:
+**assets/db/<target-technique>.yaml** for FAILURE:
 ```yaml
 target: <file:function>
 technique: <prealloc|avoid-clone|cache|etc>
@@ -278,7 +278,7 @@ lessons: |
   <why it didn't work - this is valuable knowledge>
 ```
 
-**db/<target-technique>.yaml** for BUG_FOUND:
+**assets/db/<target-technique>.yaml** for BUG_FOUND:
 ```yaml
 target: <file:function>
 technique: <what was being tried>
