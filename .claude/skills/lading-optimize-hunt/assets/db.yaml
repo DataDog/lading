@@ -11,3 +11,7 @@ entries:
     technique: on-demand-serialization
     status: success
     file: assets/db/fluent-on-demand-serialization.yaml
+  - target: lading_payload/src/block.rs:Cache methods
+    technique: inline
+    status: success
+    file: assets/db/cache-inline.yaml
