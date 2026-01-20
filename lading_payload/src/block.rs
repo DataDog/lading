@@ -404,6 +404,7 @@ impl Cache {
 
     /// Create a new handle for iterating through blocks.
     #[must_use]
+    #[inline]
     pub fn handle(&self) -> Handle {
         Handle { idx: 0 }
     }
@@ -424,6 +425,7 @@ impl Cache {
 
     /// Get the total size of the cache in bytes.
     #[must_use]
+    #[inline]
     pub fn total_size(&self) -> u64 {
         match self {
             Self::Fixed {
@@ -434,6 +436,7 @@ impl Cache {
 
     /// Get the total bytes of the next block without advancing.
     #[must_use]
+    #[inline]
     pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
@@ -442,6 +445,7 @@ impl Cache {
 
     /// Get metadata of the next block without advancing.
     #[must_use]
+    #[inline]
     pub fn peek_next_metadata(&self, handle: &Handle) -> BlockMetadata {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].metadata,
@@ -452,6 +456,7 @@ impl Cache {
     ///
     /// This advances the handle to the next block in the cache and returns a
     /// reference to the block corresponding to `Handle` internal position.
+    #[inline]
     pub fn advance<'a>(&'a self, handle: &mut Handle) -> &'a Block {
         match self {
             Self::Fixed { blocks, .. } => {
