@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fingerprint mechanism now calculates Shannon entropy.
 - Lading now supports a '--json-logs' flag to output logs in structured JSON
   format.
+- Resize blocks after payload generation so that when a significant portion of
+  the buffer is unused it frees that memory.
 
 ## [0.30.0]
 ## Added

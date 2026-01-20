@@ -675,7 +675,16 @@ where
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
     serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
-    let bytes: Bytes = block.into_inner().freeze();
+    let inner = block.into_inner();
+    // When the actual block data usage is under half of its allocated capacity (chunk_size),
+    // shrink its buffer to the actual size to avoid holding onto excess capacity.
+    // This ensures that generators with lots of small blocks respect the total cache size, and
+    // no block cache will hold more than 2x the total cache size in allocated buffers.
+    let bytes: Bytes = if inner.len() < inner.capacity() / 2 {
+        Bytes::copy_from_slice(&inner)
+    } else {
+        inner.freeze()
+    };
     if bytes.is_empty() {
         // Blocks should not be empty and if they are empty this is an
         // error. Caller may choose to handle this however they wish, often it
