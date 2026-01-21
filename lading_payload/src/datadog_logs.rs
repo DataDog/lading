@@ -149,13 +149,16 @@ impl crate::Serialize for DatadogLog {
         }
 
         // Search for an encoding that's just right.
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        let mut buffer: Vec<u8> = Vec::with_capacity(max_bytes);
         let mut high = members.len();
         while high != 0 {
-            let encoding = serde_json::to_string(&members[0..high])?;
-            if encoding.len() > max_bytes {
+            buffer.clear();
+            serde_json::to_writer(&mut buffer, &members[0..high])?;
+            if buffer.len() > max_bytes {
                 high /= 2;
             } else {
-                write!(writer, "{encoding}")?;
+                writer.write_all(&buffer)?;
                 break;
             }
         }
