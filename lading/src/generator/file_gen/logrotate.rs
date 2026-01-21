@@ -36,7 +36,7 @@ use lading_payload::block;
 
 use super::General;
 use crate::generator::common::{
-    BytesThrottleConfig, MetricsBuilder, ThrottleConversionError, create_throttle,
+    BlockThrottle, MetricsBuilder, ThrottleConfig, ThrottleConversionError, create_throttle,
 };
 
 /// An enum to allow us to determine what operation caused an IO errror as the
@@ -147,8 +147,9 @@ pub struct Config {
     /// Whether to use a fixed or streaming block cache
     #[serde(default = "lading_payload::block::default_cache_method")]
     block_cache_method: block::CacheMethod,
-    /// The load throttle configuration
-    pub throttle: Option<BytesThrottleConfig>,
+    /// Throughput profile controlling emission rate (bytes or blocks).
+    #[serde(default)]
+    pub throttle: Option<ThrottleConfig>,
 }
 
 #[derive(Debug)]
@@ -214,7 +215,7 @@ impl Server {
         let mut handles = Vec::new();
 
         for idx in 0..config.concurrent_logs {
-            let throttle =
+            let throughput_throttle =
                 create_throttle(config.throttle.as_ref(), config.bytes_per_second.as_ref())?;
 
             let mut dir_path = config.root.clone();
@@ -234,8 +235,9 @@ impl Server {
                 &basename,
                 config.total_rotations,
                 maximum_bytes_per_log,
+                maximum_block_size.get(),
                 Arc::clone(&block_cache),
-                throttle,
+                throughput_throttle,
                 shutdown.clone(),
                 child_labels,
             );
@@ -283,8 +285,9 @@ struct Child {
     names: Vec<PathBuf>,
     // The soft limit bytes per file that will trigger a rotation.
     maximum_bytes_per_log: NonZeroU32,
+    maximum_block_size: u32,
     block_cache: Arc<block::Cache>,
-    throttle: lading_throttle::Throttle,
+    throttle: BlockThrottle,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
 }
@@ -295,8 +298,9 @@ impl Child {
         basename: &Path,
         total_rotations: u8,
         maximum_bytes_per_log: NonZeroU32,
+        maximum_block_size: u32,
         block_cache: Arc<block::Cache>,
-        throttle: lading_throttle::Throttle,
+        throttle: BlockThrottle,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
     ) -> Self {
@@ -316,6 +320,7 @@ impl Child {
         Self {
             names,
             maximum_bytes_per_log,
+            maximum_block_size,
             block_cache,
             throttle,
             shutdown,
@@ -324,7 +329,10 @@ impl Child {
     }
 
     async fn spin(mut self) -> Result<(), Error> {
-        let buffer_capacity = self.throttle.maximum_capacity() as usize;
+        let mut handle = self.block_cache.handle();
+        let buffer_capacity = self
+            .throttle
+            .maximum_capacity_bytes(self.maximum_block_size);
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
 
@@ -357,21 +365,16 @@ impl Child {
                 })?,
         );
 
-        let mut handle = self.block_cache.handle();
-
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
         loop {
             // SAFETY: By construction the block cache will never be empty
             // except in the event of a catastrophic failure.
-            let total_bytes = self.block_cache.peek_next_size(&handle);
-
             tokio::select! {
-                result = self.throttle.wait_for(total_bytes) => {
+                result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
-                            let block = self.block_cache.advance(&mut handle);
-                            write_bytes(block,
+                            write_bytes(self.block_cache.advance(&mut handle),
                                     &mut fp,
                                     &mut total_bytes_written,
                                     buffer_capacity,

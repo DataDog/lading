@@ -408,6 +408,20 @@ impl Cache {
         Handle { idx: 0 }
     }
 
+    /// Number of blocks in the cache.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Fixed { blocks, .. } => blocks.len(),
+        }
+    }
+
+    /// Whether the cache is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Get the total size of the cache in bytes.
     #[must_use]
     pub fn total_size(&self) -> u64 {

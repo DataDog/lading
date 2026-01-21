@@ -5,6 +5,7 @@
 #![allow(clippy::cast_possible_wrap)]
 
 use crate::generator;
+use crate::generator::common::{RateSpec, ThrottleConversionError, ThrottleMode};
 use fuser::{
     BackgroundSession, FileAttr, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
     ReplyEntry, Request, spawn_mount2,
@@ -55,7 +56,7 @@ pub struct Config {
     maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
-    /// The load profile, controlling bytes per second as a function of time.
+    /// The load profile, controlling bytes or blocks per second as a function of time.
     load_profile: LoadProfile,
 }
 
@@ -63,30 +64,63 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadProfile {
-    /// Constant bytes per second
-    Constant(byte_unit::Byte),
-    /// Linear growth of bytes per second
+    /// Constant rate (bytes or blocks per second).
+    Constant(RateSpec),
+    /// Linear growth of rate (bytes or blocks per second).
     Linear {
-        /// Starting point for bytes per second
-        initial_bytes_per_second: byte_unit::Byte,
-        /// Amount to increase per second
-        rate: byte_unit::Byte,
+        /// Starting point for the rate.
+        #[serde(alias = "initial_bytes_per_second")]
+        initial: RateSpec,
+        /// Amount to increase per second.
+        rate: RateSpec,
     },
 }
 
 impl LoadProfile {
-    fn to_model(self) -> model::LoadProfile {
+    fn to_model(self) -> Result<model::LoadProfile, ThrottleConversionError> {
         // For now, one tick is one second.
         match self {
-            LoadProfile::Constant(bpt) => model::LoadProfile::Constant(bpt.as_u128() as u64),
-            LoadProfile::Linear {
-                initial_bytes_per_second,
-                rate,
-            } => model::LoadProfile::Linear {
-                start: initial_bytes_per_second.as_u128() as u64,
-                rate: rate.as_u128() as u64,
-            },
+            LoadProfile::Constant(rate) => {
+                let (mode, cap) = resolve_rate(&rate)?;
+                match mode {
+                    ThrottleMode::Bytes => Ok(model::LoadProfile::Constant(u64::from(cap.get()))),
+                    ThrottleMode::Blocks => Ok(model::LoadProfile::Blocks {
+                        blocks_per_tick: u64::from(cap.get()),
+                    }),
+                }
+            }
+            LoadProfile::Linear { initial, rate } => {
+                let (m1, init) = resolve_rate(&initial)?;
+                let (m2, rate) = resolve_rate(&rate)?;
+                if m1 != m2 {
+                    return Err(ThrottleConversionError::MixedModes);
+                }
+                match m1 {
+                    ThrottleMode::Bytes => Ok(model::LoadProfile::Linear {
+                        start: u64::from(init.get()),
+                        rate: u64::from(rate.get()),
+                    }),
+                    ThrottleMode::Blocks => Ok(model::LoadProfile::BlocksLinear {
+                        start: u64::from(init.get()),
+                        rate: u64::from(rate.get()),
+                    }),
+                }
+            }
         }
+    }
+}
+
+fn resolve_rate(rate: &RateSpec) -> Result<(ThrottleMode, NonZeroU32), ThrottleConversionError> {
+    match rate {
+        RateSpec::Bytes { bytes_per_second } => {
+            let val = bytes_per_second.as_u128();
+            let val = u32::try_from(val)
+                .map_err(|_| ThrottleConversionError::ValueTooLarge(*bytes_per_second))?;
+            NonZeroU32::new(val)
+                .map(|n| (ThrottleMode::Bytes, n))
+                .ok_or(ThrottleConversionError::Zero)
+        }
+        RateSpec::Blocks { blocks_per_second } => Ok((ThrottleMode::Blocks, *blocks_per_second)),
     }
 }
 
@@ -99,6 +133,9 @@ pub enum Error {
     /// Creation of payload blocks failed.
     #[error("Block creation error: {0}")]
     Block(#[from] block::Error),
+    /// Throttle conversion error
+    #[error("Throttle configuration error: {0}")]
+    ThrottleConversion(#[from] ThrottleConversionError),
     /// Failed to convert, value is 0
     #[error("Value provided must not be zero")]
     Zero,
@@ -154,10 +191,18 @@ impl Server {
             // divvy this up in the future.
             total_bytes.get() as usize,
         )?;
+        let load_profile = config.load_profile.to_model()?;
 
         let start_time = Instant::now();
         let start_time_system = SystemTime::now();
 
+        let block_cache_size = block_cache.total_size();
+        info!(
+            "LogrotateFS block cache initialized: requested={}, actual={} bytes, blocks={}",
+            config.maximum_prebuild_cache_size_bytes,
+            block_cache_size,
+            block_cache.len()
+        );
         let state = model::State::new(
             &mut rng,
             start_time.elapsed().as_secs(),
@@ -166,7 +211,7 @@ impl Server {
             block_cache,
             config.max_depth,
             config.concurrent_logs,
-            config.load_profile.to_model(),
+            load_profile,
         );
 
         info!(
@@ -481,6 +526,7 @@ impl Filesystem for LogrotateFS {
 #[cfg(test)]
 mod tests {
     use super::LoadProfile;
+    use crate::generator::common::RateSpec;
     use serde::Deserialize;
     use serde_yaml::with::singleton_map_recursive;
 
@@ -504,8 +550,28 @@ mod tests {
         "#;
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Constant(..)));
-        if let LoadProfile::Constant(bytes) = w.load_profile {
-            assert_eq!(bytes.as_u64(), 5 * 1024 * 1024);
+        if let LoadProfile::Constant(rate) = w.load_profile {
+            assert!(matches!(rate, RateSpec::Bytes { .. }));
+            if let RateSpec::Bytes { bytes_per_second } = rate {
+                assert_eq!(bytes_per_second.as_u64(), 5 * 1024 * 1024);
+            }
+        }
+    }
+
+    #[test]
+    fn load_profile_constant_blocks_per_second() {
+        let yaml = r#"
+                load_profile:
+                    constant:
+                        blocks_per_second: 100
+            "#;
+        let w = parse_wrapper(yaml);
+        assert!(matches!(w.load_profile, LoadProfile::Constant(_)));
+        if let LoadProfile::Constant(rate) = w.load_profile {
+            assert!(matches!(rate, RateSpec::Blocks { .. }));
+            if let RateSpec::Blocks { blocks_per_second } = rate {
+                assert_eq!(blocks_per_second.get(), 100);
+            }
         }
     }
 
@@ -520,13 +586,61 @@ mod tests {
 
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
-        if let LoadProfile::Linear {
-            initial_bytes_per_second,
-            rate,
-        } = w.load_profile
-        {
-            assert_eq!(initial_bytes_per_second.as_u64(), 10 * 1024 * 1024);
-            assert_eq!(rate.as_u64(), 1 * 1024 * 1024);
+        if let LoadProfile::Linear { initial, rate } = w.load_profile {
+            assert!(matches!(initial, RateSpec::Bytes { .. }));
+            if let RateSpec::Bytes { bytes_per_second } = initial {
+                assert_eq!(bytes_per_second.as_u64(), 10 * 1024 * 1024);
+            }
+            assert!(matches!(rate, RateSpec::Bytes { .. }));
+            if let RateSpec::Bytes { bytes_per_second } = rate {
+                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+            }
+        }
+    }
+
+    #[test]
+    fn load_profile_linear_new_format_flattened_bytes() {
+        let yaml = r#"
+                load_profile:
+                    linear:
+                        initial: "1 MiB"
+                        rate: "100 KiB"
+            "#;
+        let w = parse_wrapper(yaml);
+        assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
+        if let LoadProfile::Linear { initial, rate } = w.load_profile {
+            assert!(matches!(initial, RateSpec::Bytes { .. }));
+            if let RateSpec::Bytes { bytes_per_second } = initial {
+                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+            }
+            assert!(matches!(rate, RateSpec::Bytes { .. }));
+            if let RateSpec::Bytes { bytes_per_second } = rate {
+                assert_eq!(bytes_per_second.as_u64(), 100 * 1024);
+            }
+        }
+    }
+
+    #[test]
+    fn load_profile_linear_blocks_per_second() {
+        let yaml = r#"
+                load_profile:
+                    linear:
+                        initial:
+                            blocks_per_second: 100
+                        rate:
+                            blocks_per_second: 10
+            "#;
+        let w = parse_wrapper(yaml);
+        assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
+        if let LoadProfile::Linear { initial, rate } = w.load_profile {
+            assert!(matches!(initial, RateSpec::Blocks { .. }));
+            if let RateSpec::Blocks { blocks_per_second } = initial {
+                assert_eq!(blocks_per_second.get(), 100);
+            }
+            assert!(matches!(rate, RateSpec::Blocks { .. }));
+            if let RateSpec::Blocks { blocks_per_second } = rate {
+                assert_eq!(blocks_per_second.get(), 10);
+            }
         }
     }
 }

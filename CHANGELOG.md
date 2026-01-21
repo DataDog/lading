@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   format.
 - Resize blocks after payload generation so that when a significant portion of
   the buffer is unused it frees that memory.
+- Add support for throttling based on block rate instead of bytes. This can be useful
+  for generators (like "Static Chunks") that output variably sized blocks intentionally.
 
 ## [0.30.0]
 ## Added
