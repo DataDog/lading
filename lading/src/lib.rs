@@ -17,7 +17,8 @@ mod common;
 pub mod config;
 pub mod generator;
 pub mod inspector;
-pub mod observer;
+/// Target observation utilities.
+pub use lading_observer as observer;
 pub(crate) mod proto;
 pub mod target;
 pub mod target_metrics;

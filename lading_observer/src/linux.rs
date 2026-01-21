@@ -1,9 +1,11 @@
-mod cgroup;
-mod procfs;
+/// Cgroup v2 metrics collection.
+pub mod cgroup;
+/// Procfs metrics collection.
+pub mod procfs;
 mod utils;
 mod wss;
 
-use tracing::{error, warn};
+use tracing::warn;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module

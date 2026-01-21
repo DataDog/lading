@@ -13,15 +13,21 @@ use tokio::fs;
 use tracing::{debug, error, warn};
 
 #[derive(thiserror::Error, Debug)]
+/// Errors that can occur during cgroup v2 operations.
 pub enum Error {
+    /// I/O error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Integer parsing error.
     #[error("Parse int error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+    /// Float parsing error.
     #[error("Parse float error: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// Cgroup v2 not found.
     #[error("Cgroup v2 not found")]
     CgroupV2NotFound,
+    /// PSI parsing error.
     #[error("Parsing PSI error: {0}")]
     ParsingPsi(String),
 }
@@ -52,7 +58,7 @@ pub(crate) async fn get_path(pid: i32) -> Result<PathBuf, Error> {
 /// Polls for any cgroup metrics that can be read, v2 version.
 #[tracing::instrument(skip_all)]
 #[allow(clippy::too_many_lines)]
-pub(crate) async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
+pub async fn poll(file_path: &Path, labels: &[(String, String)]) -> Result<(), Error> {
     // Read all files in the cgroup `path` and create metrics for them. If we
     // lack permissions to read we skip the file. We do not use ? to allow for
     // the maximal number of files to be read.
