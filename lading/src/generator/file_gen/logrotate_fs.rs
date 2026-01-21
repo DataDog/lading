@@ -477,3 +477,56 @@ impl Filesystem for LogrotateFS {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LoadProfile;
+    use serde::Deserialize;
+    use serde_yaml::with::singleton_map_recursive;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Wrapper {
+        load_profile: LoadProfile,
+    }
+    /// Helper to deserialize Wrapper using singleton_map_recursive
+    /// (matches how the main config deserializes nested enums)
+    fn parse_wrapper(yaml: &str) -> Wrapper {
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        singleton_map_recursive::deserialize(value).unwrap()
+    }
+
+    #[test]
+    fn load_profile_constant_bytes() {
+        let yaml = r#"
+            load_profile:
+                constant: "5 MiB"
+        "#;
+        let w = parse_wrapper(yaml);
+        assert!(matches!(w.load_profile, LoadProfile::Constant(..)));
+        if let LoadProfile::Constant(bytes) = w.load_profile {
+            assert_eq!(bytes.as_u64(), 5 * 1024 * 1024);
+        }
+    }
+
+    #[test]
+    fn load_profile_linear_bytes_per_second() {
+        let yaml = r#"
+            load_profile:
+                linear:
+                    initial_bytes_per_second: "10 MiB"
+                    rate: "1 MiB"
+        "#;
+
+        let w = parse_wrapper(yaml);
+        assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
+        if let LoadProfile::Linear {
+            initial_bytes_per_second,
+            rate,
+        } = w.load_profile
+        {
+            assert_eq!(initial_bytes_per_second.as_u64(), 10 * 1024 * 1024);
+            assert_eq!(rate.as_u64(), 1 * 1024 * 1024);
+        }
+    }
+}
