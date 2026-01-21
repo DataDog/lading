@@ -15,3 +15,7 @@ entries:
     technique: inline
     status: success
     file: assets/db/cache-inline.yaml
+  - target: lading_payload/src/datadog_logs.rs::DatadogLog::to_bytes
+    technique: buffer-reuse
+    status: success
+    file: assets/db/datadog-logs-buffer-reuse.yaml
