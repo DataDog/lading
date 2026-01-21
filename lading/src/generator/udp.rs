@@ -237,7 +237,7 @@ impl UdpWorker {
             let total_bytes = self.block_cache.peek_next_size(&handle);
 
             tokio::select! {
-                conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
+                conn = UdpSocket::bind("0.0.0.0:0"), if connection.is_none() => {
                     match conn {
                         Ok(sock) => {
                             debug!("UDP port bound");
