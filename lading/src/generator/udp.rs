@@ -40,6 +40,10 @@ fn default_parallel_connections() -> u16 {
     1
 }
 
+fn default_bind_addr() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 0))
+}
+
 // https://stackoverflow.com/a/42610200
 fn maximum_block_size() -> Byte {
     Byte::from_u64_with_unit(65_507, Unit::B).expect("catastrophic programming bug")
@@ -53,6 +57,9 @@ pub struct Config {
     pub seed: [u8; 32],
     /// The address for the target, must be a valid `SocketAddr`
     pub addr: String,
+    /// The local address to bind the UDP socket to. Defaults to 127.0.0.1:0.
+    #[serde(default = "default_bind_addr")]
+    pub bind_addr: SocketAddr,
     /// The payload variant
     pub variant: lading_payload::Config,
     /// The bytes per second to send or receive from the target
@@ -182,6 +189,7 @@ impl Udp {
 
             let worker = UdpWorker {
                 addr,
+                bind_addr: config.bind_addr,
                 throttle,
                 block_cache: Arc::clone(&block_cache),
                 metric_labels: worker_labels,
@@ -219,6 +227,7 @@ impl Udp {
 
 struct UdpWorker {
     addr: SocketAddr,
+    bind_addr: SocketAddr,
     throttle: BlockThrottle,
     block_cache: Arc<block::Cache>,
     metric_labels: Vec<(String, String)>,
@@ -235,7 +244,7 @@ impl UdpWorker {
         tokio::pin!(shutdown_wait);
         loop {
             tokio::select! {
-                conn = UdpSocket::bind("127.0.0.1:0"), if connection.is_none() => {
+                conn = UdpSocket::bind(self.bind_addr), if connection.is_none() => {
                     match conn {
                         Ok(sock) => {
                             debug!("UDP port bound");

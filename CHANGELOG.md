@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the buffer is unused it frees that memory.
 - Add support for throttling based on block rate instead of bytes. This can be useful
   for generators (like "Static Chunks") that output variably sized blocks intentionally.
+- UDP generator now accepts a `bind_addr` configuration value, maintaining the
+  previous hard-coded value as a default.
 
 ## [0.30.0]
 ## Added
