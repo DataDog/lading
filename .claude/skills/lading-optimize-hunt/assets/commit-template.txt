@@ -1,0 +1,18 @@
+opt: <short-description>
+# |<-------------- Max 50 characters --------------->|
+
+<Brief 1-2 sentence explanation of the change and why it improves performance>
+
+Target: <file:function>
+Technique: <prealloc|cache|avoid-clone|buffer-reuse|etc>
+
+Micro-benchmarks:
+  <benchmark-name>: <-X% time or +X% throughput>
+  <additional-benchmarks-if-applicable>
+
+Macro-benchmarks (payloadtool):
+  Time: <-X% or ~X ms improvement>
+  Memory: <-X% (before -> after MiB)>
+  Allocations: <-X% (before -> after count)>
+
+Co-Authored-By: {MODEL} <noreply@anthropic.com>

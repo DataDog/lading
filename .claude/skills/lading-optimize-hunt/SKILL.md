@@ -94,14 +94,32 @@ git checkout main && git pull
 git checkout -b opt/<crate>-<technique>
 ```
 
-Make ONE change. Commit:
-```bash
-git commit -m "opt: <description>
+Make ONE change. After validating with benchmarks (Phase 4), commit using the template in `assets/commit-template.txt`:
 
-Hypothesis: <expected improvement>
-Technique: <prealloc|cache|avoid-clone|etc>
+```bash
+# Example:
+git commit -m "opt: buffer reuse in syslog serialization
+
+Replaced per-iteration format!() with reusable Vec<u8> buffer.
+
+Target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
+Technique: buffer-reuse
+
+Micro-benchmarks:
+  syslog_100MiB: +42.0% throughput (481 -> 683 MiB/s)
+
+Macro-benchmarks (payloadtool):
+  Time: -14.5% (8.3 ms -> 7.1 ms)
+  Memory: -35.8% (6.17 MiB -> 3.96 MiB)
+  Allocations: -49.3% (67,688 -> 34,331)
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 "
 ```
+
+**Note:**
+- First line must be ≤50 characters (Git best practice)
+- Replace `{MODEL}` with the actual Claude model being used (e.g., "Claude Sonnet 4.5", "Claude Opus 4.5").
 
 ---
 
