@@ -1,0 +1,28 @@
+target: lading_payload/src/block.rs:Cache methods
+technique: inline
+status: success
+date: 2026-01-20
+branch: opt/payload-cache-inline
+measurements:
+  time: -7.2%
+  memory: ~
+  allocations: ~
+lessons: |
+  Added #[inline] to five Cache methods: handle(), total_size(), peek_next_size(),
+  peek_next_metadata(), and advance(). These are public methods in lading_payload
+  called frequently from lading generators in hot loops.
+
+  Without #[inline], these methods cannot be inlined across crate boundaries,
+  forcing function call overhead on every generator iteration. The advance()
+  method is particularly critical as it's called for every block sent.
+
+  Benchmark results (payloadtool with JSON config):
+  - Baseline: 6.9 ms ± 2.4 ms
+  - Optimized: 6.4 ms ± 1.0 ms
+  - Improvement: 7.2% faster, 58% less variance
+
+  Memory usage unchanged (as expected - this only eliminates call overhead).
+
+  Key insight: For small, frequently-called public methods in library crates,
+  #[inline] is essential for cross-crate performance. The compiler cannot
+  inline across crate boundaries without this hint.
