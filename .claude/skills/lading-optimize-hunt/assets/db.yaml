@@ -7,3 +7,7 @@ entries:
     technique: reusable-buffer-eliminate-allocations
     status: success
     file: assets/db/syslog-to_bytes-reusable-buffer.yaml
+  - target: lading_payload/src/fluent.rs::to_bytes
+    technique: on-demand-serialization
+    status: success
+    file: assets/db/fluent-on-demand-serialization.yaml
