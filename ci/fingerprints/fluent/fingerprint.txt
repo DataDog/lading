@@ -1,9 +1,1 @@
-2026-01-22T18:32:21.276585Z  INFO payloadtool: Welcome to payloadtool
-2026-01-22T18:32:21.277837Z  INFO payloadtool: Loaded configuration, found 1 generators
-2026-01-22T18:32:21.281336Z  INFO fixed{payload="fluent"}:construct_block_cache_inner: lading_payload::block: Constructing requested block cache max_block_size=125000 total_bytes=1250000
-2026-01-22T18:32:21.691305Z  INFO fixed{payload="fluent"}:construct_block_cache_inner: lading_payload::block: Filled 1.2408638000488281 MiB of requested 1.1920928955078125 MiB. Discovered minimum block size of 459 B, maximum: 94.41015625 KiB. Total success blocks: 36. Total rejected blocks: 36.
-2026-01-22T18:32:21.691360Z  INFO fixed{payload="fluent"}:construct_block_cache_inner: lading_payload::block: close time.busy=410ms time.idle=584ns
-2026-01-22T18:32:21.691381Z  INFO fixed{payload="fluent"}: lading_payload::block: close time.busy=410ms time.idle=1.42µs
-2026-01-22T18:32:21.691387Z  INFO payloadtool: Payload generation took 413.542209ms
-2026-01-22T18:32:21.694203Z  INFO payloadtool: Generator succeeded in generating 1.1920928955078125 MiB of data
 fluent_tcp: fe41725357f12a5034c71fe47ee07946b9c2e22730f8a0c157a02fd4470369cf entropy=6.6443
