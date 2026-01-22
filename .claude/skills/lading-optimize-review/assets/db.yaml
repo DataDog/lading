@@ -1,0 +1,4 @@
+entries:
+  - branch: opt/fluent-on-demand-serialization
+    verdict: approved
+    file: assets/db/opt-fluent-on-demand-serialization.yaml

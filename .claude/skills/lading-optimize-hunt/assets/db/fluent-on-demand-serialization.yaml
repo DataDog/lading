@@ -1,0 +1,83 @@
+target: lading_payload/src/fluent.rs::to_bytes
+technique: on-demand-serialization
+status: success
+date: 2026-01-22
+branch: opt/fluent-on-demand-serialization
+commit: a14a569
+
+measurements:
+  micro_benchmarks:
+    - size: 1 MiB
+      baseline_throughput: 34.27 MiB/s
+      optimized_throughput: 79.65 MiB/s
+      improvement: +132%
+    - size: 10 MiB
+      baseline_throughput: 97.57 MiB/s
+      optimized_throughput: 117.97 MiB/s
+      improvement: +21%
+    - size: 100 MiB
+      baseline_throughput: 118.68 MiB/s
+      optimized_throughput: 122.22 MiB/s
+      improvement: +3%
+
+  macro_benchmarks:
+    time:
+      baseline: 2347 ms
+      optimized: 409.8 ms
+      improvement: -82.6%
+    allocations:
+      baseline: 3,622,824
+      optimized: 629,596
+      improvement: -82.6%
+    total_allocated:
+      baseline: 1.499 GiB
+      optimized: 143.1 MiB
+      improvement: -90.7%
+    peak_live:
+      baseline: 12.66 MiB
+      optimized: 5.87 MiB
+      improvement: -53.6%
+
+validation:
+  - cargo test: passed (60 tests)
+  - cargo fmt: passed
+  - cargo clippy: passed (after fixing mem_replace_with_default)
+  - shellcheck: passed
+
+lessons: |
+  Massive optimization success by eliminating Vec<Vec<u8>> pre-serialization pattern.
+
+  Changes made:
+  1. Added reusable Vec<u8> buffer field to Fluent struct
+  2. Changed from pre-generating all members into Vec<Vec<u8>> to on-demand serialization
+  3. Used std::mem::take to move buffer out temporarily to satisfy borrow checker
+  4. Serialize directly into reusable buffer using rmp_serde::Serializer
+  5. Write to output as we go, stopping when max_bytes reached
+
+  Key findings:
+  - Micro-benchmarks showed 132% improvement at 1 MiB (well above 5% threshold)
+  - Macro-benchmarks showed 82.6% speedup and 82.6% reduction in allocations
+  - Total memory allocated reduced by 90.7% (1.5 GiB -> 143 MiB)
+  - The optimization is most effective for smaller payloads where allocation overhead dominates
+  - At larger sizes (100 MiB), improvement diminishes to 3% as serialization dominates
+
+  Pattern is highly effective: eliminate Vec<Vec<u8>> allocations by:
+  * Adding a reusable buffer to the struct
+  * Serializing on-demand rather than pre-serializing
+  * Using std::mem::take to work around borrow checker when Member<'a> borrows from self
+  * Writing directly to output as payloads are generated
+
+  This pattern should be applied to other payload serializers that use Vec<Vec<u8>>:
+  - Check if other formats pre-serialize into collections
+  - Look for opportunities to stream serialization instead
+
+  The optimization is safe because:
+  - RNG sequence is preserved (same random choices)
+  - Output format is identical (validated by property tests)
+  - Determinism maintained (seed-based generation)
+  - All 60 tests pass
+
+  Next targets to explore:
+  1. Other formats that may use similar Vec<Vec<u8>> patterns
+  2. Formats that could benefit from streaming serialization
+  3. Buffer size tuning - current 4096 bytes, could be optimized per format

@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 
 use rand::Rng;
+use rmp_serde::Serializer;
+use serde::Serialize;
 use serde_tuple::Serialize_tuple;
 
 use crate::{Error, Generator, common::strings};
@@ -14,6 +16,7 @@ use crate::{Error, Generator, common::strings};
 /// Fluent payload
 pub struct Fluent {
     str_pool: strings::Pool,
+    buffer: Vec<u8>,
 }
 
 impl Fluent {
@@ -24,6 +27,7 @@ impl Fluent {
     {
         Self {
             str_pool: strings::Pool::with_size(rng, 1_000_000),
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -160,45 +164,39 @@ impl crate::Serialize for Fluent {
             return Ok(());
         }
 
-        // We will arbitrarily generate 1_000 Member instances and then
-        // serialize. If this is below `max_bytes` we'll add more until we're
-        // over. Once we are we'll start removing instances until we're back
-        // below the limit.
+        // Serialize members on-demand using a reusable buffer to avoid
+        // allocating a new Vec<u8> for each member. We take the buffer out
+        // temporarily to satisfy the borrow checker, since Member borrows
+        // from self through the string pool.
+        let mut bytes_written = 0;
+        let mut buffer = std::mem::take(&mut self.buffer);
 
-        let mut members: Vec<Vec<u8>> = (0..10)
-            .map(|_| self.generate(&mut rng).expect("failed to generate"))
-            .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize"))
-            .collect();
+        let result = (|| -> Result<(), Error> {
+            loop {
+                let member = self.generate(&mut rng)?;
 
-        // Search for too many Member instances.
-        loop {
-            let encoding_len = members[0..].iter().fold(0, |acc, m| acc + m.len());
-            if encoding_len > max_bytes {
-                break;
-            }
+                // Serialize into reusable buffer
+                buffer.clear();
+                member.serialize(&mut Serializer::new(&mut buffer))?;
 
-            members.extend(
-                (0..10)
-                    .map(|_| self.generate(&mut rng).expect("failed to generate"))
-                    .map(|m: Member| rmp_serde::to_vec(&m).expect("failed to serialize")),
-            );
-        }
+                let member_len = buffer.len();
 
-        // Search for an encoding that's just right.
-        let mut high = members.len();
-        loop {
-            let encoding_len = members[0..high].iter().fold(0, |acc, m| acc + m.len());
-
-            if encoding_len > max_bytes {
-                high /= 2;
-            } else {
-                for m in &members[0..high] {
-                    writer.write_all(m)?;
+                // Check if adding this member would exceed max_bytes
+                if bytes_written + member_len > max_bytes {
+                    break;
                 }
-                break;
+
+                // Write the serialized member
+                writer.write_all(&buffer)?;
+                bytes_written += member_len;
             }
-        }
-        Ok(())
+            Ok(())
+        })();
+
+        // Restore the buffer
+        self.buffer = buffer;
+
+        result
     }
 }
 
