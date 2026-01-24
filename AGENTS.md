@@ -18,9 +18,11 @@ behind these rules, see the [Architecture Decision Records](docs/adr/README.md).
 
 | Task | Key Rules | ADRs |
 |------|-----------|------|
-| Adding a generator | Pre-compute payloads, deterministic RNG, no panics | [001](docs/adr/001-generator-target-blackhole-architecture.md), [002](docs/adr/002-precomputation-philosophy.md), [003](docs/adr/003-determinism-requirements.md) |
-| Adding a blackhole | Must never backpressure target | [001](docs/adr/001-generator-target-blackhole-architecture.md), [005](docs/adr/005-performance-first-design.md) |
-| Modifying throttle | Kani proofs required, formal invariants | [003](docs/adr/003-determinism-requirements.md), [005](docs/adr/005-performance-first-design.md), [006](docs/adr/006-testing-strategy.md) |
+| Adding a generator | Pre-compute payloads, deterministic RNG, no panics, **property tests for determinism** | [001](docs/adr/001-generator-target-blackhole-architecture.md), [002](docs/adr/002-precomputation-philosophy.md), [003](docs/adr/003-determinism-requirements.md), [006](docs/adr/006-testing-strategy.md) |
+| Modifying payload generation | **Property tests for invariants**, deterministic output, no wall-clock time | [002](docs/adr/002-precomputation-philosophy.md), [003](docs/adr/003-determinism-requirements.md), [006](docs/adr/006-testing-strategy.md) |
+| Adding a blackhole | Must never backpressure target, **property tests for throughput guarantees** | [001](docs/adr/001-generator-target-blackhole-architecture.md), [005](docs/adr/005-performance-first-design.md), [006](docs/adr/006-testing-strategy.md) |
+| Modifying throttle | **Kani proofs required**, formal invariants | [003](docs/adr/003-determinism-requirements.md), [005](docs/adr/005-performance-first-design.md), [006](docs/adr/006-testing-strategy.md) |
+| Core algorithm changes | **Proofs where feasible, property tests otherwise** | [006](docs/adr/006-testing-strategy.md) |
 | Writing tests | Property tests default, document invariants | [006](docs/adr/006-testing-strategy.md) |
 | Adding a dependency | Evaluate: performance, determinism, control | [008](docs/adr/008-dependency-philosophy.md) |
 | Code style questions | Shape rule, no mod.rs, imports at top | [007](docs/adr/007-code-style-and-abstraction.md) |
@@ -100,7 +102,9 @@ See [ADR-007](docs/adr/007-code-style-and-abstraction.md).
 **Hierarchy**: Proofs > property tests > unit tests
 
 - Proofs are preferred for all code, but Kani proofs can run for unbounded time
-- Trade-off: we require proofs for critical components (throttle, core algorithms)
+- Trade-off: we require proofs for critical components where feasible
+- **The whole program must be correct**, not just the throttle - generators, payload
+  generation, blackholes, and protocol implementations all have correctness requirements
 - Where proofs are impractical, use property tests via [proptest](https://github.com/proptest-rs/proptest)
 - Unit tests only for simple pure functions
 
@@ -130,6 +134,7 @@ Document **why**, not **what**. The code shows what; comments explain why.
 - `//!` for crate/module level
 - `///` for types and functions
 - Functions: imperative verb, `# Errors`, `# Panics` sections
+- **US-ASCII only** - no Unicode characters in code or documentation
 
 ```rust
 /// Send payload bytes to the target.
@@ -169,7 +174,8 @@ Override locally: `PROPTEST_CASES=512 ci/test`
 1. Run `ci/validate` after changes - never skip
 2. Use ci/ scripts, not raw cargo commands
 3. No panics - Result types only
-4. Critical components need Kani proofs (throttle, core algorithms)
+4. **The whole program must be correct** - property tests for generators, payloads,
+   blackholes; Kani proofs for throttle and core algorithms where feasible
 5. Generators must be deterministic (explicit seeding, IndexMap)
 6. Pre-compute in init, not hot paths
 7. No HashMap/HashSet where iteration order matters

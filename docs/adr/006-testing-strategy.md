@@ -17,8 +17,16 @@ those claims. Traditional unit tests are insufficient because:
 2. They miss edge cases the author didn't think of
 3. They don't prove correctness, only demonstrate it for chosen inputs
 
-The throttle is especially critical: if throttling is wrong, all throughput claims
-made using lading are invalid.
+**The whole program must be correct.** Lading's value depends on correctness across
+all components:
+
+- **Generators**: Must produce deterministic, reproducible load
+- **Payload generation**: Must be byte-identical given the same seed
+- **Throttling**: Must enforce rate limits accurately
+- **Blackholes**: Must never backpressure targets
+- **Protocol implementations**: Must conform to specifications
+
+If any component is incorrect, performance claims made using lading are invalid.
 
 ## Decision
 
@@ -50,16 +58,18 @@ being checked.** Use formal mathematical language where possible.
 
 #### Formal Language Patterns
 
+**Use US-ASCII only** - no Unicode characters in code or documentation.
+
 **Quantified statements** (preferred):
-- "∀ request ≤ max_capacity: capacity' = capacity - request"
+- "forall request <= max_capacity: capacity' = capacity - request"
 - "For all x such that P(x), Q(x) holds"
 
 **Interval bounds**:
 - "Shannon entropy for bytes is bounded [0, 8]"
-- "x ∈ [a, b]" or "a ≤ x ≤ b"
+- "x in [a, b]" or "a <= x <= b"
 
 **Implications** (if...then):
-- "If capacity < request ≤ max_capacity ∧ ticks ≤ INTERVAL, then slop > 0"
+- "If capacity < request <= max_capacity AND ticks <= INTERVAL, then slop > 0"
 
 **Arithmetic relationships**:
 - "capacity' = capacity - request" (new value equals expression of old)
@@ -67,14 +77,14 @@ being checked.** Use formal mathematical language where possible.
 
 **Order invariants**:
 - "reset_capacity must never exceed maximum_capacity"
-- "reset_capacity ≤ maximum_capacity"
+- "reset_capacity <= maximum_capacity"
 
 #### Kani Proof Documentation
 
 Every proof must have a doc comment stating the invariant as a formal claim:
 
 ```rust
-/// ∀ request > maximum_capacity: request(ticks, request) returns Err
+/// forall request > maximum_capacity: request(ticks, request) returns Err
 ///
 /// Capacity requests that exceed the throttle's maximum always error,
 /// regardless of elapsed time or current capacity state.
@@ -90,8 +100,8 @@ fn request_too_large_always_errors() {
 ```
 
 ```rust
-/// ∀ request ≤ max_capacity, ∀ ticks ≤ INTERVAL_TICKS:
-///   slop = 0 ∧ capacity' = max_capacity - request
+/// forall request <= max_capacity, forall ticks <= INTERVAL_TICKS:
+///   slop = 0 AND capacity' = max_capacity - request
 ///
 /// If a request fits within capacity and we're in the first interval,
 /// the request succeeds immediately and capacity decreases by exactly
@@ -107,17 +117,17 @@ Property tests should document the mathematical property being verified:
 ```rust
 proptest! {
     /// Shannon entropy is bounded [0, 8] for byte data.
-    /// H(X) ∈ [0, log₂(256)] = [0, 8] bits
+    /// H(X) in [0, log2(256)] = [0, 8] bits
     #[test]
     fn entropy_bounded(data: Vec<u8>) {
         let entropy = shannon_entropy(&data);
-        prop_assert!(entropy >= 0.0, "H(X) ≥ 0");
-        prop_assert!(entropy <= 8.0, "H(X) ≤ 8");
+        prop_assert!(entropy >= 0.0, "H(X) >= 0");
+        prop_assert!(entropy <= 8.0, "H(X) <= 8");
     }
 
     /// Entropy is order-invariant: H(sort(X)) = H(X)
     ///
-    /// Shannon entropy H = -Σ p(x) * log₂(p(x)) depends only on frequency
+    /// Shannon entropy H = -sum(p(x) * log2(p(x))) depends only on frequency
     /// counts, not element order. Sorting preserves frequencies.
     #[test]
     fn order_invariant(mut data in prop::collection::vec(any::<u8>(), 1..1000)) {
@@ -129,9 +139,22 @@ proptest! {
 }
 ```
 
-### Critical Components Requiring Proofs
+### Critical Components Requiring Proofs or Property Tests
 
-The throttle is the primary example. From `lading_throttle/src/stable.rs`:
+**The whole program must be correct.** Different components have different
+verification requirements based on what's feasible with current tools:
+
+| Component | Verification | Rationale |
+|-----------|--------------|-----------|
+| Throttle | Kani proofs | Small state space, correctness is critical for all throughput claims |
+| Generator determinism | Property tests | Verify same seed produces same output across runs |
+| Payload generation | Property tests | Verify invariants (entropy bounds, format validity, determinism) |
+| Blackhole throughput | Property tests | Verify no backpressure under load |
+| Protocol implementations | Property tests | Verify conformance to specs |
+
+#### Throttle Proofs
+
+From `lading_throttle/src/stable.rs`:
 
 ```rust
 #[cfg(kani)]
@@ -144,6 +167,38 @@ mod proofs {
     #[kani::proof]
     fn wait_time_is_bounded() {
         // Prove that wait times don't overflow
+    }
+}
+```
+
+#### Generator Determinism Tests
+
+```rust
+proptest! {
+    /// forall seed s, forall config c: generate(s, c) = generate(s, c)
+    ///
+    /// Generators must be deterministic: same seed and config
+    /// produces byte-identical output.
+    #[test]
+    fn generator_determinism(seed: [u8; 32], config in valid_config()) {
+        let output1 = generate(&seed, &config);
+        let output2 = generate(&seed, &config);
+        prop_assert_eq!(output1, output2, "Same seed must produce same output");
+    }
+}
+```
+
+#### Payload Invariant Tests
+
+```rust
+proptest! {
+    /// forall payload p generated with seed s: is_valid_format(p)
+    ///
+    /// All generated payloads must conform to their format specification.
+    #[test]
+    fn payload_format_validity(seed: [u8; 32]) {
+        let payload = generate_dogstatsd_payload(&seed);
+        prop_assert!(is_valid_dogstatsd(&payload), "Payload must be valid DogStatsD");
     }
 }
 ```
@@ -211,7 +266,7 @@ Always document the invariant being tested using formal language:
 
 ```rust
 proptest! {
-    /// ∀ sequence of requests R: Σ granted(r) ≤ capacity
+    /// forall sequence of requests R: sum(granted(r)) <= capacity
     ///
     /// The total capacity granted across any sequence of requests never
     /// exceeds the throttle's configured maximum capacity.
@@ -229,7 +284,7 @@ proptest! {
             }
         }
 
-        prop_assert!(total_granted <= capacity, "Σ granted ≤ capacity");
+        prop_assert!(total_granted <= capacity, "sum(granted) <= capacity");
     }
 }
 ```
@@ -243,7 +298,7 @@ Always document the invariant with a formal statement of what is being proven:
 mod proofs {
     use super::*;
 
-    /// ∀ ticks < u64::MAX/2, ∀ interval > 0:
+    /// forall ticks < u64::MAX/2, forall interval > 0:
     ///   calculate_interval(ticks, interval) terminates without panic
     ///
     /// Interval calculation is total (always terminates) and never overflows
@@ -268,7 +323,12 @@ mod proofs {
 | Situation | Testing Approach |
 |-----------|------------------|
 | Throttle correctness | Kani proof |
+| Core algorithm with small state space | Kani proof (if feasible) |
+| Generator determinism | Property test |
 | Payload generation invariants | Property test |
+| Payload format validity | Property test |
+| Blackhole throughput guarantees | Property test |
+| Protocol conformance | Property test |
 | Configuration parsing | Property test |
 | Simple string formatting | Unit test |
 | Error message content | Unit test |
@@ -300,6 +360,8 @@ Formal specifications in TLA+. Rejected because:
 
 - `lading_throttle/src/stable.rs` - Kani proofs for throttling
 - `lading_payload/src/dogstatsd/common/tags.rs` - Property test examples
+- `lading_payload/src/` - Payload generation (requires determinism tests)
+- Generator implementations in `lading/src/generator/` - (require determinism tests)
 - `ci/test` - Test configuration
 - `ci/kani` - Kani proof runner
 - [proptest documentation](https://proptest-rs.github.io/proptest/)
