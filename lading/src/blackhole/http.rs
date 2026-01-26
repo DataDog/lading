@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `bytes_received_distr`: Distribution of compressed bytes per request (with `path` label)
 //! `decoded_bytes_received`: Total decoded bytes received
 //! `decoded_bytes_received_distr`: Distribution of decompressed bytes per request (with `path` label)
@@ -19,7 +20,7 @@ use std::{net::SocketAddr, time::Duration};
 use tracing::error;
 
 use super::General;
-use crate::blackhole::common;
+use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -160,7 +161,9 @@ async fn srv(
 
     let body: Bytes = body.boxed().collect().await?.to_bytes();
 
-    counter!("bytes_received", &metric_labels).increment(body.len() as u64);
+    let body_len = body.len() as u64;
+    counter!("bytes_received", &metric_labels).increment(body_len);
+    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(body_len);
 
     let mut labels_with_path = metric_labels.clone();
     labels_with_path.push(("path".to_string(), path));

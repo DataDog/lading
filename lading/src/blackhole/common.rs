@@ -16,6 +16,11 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
+/// Common labels for metrics shared by all blackholes.
+/// This ensures a single aggregated series across all blackhole types.
+/// Only `component` label is needed to ensure a single aggregated series across all blackhole types.
+pub(super) static COMMON_BLACKHOLE_LABELS: &[(&str, &str)] = &[("component", "blackhole")];
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Wrapper for [`std::io::Error`].
