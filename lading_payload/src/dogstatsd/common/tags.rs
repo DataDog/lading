@@ -1,6 +1,6 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::Pool, tags},
+    common::{strings::PoolTrait, tags},
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -35,7 +35,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        str_pool: Rc<dyn PoolTrait>,
+        tag_pool: Rc<dyn PoolTrait>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         // Adjust tag_length range to account for the colon separator
@@ -50,6 +51,7 @@ impl Generator {
             adjusted_tag_length,
             num_tagsets,
             str_pool,
+            tag_pool,
             unique_tag_probability,
         )?;
         Ok(Generator { inner })
@@ -84,7 +86,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::Generator;
-    use crate::common::strings::Pool;
+    use crate::common::strings::{self, Handle, Pool};
     use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
 
@@ -117,12 +119,12 @@ mod test {
     fn count_contexts_works() {
         // Create tags with identical handles - same context
         let tag1 = Tag {
-            key: (0, 1),
-            value: (2, 1),
+            key: Handle::PosAndLength((0, 1)),
+            value: Handle::PosAndLength((2, 1)),
         };
         let tag2 = Tag {
-            key: (10, 1),
-            value: (12, 1),
+            key: Handle::PosAndLength((10, 1)),
+            value: Handle::PosAndLength((12, 1)),
         };
 
         let tagsets = vec![
@@ -136,16 +138,16 @@ mod test {
 
         // Different tags = different contexts
         let tag3 = Tag {
-            key: (0, 1),
-            value: (3, 1),
+            key: Handle::PosAndLength((0, 1)),
+            value: Handle::PosAndLength((3, 1)),
         };
         let tag4 = Tag {
-            key: (0, 1),
-            value: (4, 1),
+            key: Handle::PosAndLength((0, 1)),
+            value: Handle::PosAndLength((4, 1)),
         };
         let tag5 = Tag {
-            key: (0, 1),
-            value: (5, 1),
+            key: Handle::PosAndLength((0, 1)),
+            value: Handle::PosAndLength((5, 1)),
         };
         let tagsets = vec![
             vec![tag3, tag2],
@@ -165,8 +167,9 @@ mod test {
             let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+            let tag_pool = Rc::clone(&str_pool);
             let generator =
-                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, 1.0)
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
                     .expect("Tag generator to be valid");
 
             let first_batch = (0..num_tagsets)
@@ -204,12 +207,14 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0,
             )
             .expect("Tag generator to be valid");
@@ -242,12 +247,14 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
                 unique_tag_ratio
             )
             .expect("Tag generator to be valid");

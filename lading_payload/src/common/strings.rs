@@ -38,7 +38,6 @@ pub(crate) struct Pool {
 // The pool will not index more than 2**32. Using a type smaller than `usize`
 // allows a more compact representation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
 pub(crate) enum Handle {
     PosAndLength((u32, u32)),
     Index(usize),
@@ -180,11 +179,8 @@ impl PoolTrait for StaticPool {
 
     fn using_handle(&self, handle: Handle) -> Option<&str> {
         if let Handle::Index(idx) = handle {
-            let x = self.metric_names.get(idx).map(|s| s.as_str());
-            println!("{x:?}");
-            x
+            self.metric_names.get(idx).map(|s| s.as_str())
         } else {
-            println!("Dodgy");
             None
         }
     }

@@ -194,6 +194,8 @@ pub struct Config {
     pub unique_tag_ratio: f32,
     /// A list of possible metric names to generate
     pub metric_names: Vec<String>,
+    /// A list of possible tag names to generate
+    pub tag_names: Vec<String>,
 }
 
 impl Default for Config {
@@ -222,6 +224,7 @@ impl Default for Config {
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
             metric_names: Vec::default(),
+            tag_names: Vec::default(),
         }
     }
 }
@@ -361,6 +364,7 @@ impl MemberGenerator {
         value_conf: ValueConf,
         unique_tag_ratio: f32,
         metric_names: Vec<String>,
+        tag_names: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -370,6 +374,18 @@ impl MemberGenerator {
 
         let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
 
+        let tag_pool = if tag_names.is_empty() {
+            Rc::clone(&pool) as Rc<dyn strings::PoolTrait>
+        } else {
+            Rc::new(strings::StaticPool::new(tag_names)) as Rc<dyn strings::PoolTrait>
+        };
+
+        let name_pool = if metric_names.is_empty() {
+            Rc::clone(&pool)
+        } else {
+            Rc::new(strings::StaticPool::new(metric_names)) as Rc<dyn strings::PoolTrait>
+        };
+
         let num_contexts = contexts.sample(rng);
 
         let mut tags_generator = match tags::Generator::new(
@@ -377,7 +393,8 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            Rc::clone(&pool),
+            Rc::clone(&pool) as Rc<dyn strings::PoolTrait>,
+            Rc::clone(&tag_pool),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
@@ -438,7 +455,8 @@ impl MemberGenerator {
             &mut tags_generator,
             &pool,
             value_conf,
-            metric_names,
+            &name_pool,
+            &tag_pool,
             &mut rng,
         );
 
@@ -561,6 +579,7 @@ impl DogStatsD {
             config.value,
             config.unique_tag_ratio,
             std::mem::take(&mut config.metric_names),
+            std::mem::take(&mut config.tag_names),
             rng,
         )?;
 

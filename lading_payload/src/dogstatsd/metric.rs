@@ -31,6 +31,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) num_value_generator: NumValueGenerator,
     pub(crate) str_pool: Rc<strings::Pool>,
     pub(crate) name_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Tags for each template. Each position in this Vec corresponds to the
     /// same position in the templates Vec. The handles are resolved to strings
     /// via `str_pool` during serialization.
@@ -51,7 +52,8 @@ impl MetricGenerator {
         tags_generator: &mut common::tags::Generator,
         str_pool: &Rc<strings::Pool>,
         value_conf: ValueConf,
-        metric_names: Vec<String>,
+        name_pool: &Rc<dyn strings::PoolTrait>,
+        tag_pool: &Rc<dyn strings::PoolTrait>,
         mut rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -59,12 +61,6 @@ impl MetricGenerator {
     {
         let mut templates = Vec::with_capacity(num_contexts);
         let mut tags = Vec::with_capacity(num_contexts);
-
-        let name_pool = if metric_names.is_empty() {
-            Rc::clone(str_pool)
-        } else {
-            Rc::new(strings::StaticPool::new(metric_names)) as Rc<dyn strings::PoolTrait>
-        };
 
         debug!("Generating metric templates for {num_contexts} contexts.",);
         for _ in 0..num_contexts {
@@ -96,7 +92,8 @@ impl MetricGenerator {
             sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
             str_pool: Rc::clone(str_pool),
-            name_pool,
+            name_pool: Rc::clone(name_pool),
+            tag_pool: Rc::clone(tag_pool),
             tags,
         })
     }
@@ -155,6 +152,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     sample_rate,
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -168,6 +166,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     values,
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -182,6 +181,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     sample_rate,
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -196,6 +196,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     sample_rate,
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -210,6 +211,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     sample_rate,
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -223,6 +225,7 @@ impl<'a> Generator<'a> for MetricGenerator {
                     value: values.pop().expect("failed to pop value from Vec"),
                     tags,
                     str_pool: &self.str_pool,
+                    tag_pool: Rc::clone(&self.tag_pool),
                     container_id,
                 }))
             }
@@ -286,6 +289,8 @@ pub struct Count<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -308,7 +313,7 @@ impl fmt::Display for Count<'_> {
             for tag in self.tags {
                 // Format tag from handles: "key:value"
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
@@ -341,6 +346,8 @@ pub struct Gauge<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -359,7 +366,7 @@ impl fmt::Display for Gauge<'_> {
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
@@ -394,6 +401,8 @@ pub struct Timer<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -415,7 +424,7 @@ impl fmt::Display for Timer<'_> {
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
@@ -450,6 +459,8 @@ pub struct Dist<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -471,7 +482,7 @@ impl fmt::Display for Dist<'_> {
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
@@ -504,6 +515,8 @@ pub struct Set<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -518,7 +531,7 @@ impl fmt::Display for Set<'_> {
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
@@ -553,6 +566,8 @@ pub struct Histogram<'a> {
     pub(crate) tags: &'a common::tags::Tagset,
     /// String pool for tag handle lookups during serialization.
     pub(crate) str_pool: &'a strings::Pool,
+    /// The tag pool
+    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
@@ -574,7 +589,7 @@ impl fmt::Display for Histogram<'_> {
             let mut commas_remaining = self.tags.len() - 1;
             for tag in self.tags {
                 let key = self
-                    .str_pool
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self

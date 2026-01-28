@@ -50,12 +50,14 @@ impl TagGenerator {
         str_pool: Rc<Pool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
+        let tag_pool = Rc::clone(&str_pool);
         let inner = tags::Generator::new(
             seed,
             tags_per_msg,
             tag_length,
             num_tagsets,
             str_pool,
+            tag_pool,
             unique_tag_probability,
         )
         .map_err(|_| Error::StringGenerate)?;

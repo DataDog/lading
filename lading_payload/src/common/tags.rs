@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::common::{
     config::ConfRange,
-    strings::{Handle, Pool, PoolTrait},
+    strings::{Handle, PoolTrait},
 };
 
 pub(crate) const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
@@ -69,13 +69,19 @@ impl TagStore {
 /// Generator for individual tags
 #[derive(Debug, Clone)]
 struct TagGenerator {
-    str_pool: Rc<Pool>,
+    str_pool: Rc<dyn PoolTrait>,
+    tag_pool: Rc<dyn PoolTrait>,
     tag_length: ConfRange<u16>,
 }
 
 impl TagGenerator {
-    fn new(str_pool: Rc<Pool>, tag_length: ConfRange<u16>) -> Self {
+    fn new(
+        tag_pool: Rc<dyn PoolTrait>,
+        str_pool: Rc<dyn PoolTrait>,
+        tag_length: ConfRange<u16>,
+    ) -> Self {
         Self {
+            tag_pool,
             str_pool,
             tag_length,
         }
@@ -83,7 +89,7 @@ impl TagGenerator {
 
     fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
     where
-        R: rand::Rng + ?Sized,
+        R: rand::Rng + Sized,
     {
         let desired_size = self.tag_length.sample(rng) as usize;
         // Ensure we have at least 1 character for both key and value
@@ -96,7 +102,7 @@ impl TagGenerator {
         };
         let value_size = desired_size - key_size;
 
-        let key_handle = self.str_pool.of_size_with_handle(rng, key_size);
+        let key_handle = self.tag_pool.of_size_with_handle(rng, key_size);
         let value_handle = self.str_pool.of_size_with_handle(rng, value_size);
 
         match (key_handle, value_handle) {
@@ -167,7 +173,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        str_pool: Rc<dyn PoolTrait>,
+        tag_pool: Rc<dyn PoolTrait>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
@@ -196,7 +203,7 @@ impl Generator {
         }
 
         let rng = SmallRng::seed_from_u64(seed);
-        let tags = TagGenerator::new(str_pool, tag_length);
+        let tags = TagGenerator::new(tag_pool, str_pool, tag_length);
 
         Ok(Generator {
             seed: Cell::new(seed),
