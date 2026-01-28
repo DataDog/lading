@@ -11,7 +11,7 @@ use rand::{
 use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
 use tracing::debug;
 
-use self::strings::{PoolTrait, choose_or_not_ref};
+use self::strings::{Pool, choose_or_not_ref};
 
 use super::{
     ConfRange, ValueConf,
@@ -21,24 +21,34 @@ use super::{
 mod template;
 
 #[derive(Clone, Debug)]
-pub(crate) struct MetricGenerator {
+pub(crate) struct MetricGenerator<NP, KP, VP>
+where
+    NP: Pool,
+    KP: Pool,
+    VP: Pool,
+{
     pub(crate) container_ids: Vec<String>,
-    pub(crate) templates: Vec<template::Template>,
+    pub(crate) templates: Vec<template::Template<NP::Handle>>,
     pub(crate) multivalue_count: ConfRange<u16>,
     pub(crate) multivalue_pack_probability: f32,
     pub(crate) sampling: ConfRange<f32>,
     pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
-    pub(crate) str_pool: Rc<strings::Pool>,
-    pub(crate) name_pool: Rc<dyn strings::PoolTrait>,
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) str_pool: Rc<strings::RandomStringPool>,
+    pub(crate) name_pool: Rc<NP>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Tags for each template. Each position in this Vec corresponds to the
     /// same position in the templates Vec. The handles are resolved to strings
     /// via `str_pool` during serialization.
-    pub(crate) tags: Vec<common::tags::Tagset>,
+    pub(crate) tags: Vec<common::tags::Tagset<KP::Handle, VP::Handle>>,
 }
 
-impl MetricGenerator {
+impl<NP, KP, VP> MetricGenerator<NP, KP, VP>
+where
+    NP: Pool,
+    KP: Pool,
+    VP: Pool,
+{
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         num_contexts: usize,
@@ -49,11 +59,11 @@ impl MetricGenerator {
         sampling_probability: f32,
         metric_weights: &WeightedIndex<u16>,
         container_ids: Vec<String>,
-        tags_generator: &mut common::tags::Generator,
-        str_pool: &Rc<strings::Pool>,
+        tags_generator: &mut common::tags::Generator<KP, VP>,
+        str_pool: &Rc<strings::RandomStringPool>,
         value_conf: ValueConf,
-        name_pool: &Rc<dyn strings::PoolTrait>,
-        tag_pool: &Rc<dyn strings::PoolTrait>,
+        name_pool: &Rc<NP>,
+        tag_pool: &Rc<KP>,
         mut rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -99,8 +109,16 @@ impl MetricGenerator {
     }
 }
 
-impl<'a> Generator<'a> for MetricGenerator {
-    type Output = Metric<'a>;
+impl<'a, NP, KP, VP> Generator<'a> for MetricGenerator<NP, KP, VP>
+where
+    NP: Pool + 'a,
+    KP: Pool + 'a,
+    VP: Pool,
+    NP::Handle: 'a,
+    KP::Handle: 'a,
+    VP::Handle: 'a,
+{
+    type Output = Metric<'a, KP::Handle, VP::Handle, KP>;
     type Error = Error;
 
     #[allow(clippy::too_many_lines)]
@@ -143,7 +161,7 @@ impl<'a> Generator<'a> for MetricGenerator {
         match template {
             Template::Count(count) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(count.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Count(Count {
@@ -158,7 +176,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Gauge(gauge) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(gauge.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Gauge(Gauge {
@@ -187,7 +205,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Histogram(hist) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(hist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Histogram(Histogram {
@@ -202,7 +220,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Timer(timer) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(timer.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Timer(Timer {
@@ -217,7 +235,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Set(set) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(set.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Set(Set {
@@ -235,22 +253,29 @@ impl<'a> Generator<'a> for MetricGenerator {
 
 /// Representation of a dogstatsd Metric
 #[derive(Clone)]
-pub enum Metric<'a> {
+#[allow(private_bounds)]
+pub enum Metric<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Dogstatsd 'count' metric type.
-    Count(Count<'a>),
+    Count(Count<'a, KH, VH, KP>),
     /// Dogstatsd 'gauge' metric type.
-    Gauge(Gauge<'a>),
+    Gauge(Gauge<'a, KH, VH, KP>),
     /// Dogstatsd 'timer' metric type.
-    Timer(Timer<'a>),
+    Timer(Timer<'a, KH, VH, KP>),
     /// Dogstatsd 'histogram' metric type.
-    Histogram(Histogram<'a>),
+    Histogram(Histogram<'a, KH, VH, KP>),
     /// Dogstatsd 'set' metric type.
-    Set(Set<'a>),
+    Set(Set<'a, KH, VH, KP>),
     /// Dogstatsd 'distribution' metric type.
-    Distribution(Dist<'a>),
+    Distribution(Dist<'a, KH, VH, KP>),
 }
 
-impl fmt::Display for Metric<'_> {
+impl<KP> fmt::Display for Metric<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Count(count) => write!(f, "{count}"),
@@ -263,7 +288,10 @@ impl fmt::Display for Metric<'_> {
     }
 }
 
-impl std::fmt::Debug for Metric<'_> {
+impl<KP> std::fmt::Debug for Metric<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Count(count) => write!(f, "{count}"),
@@ -278,7 +306,11 @@ impl std::fmt::Debug for Metric<'_> {
 
 #[derive(Clone, Debug)]
 /// The count type in `DogStatsD` metric format. Monotonically increasing value.
-pub struct Count<'a> {
+#[allow(private_bounds)]
+pub struct Count<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Values of the metric.
@@ -286,16 +318,19 @@ pub struct Count<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Count<'_> {
+impl<KP> fmt::Display for Count<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAGVALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -337,22 +372,29 @@ impl fmt::Display for Count<'_> {
 
 #[derive(Clone, Debug)]
 /// The gauge type in `DogStatsD` format.
-pub struct Gauge<'a> {
+#[allow(private_bounds)]
+pub struct Gauge<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Values of the metric.
     pub values: Vec<common::NumValue>,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Gauge<'_> {
+impl<KP> fmt::Display for Gauge<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -390,7 +432,11 @@ impl fmt::Display for Gauge<'_> {
 
 #[derive(Clone, Debug)]
 /// The timer type in `DogStatsD` format.
-pub struct Timer<'a> {
+#[allow(private_bounds)]
+pub struct Timer<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Values of the metric.
@@ -398,16 +444,19 @@ pub struct Timer<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Timer<'_> {
+impl<KP> fmt::Display for Timer<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -448,7 +497,11 @@ impl fmt::Display for Timer<'_> {
 
 #[derive(Clone, Debug)]
 /// The distribution type in `DogStatsD` format.
-pub struct Dist<'a> {
+#[allow(private_bounds)]
+pub struct Dist<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Values of the metric.
@@ -456,16 +509,19 @@ pub struct Dist<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Dist<'_> {
+impl<KP> fmt::Display for Dist<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|d|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|d|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -506,22 +562,29 @@ impl fmt::Display for Dist<'_> {
 
 #[derive(Clone, Debug)]
 /// The set type in `DogStatsD` format.
-pub struct Set<'a> {
+#[allow(private_bounds)]
+pub struct Set<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Value of the metric.
     pub value: common::NumValue,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Set<'_> {
+impl<KP> fmt::Display for Set<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|s|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         let name = &self.name;
@@ -555,7 +618,11 @@ impl fmt::Display for Set<'_> {
 
 #[derive(Clone, Debug)]
 /// The histogram type in `DogStatsD` format.
-pub struct Histogram<'a> {
+#[allow(private_bounds)]
+pub struct Histogram<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Name of the metric.
     pub name: &'a str,
     /// Values of the metric.
@@ -563,16 +630,19 @@ pub struct Histogram<'a> {
     /// Sample rate of the metric.
     pub sample_rate: Option<common::ZeroToOne>,
     /// Tags of the metric.
-    pub(crate) tags: &'a common::tags::Tagset,
+    pub(crate) tags: &'a common::tags::Tagset<KH, VH>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
     /// The tag pool
-    pub(crate) tag_pool: Rc<dyn strings::PoolTrait>,
+    pub(crate) tag_pool: Rc<KP>,
     /// Container ID of the metric.
     pub container_id: Option<&'a str>,
 }
 
-impl fmt::Display for Histogram<'_> {
+impl<KP> fmt::Display for Histogram<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // <METRIC_NAME>:<VALUE>|h|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|h|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>

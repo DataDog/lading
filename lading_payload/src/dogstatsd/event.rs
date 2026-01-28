@@ -5,21 +5,31 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 
-use self::strings::{choose_or_not_fn, PoolTrait};
+use self::strings::{choose_or_not_fn, Pool};
 
 use super::{ConfRange, common};
 
 #[derive(Debug, Clone)]
-pub(crate) struct EventGenerator {
+pub(crate) struct EventGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     pub(crate) title_length: ConfRange<u16>,
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
-    pub(crate) str_pool: Rc<strings::Pool>,
-    pub(crate) tags_generator: common::tags::Generator,
+    pub(crate) str_pool: Rc<strings::RandomStringPool>,
+    pub(crate) tags_generator: common::tags::Generator<KP, VP>,
 }
 
-impl<'a> Generator<'a> for EventGenerator {
-    type Output = Event<'a>;
+impl<'a, KP, VP> Generator<'a> for EventGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+    KP::Handle: 'a,
+    VP::Handle: 'a,
+{
+    type Output = Event<'a, KP::Handle, VP::Handle>;
     type Error = Error;
 
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
@@ -69,7 +79,7 @@ impl<'a> Generator<'a> for EventGenerator {
 
 /// An event, like a syslog kind of.
 #[derive(Debug)]
-pub struct Event<'a> {
+pub struct Event<'a, KH, VH> {
     /// Title of the event.
     pub title: &'a str,
     /// Text of the event.
@@ -91,12 +101,12 @@ pub struct Event<'a> {
     /// Alert type of the event.
     pub alert_type: Option<Alert>,
     /// Tags of the event
-    pub(crate) tags: Option<common::tags::Tagset>,
+    pub(crate) tags: Option<common::tags::Tagset<KH, VH>>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
 }
 
-impl fmt::Display for Event<'_> {
+impl fmt::Display for Event<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(

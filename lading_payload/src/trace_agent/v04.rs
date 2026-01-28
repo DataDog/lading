@@ -11,7 +11,10 @@ use serde::Serialize;
 
 use crate::{
     Error, Generator,
-    common::{config::ConfRange, strings::{self, PoolTrait}},
+    common::{
+        config::ConfRange,
+        strings::{self, Pool},
+    },
 };
 
 // A v0.4 Trace is a Vec<Span> that obeys the following properties:
@@ -227,20 +230,20 @@ pub struct Trace<'a> {
 #[derive(Debug, Clone)]
 struct TraceTemplate {
     /// Handle to service name in the string pool
-    service: strings::Handle,
+    service: strings::PosAndLengthHandle,
     /// Handle to operation name in the string pool
-    operation: strings::Handle,
+    operation: strings::PosAndLengthHandle,
     /// Handle to resource name in the string pool
-    resource: strings::Handle,
+    resource: strings::PosAndLengthHandle,
     /// Handle to span type in the string pool
-    span_type: strings::Handle,
+    span_type: strings::PosAndLengthHandle,
 }
 
 /// V0.4 payload generator
 #[derive(Debug, Clone)]
 pub struct V04 {
     config: Config,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     /// Pre-generated templates indexed by context ID
     templates: Vec<TraceTemplate>,
 }
@@ -255,7 +258,7 @@ impl V04 {
     where
         R: Rng + ?Sized,
     {
-        let str_pool = Rc::new(strings::Pool::with_size(rng, STRING_POOL_SIZE));
+        let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, STRING_POOL_SIZE));
 
         let num_contexts = config.contexts.sample(rng) as usize;
         let mut templates = Vec::with_capacity(num_contexts);

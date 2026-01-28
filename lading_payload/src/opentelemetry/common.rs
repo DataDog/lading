@@ -6,7 +6,7 @@ pub(crate) mod templates;
 
 use crate::{
     Error, Generator, SizedGenerator,
-    common::{config::ConfRange, strings::Pool, tags},
+    common::{config::ConfRange, strings, tags},
 };
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use prost::Message;
@@ -32,7 +32,7 @@ pub(crate) const SMALLEST_KV_PROTOBUF: usize = 10;
 /// Tag generator for OpenTelemetry attributes
 #[derive(Debug, Clone)]
 pub(crate) struct TagGenerator {
-    inner: tags::Generator,
+    inner: tags::Generator<strings::RandomStringPool, strings::RandomStringPool>,
 }
 
 impl TagGenerator {
@@ -47,7 +47,7 @@ impl TagGenerator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        str_pool: Rc<strings::RandomStringPool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         let tag_pool = Rc::clone(&str_pool);

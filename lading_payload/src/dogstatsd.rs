@@ -339,12 +339,54 @@ impl Config {
     }
 }
 
+/// Enum to handle either Pool or StaticPool for dynamic pool selection
+#[derive(Debug, Clone)]
+enum PoolOrStatic {
+    Pool(Rc<strings::RandomStringPool>),
+    Static(Rc<strings::StaticPool>),
+}
+
+impl strings::Pool for PoolOrStatic {
+    type Handle = strings::PosAndLengthHandle;
+
+    fn of_size_with_handle<'a>(
+        &'a self,
+        rng: &mut dyn rand::RngCore,
+        bytes: usize,
+    ) -> Option<(&'a str, Self::Handle)> {
+        match self {
+            PoolOrStatic::Pool(p) => p.of_size_with_handle(rng, bytes),
+            PoolOrStatic::Static(p) => {
+                // StaticPool returns IndexHandle, but we need PosAndLengthHandle
+                // We'll need to convert it
+                p.of_size_with_handle(rng, bytes).map(|(s, h)| {
+                    // Convert IndexHandle to PosAndLengthHandle
+                    // This is a bit of a hack, but necessary for compatibility
+                    let strings::IndexHandle(idx) = h;
+                    (s, strings::PosAndLengthHandle(idx as u32, s.len() as u32))
+                })
+            }
+        }
+    }
+
+    fn using_handle(&self, handle: Self::Handle) -> Option<&str> {
+        match self {
+            PoolOrStatic::Pool(p) => p.using_handle(handle),
+            PoolOrStatic::Static(p) => {
+                // Convert PosAndLengthHandle back to IndexHandle
+                let strings::PosAndLengthHandle(idx, _) = handle;
+                p.using_handle(strings::IndexHandle(idx as usize))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct MemberGenerator {
     kind_weights: WeightedIndex<u16>,
-    event_generator: EventGenerator,
-    service_check_generator: ServiceCheckGenerator,
-    metric_generator: MetricGenerator,
+    event_generator: EventGenerator<PoolOrStatic, strings::RandomStringPool>,
+    service_check_generator: ServiceCheckGenerator<PoolOrStatic, strings::RandomStringPool>,
+    metric_generator: MetricGenerator<PoolOrStatic, PoolOrStatic, strings::RandomStringPool>,
 }
 
 impl MemberGenerator {
@@ -372,18 +414,17 @@ impl MemberGenerator {
     {
         // TODO only create the Generators if they're needed per the kind weights
 
-        let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
-
+        let pool = Rc::new(strings::RandomStringPool::with_size(&mut rng, 8_000_000));
         let tag_pool = if tag_names.is_empty() {
-            Rc::clone(&pool) as Rc<dyn strings::PoolTrait>
+            PoolOrStatic::Pool(Rc::clone(&pool))
         } else {
-            Rc::new(strings::StaticPool::new(tag_names)) as Rc<dyn strings::PoolTrait>
+            PoolOrStatic::Static(Rc::new(strings::StaticPool::new(tag_names)))
         };
 
         let name_pool = if metric_names.is_empty() {
-            Rc::clone(&pool)
+            PoolOrStatic::Pool(Rc::clone(&pool))
         } else {
-            Rc::new(strings::StaticPool::new(metric_names)) as Rc<dyn strings::PoolTrait>
+            PoolOrStatic::Static(Rc::new(strings::StaticPool::new(metric_names)))
         };
 
         let num_contexts = contexts.sample(rng);
@@ -393,8 +434,8 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            Rc::clone(&pool) as Rc<dyn strings::PoolTrait>,
-            Rc::clone(&tag_pool),
+            Rc::clone(&pool),
+            Rc::new(tag_pool.clone()),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
@@ -455,8 +496,8 @@ impl MemberGenerator {
             &mut tags_generator,
             &pool,
             value_conf,
-            &name_pool,
-            &tag_pool,
+            &Rc::new(name_pool.clone()),
+            &Rc::new(tag_pool.clone()),
             &mut rng,
         );
 
@@ -478,7 +519,13 @@ impl MemberGenerator {
 }
 
 impl MemberGenerator {
-    fn generate<'a, R>(&'a self, rng: &mut R) -> Result<Member<'a>, crate::Error>
+    fn generate<'a, R>(
+        &'a self,
+        rng: &mut R,
+    ) -> Result<
+        Member<'a, strings::PosAndLengthHandle, strings::PosAndLengthHandle, PoolOrStatic>,
+        crate::Error,
+    >
     where
         R: rand::Rng + ?Sized,
     {
@@ -497,18 +544,38 @@ impl MemberGenerator {
 }
 
 // https://docs.datadoghq.com/developers/dogstatsd/datagram_shell/
-#[derive(Debug)]
 /// Supra-type for all dogstatsd variants
-pub enum Member<'a> {
+#[allow(private_bounds)]
+pub enum Member<'a, KH, VH, KP>
+where
+    KP: strings::Pool<Handle = KH>,
+{
     /// Metrics
-    Metric(metric::Metric<'a>),
+    Metric(metric::Metric<'a, KH, VH, KP>),
     /// Events, think syslog.
-    Event(event::Event<'a>),
+    Event(event::Event<'a, KH, VH>),
     /// Services, checked.
-    ServiceCheck(service_check::ServiceCheck<'a>),
+    ServiceCheck(service_check::ServiceCheck<'a, KH, VH>),
 }
 
-impl fmt::Display for Member<'_> {
+impl<KP> std::fmt::Debug
+    for Member<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Metric(m) => f.debug_tuple("Metric").field(m).finish(),
+            Self::Event(e) => f.debug_tuple("Event").field(e).finish(),
+            Self::ServiceCheck(sc) => f.debug_tuple("ServiceCheck").field(sc).finish(),
+        }
+    }
+}
+
+impl<KP> fmt::Display for Member<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, KP>
+where
+    KP: strings::Pool<Handle = strings::PosAndLengthHandle>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Metric(m) => write!(f, "{m}"),
@@ -547,7 +614,14 @@ impl DogStatsD {
     /// # Errors
     ///
     /// Function will error if a member could not be generated
-    pub fn generate<R>(&self, rng: &mut R) -> Result<Member<'_>, crate::Error>
+    #[allow(private_interfaces)]
+    pub fn generate<R>(
+        &self,
+        rng: &mut R,
+    ) -> Result<
+        Member<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle, PoolOrStatic>,
+        crate::Error,
+    >
     where
         R: rand::Rng + ?Sized,
     {
@@ -632,7 +706,12 @@ impl DogStatsD {
         let mut member_buffer: Vec<u8> = Vec::with_capacity(256);
 
         loop {
-            let member: Member = self.member_generator.generate(&mut rng)?;
+            let member: Member<
+                '_,
+                strings::PosAndLengthHandle,
+                strings::PosAndLengthHandle,
+                PoolOrStatic,
+            > = self.member_generator.generate(&mut rng)?;
             member_buffer.clear();
             // Format into the temporary buffer - write! on Vec<u8> is infallible
             write!(&mut member_buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
@@ -683,7 +762,12 @@ impl DogStatsD {
         // Each member is formatted here, measured, then written to the output.
         let mut buffer: Vec<u8> = Vec::with_capacity(256);
         loop {
-            let member: Member = self.member_generator.generate(&mut rng)?;
+            let member: Member<
+                '_,
+                strings::PosAndLengthHandle,
+                strings::PosAndLengthHandle,
+                PoolOrStatic,
+            > = self.member_generator.generate(&mut rng)?;
             buffer.clear();
             // Format into the reusable buffer - write! on Vec<u8> is infallible
             write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");

@@ -1,6 +1,6 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::PoolTrait, tags},
+    common::{strings::Pool, tags},
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -11,8 +11,12 @@ use std::rc::Rc;
 pub(crate) use tags::Tagset;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Generator {
-    inner: tags::Generator,
+pub(crate) struct Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
+    inner: tags::Generator<KP, VP>,
 }
 
 /// Error type for `TagGenerator`
@@ -23,7 +27,11 @@ pub(crate) enum Error {
     InvalidConstruction(#[from] crate::common::tags::Error),
 }
 
-impl Generator {
+impl<KP, VP> Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     /// Creates a new tag generator
     ///
     /// # Errors
@@ -35,8 +43,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<dyn PoolTrait>,
-        tag_pool: Rc<dyn PoolTrait>,
+        key_pool: Rc<VP>,
+        tag_pool: Rc<KP>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         // Adjust tag_length range to account for the colon separator
@@ -50,7 +58,7 @@ impl Generator {
             tags_per_msg,
             adjusted_tag_length,
             num_tagsets,
-            str_pool,
+            key_pool,
             tag_pool,
             unique_tag_probability,
         )?;
@@ -59,8 +67,14 @@ impl Generator {
 }
 
 // https://docs.datadoghq.com/getting_started/tagging/#define-tags
-impl<'a> crate::Generator<'a> for Generator {
-    type Output = Tagset;
+impl<'a, KP, VP> crate::Generator<'a> for Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+    KP::Handle: 'a,
+    VP::Handle: 'a,
+{
+    type Output = Tagset<KP::Handle, VP::Handle>;
     type Error = crate::Error;
 
     /// Return a tagset -- a list of tags as handle pairs (key, value).
@@ -86,12 +100,14 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::Generator;
-    use crate::common::strings::{self, Handle, Pool};
+    use crate::common::strings::{PosAndLengthHandle, RandomStringPool};
     use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
 
     /// Given a list of tagsets, count unique contexts.
-    fn count_num_contexts(tagsets: &[tags::Tagset]) -> usize {
+    fn count_num_contexts(
+        tagsets: &[tags::Tagset<PosAndLengthHandle, PosAndLengthHandle>],
+    ) -> usize {
         let mut unique_contexts: HashSet<u64> = HashSet::new();
         let hash_builder = RandomState::new();
 
@@ -119,12 +135,12 @@ mod test {
     fn count_contexts_works() {
         // Create tags with identical handles - same context
         let tag1 = Tag {
-            key: Handle::PosAndLength((0, 1)),
-            value: Handle::PosAndLength((2, 1)),
+            key: PosAndLengthHandle(0, 1),
+            value: PosAndLengthHandle(2, 1),
         };
         let tag2 = Tag {
-            key: Handle::PosAndLength((10, 1)),
-            value: Handle::PosAndLength((12, 1)),
+            key: PosAndLengthHandle(10, 1),
+            value: PosAndLengthHandle(12, 1),
         };
 
         let tagsets = vec![
@@ -138,16 +154,16 @@ mod test {
 
         // Different tags = different contexts
         let tag3 = Tag {
-            key: Handle::PosAndLength((0, 1)),
-            value: Handle::PosAndLength((3, 1)),
+            key: PosAndLengthHandle(0, 1),
+            value: PosAndLengthHandle(3, 1),
         };
         let tag4 = Tag {
-            key: Handle::PosAndLength((0, 1)),
-            value: Handle::PosAndLength((4, 1)),
+            key: PosAndLengthHandle(0, 1),
+            value: PosAndLengthHandle(4, 1),
         };
         let tag5 = Tag {
-            key: Handle::PosAndLength((0, 1)),
-            value: Handle::PosAndLength((5, 1)),
+            key: PosAndLengthHandle(0, 1),
+            value: PosAndLengthHandle(5, 1),
         };
         let tagsets = vec![
             vec![tag3, tag2],
@@ -164,7 +180,7 @@ mod test {
         fn tagsets_repeat_after_reaching_tagset_max(seed: u64, num_tagsets in 1..10_000_usize) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, 1_000_000));
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let tag_pool = Rc::clone(&str_pool);
@@ -206,7 +222,7 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, 500_000));
             let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,
@@ -246,7 +262,7 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, 500_000));
             let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,

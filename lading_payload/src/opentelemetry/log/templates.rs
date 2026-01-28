@@ -55,7 +55,7 @@ impl TraceIdPool {
 #[derive(Debug, Clone)]
 pub(crate) struct LogTemplateGenerator {
     severity_dist: WeightedIndex<u16>,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     trace_pool: Rc<TraceIdPool>,
     tags: TagGenerator,
     body_size: ConfRange<u16>,
@@ -64,7 +64,7 @@ pub(crate) struct LogTemplateGenerator {
 impl LogTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
@@ -199,14 +199,14 @@ impl<'a> crate::SizedGenerator<'a> for LogTemplateGenerator {
 pub(crate) struct ScopeTemplateGenerator {
     log_gen: LogTemplateGenerator,
     tags: TagGenerator,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     logs_per_scope: ConfRange<u8>,
 }
 
 impl ScopeTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
@@ -317,7 +317,7 @@ pub(crate) struct ResourceTemplateGenerator {
 impl ResourceTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>

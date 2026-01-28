@@ -301,7 +301,7 @@ impl fmt::Display for Member<'_> {
 #[derive(Debug, Clone)]
 /// Apache Common log format payload
 pub struct ApacheCommon {
-    str_pool: strings::Pool,
+    str_pool: strings::RandomStringPool,
 }
 
 impl ApacheCommon {
@@ -311,7 +311,7 @@ impl ApacheCommon {
         R: rand::Rng + ?Sized,
     {
         Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: strings::RandomStringPool::with_size(rng, 1_000_000),
         }
     }
 }

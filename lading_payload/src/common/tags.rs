@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::common::{
     config::ConfRange,
-    strings::{Handle, PoolTrait},
+    strings::Pool,
 };
 
 pub(crate) const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
@@ -20,25 +20,38 @@ pub(crate) const MIN_TAG_LENGTH: u16 = 3;
 
 /// List of tags that will be present on a dogstatsd message
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Tag {
-    pub(crate) key: Handle,
-    pub(crate) value: Handle,
+pub(crate) struct Tag<KH, VH> {
+    pub(crate) key: KH,
+    pub(crate) value: VH,
 }
-pub(crate) type Tagset = Vec<Tag>;
+pub(crate) type Tagset<KH, VH> = Vec<Tag<KH, VH>>;
 
 /// A store for managing unique tags with O(1) insertion and random selection
-#[derive(Debug, Default, Clone)]
-struct TagStore {
-    set: HashSet<Tag>, // O(1) uniqueness checks
-    vec: Vec<Tag>,     // O(1) random selection
+#[derive(Debug, Clone)]
+struct TagStore<KH, VH> {
+    set: HashSet<Tag<KH, VH>>, // O(1) uniqueness checks
+    vec: Vec<Tag<KH, VH>>,     // O(1) random selection
 }
 
-impl TagStore {
+impl<KH, VH> Default for TagStore<KH, VH> {
+    fn default() -> Self {
+        Self {
+            set: HashSet::new(),
+            vec: Vec::new(),
+        }
+    }
+}
+
+impl<KH, VH> TagStore<KH, VH>
+where
+    KH: Clone + Copy + std::fmt::Debug + PartialEq + Eq + std::hash::Hash + Default,
+    VH: Clone + Copy + std::fmt::Debug + PartialEq + Eq + std::hash::Hash + Default,
+{
     fn new() -> Self {
         Self::default()
     }
 
-    fn insert(&mut self, tag: Tag) -> bool {
+    fn insert(&mut self, tag: Tag<KH, VH>) -> bool {
         if self.set.insert(tag) {
             self.vec.push(tag);
             true
@@ -51,7 +64,7 @@ impl TagStore {
         self.set.is_empty()
     }
 
-    fn random_tag<R: Rng>(&self, rng: &mut R) -> Option<&Tag> {
+    fn random_tag<R: Rng>(&self, rng: &mut R) -> Option<&Tag<KH, VH>> {
         if self.vec.is_empty() {
             None
         } else {
@@ -68,16 +81,24 @@ impl TagStore {
 
 /// Generator for individual tags
 #[derive(Debug, Clone)]
-struct TagGenerator {
-    str_pool: Rc<dyn PoolTrait>,
-    tag_pool: Rc<dyn PoolTrait>,
+struct TagGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
+    str_pool: Rc<VP>,
+    tag_pool: Rc<KP>,
     tag_length: ConfRange<u16>,
 }
 
-impl TagGenerator {
+impl<KP, VP> TagGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     fn new(
-        tag_pool: Rc<dyn PoolTrait>,
-        str_pool: Rc<dyn PoolTrait>,
+        tag_pool: Rc<KP>,
+        str_pool: Rc<VP>,
         tag_length: ConfRange<u16>,
     ) -> Self {
         Self {
@@ -87,7 +108,7 @@ impl TagGenerator {
         }
     }
 
-    fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
+    fn generate<R>(&self, rng: &mut R) -> Result<Tag<KP::Handle, VP::Handle>, crate::Error>
     where
         R: rand::Rng + Sized,
     {
@@ -142,15 +163,19 @@ impl TagGenerator {
 /// over-sample the existing tags and therefore UNDER-generate the desired
 /// number of unique tagsets.
 #[derive(Debug, Clone)]
-pub(crate) struct Generator {
+pub(crate) struct Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     seed: Cell<u64>,
     internal_rng: RefCell<SmallRng>,
     tagsets_produced: Cell<usize>,
     num_tagsets: usize, // Maximum number of unique tagsets that will ever be generated
     tags_per_msg: ConfRange<u8>, // Maximum number of tags per individually generated tagset
-    tags: TagGenerator,
+    tags: TagGenerator<KP, VP>,
     unique_tag_probability: f32,
-    tag_store: RefCell<TagStore>,
+    tag_store: RefCell<TagStore<KP::Handle, VP::Handle>>,
 }
 
 /// Error type for `TagGenerator`
@@ -161,7 +186,11 @@ pub(crate) enum Error {
     InvalidConstruction(String),
 }
 
-impl Generator {
+impl<KP, VP> Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     /// Creates a new tagset generator
     ///
     /// # Errors
@@ -173,8 +202,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<dyn PoolTrait>,
-        tag_pool: Rc<dyn PoolTrait>,
+        str_pool: Rc<VP>,
+        tag_pool: Rc<KP>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
@@ -221,13 +250,19 @@ impl Generator {
     /// represents. None if handle is not valid.
     #[must_use]
     #[inline]
-    pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
+    pub(crate) fn using_handle(&self, handle: VP::Handle) -> Option<&str> {
         self.tags.str_pool.using_handle(handle)
     }
 }
 
-impl<'a> crate::Generator<'a> for Generator {
-    type Output = Tagset;
+impl<'a, KP, VP> crate::Generator<'a> for Generator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+    KP::Handle: 'a,
+    VP::Handle: 'a,
+{
+    type Output = Tagset<KP::Handle, VP::Handle>;
     type Error = crate::Error;
 
     /// Return a tagset -- a list of tags
@@ -259,7 +294,7 @@ impl<'a> crate::Generator<'a> for Generator {
             self.tagsets_produced.set(0);
         }
 
-        let mut tagset: Tagset = Vec::new();
+        let mut tagset: Tagset<KP::Handle, VP::Handle> = Vec::new();
         let mut rng = self.internal_rng.borrow_mut();
         let tags_count = self.tags_per_msg.sample(&mut *rng) as usize;
         let mut tag_store = self.tag_store.borrow_mut();
@@ -308,8 +343,7 @@ mod test {
     use super::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, WARN_UNIQUE_TAG_RATIO};
     use crate::Generator;
     use crate::common::config::ConfRange;
-    use crate::common::strings::Pool;
-    use crate::common::tags::Handle;
+    use crate::common::strings::RandomStringPool;
 
     proptest! {
         #[test]
@@ -323,7 +357,8 @@ mod test {
         ) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, pool_size));
+            let tag_pool = Rc::clone(&str_pool);
             let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
             let tag_size_range = ConfRange::Inclusive{min: tag_size_min, max: tag_size_max};
             let generator = super::Generator::new(
@@ -332,6 +367,7 @@ mod test {
                 tag_size_range,
                 num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0
             ).expect("Tag generator to be valid");
 
@@ -360,7 +396,8 @@ mod test {
         ) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, pool_size));
+            let tag_pool = Rc::clone(&str_pool);
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: tags_per_msg_max };
             let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
             let generator = super::Generator::new(
@@ -369,6 +406,7 @@ mod test {
                 tag_size_range,
                 num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0
             ).expect("Tag generator to be valid");
 
@@ -410,17 +448,20 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(RandomStringPool::with_size(&mut rng, pool_size));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = super::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
                 unique_tag_ratio
             ).expect("Tag generator to be valid");
 
-            let mut unique_tagsets: HashSet<Vec<(Handle, Handle)>> = HashSet::new();
+            use crate::common::strings::PosAndLengthHandle;
+            let mut unique_tagsets: HashSet<Vec<(PosAndLengthHandle, PosAndLengthHandle)>> = HashSet::new();
             for _ in 0..desired_num_tagsets {
                 let ts = generator.generate(&mut rng)?;
                 // Hash the tag-set as an ordered list of (key,value) pairs

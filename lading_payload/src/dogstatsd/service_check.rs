@@ -5,22 +5,32 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRando
 
 use crate::{
     Error, Generator,
-    common::strings::{self, choose_or_not_ref, PoolTrait},
+    common::strings::{self, choose_or_not_ref, Pool},
 };
 
 use super::common::{self, tags::Tagset};
 
 #[derive(Debug, Clone)]
-pub(crate) struct ServiceCheckGenerator {
+pub(crate) struct ServiceCheckGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+{
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) tags_generator: common::tags::Generator,
-    pub(crate) str_pool: Rc<strings::Pool>,
+    pub(crate) tags_generator: common::tags::Generator<KP, VP>,
+    pub(crate) str_pool: Rc<strings::RandomStringPool>,
 }
 
-impl<'a> Generator<'a> for ServiceCheckGenerator {
-    type Output = ServiceCheck<'a>;
+impl<'a, KP, VP> Generator<'a> for ServiceCheckGenerator<KP, VP>
+where
+    KP: Pool,
+    VP: Pool,
+    KP::Handle: 'a,
+    VP::Handle: 'a,
+{
+    type Output = ServiceCheck<'a, KP::Handle, VP::Handle>;
     type Error = Error;
 
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
@@ -50,7 +60,7 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
 
 /// Check of a service.
 #[derive(Debug)]
-pub struct ServiceCheck<'a> {
+pub struct ServiceCheck<'a, KH, VH> {
     /// Name of the service check.
     pub name: &'a str,
     /// Status of the service check.
@@ -60,14 +70,14 @@ pub struct ServiceCheck<'a> {
     /// Hostname of the service check.
     pub hostname: Option<&'a str>,
     /// Tags of the service check.
-    pub(crate) tags: Option<Tagset>,
+    pub(crate) tags: Option<Tagset<KH, VH>>,
     /// Message of the service check.
     pub message: Option<&'a str>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) str_pool: &'a strings::RandomStringPool,
 }
 
-impl fmt::Display for ServiceCheck<'_> {
+impl fmt::Display for ServiceCheck<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         write!(

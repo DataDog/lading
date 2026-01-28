@@ -49,7 +49,7 @@ pub(crate) enum Message<'a> {
     Structured(String),
 }
 
-fn message<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> Message<'a>
+fn message<'a, R>(rng: &mut R, str_pool: &'a strings::RandomStringPool) -> Message<'a>
 where
     R: rand::Rng + ?Sized,
 {
@@ -88,7 +88,7 @@ pub struct Member<'a> {
 #[derive(Debug)]
 /// Datadog log format payload
 pub struct DatadogLog {
-    str_pool: strings::Pool,
+    str_pool: strings::RandomStringPool,
 }
 
 impl DatadogLog {
@@ -98,7 +98,7 @@ impl DatadogLog {
         R: rand::Rng + ?Sized,
     {
         Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: strings::RandomStringPool::with_size(rng, 1_000_000),
         }
     }
 }
