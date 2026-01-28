@@ -146,7 +146,7 @@ impl Default for ValueConf {
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -192,6 +192,8 @@ pub struct Config {
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
+    /// A list of possible metric names to generate
+    pub metric_names: Vec<String>,
 }
 
 impl Default for Config {
@@ -219,6 +221,7 @@ impl Default for Config {
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
+            metric_names: Vec::default(),
         }
     }
 }
@@ -357,6 +360,7 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
+        metric_names: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -434,6 +438,7 @@ impl MemberGenerator {
             &mut tags_generator,
             &pool,
             value_conf,
+            metric_names,
             &mut rng,
         );
 
@@ -537,7 +542,7 @@ impl DogStatsD {
     ///
     /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
-    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, crate::Error>
+    pub fn new<R>(mut config: Config, rng: &mut R) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -555,6 +560,7 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
+            std::mem::take(&mut config.metric_names),
             rng,
         )?;
 

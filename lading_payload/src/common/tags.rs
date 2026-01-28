@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::common::{
     config::ConfRange,
-    strings::{Handle, Pool},
+    strings::{Handle, Pool, PoolTrait},
 };
 
 pub(crate) const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;

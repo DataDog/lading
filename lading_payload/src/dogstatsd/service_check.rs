@@ -5,7 +5,7 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRando
 
 use crate::{
     Error, Generator,
-    common::strings::{self, choose_or_not_ref},
+    common::strings::{self, choose_or_not_ref, PoolTrait},
 };
 
 use super::common::{self, tags::Tagset};

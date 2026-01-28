@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::{
     Error, Generator,
-    common::{config::ConfRange, strings},
+    common::{config::ConfRange, strings::{self, PoolTrait}},
 };
 
 // A v0.4 Trace is a Vec<Span> that obeys the following properties:

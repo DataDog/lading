@@ -1,10 +1,22 @@
 //! Code for the quick creation of randomize strings
 
 use crate::common::config::ConfRange;
-use rand::{Rng, distr::uniform::SampleUniform, seq::IndexedRandom};
+use rand::distr::{Distribution, Uniform};
+use rand::{Rng, RngCore, distr::uniform::SampleUniform, seq::IndexedRandom};
 use std::ops::Range;
 
 const ALPHANUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+pub(crate) trait PoolTrait: std::fmt::Debug {
+    #[allow(dead_code)]
+    fn of_size_with_handle<'a>(
+        &'a self,
+        rng: &mut dyn RngCore,
+        bytes: usize,
+    ) -> Option<(&'a str, Handle)>;
+
+    fn using_handle(&self, handle: Handle) -> Option<&str>;
+}
 
 /// A pool of strings
 ///
@@ -25,7 +37,18 @@ pub(crate) struct Pool {
 ///
 // The pool will not index more than 2**32. Using a type smaller than `usize`
 // allows a more compact representation.
-pub(crate) type Handle = (u32, u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
+pub(crate) enum Handle {
+    PosAndLength((u32, u32)),
+    Index(usize),
+}
+
+impl Default for Handle {
+    fn default() -> Self {
+        Handle::PosAndLength((0, 0))
+    }
+}
 
 impl Pool {
     /// Create a new instance of `Pool` with the default alpha-numeric character
@@ -106,12 +129,12 @@ impl Pool {
 
         Some((
             &self.inner[lower_idx..upper_idx],
-            (
+            Handle::PosAndLength((
                 lower_idx
                     .try_into()
                     .expect("must fit into u32 by construction"),
                 bytes.try_into().expect("must fit in u32 by construction"),
-            ),
+            )),
         ))
     }
 
@@ -129,20 +152,82 @@ impl Pool {
         let bytes: usize = rng.random_range(bytes_range).into();
         self.of_size(rng, bytes)
     }
+}
 
-    /// Given an opaque handle returned from `*_with_handle`, return the &str it represents
-    #[must_use]
-    #[inline]
-    pub(crate) fn using_handle(&self, handle: Handle) -> Option<&str> {
-        let (offset, length) = handle;
-        let offset = offset as usize;
-        let length = length as usize;
-        if offset + length < self.inner.len() {
-            let str = &self.inner[offset..offset + length];
-            Some(str)
+#[derive(Debug)]
+pub(crate) struct StaticPool {
+    metric_names: Vec<String>,
+}
+
+impl StaticPool {
+    pub(crate) fn new(metric_names: Vec<String>) -> Self {
+        Self { metric_names }
+    }
+}
+
+impl PoolTrait for StaticPool {
+    fn of_size_with_handle<'a>(
+        &'a self,
+        rng: &mut dyn RngCore,
+        _bytes: usize,
+    ) -> Option<(&'a str, Handle)> {
+        let dist = Uniform::new(0, self.metric_names.len())
+            .expect("failed to create uniform distribution");
+        let idx: usize = dist.sample(rng);
+
+        Some((&self.metric_names[idx], Handle::Index(idx)))
+    }
+
+    fn using_handle(&self, handle: Handle) -> Option<&str> {
+        if let Handle::Index(idx) = handle {
+            let x = self.metric_names.get(idx).map(|s| s.as_str());
+            println!("{x:?}");
+            x
         } else {
+            println!("Dodgy");
             None
         }
+    }
+}
+
+impl PoolTrait for Pool {
+    fn of_size_with_handle<'a>(
+        &'a self,
+        rng: &mut dyn RngCore,
+        bytes: usize,
+    ) -> Option<(&'a str, Handle)> {
+        if bytes >= self.inner.len() {
+            return None;
+        }
+
+        let max_lower_idx = self.inner.len() - bytes;
+        let dist = Uniform::new(0, max_lower_idx).expect("failed to create uniform distribution");
+        let lower_idx: usize = dist.sample(rng);
+        let upper_idx: usize = lower_idx + bytes;
+
+        Some((
+            &self.inner[lower_idx..upper_idx],
+            Handle::PosAndLength((
+                lower_idx
+                    .try_into()
+                    .expect("must fit into u32 by construction"),
+                bytes.try_into().expect("must fit in u32 by construction"),
+            )),
+        ))
+    }
+
+    #[inline]
+    fn using_handle(&self, handle: Handle) -> Option<&str> {
+        if let Handle::PosAndLength((offset, length)) = handle {
+            let offset = offset as usize;
+            let length = length as usize;
+            if offset + length < self.inner.len() {
+                let str = &self.inner[offset..offset + length];
+                return Some(str);
+            }
+        }
+
+        None
     }
 }
 

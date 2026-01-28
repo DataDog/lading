@@ -11,7 +11,7 @@ use rand::{
 use crate::{Error, Generator, common::strings, dogstatsd::metric::template::Template};
 use tracing::debug;
 
-use self::strings::choose_or_not_ref;
+use self::strings::{PoolTrait, choose_or_not_ref};
 
 use super::{
     ConfRange, ValueConf,
@@ -30,6 +30,7 @@ pub(crate) struct MetricGenerator {
     pub(crate) sampling_probability: f32,
     pub(crate) num_value_generator: NumValueGenerator,
     pub(crate) str_pool: Rc<strings::Pool>,
+    pub(crate) name_pool: Rc<dyn strings::PoolTrait>,
     /// Tags for each template. Each position in this Vec corresponds to the
     /// same position in the templates Vec. The handles are resolved to strings
     /// via `str_pool` during serialization.
@@ -50,6 +51,7 @@ impl MetricGenerator {
         tags_generator: &mut common::tags::Generator,
         str_pool: &Rc<strings::Pool>,
         value_conf: ValueConf,
+        metric_names: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -58,11 +60,17 @@ impl MetricGenerator {
         let mut templates = Vec::with_capacity(num_contexts);
         let mut tags = Vec::with_capacity(num_contexts);
 
+        let name_pool = if metric_names.is_empty() {
+            Rc::clone(str_pool)
+        } else {
+            Rc::new(strings::StaticPool::new(metric_names)) as Rc<dyn strings::PoolTrait>
+        };
+
         debug!("Generating metric templates for {num_contexts} contexts.",);
         for _ in 0..num_contexts {
             let template_tags = tags_generator.generate(&mut rng)?;
             let name_sz = name_length.sample(&mut rng) as usize;
-            let (_, name_handle) = str_pool
+            let (_, name_handle) = name_pool
                 .of_size_with_handle(&mut rng, name_sz)
                 .ok_or(Error::StringGenerate)?;
             tags.push(template_tags);
@@ -88,6 +96,7 @@ impl MetricGenerator {
             sampling_probability,
             num_value_generator: NumValueGenerator::new(value_conf),
             str_pool: Rc::clone(str_pool),
+            name_pool,
             tags,
         })
     }
@@ -164,7 +173,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             }
             Template::Distribution(dist) => {
                 let name = self
-                    .str_pool
+                    .name_pool
                     .using_handle(dist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Distribution(Dist {

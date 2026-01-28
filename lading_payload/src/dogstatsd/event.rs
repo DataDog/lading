@@ -5,7 +5,7 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 
-use self::strings::choose_or_not_fn;
+use self::strings::{choose_or_not_fn, PoolTrait};
 
 use super::{ConfRange, common};
 
