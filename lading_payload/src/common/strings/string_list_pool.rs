@@ -1,6 +1,3 @@
-use rand::RngCore;
-use rand::distr::{Distribution, Uniform};
-
 use super::{Handle, Pool};
 
 #[derive(Debug, Clone)]
@@ -15,15 +12,11 @@ impl StringListPool {
 }
 
 impl Pool for StringListPool {
-    fn of_size_with_handle<'a>(
-        &'a self,
-        rng: &mut dyn RngCore,
-        _bytes: usize,
-    ) -> Option<(&'a str, Handle)> {
-        let dist = Uniform::new(0, self.metric_names.len())
-            .expect("failed to create uniform distribution");
-        let idx: usize = dist.sample(rng);
-
+    fn of_size_with_handle<'a, R>(&'a self, rng: &mut R, _bytes: usize) -> Option<(&'a str, Handle)>
+    where
+        R: rand::Rng + ?Sized,
+    {
+        let idx: usize = rng.random_range(0..self.metric_names.len());
         Some((&self.metric_names[idx], Handle::Index(idx)))
     }
 

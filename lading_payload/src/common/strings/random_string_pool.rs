@@ -1,6 +1,5 @@
 use rand::Rng;
-use rand::distr::{Distribution, Uniform};
-use rand::{RngCore, distr::uniform::SampleUniform};
+use rand::distr::uniform::SampleUniform;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -106,18 +105,16 @@ impl RandomStringPool {
 impl Pool for RandomStringPool {
     /// Return a `&str` from the interior storage with size `bytes`. Result will
     /// be `None` if the request cannot be satisfied.
-    fn of_size_with_handle<'a>(
-        &'a self,
-        rng: &mut dyn RngCore,
-        bytes: usize,
-    ) -> Option<(&'a str, Handle)> {
+    fn of_size_with_handle<'a, R>(&'a self, rng: &mut R, bytes: usize) -> Option<(&'a str, Handle)>
+    where
+        R: rand::Rng + ?Sized,
+    {
         if bytes >= self.inner.len() {
             return None;
         }
 
         let max_lower_idx = self.inner.len() - bytes;
-        let dist = Uniform::new(0, max_lower_idx).expect("failed to create uniform distribution");
-        let lower_idx: usize = dist.sample(rng);
+        let lower_idx: usize = rng.random_range(0..max_lower_idx);
         let upper_idx: usize = lower_idx + bytes;
 
         Some((
@@ -140,10 +137,10 @@ impl Pool for RandomStringPool {
         let length = length as usize;
         if offset + length <= self.inner.len() {
             let str = &self.inner[offset..offset + length];
-            return Some(str);
+            Some(str)
+        } else {
+            None
         }
-
-        None
     }
 }
 

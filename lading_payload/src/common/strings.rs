@@ -1,7 +1,7 @@
 //! Code for the quick creation of randomize strings
 
 use enum_dispatch::enum_dispatch;
-use rand::{RngCore, seq::IndexedRandom};
+use rand::seq::IndexedRandom;
 
 mod random_string_pool;
 mod string_list_pool;
@@ -43,11 +43,9 @@ impl Default for Handle {
 
 #[enum_dispatch]
 pub(crate) trait Pool {
-    fn of_size_with_handle<'a>(
-        &'a self,
-        rng: &mut dyn RngCore,
-        bytes: usize,
-    ) -> Option<(&'a str, Handle)>;
+    fn of_size_with_handle<'a, R>(&'a self, rng: &mut R, bytes: usize) -> Option<(&'a str, Handle)>
+    where
+        R: rand::Rng + ?Sized;
 
     fn using_handle(&self, handle: Handle) -> Option<&str>;
 }
