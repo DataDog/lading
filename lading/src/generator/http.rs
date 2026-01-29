@@ -19,7 +19,7 @@ use std::{
 
 use hyper::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use metrics::counter;
+use metrics::{counter, histogram};
 use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
@@ -258,6 +258,7 @@ impl Http {
                                 match client.request(request).await {
                                     Ok(response) => {
                                         counter!("bytes_written", &labels).increment(block_length as u64);
+                                        histogram!("bytes_written_histogram", &labels).record(block_length as f64);
 
                                         if let Some(dp) = data_points {
                                             counter!("data_points_transmitted", &labels).increment(dp);
