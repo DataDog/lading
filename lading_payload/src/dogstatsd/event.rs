@@ -1,35 +1,25 @@
 //! `DogStatsD` event.
-use std::{fmt, ops::Range, rc::Rc};
+use std::{fmt, ops::Range};
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 
-use self::strings::{choose_or_not_fn, Pool};
+use self::strings::{Pool, choose_or_not_fn};
 
-use super::{ConfRange, common};
+use super::{ConfRange, StringPools, common};
 
 #[derive(Debug, Clone)]
-pub(crate) struct EventGenerator<KP, VP>
-where
-    KP: Pool,
-    VP: Pool,
-{
+pub(crate) struct EventGenerator {
     pub(crate) title_length: ConfRange<u16>,
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
-    pub(crate) str_pool: Rc<strings::RandomStringPool>,
-    pub(crate) tags_generator: common::tags::Generator<KP, VP>,
+    pub(crate) pools: StringPools,
+    pub(crate) tags_generator: common::tags::Generator,
 }
 
-impl<'a, KP, VP> Generator<'a> for EventGenerator<KP, VP>
-where
-    KP: Pool,
-    VP: Pool,
-    KP::Handle: 'a,
-    VP::Handle: 'a,
-{
-    type Output = Event<'a, KP::Handle, VP::Handle>;
+impl<'a> Generator<'a> for EventGenerator {
+    type Output = Event<'a>;
     type Error = Error;
 
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
@@ -38,10 +28,12 @@ where
     {
         let title_sz = self.title_length.sample(&mut rng) as usize;
         let title = self
+            .pools
             .str_pool
             .of_size(&mut rng, title_sz)
             .ok_or(Error::StringGenerate)?;
         let text = self
+            .pools
             .str_pool
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .ok_or(Error::StringGenerate)?;
@@ -58,28 +50,31 @@ where
             text,
             timestamp_second: rng.random_bool(0.5).then(|| rng.random()),
             hostname: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             aggregation_key: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             priority: rng.random_bool(0.5).then(|| rng.random()),
             source_type_name: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .str_pool
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             alert_type: rng.random_bool(0.5).then(|| rng.random()),
             tags,
-            str_pool: &self.str_pool,
+            pools: &self.pools,
         })
     }
 }
 
 /// An event, like a syslog kind of.
 #[derive(Debug)]
-pub struct Event<'a, KH, VH> {
+pub struct Event<'a> {
     /// Title of the event.
     pub title: &'a str,
     /// Text of the event.
@@ -101,12 +96,12 @@ pub struct Event<'a, KH, VH> {
     /// Alert type of the event.
     pub alert_type: Option<Alert>,
     /// Tags of the event
-    pub(crate) tags: Option<common::tags::Tagset<KH, VH>>,
+    pub(crate) tags: Option<common::tags::Tagset>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::RandomStringPool,
+    pub(crate) pools: &'a StringPools,
 }
 
-impl fmt::Display for Event<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle> {
+impl fmt::Display for Event<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         write!(
@@ -142,10 +137,12 @@ impl fmt::Display for Event<'_, strings::PosAndLengthHandle, strings::PosAndLeng
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
                 let key = self
-                    .str_pool
+                    .pools
+                    .tag_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
+                    .pools
                     .str_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");

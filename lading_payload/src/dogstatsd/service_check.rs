@@ -1,36 +1,29 @@
 //! `DogStatsD` service check.
-use std::{fmt, rc::Rc};
+use std::fmt;
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use crate::{
     Error, Generator,
-    common::strings::{self, choose_or_not_ref, Pool},
+    common::strings::{Pool, choose_or_not_ref},
 };
 
-use super::common::{self, tags::Tagset};
+use super::{
+    StringPools,
+    common::{self, tags::Tagset},
+};
 
 #[derive(Debug, Clone)]
-pub(crate) struct ServiceCheckGenerator<KP, VP>
-where
-    KP: Pool,
-    VP: Pool,
-{
+pub(crate) struct ServiceCheckGenerator {
     pub(crate) names: Vec<String>,
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
-    pub(crate) tags_generator: common::tags::Generator<KP, VP>,
-    pub(crate) str_pool: Rc<strings::RandomStringPool>,
+    pub(crate) tags_generator: common::tags::Generator,
+    pub(crate) pools: StringPools,
 }
 
-impl<'a, KP, VP> Generator<'a> for ServiceCheckGenerator<KP, VP>
-where
-    KP: Pool,
-    VP: Pool,
-    KP::Handle: 'a,
-    VP::Handle: 'a,
-{
-    type Output = ServiceCheck<'a, KP::Handle, VP::Handle>;
+impl<'a> Generator<'a> for ServiceCheckGenerator {
+    type Output = ServiceCheck<'a>;
     type Error = Error;
 
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Error>
@@ -53,14 +46,14 @@ where
             hostname,
             tags,
             message,
-            str_pool: &self.str_pool,
+            pools: &self.pools,
         })
     }
 }
 
 /// Check of a service.
 #[derive(Debug)]
-pub struct ServiceCheck<'a, KH, VH> {
+pub struct ServiceCheck<'a> {
     /// Name of the service check.
     pub name: &'a str,
     /// Status of the service check.
@@ -70,14 +63,14 @@ pub struct ServiceCheck<'a, KH, VH> {
     /// Hostname of the service check.
     pub hostname: Option<&'a str>,
     /// Tags of the service check.
-    pub(crate) tags: Option<Tagset<KH, VH>>,
+    pub(crate) tags: Option<Tagset>,
     /// Message of the service check.
     pub message: Option<&'a str>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::RandomStringPool,
+    pub(crate) pools: &'a StringPools,
 }
 
-impl fmt::Display for ServiceCheck<'_, strings::PosAndLengthHandle, strings::PosAndLengthHandle> {
+impl fmt::Display for ServiceCheck<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         write!(
@@ -99,11 +92,13 @@ impl fmt::Display for ServiceCheck<'_, strings::PosAndLengthHandle, strings::Pos
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
                 let key = self
+                    .pools
                     .str_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
-                    .str_pool
+                    .pools
+                    .tag_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

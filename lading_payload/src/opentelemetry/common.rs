@@ -32,7 +32,7 @@ pub(crate) const SMALLEST_KV_PROTOBUF: usize = 10;
 /// Tag generator for OpenTelemetry attributes
 #[derive(Debug, Clone)]
 pub(crate) struct TagGenerator {
-    inner: tags::Generator<strings::RandomStringPool, strings::RandomStringPool>,
+    inner: tags::Generator,
 }
 
 impl TagGenerator {
@@ -50,13 +50,14 @@ impl TagGenerator {
         str_pool: Rc<strings::RandomStringPool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        let tag_pool = Rc::clone(&str_pool);
+        let str_pool_kind = Rc::new(strings::PoolKind::RandomStringPool((*str_pool).clone()));
+        let tag_pool = Rc::clone(&str_pool_kind);
         let inner = tags::Generator::new(
             seed,
             tags_per_msg,
             tag_length,
             num_tagsets,
-            str_pool,
+            str_pool_kind,
             tag_pool,
             unique_tag_probability,
         )

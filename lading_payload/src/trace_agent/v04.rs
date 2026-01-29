@@ -230,13 +230,13 @@ pub struct Trace<'a> {
 #[derive(Debug, Clone)]
 struct TraceTemplate {
     /// Handle to service name in the string pool
-    service: strings::PosAndLengthHandle,
+    service: strings::Handle,
     /// Handle to operation name in the string pool
-    operation: strings::PosAndLengthHandle,
+    operation: strings::Handle,
     /// Handle to resource name in the string pool
-    resource: strings::PosAndLengthHandle,
+    resource: strings::Handle,
     /// Handle to span type in the string pool
-    span_type: strings::PosAndLengthHandle,
+    span_type: strings::Handle,
 }
 
 /// V0.4 payload generator
@@ -256,7 +256,7 @@ impl V04 {
     /// Returns error if string generation from the string pool fails
     pub fn with_config<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
-        R: Rng + ?Sized,
+        R: Rng,
     {
         let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, STRING_POOL_SIZE));
 
@@ -707,7 +707,7 @@ mod test {
         let mut rng = SmallRng::seed_from_u64(42);
 
         let template_size = std::mem::size_of::<super::TraceTemplate>();
-        assert_eq!(template_size, 32);
+        assert_eq!(template_size, 64);
 
         let mut small_config = Config::default();
         small_config.contexts = ConfRange::Constant(1000);
@@ -728,6 +728,7 @@ mod test {
         traces
             .serialize(&mut rmp_serde::Serializer::new(&mut serialized).with_struct_map())
             .unwrap();
+
         // NOTE this assertion must be exact. As the payload is updated this
         // value will need to be modified, but keeping it exact allows us to set
         // accurate bounds on memory consumption. Do not make this an
