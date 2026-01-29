@@ -1,0 +1,38 @@
+target: lading_payload/src/opentelemetry/trace.rs::OpentelemetryTraces::to_bytes
+technique: buffer-reuse
+status: failure
+date: 2026-01-29
+reason: cold path - encode_to_vec accounts for <1% of total allocations
+measurements:
+  time: ~0% (17.4ms baseline vs 17.4ms optimized)
+  memory: -4.09% (28.51 MiB baseline vs 27.34 MiB optimized)
+  allocations: -0.08% (258,094 baseline vs 257,879 optimized, -215 allocations)
+lessons: |
+  Attempted to apply buffer reuse pattern (similar to otel_logs and otel_metrics)
+  to OpentelemetryTraces::to_bytes by replacing encode_to_vec() with a reusable
+  BytesMut buffer.
+
+  The optimization successfully eliminated ~1 allocation per trace (215 saves across
+  218 traces), confirming the technique works. However, this represents only 0.08%
+  of total allocations.
+
+  Root cause: The vast majority of allocations (99.92%) occur elsewhere in the trace
+  generation pipeline:
+  - TraceTemplate generation and sampling
+  - String pool operations for service/operation/tag names
+  - Span creation and attribute allocation
+  - Protobuf encoding internals
+
+  The to_bytes() final encoding step is a cold path relative to the entire pipeline.
+  With 1,183 allocations per trace on average, saving 1 per trace is negligible.
+
+  Key insight: Not all buffer-reuse opportunities are equal. The otel_logs and
+  otel_metrics implementations generate many small messages per to_bytes() call,
+  making buffer reuse highly effective. OpentelemetryTraces generates one large
+  trace per call, making the final encoding a small fraction of total work.
+
+  Future optimization targets should focus on:
+  1. TraceTemplate allocation patterns
+  2. String pool efficiency during heavy sampling
+  3. Span/attribute pre-allocation strategies
+  4. Protobuf encoding batch operations

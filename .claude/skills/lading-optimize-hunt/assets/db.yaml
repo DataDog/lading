@@ -19,3 +19,7 @@ entries:
     technique: buffer-reuse
     status: success
     file: assets/db/datadog-logs-buffer-reuse.yaml
+  - target: lading_payload/src/opentelemetry/trace.rs::OpentelemetryTraces::to_bytes
+    technique: buffer-reuse
+    status: failure
+    file: assets/db/otel-traces-buffer-reuse.yaml
