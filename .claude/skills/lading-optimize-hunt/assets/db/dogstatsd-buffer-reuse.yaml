@@ -2,7 +2,6 @@ target: dogstatsd.rs:to_bytes_unframed,to_bytes_length_prefix_framed
 technique: buffer-reuse
 status: success
 date: 2026-01-14
-branch: opt/dogstatsd-buffer-reuse
 measurements:
   micro_benchmarks:
     dogstatsd_all_1MiB: "-3% time"

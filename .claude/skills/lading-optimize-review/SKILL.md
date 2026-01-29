@@ -36,7 +36,7 @@ cat .claude/skills/lading-optimize-hunt/assets/db.yaml
 ```
 
 **Check for:**
-- Same branch name already reviewed -> REJECT as "DUPLICATE"
+- Same optimization already reviewed -> REJECT as "DUPLICATE"
 - Same file + technique already approved -> REJECT as "DUPLICATE"
 
 ---
@@ -55,56 +55,28 @@ ci/validate
 
 ## Phase 2: Measurement
 
-### CRITICAL: Use Separate Worktree for Baseline
+**Review existing benchmark data.** The optimization should already have benchmark results. If missing, request them or REJECT.
 
-**NEVER use `git checkout` to switch between baseline and optimized.** This causes confusion and errors. Instead, use a separate git worktree:
+**The optimization being reviewed MUST provide benchmark data.** Review should focus on analyzing existing data, not generating new benchmarks.
 
-```bash
-# One-time setup: create a baseline worktree (do this once per repo)
-git worktree add ../lading-baseline main
+### Expected Benchmark Data
 
-# The baseline worktree is at ../lading-baseline
-# Your optimization work stays in the current directory
-```
+The optimization should include:
 
-### For payloadtool (end-to-end):
+**Micro-benchmarks (criterion):**
+- Benchmark name and throughput change
+- Example: `syslog_100MiB: +42.0% throughput (481 -> 683 MiB/s)`
 
-```bash
-# Choose a config file (e.g., ci/fingerprints/json/lading.yaml)
-CONFIG=ci/fingerprints/json/lading.yaml
-
-# In baseline worktree
-cd ../lading-baseline
-cargo build --release --bin payloadtool
-hyperfine --warmup 3 --runs 30 --export-json /tmp/old.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/old-mem.txt
-
-# In optimization worktree
-cd /path/to/your/optimization/branch
-cargo build --release --bin payloadtool
-hyperfine --warmup 3 --runs 30 --export-json /tmp/new.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/new-mem.txt
-```
-
-### For inner loops (criterion):
-
-Use `cargo criterion` for micro-benchmarks. Run in each worktree and compare output:
-
-```bash
-# In baseline worktree
-cd ../lading-baseline
-cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
-
-# In optimization worktree
-cd /path/to/your/optimization/branch
-cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
-
-# Compare results manually - look for "change:" lines showing improvement/regression
-```
-
-**Note:** Criterion automatically compares against the last run in that worktree and reports percentage changes.
+**Macro-benchmarks (payloadtool with hyperfine):**
+- Time change with absolute values
+- Memory change with absolute values
+- Allocation count change with absolute values
+- Example:
+  ```
+  Time: -14.5% (8.3 ms -> 7.1 ms)
+  Memory: -35.8% (6.17 MiB -> 3.96 MiB)
+  Allocations: -49.3% (67,688 -> 34,331)
+  ```
 
 ### Statistical Requirements
 - Minimum 30 runs for hyperfine (`--runs 30`)
@@ -127,10 +99,10 @@ cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 ## Phase 3: Five-Persona Review
 
 ### 1. Duplicate Hunter (Checks for Redundant Work)
-- [ ] Branch not already in reviews.yaml
+- [ ] Optimization not already in reviews.yaml
 - [ ] File + technique combo not already approved
 - [ ] No substantially similar optimization exists
-- [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing branch>"
+- [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing entry>"
 
 ### 2. Skeptic (Demands Proof)
 - [ ] Hot path verified via profiling (not just guessed)
@@ -193,9 +165,9 @@ ci/kani lading_payload
 
 | Outcome | Votes | Action |
 |---------|-------|--------|
-| **APPROVED** | 5/5 APPROVE | Merge, record success |
-| **REJECTED** | Any REJECT | Record lesson, delete branch |
-| **DUPLICATE** | Duplicate Hunter REJECT | Record as DUPLICATE, delete branch |
+| **APPROVED** | 5/5 APPROVE | Record success |
+| **REJECTED** | Any REJECT | Record lesson |
+| **DUPLICATE** | Duplicate Hunter REJECT | Record as DUPLICATE |
 | **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate` |
 
 ### When Bug Is Found
@@ -226,14 +198,16 @@ Then return here to record the finding as BUG_FOUND in Phase 6.
 **assets/db.yaml entry:**
 ```yaml
 entries:
-  - branch: <branch name>
+  - id: <descriptive-name>
     verdict: <approved|rejected|duplicate|bug_found>
-    file: assets/db/<branch-name>.yaml
+    file: assets/db/<review-name>.yaml
 ```
 
-**assets/db/<branch-name>.yaml** for APPROVED:
+**assets/db/<review-name>.yaml** for APPROVED:
 ```yaml
-branch: <branch name>
+id: <descriptive-name>
+target: <file:function>
+technique: <technique>
 verdict: approved
 date: <YYYY-MM-DD>
 votes:
@@ -252,9 +226,11 @@ lessons: |
   <pattern learned>
 ```
 
-**assets/db/<branch-name>.yaml** for REJECTED:
+**assets/db/<review-name>.yaml** for REJECTED:
 ```yaml
-branch: <branch name>
+id: <descriptive-name>
+target: <file:function>
+technique: <technique>
 verdict: rejected
 date: <YYYY-MM-DD>
 votes:
@@ -269,19 +245,22 @@ lessons: |
   <what NOT to do next time>
 ```
 
-**assets/db/<branch-name>.yaml** for DUPLICATE:
+**assets/db/<review-name>.yaml** for DUPLICATE:
 ```yaml
-branch: <branch name>
+id: <descriptive-name>
+target: <file:function>
+technique: <technique>
 verdict: duplicate
 date: <YYYY-MM-DD>
-duplicate_of: <existing branch or entry>
+duplicate_of: <existing entry>
 reason: |
   <explanation of duplication>
 ```
 
-**assets/db/<branch-name>.yaml** for BUG_FOUND:
+**assets/db/<review-name>.yaml** for BUG_FOUND:
 ```yaml
-branch: <branch name>
+id: <descriptive-name>
+target: <file:function>
 verdict: bug_found
 date: <YYYY-MM-DD>
 validation_file: <path to validate db entry>

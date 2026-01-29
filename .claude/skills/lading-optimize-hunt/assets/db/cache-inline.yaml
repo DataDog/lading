@@ -2,7 +2,6 @@ target: lading_payload/src/block.rs:Cache methods
 technique: inline
 status: success
 date: 2026-01-20
-branch: opt/payload-cache-inline
 measurements:
   time: -7.2%
   memory: ~

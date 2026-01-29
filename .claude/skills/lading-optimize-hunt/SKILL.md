@@ -87,103 +87,84 @@ Otherwise, check pending hunt issues or pick from hot subsystems:
 
 ---
 
-## Phase 3: Implement
+## Phase 3: Establish Baseline
+
+**CRITICAL: Capture baseline metrics BEFORE making any code changes.**
+
+### Stage 1: Micro-benchmark Baseline
+
+Use `cargo criterion` for micro-benchmarks.
 
 ```bash
-git checkout main && git pull
-git checkout -b opt/<crate>-<technique>
+cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
 ```
 
-Make ONE change. After validating with benchmarks (Phase 4), commit using the template in `assets/commit-template.txt`:
+**Note:** Criterion stores baseline data automatically for later comparison.
+
+### Stage 2: Macro-benchmark Baseline
+
+Choose a config file that exercises your target code path:
 
 ```bash
-# Example:
-git commit -m "opt: buffer reuse in syslog serialization
+# Common configs: ci/fingerprints/{json,syslog,dogstatsd}/lading.yaml
+CONFIG=ci/fingerprints/json/lading.yaml
+cargo build --release --bin payloadtool
+hyperfine --warmup 3 --runs 10 --export-json /tmp/baseline.json \
+  "./target/release/payloadtool $CONFIG"
 
-Replaced per-iteration format!() with reusable Vec<u8> buffer.
-
-Target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
-Technique: buffer-reuse
-
-Micro-benchmarks:
-  syslog_100MiB: +42.0% throughput (481 -> 683 MiB/s)
-
-Macro-benchmarks (payloadtool):
-  Time: -14.5% (8.3 ms -> 7.1 ms)
-  Memory: -35.8% (6.17 MiB -> 3.96 MiB)
-  Allocations: -49.3% (67,688 -> 34,331)
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
-"
+./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/baseline-mem.txt
 ```
 
-**Note:**
-- First line must be ≤50 characters (Git best practice)
-- Replace `{MODEL}` with the actual Claude model being used (e.g., "Claude Sonnet 4.5", "Claude Opus 4.5").
+**Baseline captured. Now proceed to implementation.**
 
 ---
 
-## Phase 4: Benchmark
+## Phase 4: Implement
+
+Make ONE change. Keep it focused and minimal.
+
+Before proceeding, ALL changes must pass:
+
+```bash
+ci/validate
+```
+
+**No exceptions. If ci/validate fails, fix the issue before continuing.**
+
+---
+
+## Phase 5: Re-benchmark and Compare
 
 **Two-stage gate: micro THEN macro. Both must show improvement.**
 
-### CRITICAL: Use Separate Worktree for Baseline
-
-**NEVER use `git stash`/`git checkout` to switch between baseline and optimized.** This causes confusion and errors. Instead, use a separate git worktree:
-
-```bash
-# One-time setup: create a baseline worktree (do this once per repo)
-git worktree add ../lading-baseline main
-
-# The baseline worktree is at ../lading-baseline
-# Your optimization work stays in the current directory
-```
-
 ### Stage 1: Micro-benchmarks (inner loops)
 
-Use `cargo criterion` for micro-benchmarks. Run in each worktree and compare output:
+Re-run the same criterion benchmarks with your changes:
 
 ```bash
-# In baseline worktree (../lading-baseline)
-cd ../lading-baseline
-cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
-
-# In optimization worktree (your current directory)
-cd /path/to/your/optimization/branch
 cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
-
-# Compare results manually - look for "change:" lines showing improvement/regression
-# Example output: "time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678% -4.0123%]"
 ```
 
-**Note:** Criterion automatically compares against the last run in that worktree and reports percentage changes.
+Note: Criterion automatically compares against the last run and reports percentage changes.
+
+Compare results manually - look for "change:" lines showing improvement/regression
+
+Example output looks like: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678% -4.0123%]`
 
 #### Micro Decision Point
 
 | Result | Action |
 |--------|--------|
 | Time improved >=5% | Proceed to Stage 2 |
-| No change or regression | Record FAILURE, next target |
-
-**If micro-benchmark shows no improvement, STOP. Move to next target.**
+| No change or regression | Process to Phase 8 and record FAILURE |
 
 ### Stage 2: Macro-benchmarks (end-to-end payloadtool)
 
-Only run this if Stage 1 showed improvement.
+Only run this if Stage 1 showed improvement. Use the SAME config as baseline:
 
 ```bash
-# Choose a config file (e.g., ci/fingerprints/json/lading.yaml)
+# Use same CONFIG as Phase 3
 CONFIG=ci/fingerprints/json/lading.yaml
-
-# In baseline worktree
-cd ../lading-baseline
-cargo build --release --bin payloadtool
-hyperfine --warmup 3 --export-json /tmp/baseline.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/baseline-mem.txt
-
-# In optimization worktree
-cd /path/to/your/optimization/branch
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --export-json /tmp/optimized.json \
   "./target/release/payloadtool $CONFIG"
@@ -194,21 +175,21 @@ hyperfine --warmup 3 --export-json /tmp/optimized.json \
 
 | Result | Action |
 |--------|--------|
-| Time improved >=5% | Proceed to `/lading-optimize-review` |
-| Memory reduced >=10% | Proceed to `/lading-optimize-review` |
-| Allocations reduced >=20% | Proceed to `/lading-optimize-review` |
-| No change or regression | Record FAILURE (micro win, macro loss), next target |
+| Time improved >=5% | Proceed to Phase 6 |
+| Memory reduced >=10% | Proceed to Phase 6 |
+| Allocations reduced >=20% | Proceed to Phase 6 |
+| No change or regression | Process to Phase 8 and record FAILURE (micro win, macro loss) |
 | **ci/validate fails** | Might be a **BUG** |
 | **Determinism broken** | Might be a **BUG** |
 
-**All three gates must pass to proceed to review:**
+**All three gates must pass to proceed:**
 1. Micro-benchmark shows improvement (>=5% time)
 2. Macro-benchmark shows improvement (>=5% time OR >=10% memory OR >=20% allocations)
 3. ci/validate passes (correctness preserved)
 
 ---
 
-## Phase 5: Handle Bug Discovery
+## Phase 6: Handle Bug Discovery
 
 If during hunting you discover a bug (not an optimization):
 
@@ -225,36 +206,19 @@ This skill will:
 
 ### After Validation
 
-Return here and record as BUG_FOUND in Phase 7, then **continue hunting** - don't stop.
+Return here and record as BUG_FOUND in Phase 8, then **continue hunting** - don't stop.
 
 ---
 
-## Phase 6: Validate (MANDATORY)
+## Phase 7: Review
 
-Before proceeding to review, ALL changes must pass:
+Invoke the review process: `/lading-optimize-review`
 
-```bash
-ci/validate
-```
-
-**No exceptions. If ci/validate fails, fix the issue before continuing.**
-
-### Kani Proofs (When Touching Critical Code)
-
-If your optimization touches `lading_throttle` or `lading_payload`:
-
-```bash
-ci/kani lading_throttle  # If throttle was modified
-ci/kani lading_payload   # If payload was modified
-```
-
-Kani is slow and may not compile complex code. If it fails:
-1. Document why Kani couldn't run
-2. Ensure comprehensive property tests exist instead
+**Only consider this a valid optimization if the review passes.**
 
 ---
 
-## Phase 7: Record & Continue
+## Phase 8: Record the results
 
 ### MANDATORY: Update db.yaml
 
@@ -276,7 +240,6 @@ target: <file:function>
 technique: <prealloc|avoid-clone|cache|etc>
 status: success
 date: <YYYY-MM-DD>
-branch: <branch name>
 measurements:
   time: <-X% or ~>
   memory: <-X% or ~>
@@ -306,12 +269,6 @@ bug_description: <what was found>
 validation_file: <path to validate db entry>
 lessons: |
   <what was learned>
-```
-
-### Immediately Continue
-
-```
-Target completed -> Back to Phase 1 -> Pick new target -> Never stop
 ```
 
 ---
