@@ -196,6 +196,8 @@ pub struct Config {
     pub metric_names: Vec<String>,
     /// A list of possible tag names to generate
     pub tag_names: Vec<String>,
+    /// A list of possible tag values to generate
+    pub tag_values: Vec<String>,
 }
 
 impl Default for Config {
@@ -225,6 +227,7 @@ impl Default for Config {
             unique_tag_ratio: 0.11,
             metric_names: Vec::default(),
             tag_names: Vec::default(),
+            tag_values: Vec::default(),
         }
     }
 }
@@ -351,8 +354,8 @@ struct MemberGenerator {
 /// Cheap to clone.
 #[derive(Clone, Debug)]
 pub(crate) struct StringPools {
-    tag_pool: Rc<strings::PoolKind>,
-    value_pool: Rc<strings::PoolKind>,
+    tag_name_pool: Rc<strings::PoolKind>,
+    tag_value_pool: Rc<strings::PoolKind>,
     name_pool: Rc<strings::PoolKind>,
     str_pool: Rc<strings::RandomStringPool>,
 }
@@ -375,6 +378,7 @@ impl MemberGenerator {
         unique_tag_ratio: f32,
         metric_names: Vec<String>,
         tag_names: Vec<String>,
+        tag_values: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -398,11 +402,19 @@ impl MemberGenerator {
         let str_pool = Rc::new(pool.clone());
         let pool = Rc::new(strings::PoolKind::RandomStringPool(pool));
 
-        let tag_pool = if tag_names.is_empty() {
+        let tag_name_pool = if tag_names.is_empty() {
             Rc::clone(&pool)
         } else {
             Rc::new(strings::PoolKind::StringListPool(
                 strings::StringListPool::new(tag_names),
+            ))
+        };
+
+        let tag_value_pool = if tag_values.is_empty() {
+            Rc::clone(&pool)
+        } else {
+            Rc::new(strings::PoolKind::StringListPool(
+                strings::StringListPool::new(tag_values),
             ))
         };
 
@@ -415,8 +427,8 @@ impl MemberGenerator {
         };
 
         let pools = StringPools {
-            tag_pool,
-            value_pool: Rc::clone(&pool),
+            tag_name_pool,
+            tag_value_pool,
             name_pool,
             str_pool,
         };
@@ -428,8 +440,8 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            Rc::clone(&pools.value_pool),
-            Rc::clone(&pools.tag_pool),
+            Rc::clone(&pools.tag_value_pool),
+            Rc::clone(&pools.tag_name_pool),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
@@ -582,7 +594,7 @@ impl DogStatsD {
     ///
     /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
-    pub fn new<R>(mut config: Config, rng: &mut R) -> Result<Self, crate::Error>
+    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -600,8 +612,9 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
-            std::mem::take(&mut config.metric_names),
-            std::mem::take(&mut config.tag_names),
+            config.metric_names,
+            config.tag_names,
+            config.tag_values,
             rng,
         )?;
 

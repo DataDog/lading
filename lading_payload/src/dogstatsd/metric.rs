@@ -307,12 +307,12 @@ impl fmt::Display for Count<'_> {
                 // Format tag from handles: "key:value"
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -360,12 +360,12 @@ impl fmt::Display for Gauge<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -418,12 +418,12 @@ impl fmt::Display for Timer<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -476,12 +476,12 @@ impl fmt::Display for Dist<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -525,12 +525,12 @@ impl fmt::Display for Set<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -583,12 +583,12 @@ impl fmt::Display for Histogram<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .tag_value_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

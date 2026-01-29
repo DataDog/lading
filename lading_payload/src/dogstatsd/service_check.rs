@@ -98,7 +98,7 @@ impl fmt::Display for ServiceCheck<'_> {
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

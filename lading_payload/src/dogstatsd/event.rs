@@ -138,7 +138,7 @@ impl fmt::Display for Event<'_> {
             for tag in tags {
                 let key = self
                     .pools
-                    .tag_pool
+                    .tag_name_pool
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
