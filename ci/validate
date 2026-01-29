@@ -45,6 +45,19 @@ run_check "$CI_DIR/test" "cargo nextest"
 # Optional checks (don't fail if tools aren't available)
 echo ">>> Running optional checks..."
 
+# Loom tests
+echo ">>> Running loom tests for each crate..."
+# shellcheck disable=SC2043
+for crate in lading-signal; do
+    echo ">>> Running loom tests for $crate..."
+    if ! "$CI_DIR/loom" "$crate"; then
+        echo "FAILED: loom tests for $crate failed!"
+        exit 1
+    fi
+    echo "PASSED: loom tests for $crate passed!"
+    echo
+done
+
 # Kani proofs (optional)
 if command -v cargo-kani &> /dev/null; then
     echo ">>> Running kani proofs for each crate..."

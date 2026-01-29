@@ -208,6 +208,37 @@ jobs:
       - run: ci/kani ${{ matrix.crate }}
         timeout-minutes: 30
 
+  loom:
+    name: Loom Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [lading-signal]
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BUCKET: "lading-sccache"
+      SCCACHE_REGION: "us-west-2"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::850406765696:role/lading-ci-sccache-oidc
+          aws-region: us-west-2
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Install Protobuf
+        uses: ./.github/actions/install-protobuf
+      - name: Install FUSE
+        uses: ./.github/actions/install-fuse
+      - run: ci/loom ${{ matrix.crate }}
+        timeout-minutes: 30
+
   fuzz-check:
     name: Check Fuzz Targets
     runs-on: ubuntu-latest
