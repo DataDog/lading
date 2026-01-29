@@ -23,14 +23,14 @@ impl Handle {
     pub(crate) fn as_pos_and_length(self) -> Option<(u32, u32)> {
         match self {
             Self::PosAndLength(pos, len) => Some((pos, len)),
-            _ => None,
+            Self::Index(_) => None,
         }
     }
 
     pub(crate) fn as_index(self) -> Option<usize> {
         match self {
             Self::Index(idx) => Some(idx),
-            _ => None,
+            Self::PosAndLength(..) => None,
         }
     }
 }

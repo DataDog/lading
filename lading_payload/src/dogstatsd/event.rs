@@ -29,12 +29,12 @@ impl<'a> Generator<'a> for EventGenerator {
         let title_sz = self.title_length.sample(&mut rng) as usize;
         let title = self
             .pools
-            .str_pool
+            .randomstring
             .of_size(&mut rng, title_sz)
             .ok_or(Error::StringGenerate)?;
         let text = self
             .pools
-            .str_pool
+            .randomstring
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .ok_or(Error::StringGenerate)?;
         let tags = if rng.random() {
@@ -51,18 +51,18 @@ impl<'a> Generator<'a> for EventGenerator {
             timestamp_second: rng.random_bool(0.5).then(|| rng.random()),
             hostname: choose_or_not_fn(&mut rng, |r| {
                 self.pools
-                    .str_pool
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             aggregation_key: choose_or_not_fn(&mut rng, |r| {
                 self.pools
-                    .str_pool
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             priority: rng.random_bool(0.5).then(|| rng.random()),
             source_type_name: choose_or_not_fn(&mut rng, |r| {
                 self.pools
-                    .str_pool
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             alert_type: rng.random_bool(0.5).then(|| rng.random()),
@@ -138,12 +138,12 @@ impl fmt::Display for Event<'_> {
             for tag in tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .str_pool
+                    .randomstring
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

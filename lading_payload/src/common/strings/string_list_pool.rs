@@ -34,7 +34,7 @@ impl Pool for StringListPool {
         let idx = handle
             .as_index()
             .expect("handle for string list pool should be a string pool handle");
-        self.metric_names.get(idx).map(|s| s.as_str())
+        self.metric_names.get(idx).map(String::as_str)
     }
 }
 

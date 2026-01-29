@@ -22,7 +22,7 @@ pub(crate) struct RandomStringPool {
     // maximum size in memory and we stuff a `String` until that size is
     // met. The user calls for a `&str` of a certain size less than the maximum
     // size and we make a slice of that size in `inner` at a random offset.
-    inner: Rc<String>,
+    inner: Rc<str>,
 }
 
 impl RandomStringPool {
@@ -65,7 +65,7 @@ impl RandomStringPool {
         }
 
         Self {
-            inner: Rc::new(inner),
+            inner: Rc::from(inner),
         }
     }
 

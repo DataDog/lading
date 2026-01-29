@@ -47,10 +47,10 @@ impl TagGenerator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<strings::RandomStringPool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
-        let str_pool_kind = Rc::new(strings::PoolKind::RandomStringPool((*str_pool).clone()));
+        let str_pool_kind = Rc::new(strings::PoolKind::RandomStringPool((**str_pool).clone()));
         let tag_pool = Rc::clone(&str_pool_kind);
         let inner = tags::Generator::new(
             seed,

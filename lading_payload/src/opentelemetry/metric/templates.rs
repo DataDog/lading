@@ -103,7 +103,7 @@ impl MetricTemplateGenerator {
             config.contexts.attributes_per_metric,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -306,7 +306,7 @@ impl ScopeTemplateGenerator {
             config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -424,7 +424,7 @@ impl ResourceTemplateGenerator {
             config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            &Rc::clone(str_pool),
             UNIQUE_TAG_RATIO,
         )?;
 

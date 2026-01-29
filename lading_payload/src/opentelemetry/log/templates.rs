@@ -76,7 +76,7 @@ impl LogTemplateGenerator {
             config.contexts.attributes_per_log,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -218,7 +218,7 @@ impl ScopeTemplateGenerator {
             config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -331,7 +331,7 @@ impl ResourceTemplateGenerator {
             config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 

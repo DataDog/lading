@@ -354,14 +354,14 @@ struct MemberGenerator {
 /// Cheap to clone.
 #[derive(Clone, Debug)]
 pub(crate) struct StringPools {
-    tag_name_pool: Rc<strings::PoolKind>,
-    tag_value_pool: Rc<strings::PoolKind>,
-    name_pool: Rc<strings::PoolKind>,
-    str_pool: Rc<strings::RandomStringPool>,
+    tag_name: Rc<strings::PoolKind>,
+    tag_value: Rc<strings::PoolKind>,
+    name: Rc<strings::PoolKind>,
+    randomstring: Rc<strings::RandomStringPool>,
 }
 
 impl MemberGenerator {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn new<R>(
         contexts: ConfRange<u32>,
         service_check_names: ConfRange<u16>,
@@ -385,7 +385,6 @@ impl MemberGenerator {
         R: Rng + ?Sized,
     {
         // TODO only create the Generators if they're needed per the kind weights
-
         let pool = strings::RandomStringPool::with_size(&mut rng, 8_000_000);
 
         // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
@@ -427,10 +426,10 @@ impl MemberGenerator {
         };
 
         let pools = StringPools {
-            tag_name_pool,
-            tag_value_pool,
-            name_pool,
-            str_pool,
+            tag_name: tag_name_pool,
+            tag_value: tag_value_pool,
+            name: name_pool,
+            randomstring: str_pool,
         };
 
         let num_contexts = contexts.sample(rng);
@@ -440,8 +439,8 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            Rc::clone(&pools.tag_value_pool),
-            Rc::clone(&pools.tag_name_pool),
+            Rc::clone(&pools.tag_value),
+            Rc::clone(&pools.tag_name),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,

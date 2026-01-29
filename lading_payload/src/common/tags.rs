@@ -79,8 +79,8 @@ struct TagGenerator {
 impl TagGenerator {
     fn new(tag_pool: Rc<PoolKind>, str_pool: Rc<PoolKind>, tag_length: ConfRange<u16>) -> Self {
         Self {
-            tag_pool,
             str_pool,
+            tag_pool,
             tag_length,
         }
     }

@@ -63,7 +63,7 @@ impl MetricGenerator {
             let template_tags = tags_generator.generate(&mut rng)?;
             let name_sz = name_length.sample(&mut rng) as usize;
             let (_, name_handle) = pools
-                .name_pool
+                .name
                 .of_size_with_handle(&mut rng, name_sz)
                 .ok_or(Error::StringGenerate)?;
             tags.push(template_tags);
@@ -139,7 +139,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Count(count) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(count.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Count(Count {
@@ -154,7 +154,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Gauge(gauge) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(gauge.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Gauge(Gauge {
@@ -168,7 +168,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Distribution(dist) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(dist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Distribution(Dist {
@@ -183,7 +183,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Histogram(hist) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(hist.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Histogram(Histogram {
@@ -198,7 +198,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Timer(timer) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(timer.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Timer(Timer {
@@ -213,7 +213,7 @@ impl<'a> Generator<'a> for MetricGenerator {
             Template::Set(set) => {
                 let name = self
                     .pools
-                    .name_pool
+                    .name
                     .using_handle(set.name)
                     .ok_or(Error::StringGenerate)?;
                 Ok(Metric::Set(Set {
@@ -307,12 +307,12 @@ impl fmt::Display for Count<'_> {
                 // Format tag from handles: "key:value"
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -360,12 +360,12 @@ impl fmt::Display for Gauge<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -418,12 +418,12 @@ impl fmt::Display for Timer<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -476,12 +476,12 @@ impl fmt::Display for Dist<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -525,12 +525,12 @@ impl fmt::Display for Set<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
@@ -583,12 +583,12 @@ impl fmt::Display for Histogram<'_> {
             for tag in self.tags {
                 let key = self
                     .pools
-                    .tag_name_pool
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_value_pool
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
