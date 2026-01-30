@@ -86,6 +86,7 @@ large_stack_arrays = "deny"
 float_cmp = "deny"
 manual_memcpy = "deny"
 unnecessary_to_owned = "deny"
+disallowed_types = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

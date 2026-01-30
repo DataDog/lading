@@ -956,6 +956,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "once_cell",
+ "rustc-hash",
  "shared",
  "tokio",
  "tokio-stream",

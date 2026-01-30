@@ -31,7 +31,9 @@ use shared::{
         integration_target_server::{IntegrationTarget, IntegrationTargetServer},
     },
 };
-use std::{collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use std::{net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+
+use rustc_hash::FxHashMap;
 use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
@@ -54,7 +56,7 @@ struct HttpCounters {
     entropy: DDSketch,
     request_count: u64,
     total_bytes: u64,
-    methods: HashMap<Method, u64>,
+    methods: FxHashMap<Method, u64>,
 }
 
 impl From<&HttpCounters> for HttpMetrics {

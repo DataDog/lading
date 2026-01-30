@@ -4,8 +4,10 @@
 //! Apache Arrow compute kernels. Unlike the row-based validation in `jsonl`,
 //! this leverages columnar operations for better performance and memory efficiency.
 
+use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
-use std::collections::{BTreeSet, HashMap};
+
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
@@ -78,8 +80,8 @@ pub fn validate_parquet<P: AsRef<Path>>(
     //
     // We also collect (fetch_index, time) pairs for each series to validate
     // per-series invariants in Phase 2.
-    let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
-    let mut series_data: HashMap<u64, (Vec<(u64, u128)>, String)> = HashMap::new();
+    let mut fetch_index_to_time: FxHashMap<u64, u128> = FxHashMap::default();
+    let mut series_data: FxHashMap<u64, (Vec<(u64, u128)>, String)> = FxHashMap::default();
     let hash_builder = RandomState::new();
 
     let mut line_count = 0u128;
