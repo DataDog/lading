@@ -1,0 +1,31 @@
+target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+technique: buffer-reuse
+status: failure
+date: 2026-01-30
+reason: time-regression
+measurements:
+  time: +6.6% (13.6 ms -> 14.5 ms)
+  total_allocated: -67.6% (32.55 MiB -> 10.56 MiB)
+  allocations: -1.2% (18,141 -> 17,921)
+  peak_live: ~0% (2.78 MiB -> 2.78 MiB)
+lessons: |
+  Buffer reuse pattern that works for simple serializers doesn't work here.
+
+  Moved Vec::with_capacity(max_bytes) outside the loop and used .clear()
+  to reuse the buffer across iterations. This reduced total allocated memory
+  by 67.6% but caused a 6.6% time regression.
+
+  The to_bytes method has THREE buffer allocations that were consolidated:
+  1. Line 493 - in the initial trace generation loop
+  2. Line 513 - in the binary search loop for sizing
+  3. Line 523 - for final serialization
+
+  All three now reuse the same buffer, which dramatically cuts allocations
+  but appears to introduce cache or performance issues specific to msgpack
+  serialization with complex nested structures.
+
+  Rejected in review by Skeptic persona for time regression.
+
+  Key insight: Not all serialization paths benefit from buffer reuse in the
+  same way. The msgpack Serializer or the binary search pattern may interact
+  poorly with buffer reuse.

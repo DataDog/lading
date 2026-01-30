@@ -5,3 +5,6 @@ entries:
   - id: payload-cache-inline
     verdict: approved
     file: assets/db/opt-payload-cache-inline.yaml
+  - id: trace-agent-v04-buffer-reuse
+    verdict: rejected
+    file: assets/db/opt-trace-agent-v04-buffer-reuse.yaml
