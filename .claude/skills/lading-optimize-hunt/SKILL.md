@@ -71,8 +71,7 @@ Otherwise, check pending hunt issues or pick from hot subsystems:
 |---------|-----------|----------|
 | `Vec::new()` + repeated push | `Vec::with_capacity(n)` | None |
 | `String::new()` + repeated push | `String::with_capacity(n)` | None |
-| `HashMap::new()` hot insert | `HashMap::with_capacity(n)` | None |
-| Default `HashMap` with int keys | `FxHashMap` (rustc-hash) | Hash collision DoS |
+| `FxHashMap::default()` hot insert | `FxHashMap::with_capacity(n)` | None |
 | `format!()` in hot loop | `write!()` to reused buffer | Format errors, buffer sizing |
 | `&Vec<T>` or `&String` parameter | `&[T]` or `&str` slice | None |
 | Allocation in hot loop | Move outside loop | Lifetime issues |

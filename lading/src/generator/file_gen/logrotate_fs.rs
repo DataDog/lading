@@ -16,7 +16,6 @@ use nix::libc::{self, ENOENT};
 use rand::{SeedableRng, rngs::SmallRng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     fs,
     num::NonZeroU32,
@@ -26,6 +25,8 @@ use std::{
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
+
+use rustc_hash::FxHashMap;
 
 mod model;
 
@@ -222,7 +223,7 @@ impl Server {
         // Initialize the FUSE filesystem
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
+            open_files: Arc::new(Mutex::new(FxHashMap::default())),
             start_time,
             start_time_system,
         };
@@ -263,7 +264,7 @@ impl Server {
 #[derive(Debug)]
 struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
-    open_files: Arc<Mutex<HashMap<u64, model::FileHandle>>>,
+    open_files: Arc<Mutex<FxHashMap<u64, model::FileHandle>>>,
 
     start_time: Instant,
     start_time_system: SystemTime,

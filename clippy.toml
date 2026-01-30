@@ -1,2 +1,7 @@
 # https://rust-lang.github.io/rust-clippy/master/index.html#doc_markdown
 doc-valid-idents = ["OpenTelemetry", "gRPC", ".."]
+
+# https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_types
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "Use rustc_hash::FxHashMap for better performance." },
+]

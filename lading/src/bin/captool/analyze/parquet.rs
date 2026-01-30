@@ -3,13 +3,14 @@
 //! This module provides analysis operations on parquet capture files using
 //! Apache Arrow, staying in columnar format for efficiency.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::Path;
 
 use arrow_array::{Array, Float64Array, MapArray, StringArray, UInt64Array};
 use lading_capture_schema::columns;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use rustc_hash::FxHashMap;
 
 use super::{MetricInfo, SeriesStats};
 
@@ -93,12 +94,12 @@ pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, E
 pub(crate) fn analyze_metric<P: AsRef<Path>>(
     path: P,
     metric_name: &str,
-) -> Result<HashMap<BTreeSet<String>, SeriesStats>, Error> {
+) -> Result<FxHashMap<BTreeSet<String>, SeriesStats>, Error> {
     let file = File::open(path)?;
     let reader_builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let reader = reader_builder.build()?;
 
-    let mut series_map: HashMap<BTreeSet<String>, Vec<(u64, f64)>> = HashMap::new();
+    let mut series_map: FxHashMap<BTreeSet<String>, Vec<(u64, f64)>> = FxHashMap::default();
 
     for batch_result in reader {
         let batch = batch_result?;
@@ -194,7 +195,7 @@ pub(crate) fn analyze_metric<P: AsRef<Path>>(
     }
 
     // Compute statistics for each series
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     for (labels, mut values) in series_map {
         if values.is_empty() {
             continue;

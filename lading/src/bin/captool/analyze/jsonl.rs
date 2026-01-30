@@ -2,10 +2,12 @@
 //!
 //! This module provides analysis operations on JSONL (row-based) capture files.
 
-use std::collections::{BTreeSet, HashMap, hash_map::RandomState};
+use std::collections::BTreeSet;
+use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
 use lading_capture::line::{Line, MetricKind};
+use rustc_hash::FxHashMap;
 
 use super::{MetricInfo, SeriesStats};
 
@@ -39,9 +41,9 @@ pub(crate) fn list_metrics(lines: &[Line]) -> Vec<MetricInfo> {
 pub(crate) fn analyze_metric(
     lines: &[Line],
     metric_name: &str,
-) -> HashMap<BTreeSet<String>, SeriesStats> {
-    let mut context_map: HashMap<u64, (BTreeSet<String>, Vec<f64>)> = HashMap::new();
-    let mut fetch_indices: HashMap<u64, Vec<u64>> = HashMap::new();
+) -> FxHashMap<BTreeSet<String>, SeriesStats> {
+    let mut context_map: FxHashMap<u64, (BTreeSet<String>, Vec<f64>)> = FxHashMap::default();
+    let mut fetch_indices: FxHashMap<u64, Vec<u64>> = FxHashMap::default();
     let hash_builder = RandomState::new();
 
     // Filter to matching metric and group by label set
@@ -72,7 +74,7 @@ pub(crate) fn analyze_metric(
     }
 
     // Compute statistics
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     for (key, (labels, values)) in context_map {
         if values.is_empty() {
             continue;
