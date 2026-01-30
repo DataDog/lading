@@ -39,6 +39,23 @@ git status
 
 Run `/lading-optimize-hunt`.
 
+**CRITICAL: After `/lading-optimize-hunt` completes, you MUST return here to Phase 3.**
+
+The hunt workflow will:
+- Benchmark baseline
+- Implement optimization
+- Re-benchmark with changes
+- Run review process (/lading-optimize-review)
+- Record results in db.yaml
+
+**BUT the hunt does NOT:**
+- Create git branches
+- Commit changes
+- Push to remote
+- Create PRs
+
+Those are the responsibility of THIS skill (lading-optimize-submit).
+
 ---
 
 ## Phase 3: Create Optimization Branch
