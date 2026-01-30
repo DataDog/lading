@@ -19,3 +19,7 @@ entries:
     technique: buffer-reuse
     status: success
     file: assets/db/datadog-logs-buffer-reuse.yaml
+  - target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+    technique: buffer-reuse
+    status: failure
+    file: assets/db/trace-agent-v04-buffer-reuse.yaml

@@ -1,0 +1,50 @@
+id: trace-agent-v04-buffer-reuse
+target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+technique: buffer-reuse
+verdict: rejected
+date: 2026-01-30
+votes:
+  duplicate_hunter: approve
+  skeptic: reject
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
+measurements:
+  time: +6.6% (13.6 ms -> 14.5 ms)
+  total_allocated: -67.6% (32.55 MiB -> 10.56 MiB)
+  allocations: -1.2% (18,141 -> 17,921)
+  peak_live: ~0% (2.78 MiB -> 2.78 MiB)
+reason: |
+  REJECTED by Skeptic persona due to time regression.
+
+  While the optimization successfully reduced total allocated memory by 67.6%,
+  it caused a 6.6% time regression (13.6ms → 14.5ms). This violates the
+  requirement that optimizations should improve performance, not degrade it.
+
+  The Skeptic persona requires either:
+  - Time improvement >= 5%, OR
+  - Memory improvement >= 10%, OR
+  - Allocation reduction >= 20%
+
+  AND no significant time regression.
+
+  This optimization achieved the memory threshold but failed the time requirement.
+lessons: |
+  Buffer reuse in msgpack serialization contexts may introduce unexpected overhead.
+
+  The pattern that works well for simple text-based serializers (syslog, dogstatsd,
+  datadog_logs) does not necessarily translate to msgpack serialization with
+  complex nested structures.
+
+  Possible explanations for time regression:
+  1. The .clear() operation on large Vec<u8> may touch memory pages
+  2. Cache locality issues with reused buffers
+  3. The msgpack Serializer may have internal state that interacts poorly with
+     buffer reuse
+  4. The binary search loop (lines 511-521) repeatedly serializes to the same
+     buffer, potentially causing cache thrashing
+
+  Lesson: Always measure! "Obvious" optimizations aren't always wins. The dramatic
+  reduction in total allocated memory (-67.6%) suggests we avoided allocations,
+  but the time regression indicates the tradeoff wasn't favorable for this
+  specific use case.
