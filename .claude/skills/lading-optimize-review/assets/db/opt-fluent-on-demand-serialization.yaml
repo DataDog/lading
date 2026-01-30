@@ -1,7 +1,6 @@
-branch: opt/fluent-on-demand-serialization
+id: fluent-on-demand-serialization
 verdict: approved
 date: 2026-01-22
-commit: a14a569
 target: lading_payload/src/fluent.rs::to_bytes
 technique: on-demand-serialization
 

@@ -11,7 +11,7 @@ Salvage optimization work done without proper benchmarks. Generate evidence, val
 
 | Outcome | Value | Action |
 |---------|-------|--------|
-| **Change validated** | Real improvement proven | KEEP, include in rescued branch |
+| **Change validated** | Real improvement proven | KEEP in working directory |
 | **Change invalidated** | No improvement | DISCARD, record lesson |
 | **Bug discovered** | Correctness issue found | Invoke `/lading-optimize-validate` |
 
@@ -27,11 +27,7 @@ Run `/lading-preflight` first.
 
 ## Phase 1: Audit
 
-```bash
-git diff --name-only origin/main...HEAD | grep '\.rs$'
-```
-
-For each change, categorize:
+Examine the changes in your working directory. Identify all modified files and categorize each change:
 - Preallocation (`Vec::with_capacity`, `String::with_capacity`)
 - Avoiding clones (borrowing instead of owned)
 - Moving allocations out of loops
@@ -64,17 +60,9 @@ For each change, categorize:
 
 ## Phase 3: Generate Evidence
 
-### CRITICAL: Use Separate Worktree for Baseline
+### Establish Baseline for Comparison
 
-**NEVER use `git stash`/`git checkout` to switch between baseline and optimized.** This causes confusion and errors. Instead, use a separate git worktree:
-
-```bash
-# One-time setup: create a baseline worktree (do this once per repo)
-git worktree add ../lading-baseline main
-
-# The baseline worktree is at ../lading-baseline
-# Your optimization work stays in the current directory
-```
+**Baseline must be from unmodified code.** You'll need to capture baseline metrics before your changes, then measure again with your changes applied.
 
 ### For payloadtool (end-to-end):
 
@@ -82,15 +70,13 @@ git worktree add ../lading-baseline main
 # Choose a config file (e.g., ci/fingerprints/json/lading.yaml)
 CONFIG=ci/fingerprints/json/lading.yaml
 
-# In baseline worktree
-cd ../lading-baseline
+# Baseline (without changes)
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --runs 30 --export-json /tmp/baseline.json \
   "./target/release/payloadtool $CONFIG"
 ./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/baseline-mem.txt
 
-# In optimization worktree
-cd /path/to/your/optimization/branch
+# With changes applied
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
   "./target/release/payloadtool $CONFIG"
@@ -99,21 +85,19 @@ hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
 
 ### For inner loops (criterion):
 
-Use `cargo criterion` for micro-benchmarks. Run in each worktree and compare output:
+Use `cargo criterion` for micro-benchmarks. Run before and after changes:
 
 ```bash
-# In baseline worktree
-cd ../lading-baseline
+# Baseline (without changes)
 cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
 
-# In optimization worktree
-cd /path/to/your/optimization/branch
+# With changes applied
 cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 
 # Compare results manually - look for "change:" lines showing improvement/regression
 ```
 
-**Note:** Criterion automatically compares against the last run in that worktree and reports percentage changes.
+**Note:** Criterion automatically compares against the previous run and reports percentage changes.
 
 ### Create Benchmarks If Missing
 
@@ -182,22 +166,17 @@ If rescue uncovers a bug instead of an optimization:
 After validation:
 1. Bug recorded in validate's assets/db.yaml (via /lading-optimize-validate)
 2. Record rescue as BUG_FOUND in Phase 7
-3. The bug fix becomes part of rescued branch (with tests!)
+3. The bug fix remains in working directory (with tests!)
 
 ---
 
 ## Phase 6: Reconstruct
 
-```bash
-git checkout main
-git checkout -b opt/<name>-rescued
-```
-
-Apply only:
+Keep only:
 - **KEEP** changes (validated optimizations with benchmark proof)
 - **BUG_FOUND** changes (with tests from /lading-optimize-validate)
 
-Discard everything else.
+Discard everything else from your working directory.
 
 ### Mandatory Before Finishing
 
@@ -205,7 +184,7 @@ Discard everything else.
 ci/validate
 ```
 
-**No exceptions. Rescued branch must pass ci/validate.**
+**No exceptions. Rescued changes must pass ci/validate.**
 
 ---
 
@@ -219,16 +198,14 @@ ci/validate
 **assets/db.yaml entry:**
 ```yaml
 entries:
-  - original_branch: <opt/original-branch>
-    rescued_as: <opt/original-branch-rescued>
+  - id: <descriptive-name>
     status: <rescued|partial|bug_found>
-    file: assets/db/<branch-name>.yaml
+    file: assets/db/<rescue-name>.yaml
 ```
 
-**assets/db/<branch-name>.yaml:**
+**assets/db/<id>.yaml:**
 ```yaml
-original_branch: <opt/original-branch>
-rescued_as: <opt/original-branch-rescued>
+id: <descriptive-name>
 date: <YYYY-MM-DD>
 statistics:
   audited: <N>

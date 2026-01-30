@@ -2,8 +2,6 @@ target: lading_payload/src/datadog_logs.rs::DatadogLog::to_bytes
 technique: buffer-reuse
 status: success
 date: 2026-01-21
-branch: opt/datadog-logs-buffer-reuse
-commit: 1ffd10f
 measurements:
   micro:
     datadog_logs_100MiB_time: +5.41%

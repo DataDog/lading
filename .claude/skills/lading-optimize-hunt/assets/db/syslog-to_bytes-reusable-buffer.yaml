@@ -2,9 +2,6 @@ target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
 technique: reusable-buffer-eliminate-allocations
 status: success
 date: 2026-01-15
-branch: opt/syslog-eliminate-allocations
-commit: d90086c
-
 measurements:
   micro_benchmarks:
     - size: 1 MiB

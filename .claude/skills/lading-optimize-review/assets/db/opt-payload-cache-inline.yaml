@@ -1,6 +1,8 @@
-branch: opt/payload-cache-inline
+id: payload-cache-inline
 verdict: approved
 date: 2026-01-20
+target: lading_payload/src/block.rs:Cache methods
+technique: inline
 votes:
   duplicate_hunter: approve
   skeptic: approve

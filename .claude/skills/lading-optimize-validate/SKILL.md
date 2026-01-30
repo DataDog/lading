@@ -187,17 +187,11 @@ capacity_at_least_requested
 
 ### 3.3 Verify Test Fails Before Fix
 
+**Important:** Ensure the test fails on buggy code before applying the fix. You may need to temporarily revert your fix to verify.
+
 ```bash
-# Checkout code BEFORE fix
-git stash
-git checkout origin/main
-
-# Run the new test - MUST FAIL
+# Run the new test - should FAIL on buggy code
 ci/test
-
-# Return to fix branch
-git checkout -
-git stash pop
 ```
 
 **If test passes on buggy code, the test doesn't reproduce the bug. Rewrite it.**
@@ -209,7 +203,6 @@ git stash pop
 ### 4.1 Verify Test Passes After Fix
 
 ```bash
-# On the fix branch
 ci/test
 ```
 
@@ -244,27 +237,7 @@ diff /tmp/run1.txt /tmp/run2.txt  # Must be identical
 
 ## Phase 5: Document and Record
 
-### 5.1 Commit Message Format
-
-```bash
-git commit -m "$(cat <<'EOF'
-fix(lading_payload): correct off-by-one in capacity calculation
-
-Bug: calculate_capacity returned size-1 instead of size
-Fix: Changed < to <= in boundary check
-
-Test: Property test output_length_equals_requested fails before, passes after
-Kani: Proof capacity_never_underflows added (or: Kani not feasible - timeout)
-
-Discovered-by: /lading-optimize-hunt
-Validated-by: /lading-optimize-validate
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-EOF
-)"
-```
-
-### 5.2 MANDATORY: Update db.yaml
+### MANDATORY: Update db.yaml
 
 1. Add entry to `assets/db.yaml` index
 2. Create detailed file in `assets/db/` directory
@@ -285,7 +258,6 @@ file: <file path>
 function: <function name>
 category: <off-by-one|capacity|determinism|overflow|logic|panic>
 discovered_by: <hunt|rescue|review>
-original_branch: <branch name>
 date: <YYYY-MM-DD>
 bug_description: |
   <what was wrong>
