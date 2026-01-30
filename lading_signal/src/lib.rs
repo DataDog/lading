@@ -107,6 +107,10 @@ impl Broadcaster {
         // `decrease_peer_count`: loop will not consume CPU until a `Watcher`
         // has signaled that it has received the transmitted signal.
         loop {
+            // Register interest first
+            let notified = self.notify.notified();
+
+            // Check condition
             let peers = self.peers.load(Ordering::SeqCst);
 
             #[cfg(loom)]
@@ -118,7 +122,9 @@ impl Broadcaster {
                 break;
             }
             info!("Waiting for {peers} peers");
-            self.notify.notified().await;
+
+            // Safe to await, we are registered
+            notified.await;
         }
     }
 }
