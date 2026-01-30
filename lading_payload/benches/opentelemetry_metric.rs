@@ -14,7 +14,7 @@ const MIB: usize = 1_048_576;
 fn opentelemetry_metric_setup(c: &mut Criterion) {
     c.bench_function("opentelemetry_metric_setup", |b| {
         b.iter(|| {
-            let mut rng = SmallRng::seed_from_u64(19690716);
+            let mut rng = SmallRng::seed_from_u64(19_690_716);
             let config = Config {
                 metric_weights: MetricWeights {
                     gauge: 50,
@@ -42,7 +42,7 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut rng = SmallRng::seed_from_u64(19690716);
+                let mut rng = SmallRng::seed_from_u64(19_690_716);
                 let config = Config {
                     metric_weights: MetricWeights {
                         gauge: 50,
