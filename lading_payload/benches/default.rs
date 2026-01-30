@@ -9,6 +9,7 @@ use criterion::criterion_main;
 
 mod apache_common;
 mod ascii;
+mod block;
 mod datadog_logs;
 mod dogstatsd;
 mod fluent;
@@ -23,6 +24,7 @@ mod trace_agent;
 criterion_main!(
     apache_common::benches,
     ascii::benches,
+    block::benches,
     datadog_logs::benches,
     dogstatsd::benches,
     fluent::benches,

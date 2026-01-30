@@ -10,7 +10,7 @@ const MIB: usize = 1_048_576;
 fn opentelemetry_traces_setup(c: &mut Criterion) {
     c.bench_function("opentelemetry_traces_setup", |b| {
         b.iter(|| {
-            let mut rng = SmallRng::seed_from_u64(19690716);
+            let mut rng = SmallRng::seed_from_u64(19_690_716);
             let _ot = OpentelemetryTraces::with_config(Config::default(), &mut rng)
                 .expect("failed to create trace generator");
         })
@@ -23,7 +23,7 @@ fn opentelemetry_traces_all(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut rng = SmallRng::seed_from_u64(19690716);
+                let mut rng = SmallRng::seed_from_u64(19_690_716);
                 let mut ot = OpentelemetryTraces::with_config(Config::default(), &mut rng)
                     .expect("failed to create trace generator");
                 let mut writer = Vec::with_capacity(size);

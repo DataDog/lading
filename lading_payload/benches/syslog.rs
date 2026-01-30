@@ -21,7 +21,7 @@ fn syslog_all(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let rng = SmallRng::seed_from_u64(19690716);
+                let rng = SmallRng::seed_from_u64(19_690_716);
                 let mut syslog = Syslog5424::default();
                 let mut writer = Vec::with_capacity(size);
 
