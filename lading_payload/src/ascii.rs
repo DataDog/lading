@@ -11,7 +11,7 @@ const MAX_LENGTH: u16 = 6_144; // 6 KiB
 #[derive(Debug, Clone)]
 /// ASCII text payload
 pub struct Ascii {
-    pool: strings::Pool,
+    pool: strings::RandomStringPool,
 }
 
 impl Ascii {
@@ -23,7 +23,7 @@ impl Ascii {
         Self {
             // SAFETY: Do not adjust this downward below MAX_LENGTH without also
             // adjusting the input to `self.pool.of_size` below.
-            pool: strings::Pool::with_size(rng, usize::from(MAX_LENGTH * 4)),
+            pool: strings::RandomStringPool::with_size(rng, usize::from(MAX_LENGTH * 4)),
         }
     }
 }

@@ -85,14 +85,14 @@ impl Distribution<Ndp> for StandardUniform {
 pub(crate) struct MetricTemplateGenerator {
     kind_dist: WeightedIndex<u16>,
     unit_gen: UnitGenerator,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     tags: TagGenerator,
 }
 
 impl MetricTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -103,7 +103,7 @@ impl MetricTemplateGenerator {
             config.contexts.attributes_per_metric,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -287,7 +287,7 @@ pub(crate) enum Kind {
 pub(crate) struct ScopeTemplateGenerator {
     metrics_per_scope: ConfRange<u8>,
     metric_generator: MetricTemplateGenerator,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     tags: TagGenerator,
     attributes_per_scope: ConfRange<u8>,
 }
@@ -295,7 +295,7 @@ pub(crate) struct ScopeTemplateGenerator {
 impl ScopeTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -306,7 +306,7 @@ impl ScopeTemplateGenerator {
             config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -413,7 +413,7 @@ pub(crate) struct ResourceTemplateGenerator {
 impl ResourceTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
     where
@@ -424,7 +424,7 @@ impl ResourceTemplateGenerator {
             config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            &Rc::clone(str_pool),
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -543,7 +543,7 @@ mod test {
 
             let generator_result = MetricTemplateGenerator::new(
                 &config,
-                &Rc::new(strings::Pool::with_size(&mut rng, 1024)),
+                &Rc::new(strings::RandomStringPool::with_size(&mut rng, 1024)),
                 &mut rng,
             );
             assert!(generator_result.is_ok());

@@ -254,7 +254,7 @@ impl Cache {
                         return Err(Error::InvalidConfig(e));
                     }
                 }
-                let mut serializer = crate::DogStatsD::new(*conf, &mut rng)?;
+                let mut serializer = crate::DogStatsD::new(conf.clone(), &mut rng)?;
 
                 let span = span!(Level::INFO, "fixed", payload = "dogstatsd");
                 let _guard = span.enter();

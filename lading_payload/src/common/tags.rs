@@ -10,8 +10,10 @@ use tracing::warn;
 
 use crate::common::{
     config::ConfRange,
-    strings::{Handle, Pool},
+    strings::{Pool, PoolKind},
 };
+
+use super::strings::Handle;
 
 pub(crate) const MIN_UNIQUE_TAG_RATIO: f32 = 0.01;
 pub(crate) const MAX_UNIQUE_TAG_RATIO: f32 = 1.00;
@@ -69,21 +71,23 @@ impl TagStore {
 /// Generator for individual tags
 #[derive(Debug, Clone)]
 struct TagGenerator {
-    str_pool: Rc<Pool>,
+    str_pool: Rc<PoolKind>,
+    tag_pool: Rc<PoolKind>,
     tag_length: ConfRange<u16>,
 }
 
 impl TagGenerator {
-    fn new(str_pool: Rc<Pool>, tag_length: ConfRange<u16>) -> Self {
+    fn new(tag_pool: Rc<PoolKind>, str_pool: Rc<PoolKind>, tag_length: ConfRange<u16>) -> Self {
         Self {
             str_pool,
+            tag_pool,
             tag_length,
         }
     }
 
     fn generate<R>(&self, rng: &mut R) -> Result<Tag, crate::Error>
     where
-        R: rand::Rng + ?Sized,
+        R: rand::Rng + Sized,
     {
         let desired_size = self.tag_length.sample(rng) as usize;
         // Ensure we have at least 1 character for both key and value
@@ -96,7 +100,7 @@ impl TagGenerator {
         };
         let value_size = desired_size - key_size;
 
-        let key_handle = self.str_pool.of_size_with_handle(rng, key_size);
+        let key_handle = self.tag_pool.of_size_with_handle(rng, key_size);
         let value_handle = self.str_pool.of_size_with_handle(rng, value_size);
 
         match (key_handle, value_handle) {
@@ -167,7 +171,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        str_pool: Rc<PoolKind>,
+        tag_pool: Rc<PoolKind>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         let (tag_length_valid, tag_length_valid_msg) = tag_length.valid();
@@ -196,7 +201,7 @@ impl Generator {
         }
 
         let rng = SmallRng::seed_from_u64(seed);
-        let tags = TagGenerator::new(str_pool, tag_length);
+        let tags = TagGenerator::new(tag_pool, str_pool, tag_length);
 
         Ok(Generator {
             seed: Cell::new(seed),
@@ -301,8 +306,7 @@ mod test {
     use super::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, WARN_UNIQUE_TAG_RATIO};
     use crate::Generator;
     use crate::common::config::ConfRange;
-    use crate::common::strings::Pool;
-    use crate::common::tags::Handle;
+    use crate::common::strings::{PoolKind, RandomStringPool};
 
     proptest! {
         #[test]
@@ -316,7 +320,8 @@ mod test {
         ) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, pool_size)));
+            let tag_pool = Rc::clone(&str_pool);
             let tags_per_msg_range = ConfRange::Inclusive{min: 0, max: tags_per_msg_max};
             let tag_size_range = ConfRange::Inclusive{min: tag_size_min, max: tag_size_max};
             let generator = super::Generator::new(
@@ -325,6 +330,7 @@ mod test {
                 tag_size_range,
                 num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0
             ).expect("Tag generator to be valid");
 
@@ -353,7 +359,8 @@ mod test {
         ) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, pool_size)));
+            let tag_pool = Rc::clone(&str_pool);
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: tags_per_msg_max };
             let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
             let generator = super::Generator::new(
@@ -362,6 +369,7 @@ mod test {
                 tag_size_range,
                 num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0
             ).expect("Tag generator to be valid");
 
@@ -403,16 +411,19 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: tag_size_min, max: tag_size_max };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, pool_size));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, pool_size)));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = super::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
                 unique_tag_ratio
             ).expect("Tag generator to be valid");
 
+            use crate::common::strings::Handle;
             let mut unique_tagsets: HashSet<Vec<(Handle, Handle)>> = HashSet::new();
             for _ in 0..desired_num_tagsets {
                 let ts = generator.generate(&mut rng)?;

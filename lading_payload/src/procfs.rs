@@ -1640,7 +1640,7 @@ pub struct Process {
 /// Generates a [`Process`].
 #[derive(Debug)]
 pub struct ProcessGenerator {
-    str_pool: strings::Pool,
+    str_pool: strings::RandomStringPool,
 }
 
 impl ProcessGenerator {
@@ -1650,7 +1650,7 @@ impl ProcessGenerator {
         R: rand::Rng + ?Sized,
     {
         Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: strings::RandomStringPool::with_size(rng, 1_000_000),
         }
     }
 }

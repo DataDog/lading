@@ -316,7 +316,7 @@ impl OpentelemetryMetrics {
         let context_cap = config.contexts.total_contexts.sample(rng);
         // Moby Dick is 1.2Mb. 128Kb should be more than enough for metric
         // names, descriptions, etc.
-        let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
+        let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, 128_000));
         let rt_gen = ResourceTemplateGenerator::new(&config, &str_pool, rng)?;
 
         Ok(Self {

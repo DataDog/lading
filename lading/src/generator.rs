@@ -204,7 +204,7 @@ impl Server {
             Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
             Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),
             Inner::UnixStream(conf) => {
-                if let lading_payload::Config::DogStatsD(variant) = conf.variant
+                if let lading_payload::Config::DogStatsD(variant) = conf.variant.clone()
                     && !variant.length_prefix_framed
                 {
                     warn!(

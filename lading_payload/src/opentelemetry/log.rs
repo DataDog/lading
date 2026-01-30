@@ -303,7 +303,7 @@ impl OpentelemetryLogs {
         config.valid().map_err(Error::Validation)?;
 
         let context_cap = config.contexts.total_contexts.sample(rng);
-        let str_pool = Rc::new(strings::Pool::with_size(rng, 128_000));
+        let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, 128_000));
 
         let trace_count = config.trace_cardinality.sample(rng) as usize;
         let trace_pool = Rc::new(templates::TraceIdPool::new(trace_count, rng));
