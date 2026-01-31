@@ -20,7 +20,7 @@ pub enum Error {
 
 /// Multi-format writer
 ///
-/// Writes metrics to both JSONL and Parquet formats, uses fail-fast sematics on
+/// Writes metrics to both JSONL and Parquet formats, uses fail-fast semantics on
 /// errors from either format.
 #[derive(Debug)]
 pub struct Format<W1: Write, W2: Write + Seek + Send> {
