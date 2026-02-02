@@ -125,7 +125,7 @@ pub enum LineValue {
     /// A floating point, 64 bits wide
     Float(f64),
     /// Value given externally
-    ExternalHistogram
+    ExternalHistogram,
 }
 
 impl LineValue {
