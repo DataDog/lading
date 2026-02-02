@@ -6,6 +6,7 @@ authors = [
   "George Hahn <george.hahn@datadoghq.com>",
   "Scott Opell <scott.opell@datadoghq.com>",
   "Caleb Metz <caleb.metz@datadoghq.com>",
+  "Paul Reinlein <paul.reinlein@datadoghq.com>",
 ]
 edition = "2024"
 license = "MIT"
