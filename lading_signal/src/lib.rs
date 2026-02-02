@@ -31,6 +31,19 @@ use tokio::sync::{
 };
 use tracing::info;
 
+// Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
+// window between `peers.load()` and `notified().await`. This allows loom to
+// explore the interleaving where a watcher's `notify_waiters()` fires in this
+// window, exposing the lost wakeup race condition.
+//
+// This is only used in tests to prove the race exists. In production builds
+// (`#[cfg(not(loom))]`), this is compiled out entirely.
+#[cfg(loom)]
+std::thread_local! {
+    #[allow(missing_docs)]
+    pub static LOOM_EXPLORE_RACE_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Construct a `Watcher` and `Broadcaster` pair.
 #[must_use]
 pub fn signal() -> (Watcher, Broadcaster) {
@@ -95,6 +108,12 @@ impl Broadcaster {
         // has signaled that it has received the transmitted signal.
         loop {
             let peers = self.peers.load(Ordering::SeqCst);
+
+            #[cfg(loom)]
+            if LOOM_EXPLORE_RACE_WINDOW.get() {
+                loom::thread::yield_now(); // Force exploration here
+            }
+
             if peers == 0 {
                 break;
             }
@@ -573,6 +592,43 @@ mod tests {
 
             block_on(broadcaster.signal_and_wait());
             watcher_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn signal_and_wait_race_proof_with_yield() {
+        use crate::LOOM_EXPLORE_RACE_WINDOW;
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            LOOM_EXPLORE_RACE_WINDOW.set(true); // Enable instrumentation
+
+            let (watcher, broadcaster) = signal();
+
+            let handle = thread::spawn(move || drop(watcher));
+
+            block_on(broadcaster.signal_and_wait()); // Calls REAL function
+
+            handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn signal_and_wait_race_proof_without_yield() {
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            let (watcher, broadcaster) = signal();
+
+            let handle = thread::spawn(move || drop(watcher));
+
+            block_on(broadcaster.signal_and_wait()); // Calls REAL function
+
+            handle.join().unwrap();
         });
     }
 }
