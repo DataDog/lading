@@ -1,6 +1,6 @@
 //! Tag generation for dogstatsd payloads
 use crate::{
-    common::{strings::Pool, tags},
+    common::{strings::PoolKind, tags},
     dogstatsd::ConfRange,
 };
 use std::rc::Rc;
@@ -35,7 +35,8 @@ impl Generator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        key_pool: Rc<PoolKind>,
+        tag_pool: Rc<PoolKind>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
         // Adjust tag_length range to account for the colon separator
@@ -49,7 +50,8 @@ impl Generator {
             tags_per_msg,
             adjusted_tag_length,
             num_tagsets,
-            str_pool,
+            key_pool,
+            tag_pool,
             unique_tag_probability,
         )?;
         Ok(Generator { inner })
@@ -84,7 +86,7 @@ mod test {
     use rand::{SeedableRng, rngs::SmallRng};
 
     use crate::Generator;
-    use crate::common::strings::Pool;
+    use crate::common::strings::{Handle, PoolKind, RandomStringPool, StringListPool};
     use crate::common::tags::{MAX_UNIQUE_TAG_RATIO, Tag, WARN_UNIQUE_TAG_RATIO};
     use crate::dogstatsd::{ConfRange, tags};
 
@@ -94,19 +96,28 @@ mod test {
         let hash_builder = RandomState::new();
 
         for tagset in tagsets {
-            // Sort tags by key handle, then value handle for deterministic ordering
-            let mut sorted_handles: Vec<(u32, u32, u32, u32)> = tagset
+            let mut sorted_handles: Vec<(usize, usize, usize, usize)> = tagset
                 .iter()
-                .map(|t| (t.key.0, t.key.1, t.value.0, t.value.1))
+                .map(|t| {
+                    let (k0, k1) = match t.key {
+                        Handle::PosAndLength(k0, k1) => (k0 as usize, k1 as usize),
+                        Handle::Index(k0) => (k0, 0),
+                    };
+                    let (v0, v1) = match t.value {
+                        Handle::PosAndLength(v0, v1) => (v0 as usize, v1 as usize),
+                        Handle::Index(v0) => (v0, 0),
+                    };
+                    (k0, k1, v0, v1)
+                })
                 .collect();
             sorted_handles.sort();
 
             let mut context_hasher = hash_builder.build_hasher();
             for (k0, k1, v0, v1) in &sorted_handles {
-                context_hasher.write_u32(*k0);
-                context_hasher.write_u32(*k1);
-                context_hasher.write_u32(*v0);
-                context_hasher.write_u32(*v1);
+                context_hasher.write_usize(*k0);
+                context_hasher.write_usize(*k1);
+                context_hasher.write_usize(*v0);
+                context_hasher.write_usize(*v1);
             }
             unique_contexts.insert(context_hasher.finish());
         }
@@ -117,12 +128,12 @@ mod test {
     fn count_contexts_works() {
         // Create tags with identical handles - same context
         let tag1 = Tag {
-            key: (0, 1),
-            value: (2, 1),
+            key: Handle::PosAndLength(0, 1),
+            value: Handle::PosAndLength(2, 1),
         };
         let tag2 = Tag {
-            key: (10, 1),
-            value: (12, 1),
+            key: Handle::PosAndLength(10, 1),
+            value: Handle::PosAndLength(12, 1),
         };
 
         let tagsets = vec![
@@ -136,16 +147,16 @@ mod test {
 
         // Different tags = different contexts
         let tag3 = Tag {
-            key: (0, 1),
-            value: (3, 1),
+            key: Handle::PosAndLength(0, 1),
+            value: Handle::PosAndLength(3, 1),
         };
         let tag4 = Tag {
-            key: (0, 1),
-            value: (4, 1),
+            key: Handle::PosAndLength(0, 1),
+            value: Handle::PosAndLength(4, 1),
         };
         let tag5 = Tag {
-            key: (0, 1),
-            value: (5, 1),
+            key: Handle::PosAndLength(0, 1),
+            value: Handle::PosAndLength(5, 1),
         };
         let tagsets = vec![
             vec![tag3, tag2],
@@ -162,11 +173,58 @@ mod test {
         fn tagsets_repeat_after_reaching_tagset_max(seed: u64, num_tagsets in 1..10_000_usize) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 1_000_000));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, 1_000_000)));
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+            let tag_pool = Rc::clone(&str_pool);
             let generator =
-                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, 1.0)
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
+                    .expect("Tag generator to be valid");
+
+            let first_batch = (0..num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            let second_batch = (0..num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(first_batch.len(), second_batch.len());
+            for i in 0..first_batch.len() {
+                let first = &first_batch[i];
+                let second = &second_batch[i];
+                assert_eq!(first, second);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn tagsets_repeat_after_reaching_tagset_max_string_list_pool(seed: u64, num_tagsets in 1..10_000_usize) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            // Create a string list pool with enough strings to generate unique tagsets
+            let string_list: Vec<String> = (0..1_000)
+                .map(|i| format!("string_{}", i))
+                .collect();
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+            let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
+            let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+
+            let tag_list: Vec<String> = (0..1_000)
+                .map(|i| format!("string_{}", i))
+                .collect();
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+            let generator =
+                tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
                     .expect("Tag generator to be valid");
 
             let first_batch = (0..num_tagsets)
@@ -203,13 +261,15 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, 500_000)));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
                 1.0,
             )
             .expect("Tag generator to be valid");
@@ -241,13 +301,109 @@ mod test {
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let str_pool = Rc::new(Pool::with_size(&mut rng, 500_000));
+            let str_pool = Rc::new(PoolKind::RandomStringPool(RandomStringPool::with_size(&mut rng, 500_000)));
+            let tag_pool = Rc::clone(&str_pool);
             let generator = tags::Generator::new(
                 seed,
                 tags_per_msg_range,
                 tag_size_range,
                 desired_num_tagsets,
                 str_pool,
+                tag_pool,
+                unique_tag_ratio
+            )
+            .expect("Tag generator to be valid");
+
+            let tagsets = (0..desired_num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            let margin_of_error = 3;
+            let num_contexts = count_num_contexts(&tagsets);
+            assert!(num_contexts >= desired_num_tagsets - margin_of_error || num_contexts <= desired_num_tagsets + margin_of_error);
+        }
+    }
+
+    proptest! {
+        /// This test asserts that when the unique_tag_probability is 1.0, we always are able to hit
+        /// the desired number of unique tagsets no matter what, using StringListPool.
+        #[test]
+        fn unique_tagsets_respected_always_unique_tags_string_list_pool(seed: u64, desired_num_tagsets in 1..5_000_usize) {
+            let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 25 };
+            let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            // Create a string list pool with enough strings to generate unique tagsets
+            let string_list: Vec<String> = (0..10_000)
+                .map(|i| format!("key_{}", i))
+                .collect();
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+
+            let tag_list: Vec<String> = (0..10_000)
+                .map(|i| format!("value_{}", i))
+                .collect();
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+
+            let generator = tags::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                desired_num_tagsets,
+                str_pool,
+                tag_pool,
+                1.0,
+            )
+            .expect("Tag generator to be valid");
+
+            // need guarantee that calling generate N times will generate N unique tagsets
+            let tagsets = (0..desired_num_tagsets)
+                .map(|_| {
+                    generator
+                        .generate(&mut rng)
+                        .expect("failed to generate tagset")
+                })
+                .collect::<Vec<_>>();
+
+            let num_contexts = count_num_contexts(&tagsets);
+            assert_eq!(num_contexts, desired_num_tagsets);
+        }
+    }
+
+    proptest! {
+        /// This test varies the unique_tag_probability with StringListPool. This config option makes it possible
+        /// to specify inputs that will force the tagsets to repeat
+        /// A concern of the dogstatsd consumer is that the tagsets yielded have a cardinality of
+        /// `num_tagsets`
+        /// The goal of this test is to vary the unique_tag_probability between the WARN and MAX
+        /// levels and ensure that we are always able to generate the desired number of unique tagsets
+        #[test]
+        fn unique_tagsets_respected_with_varying_ratio_string_list_pool(seed: u64, desired_num_tagsets in 5..5_000_usize, unique_tag_ratio in WARN_UNIQUE_TAG_RATIO..MAX_UNIQUE_TAG_RATIO) {
+            let tags_per_msg_range = ConfRange::Inclusive { min: 2, max: 25 };
+            let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
+            let mut rng = SmallRng::seed_from_u64(seed);
+
+            // Create a string list pool with enough strings to generate unique tagsets
+            let string_list: Vec<String> = (0..10_000)
+                .map(|i| format!("key_{}", i))
+                .collect();
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+
+            let tag_list: Vec<String> = (0..10_000)
+                .map(|i| format!("value_{}", i))
+                .collect();
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+
+            let generator = tags::Generator::new(
+                seed,
+                tags_per_msg_range,
+                tag_size_range,
+                desired_num_tagsets,
+                str_pool,
+                tag_pool,
                 unique_tag_ratio
             )
             .expect("Tag generator to be valid");

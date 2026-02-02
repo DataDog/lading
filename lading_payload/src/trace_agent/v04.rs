@@ -11,7 +11,10 @@ use serde::Serialize;
 
 use crate::{
     Error, Generator,
-    common::{config::ConfRange, strings},
+    common::{
+        config::ConfRange,
+        strings::{self, Pool},
+    },
 };
 
 // A v0.4 Trace is a Vec<Span> that obeys the following properties:
@@ -240,7 +243,7 @@ struct TraceTemplate {
 #[derive(Debug, Clone)]
 pub struct V04 {
     config: Config,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     /// Pre-generated templates indexed by context ID
     templates: Vec<TraceTemplate>,
 }
@@ -253,9 +256,9 @@ impl V04 {
     /// Returns error if string generation from the string pool fails
     pub fn with_config<R>(config: Config, rng: &mut R) -> Result<Self, Error>
     where
-        R: Rng + ?Sized,
+        R: Rng,
     {
-        let str_pool = Rc::new(strings::Pool::with_size(rng, STRING_POOL_SIZE));
+        let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, STRING_POOL_SIZE));
 
         let num_contexts = config.contexts.sample(rng) as usize;
         let mut templates = Vec::with_capacity(num_contexts);
@@ -704,7 +707,7 @@ mod test {
         let mut rng = SmallRng::seed_from_u64(42);
 
         let template_size = std::mem::size_of::<super::TraceTemplate>();
-        assert_eq!(template_size, 32);
+        assert_eq!(template_size, 64);
 
         let mut small_config = Config::default();
         small_config.contexts = ConfRange::Constant(1000);
@@ -725,6 +728,7 @@ mod test {
         traces
             .serialize(&mut rmp_serde::Serializer::new(&mut serialized).with_struct_map())
             .unwrap();
+
         // NOTE this assertion must be exact. As the payload is updated this
         // value will need to be modified, but keeping it exact allows us to set
         // accurate bounds on memory consumption. Do not make this an

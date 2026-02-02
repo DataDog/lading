@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for generators (like "Static Chunks") that output variably sized blocks intentionally.
 - UDP generator now accepts a `bind_addr` configuration value, maintaining the
   previous hard-coded value as a default.
+- dogstatsd generator can be configured to use metric names, tag names and tag
+  values from a configured list. Configured with `metric_names`, `tag_names` and
+  `tag_values`.
 
 ## [0.30.0]
 ## Added

@@ -6,7 +6,7 @@ pub(crate) mod templates;
 
 use crate::{
     Error, Generator, SizedGenerator,
-    common::{config::ConfRange, strings::Pool, tags},
+    common::{config::ConfRange, strings, tags},
 };
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use prost::Message;
@@ -47,15 +47,18 @@ impl TagGenerator {
         tags_per_msg: ConfRange<u8>,
         tag_length: ConfRange<u16>,
         num_tagsets: usize,
-        str_pool: Rc<Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         unique_tag_probability: f32,
     ) -> Result<Self, Error> {
+        let str_pool_kind = Rc::new(strings::PoolKind::RandomStringPool((**str_pool).clone()));
+        let tag_pool = Rc::clone(&str_pool_kind);
         let inner = tags::Generator::new(
             seed,
             tags_per_msg,
             tag_length,
             num_tagsets,
-            str_pool,
+            str_pool_kind,
+            tag_pool,
             unique_tag_probability,
         )
         .map_err(|_| Error::StringGenerate)?;

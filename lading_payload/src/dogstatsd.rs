@@ -146,7 +146,7 @@ impl Default for ValueConf {
 }
 
 /// Configure the `DogStatsD` payload.
-#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -192,6 +192,12 @@ pub struct Config {
     /// If this is 0.10, then most of the tags (90%) will be re-used
     /// from existing tags.
     pub unique_tag_ratio: f32,
+    /// A list of possible metric names to generate
+    pub metric_names: Vec<String>,
+    /// A list of possible tag names to generate
+    pub tag_names: Vec<String>,
+    /// A list of possible tag values to generate
+    pub tag_values: Vec<String>,
 }
 
 impl Default for Config {
@@ -219,6 +225,9 @@ impl Default for Config {
             // This should be enabled for UDS-streams, but not for UDS-datagram nor UDP
             length_prefix_framed: false,
             unique_tag_ratio: 0.11,
+            metric_names: Vec::default(),
+            tag_names: Vec::default(),
+            tag_values: Vec::default(),
         }
     }
 }
@@ -341,8 +350,18 @@ struct MemberGenerator {
     metric_generator: MetricGenerator,
 }
 
+/// The collection of pools from which to choose our strings
+/// Cheap to clone.
+#[derive(Clone, Debug)]
+pub(crate) struct StringPools {
+    tag_name: Rc<strings::PoolKind>,
+    tag_value: Rc<strings::PoolKind>,
+    name: Rc<strings::PoolKind>,
+    randomstring: Rc<strings::RandomStringPool>,
+}
+
 impl MemberGenerator {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn new<R>(
         contexts: ConfRange<u32>,
         service_check_names: ConfRange<u16>,
@@ -357,14 +376,61 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
+        metric_names: Vec<String>,
+        tag_names: Vec<String>,
+        tag_values: Vec<String>,
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
         R: Rng + ?Sized,
     {
         // TODO only create the Generators if they're needed per the kind weights
+        let pool = strings::RandomStringPool::with_size(&mut rng, 8_000_000);
 
-        let pool = Rc::new(strings::Pool::with_size(&mut rng, 8_000_000));
+        // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
+        let service_event_titles = random_strings_with_length_range(
+            &pool,
+            service_check_names.sample(rng) as usize,
+            name_length,
+            &mut rng,
+        );
+
+        let texts_or_messages = random_strings_with_length(&pool, 4..128, 1024, &mut rng);
+        let small_strings = random_strings_with_length(&pool, 16..1024, 8, &mut rng);
+
+        let str_pool = Rc::new(pool.clone());
+        let pool = Rc::new(strings::PoolKind::RandomStringPool(pool));
+
+        let tag_name_pool = if tag_names.is_empty() {
+            Rc::clone(&pool)
+        } else {
+            Rc::new(strings::PoolKind::StringListPool(
+                strings::StringListPool::new(tag_names),
+            ))
+        };
+
+        let tag_value_pool = if tag_values.is_empty() {
+            Rc::clone(&pool)
+        } else {
+            Rc::new(strings::PoolKind::StringListPool(
+                strings::StringListPool::new(tag_values),
+            ))
+        };
+
+        let name_pool = if metric_names.is_empty() {
+            Rc::clone(&pool)
+        } else {
+            Rc::new(strings::PoolKind::StringListPool(
+                strings::StringListPool::new(metric_names),
+            ))
+        };
+
+        let pools = StringPools {
+            tag_name: tag_name_pool,
+            tag_value: tag_value_pool,
+            name: name_pool,
+            randomstring: str_pool,
+        };
 
         let num_contexts = contexts.sample(rng);
 
@@ -373,7 +439,8 @@ impl MemberGenerator {
             tags_per_msg,
             tag_length,
             num_contexts as usize,
-            Rc::clone(&pool),
+            Rc::clone(&pools.tag_value),
+            Rc::clone(&pools.tag_name),
             unique_tag_ratio,
         ) {
             Ok(tg) => tg,
@@ -382,17 +449,6 @@ impl MemberGenerator {
                 return Err(crate::Error::StringGenerate);
             }
         };
-
-        // BUG: Resulting size is contexts * name_length, so 2**32 * 2**16.
-        let service_event_titles = random_strings_with_length_range(
-            pool.as_ref(),
-            service_check_names.sample(rng) as usize,
-            name_length,
-            &mut rng,
-        );
-
-        let texts_or_messages = random_strings_with_length(pool.as_ref(), 4..128, 1024, &mut rng);
-        let small_strings = random_strings_with_length(pool.as_ref(), 16..1024, 8, &mut rng);
 
         // NOTE the ordering here of `metric_choices` is very important! If you
         // change it here you MUST also change it in `Generator<Metric> for
@@ -407,7 +463,7 @@ impl MemberGenerator {
         ];
 
         let event_generator = EventGenerator {
-            str_pool: Rc::clone(&pool),
+            pools: pools.clone(),
             title_length: name_length,
             texts_or_messages_length_range: 1..1024,
             small_strings_length_range: 1..8,
@@ -419,7 +475,7 @@ impl MemberGenerator {
             small_strings: small_strings.clone(),
             texts_or_messages,
             tags_generator: tags_generator.clone(),
-            str_pool: Rc::clone(&pool),
+            pools: pools.clone(),
         };
 
         let metric_generator = MetricGenerator::new(
@@ -432,7 +488,7 @@ impl MemberGenerator {
             &WeightedIndex::new(metric_choices)?,
             small_strings,
             &mut tags_generator,
-            &pool,
+            &pools,
             value_conf,
             &mut rng,
         );
@@ -555,6 +611,9 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
+            config.metric_names,
+            config.tag_names,
+            config.tag_values,
             rng,
         )?;
 

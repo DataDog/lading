@@ -15,7 +15,7 @@ use crate::{Error, Generator, common::strings};
 #[derive(Debug, Clone)]
 /// Fluent payload
 pub struct Fluent {
-    str_pool: strings::Pool,
+    str_pool: strings::RandomStringPool,
     buffer: Vec<u8>,
 }
 
@@ -26,7 +26,7 @@ impl Fluent {
         R: rand::Rng + ?Sized,
     {
         Self {
-            str_pool: strings::Pool::with_size(rng, 1_000_000),
+            str_pool: strings::RandomStringPool::with_size(rng, 1_000_000),
             buffer: Vec::with_capacity(4096),
         }
     }
@@ -121,7 +121,7 @@ enum RecordValue<'a> {
     Object(BTreeMap<&'a str, u8>),
 }
 
-fn record_value<'a, R>(rng: &mut R, str_pool: &'a strings::Pool) -> RecordValue<'a>
+fn record_value<'a, R>(rng: &mut R, str_pool: &'a strings::RandomStringPool) -> RecordValue<'a>
 where
     R: rand::Rng + ?Sized,
 {

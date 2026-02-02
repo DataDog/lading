@@ -67,6 +67,7 @@ ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c
 ] }
 datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
 protobuf = { version = "3.7" }
+enum_dispatch = { version = "0.3" }
 
 [workspace.lints.clippy]
 all = "deny"

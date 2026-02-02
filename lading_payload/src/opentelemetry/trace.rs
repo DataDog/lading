@@ -158,7 +158,7 @@ struct TraceTemplate {
 
 impl TraceTemplate {
     fn from_rng<R>(
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         rng: &mut R,
         config: &Config,
     ) -> Result<Self, Error>
@@ -250,7 +250,7 @@ impl Trace {
 #[derive(Debug, Clone)]
 /// OpenTelemetry trace generator
 pub struct OpentelemetryTraces {
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     config: Config,
     templates: Vec<TraceTemplate>,
 }
@@ -265,7 +265,7 @@ impl OpentelemetryTraces {
     where
         R: Rng + ?Sized,
     {
-        let str_pool = Rc::new(strings::Pool::with_size(rng, STRING_POOL_SIZE));
+        let str_pool = Rc::new(strings::RandomStringPool::with_size(rng, STRING_POOL_SIZE));
 
         let num_contexts = config.contexts.sample(rng) as usize;
         let mut templates = Vec::with_capacity(num_contexts);

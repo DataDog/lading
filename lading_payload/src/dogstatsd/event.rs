@@ -1,20 +1,20 @@
 //! `DogStatsD` event.
-use std::{fmt, ops::Range, rc::Rc};
+use std::{fmt, ops::Range};
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 
 use crate::{Error, Generator, common::strings};
 
-use self::strings::choose_or_not_fn;
+use self::strings::{Pool, choose_or_not_fn};
 
-use super::{ConfRange, common};
+use super::{ConfRange, StringPools, common};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventGenerator {
     pub(crate) title_length: ConfRange<u16>,
     pub(crate) texts_or_messages_length_range: Range<u16>,
     pub(crate) small_strings_length_range: Range<u16>,
-    pub(crate) str_pool: Rc<strings::Pool>,
+    pub(crate) pools: StringPools,
     pub(crate) tags_generator: common::tags::Generator,
 }
 
@@ -28,11 +28,13 @@ impl<'a> Generator<'a> for EventGenerator {
     {
         let title_sz = self.title_length.sample(&mut rng) as usize;
         let title = self
-            .str_pool
+            .pools
+            .randomstring
             .of_size(&mut rng, title_sz)
             .ok_or(Error::StringGenerate)?;
         let text = self
-            .str_pool
+            .pools
+            .randomstring
             .of_size_range(&mut rng, self.texts_or_messages_length_range.clone())
             .ok_or(Error::StringGenerate)?;
         let tags = if rng.random() {
@@ -48,21 +50,24 @@ impl<'a> Generator<'a> for EventGenerator {
             text,
             timestamp_second: rng.random_bool(0.5).then(|| rng.random()),
             hostname: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             aggregation_key: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             priority: rng.random_bool(0.5).then(|| rng.random()),
             source_type_name: choose_or_not_fn(&mut rng, |r| {
-                self.str_pool
+                self.pools
+                    .randomstring
                     .of_size_range(r, self.small_strings_length_range.clone())
             }),
             alert_type: rng.random_bool(0.5).then(|| rng.random()),
             tags,
-            str_pool: &self.str_pool,
+            pools: &self.pools,
         })
     }
 }
@@ -93,7 +98,7 @@ pub struct Event<'a> {
     /// Tags of the event
     pub(crate) tags: Option<common::tags::Tagset>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) pools: &'a StringPools,
 }
 
 impl fmt::Display for Event<'_> {
@@ -132,11 +137,13 @@ impl fmt::Display for Event<'_> {
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
                 let key = self
-                    .str_pool
+                    .pools
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
-                    .str_pool
+                    .pools
+                    .randomstring
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

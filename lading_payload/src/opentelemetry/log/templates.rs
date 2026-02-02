@@ -55,7 +55,7 @@ impl TraceIdPool {
 #[derive(Debug, Clone)]
 pub(crate) struct LogTemplateGenerator {
     severity_dist: WeightedIndex<u16>,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     trace_pool: Rc<TraceIdPool>,
     tags: TagGenerator,
     body_size: ConfRange<u16>,
@@ -64,7 +64,7 @@ pub(crate) struct LogTemplateGenerator {
 impl LogTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
@@ -76,7 +76,7 @@ impl LogTemplateGenerator {
             config.contexts.attributes_per_log,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -199,14 +199,14 @@ impl<'a> crate::SizedGenerator<'a> for LogTemplateGenerator {
 pub(crate) struct ScopeTemplateGenerator {
     log_gen: LogTemplateGenerator,
     tags: TagGenerator,
-    str_pool: Rc<strings::Pool>,
+    str_pool: Rc<strings::RandomStringPool>,
     logs_per_scope: ConfRange<u8>,
 }
 
 impl ScopeTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
@@ -218,7 +218,7 @@ impl ScopeTemplateGenerator {
             config.contexts.attributes_per_scope,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 
@@ -317,7 +317,7 @@ pub(crate) struct ResourceTemplateGenerator {
 impl ResourceTemplateGenerator {
     pub(crate) fn new<R>(
         config: &Config,
-        str_pool: &Rc<strings::Pool>,
+        str_pool: &Rc<strings::RandomStringPool>,
         trace_pool: &Rc<TraceIdPool>,
         rng: &mut R,
     ) -> Result<Self, Error>
@@ -331,7 +331,7 @@ impl ResourceTemplateGenerator {
             config.contexts.attributes_per_resource,
             ConfRange::Inclusive { min: 3, max: 32 },
             config.contexts.total_contexts.end() as usize,
-            Rc::clone(str_pool),
+            str_pool,
             UNIQUE_TAG_RATIO,
         )?;
 

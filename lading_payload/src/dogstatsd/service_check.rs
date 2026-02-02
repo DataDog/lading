@@ -1,14 +1,17 @@
 //! `DogStatsD` service check.
-use std::{fmt, rc::Rc};
+use std::fmt;
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
 
 use crate::{
     Error, Generator,
-    common::strings::{self, choose_or_not_ref},
+    common::strings::{Pool, choose_or_not_ref},
 };
 
-use super::common::{self, tags::Tagset};
+use super::{
+    StringPools,
+    common::{self, tags::Tagset},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServiceCheckGenerator {
@@ -16,7 +19,7 @@ pub(crate) struct ServiceCheckGenerator {
     pub(crate) small_strings: Vec<String>,
     pub(crate) texts_or_messages: Vec<String>,
     pub(crate) tags_generator: common::tags::Generator,
-    pub(crate) str_pool: Rc<strings::Pool>,
+    pub(crate) pools: StringPools,
 }
 
 impl<'a> Generator<'a> for ServiceCheckGenerator {
@@ -43,7 +46,7 @@ impl<'a> Generator<'a> for ServiceCheckGenerator {
             hostname,
             tags,
             message,
-            str_pool: &self.str_pool,
+            pools: &self.pools,
         })
     }
 }
@@ -64,7 +67,7 @@ pub struct ServiceCheck<'a> {
     /// Message of the service check.
     pub message: Option<&'a str>,
     /// String pool for tag handle lookups during serialization.
-    pub(crate) str_pool: &'a strings::Pool,
+    pub(crate) pools: &'a StringPools,
 }
 
 impl fmt::Display for ServiceCheck<'_> {
@@ -89,11 +92,13 @@ impl fmt::Display for ServiceCheck<'_> {
             let mut commas_remaining = tags.len() - 1;
             for tag in tags {
                 let key = self
-                    .str_pool
+                    .pools
+                    .randomstring
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
-                    .str_pool
+                    .pools
+                    .tag_name
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
