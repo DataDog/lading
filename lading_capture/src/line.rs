@@ -124,6 +124,8 @@ pub enum LineValue {
     Int(u64),
     /// A floating point, 64 bits wide
     Float(f64),
+    /// Value given externally
+    ExternalHistogram,
 }
 
 impl LineValue {
@@ -134,6 +136,7 @@ impl LineValue {
         match self {
             LineValue::Int(int) => *int as f64,
             LineValue::Float(float) => *float,
+            LineValue::ExternalHistogram => -1.0,
         }
     }
 }
@@ -143,6 +146,7 @@ impl std::fmt::Display for LineValue {
         match self {
             LineValue::Int(int) => write!(f, "{int}"),
             LineValue::Float(float) => write!(f, "{float}"),
+            LineValue::ExternalHistogram => write!(f, "[hist]"),
         }
     }
 }
