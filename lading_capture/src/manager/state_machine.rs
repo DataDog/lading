@@ -418,7 +418,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
                     fetch_index: tick,
                     metric_name: key.name().into(),
                     metric_kind: line::MetricKind::Histogram,
-                    value: line::LineValue::Float(0.0),
+                    value: line::LineValue::ExternalHistogram,
                     labels,
                     value_histogram: sketch_bytes.clone(),
                 };
