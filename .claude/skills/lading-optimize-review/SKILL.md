@@ -1,6 +1,7 @@
 ---
 name: lading-optimize-review
 description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
+allowed-tools: Bash(cat:*) Bash(ci/*:*) Read Write Edit Glob Grep Skill
 ---
 
 # Optimization Patch Review

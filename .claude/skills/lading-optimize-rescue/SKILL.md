@@ -1,6 +1,7 @@
 ---
 name: lading-optimize-rescue
 description: Salvages optimization work lacking benchmarks. Generates missing evidence, validates claims. Bugs discovered during rescue are valuable - invoke /lading-optimize-validate.
+allowed-tools: Bash(cargo:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(ci/*:*) Bash(diff:*) Bash(tee:*) Read Write Edit Glob Grep Skill
 ---
 
 # Optimization Rescue
