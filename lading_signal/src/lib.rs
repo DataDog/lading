@@ -603,6 +603,9 @@ mod tests {
 
     #[cfg(loom)]
     #[test]
+    // This tests the same flow as `watcher_drops_before_signal_and_wait` but with an explicit
+    // yield to clue loom into exploring interleavings that exposed a race condition fixed in
+    // PR#1740
     fn signal_and_wait_race_proof_with_yield() {
         use crate::LOOM_EXPLORE_RACE_WINDOW;
         use crate::signal;
@@ -611,23 +614,6 @@ mod tests {
         loom::model(|| {
             LOOM_EXPLORE_RACE_WINDOW.set(true); // Enable instrumentation
 
-            let (watcher, broadcaster) = signal();
-
-            let handle = thread::spawn(move || drop(watcher));
-
-            block_on(broadcaster.signal_and_wait()); // Calls REAL function
-
-            handle.join().unwrap();
-        });
-    }
-
-    #[cfg(loom)]
-    #[test]
-    fn signal_and_wait_race_proof_without_yield() {
-        use crate::signal;
-        use loom::{future::block_on, thread};
-
-        loom::model(|| {
             let (watcher, broadcaster) = signal();
 
             let handle = thread::spawn(move || drop(watcher));
