@@ -14,8 +14,10 @@ use lading_throttle::Throttle;
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
-use std::{collections::HashMap, process};
+use std::process;
 use tokio::time::Instant;
+
+use rustc_hash::FxHashMap;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
@@ -53,7 +55,7 @@ pub struct Config {
     /// Environment variables for the container, maps to docker run --env.
     pub env: Option<Vec<String>>,
     /// Labels to set on the container, maps to docker run --label.
-    pub labels: Option<HashMap<String, String>>,
+    pub labels: Option<FxHashMap<String, String>>,
     /// Whether to disable the container network, maps to docker run --network
     /// none.
     #[serde(default = "default_network_disabled")]
@@ -162,7 +164,7 @@ pub struct Container {
     throttle: Option<Throttle>,
     shutdown: lading_signal::Watcher,
     metric_labels: Vec<(String, String)>,
-    containers: HashMap<u32, ContainerInfo>,
+    containers: FxHashMap<u32, ContainerInfo>,
 }
 
 impl Container {
@@ -209,7 +211,7 @@ impl Container {
             throttle,
             shutdown,
             metric_labels,
-            containers: HashMap::new(),
+            containers: FxHashMap::default(),
         })
     }
 
@@ -682,6 +684,8 @@ impl Config {
         // Docker API requires exposed ports as {"<port>/<protocol>": {}}
         // Bollard represents the empty object as HashMap<(), ()>
         #[allow(clippy::zero_sized_map_values)]
+        // A lot of the properties of `ContainerCreateBody` require `HashMap` and as such this lint must be disabled here.
+        #[allow(clippy::disallowed_types)]
         let exposed_ports = if self.exposed_ports.is_empty() {
             None
         } else {
@@ -694,7 +698,10 @@ impl Config {
                         } else {
                             format!("{port}/tcp")
                         };
-                        (port_with_protocol, HashMap::<(), ()>::new())
+                        (
+                            port_with_protocol,
+                            std::collections::HashMap::<(), ()>::new(),
+                        )
                     })
                     .collect(),
             )
@@ -705,7 +712,10 @@ impl Config {
             tty: Some(true),
             cmd: self.args.clone(),
             env: self.env.clone(),
-            labels: self.labels.clone(),
+            labels: self
+                .labels
+                .as_ref()
+                .map(|labels| labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             network_disabled: Some(self.network_disabled),
             exposed_ports,
             ..Default::default()

@@ -17,7 +17,7 @@ This document explains the reasoning behind each optimization pattern in the lad
 
 ## Preallocation Patterns
 
-### `Vec::with_capacity(n)` / `String::with_capacity(n)` / `HashMap::with_capacity(n)`
+### `Vec::with_capacity(n)` / `String::with_capacity(n)` / `FxHashMap::with_capacity(n)`
 
 **Pattern**: `Vec::new()` + repeated push operations
 
@@ -50,46 +50,6 @@ for i in 0..1000 {
 
 **References**:
 - Rust std documentation on Vec::with_capacity
-
----
-
-## Hash Function Optimization
-
-### `FxHashMap` from rustc-hash
-
-**Pattern**: Using default `HashMap` with integer, pointer, or short string keys
-
-**Why it matters**: The default HashMap uses SipHash, a cryptographically secure hash function designed to prevent DoS attacks. For internal data structures where DoS isn't a concern, faster non-cryptographic hashes significantly improve performance.
-
-**How it works**:
-- SipHash: Secure but slow (~13 CPU cycles per byte)
-- FxHash: Fast but not DoS-resistant (~0.5 CPU cycles per byte)
-- FxHash works on 8 bytes at a time, making it much faster for common key types
-
-**Performance impact**:
-- rustc benchmarks showed 4-84% slowdowns when switching FROM FxHash back to default HashMap
-- Consistently outperforms FNV hash in rustc itself
-- Best for: integer keys, pointer keys, small fixed-size keys
-
-**Example**:
-```rust
-// Slow for internal data structures
-use std::collections::HashMap;
-let mut map: HashMap<u64, Value> = HashMap::new();
-
-// Fast for internal data structures
-use rustc_hash::FxHashMap;
-let mut map: FxHashMap<u64, Value> = FxHashMap::default();
-```
-
-**Bug risk**: Hash collision DoS attacks (only relevant if keys come from untrusted sources)
-
-**When NOT to use**: User-facing APIs, networked services where keys come from untrusted sources
-
-**References**:
-- [Hashing - The Rust Performance Book](https://nnethercote.github.io/perf-book/hashing.html)
-- [rustc-hash GitHub](https://github.com/rust-lang/rustc-hash)
-- [Using rustc-hash in Rust: A Guide](https://dlcoder.medium.com/using-rustc-hash-in-rust-a-guide-to-faster-and-safer-hashing-1f3dacfbf6de)
 
 ---
 
@@ -260,7 +220,7 @@ for _ in 0..1_000_000 {
 
 ### Bounded buffers for unbounded growth
 
-**Pattern**: Collections that grow indefinitely without limits (unbounded `Vec`, `String`, `HashMap`)
+**Pattern**: Collections that grow indefinitely without limits (unbounded `Vec`, `String`, `FxHashMap`)
 
 **Why it matters**: Unbounded growth can lead to memory exhaustion, unpredictable performance, and OOM crashes. In long-running services or load generators, this is a critical reliability concern.
 
