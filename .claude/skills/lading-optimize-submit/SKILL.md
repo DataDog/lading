@@ -1,6 +1,7 @@
 ---
 name: lading-optimize-submit
 description: Full optimization workflow with git branch creation, commits, and optional PR. Wraps /lading-optimize-hunt with git automation.
+allowed-tools: Bash(git:*) Bash(gh:*) Bash(cat:*) Read Write Edit Skill
 ---
 
 # Optimization Submit Workflow

@@ -1,6 +1,7 @@
 ---
 name: lading-optimize-validate
 description: Validates discovered bugs with reproducing tests and validates fixes with regression tests. Called by other skills when bugs are found during optimization hunting. Creates property tests (proptest) and Kani proofs when feasible.
+allowed-tools: Bash(ci/*:*) Bash(cargo:*) Bash(*/payloadtool:*) Bash(diff:*) Read Write Edit Glob Grep
 ---
 
 # Correctness Validation
