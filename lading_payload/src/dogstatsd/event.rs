@@ -143,7 +143,7 @@ impl fmt::Display for Event<'_> {
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .randomstring
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;
