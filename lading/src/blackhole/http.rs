@@ -13,7 +13,8 @@ use bytes::Bytes;
 use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
-use metrics::{counter, histogram};
+// use metrics::{counter, histogram};
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use tracing::error;
@@ -164,13 +165,15 @@ async fn srv(
 
     let mut labels_with_path = metric_labels.clone();
     labels_with_path.push(("path".to_string(), path));
-    histogram!("bytes_received_distr", &labels_with_path).record(body.len() as f64);
+    // TODO Put back!
+    //histogram!("bytes_received_distr", &labels_with_path).record(body.len() as f64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
-            histogram!("decoded_bytes_received_distr", &labels_with_path).record(body.len() as f64);
+            // TODO Put back!
+            //histogram!("decoded_bytes_received_distr", &labels_with_path).record(body.len() as f64);
 
             tokio::time::sleep(response_delay).await;
 
