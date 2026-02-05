@@ -31,16 +31,15 @@ use tokio::sync::{
 };
 use tracing::info;
 
-// Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
-// window between `peers.load()` and `notified.await`. This allows loom to
-// explore the interleaving where a watcher's `notify_waiters()` fires in this
-// window, exposing a lost wakeup race condition that was fixed in PR#1740.
-//
-// This is only used in tests to prove the race exists. In production builds
-// (`#[cfg(not(loom))]`), this is compiled out entirely.
 #[cfg(loom)]
 std::thread_local! {
-    #[allow(missing_docs)]
+    // Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
+    // window between `peers.load()` and `notified.await`. This allows loom to
+    // explore the interleaving where a watcher's `notify_waiters()` fires in this
+    // window, exposing a lost wakeup race condition that was fixed in PR#1740.
+    //
+    // This is only used in tests to prove the race exists. In production builds
+    // (`#[cfg(not(loom))]`), this is compiled out entirely.
     pub static LOOM_EXPLORE_RACE_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -106,11 +105,14 @@ impl Broadcaster {
         // Wait for all peers to drop off. The opposite to
         // `decrease_peer_count`: loop will not consume CPU until a `Watcher`
         // has signaled that it has received the transmitted signal.
+        //
+        // To avoid a race condition, we must: (1) register for notification,
+        // (2) check the condition, (3) await. If we checked first and then
+        // registered, a peer could decrement and notify between our check and
+        // registration, causing us to miss the wakeup and hang forever.
         loop {
-            // Register interest first
             let notified = self.notify.notified();
 
-            // Check condition
             let peers = self.peers.load(Ordering::SeqCst);
 
             #[cfg(loom)]
@@ -123,7 +125,6 @@ impl Broadcaster {
             }
             info!("Waiting for {peers} peers");
 
-            // Safe to await, we are registered
             notified.await;
         }
     }
