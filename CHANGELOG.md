@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - dogstatsd generator can be configured to use metric names, tag names and tag
   values from a configured list. Configured with `metric_names`, `tag_names` and
   `tag_values`.
+## Fixed
+- Fixed a race condition in `lading_signal` that caused lading to hang on shutdown.
 
 ## [0.30.0]
 ## Added
