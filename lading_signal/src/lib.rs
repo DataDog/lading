@@ -33,13 +33,13 @@ use tracing::info;
 
 #[cfg(loom)]
 std::thread_local! {
-    // Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
-    // window between `peers.load()` and `notified.await`. This allows loom to
-    // explore the interleaving where a watcher's `notify_waiters()` fires in this
-    // window, exposing a lost wakeup race condition that was fixed in PR#1740.
-    //
-    // This is only used in tests to prove the race exists. In production builds
-    // (`#[cfg(not(loom))]`), this is compiled out entirely.
+    /// Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
+    /// window between `peers.load()` and `notified.await`. This allows loom to
+    /// explore the interleaving where a watcher's `notify_waiters()` fires in this
+    /// window, exposing a lost wakeup race condition that was fixed in PR#1740.
+    ///
+    /// This is only used in tests to prove the race exists. In production builds
+    /// (`#[cfg(not(loom))]`), this is compiled out entirely.
     pub static LOOM_EXPLORE_RACE_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
