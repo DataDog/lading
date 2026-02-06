@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total messages received
 //!
 
@@ -16,7 +17,7 @@ use std::{fmt::Write, net::SocketAddr};
 use tracing::{debug, error};
 
 use super::General;
-use crate::blackhole::common;
+use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Sqs`]
@@ -235,7 +236,9 @@ async fn srv(
 
     let (_, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
+    let bytes_len = bytes.len() as u64;
+    counter!("bytes_received", &metric_labels).increment(bytes_len);
+    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(bytes_len);
 
     let action = match serde_qs::from_bytes::<Action>(&bytes) {
         Ok(a) => a,
