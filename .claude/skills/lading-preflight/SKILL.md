@@ -6,20 +6,11 @@ allowed-tools: Bash
 
 # Pre-flight Checklist
 
-**Run this skill FIRST when starting a new session.**
+Run each check. **STOP on any failure and report the issue.**
 
-This validates that the environment is properly configured for optimization hunting, reviewing, and rescuing in lading.
-
----
-
-## Execute All Checks
-
-Run each check in order. **STOP on any failure and report the issue.**
-
-### Phase 1: Rust Toolchain
+### Check 1: Rust Toolchain
 
 ```bash
-echo "=== Phase 1: Rust Toolchain ==="
 rustc --version
 ```
 **Expected:** `rustc 1.70.0` or newer (Rust 2024 edition requires 1.82+)
@@ -39,10 +30,9 @@ cargo nextest --version
 
 ---
 
-### Phase 2: CI Scripts
+### Check 2: CI Scripts
 
 ```bash
-echo "=== Phase 2: CI Scripts ==="
 test -x ci/validate && echo "ci/validate executable" || echo "FAIL: ci/validate"
 test -x ci/test && echo "ci/test executable" || echo "FAIL: ci/test"
 test -x ci/check && echo "ci/check executable" || echo "FAIL: ci/check"
@@ -55,10 +45,9 @@ test -x ci/kani && echo "ci/kani present" || echo "WARN: ci/kani (optional for p
 
 ---
 
-### Phase 3: Build Verification
+### Check 3: Build Verification
 
 ```bash
-echo "=== Phase 3: Build Verification ==="
 ci/check
 ```
 **Expected:** Clean compilation with no errors
@@ -72,10 +61,9 @@ cargo build --release --bin payloadtool
 
 ---
 
-### Phase 4: Benchmarking Tools
+### Check 4: Benchmarking Tools
 
 ```bash
-echo "=== Phase 4: Benchmarking Tools ==="
 which hyperfine && hyperfine --version || echo "WARN: hyperfine not found"
 ```
 **Expected:** Version like `hyperfine 1.X.X`
@@ -96,10 +84,9 @@ ls lading_payload/benches/*.rs 2>/dev/null | head -3 && echo "criterion benchmar
 
 ---
 
-### Phase 5: Profiling Tools
+### Check 5: Profiling Tools
 
 ```bash
-echo "=== Phase 5: Profiling Tools ==="
 PROFILERS=""
 which samply > /dev/null 2>&1 && PROFILERS="${PROFILERS}samply "
 which cargo-flamegraph > /dev/null 2>&1 && PROFILERS="${PROFILERS}cargo-flamegraph "
@@ -120,10 +107,9 @@ fi
 
 ---
 
-### Phase 6: Memory Tools
+### Check 6: Memory Tools
 
 ```bash
-echo "=== Phase 6: Memory Tools ==="
 ./target/release/payloadtool --help 2>&1 | grep -q "memory-stats" && echo "payloadtool --memory-stats: supported" || echo "WARN: payloadtool missing --memory-stats"
 ```
 **Expected:** `payloadtool --memory-stats: supported`
@@ -139,10 +125,9 @@ which valgrind > /dev/null 2>&1 && echo "valgrind: available" || echo "valgrind:
 
 ---
 
-### Phase 7: Git State
+### Check 7: Git State
 
 ```bash
-echo "=== Phase 7: Git State ==="
 git config user.name || echo "FAIL: git user.name not set"
 git config user.email || echo "FAIL: git user.email not set"
 ```
@@ -161,54 +146,6 @@ fi
 **Expected:** Report status; dirty tree is a warning, not a failure
 **Note:** Commit or stash changes before starting optimization work
 
----
-
-## Quick All-in-One Check
-
-```bash
-#!/bin/bash
-set -e  # Exit on ANY error
-
-echo "=== LADING PREFLIGHT START ==="
-
-echo "Phase 1: Rust toolchain..."
-rustc --version > /dev/null
-cargo --version > /dev/null
-cargo nextest --version > /dev/null
-
-echo "Phase 2: CI scripts..."
-test -x ci/validate
-test -x ci/test
-test -x ci/check
-test -x ci/clippy
-test -x ci/fmt
-
-echo "Phase 3: Build..."
-ci/check
-cargo build --release --bin payloadtool
-
-echo "Phase 4: Benchmarking..."
-which hyperfine > /dev/null
-cargo criterion --version > /dev/null
-
-echo "Phase 5: Profiling..."
-which samply > /dev/null || which sample > /dev/null || which perf > /dev/null
-
-echo "Phase 6: Memory tools..."
-./target/release/payloadtool --help | grep -q "memory-stats"
-
-echo "Phase 7: Git..."
-git config user.name > /dev/null
-git config user.email > /dev/null
-
-echo "=== LADING PREFLIGHT PASSED ==="
-```
-
-**CRITICAL: The `set -e` ensures the script exits immediately on ANY failure.**
-If you see output stop before "LADING PREFLIGHT PASSED", a check failed.
-
----
-
 ## Report Format
 
 After running checks, output:
@@ -219,12 +156,12 @@ LADING PREFLIGHT REPORT
 Timestamp: <current time>
 Status: PASS | FAIL
 
-Phase 1 - Rust Toolchain:
+Check 1 - Rust Toolchain:
   [*] rustc 1.XX.X
   [*] cargo 1.XX.X
   [*] cargo-nextest X.Y.Z
 
-Phase 2 - CI Scripts:
+Check 2 - CI Scripts:
   [*] ci/validate
   [*] ci/test
   [*] ci/check
@@ -232,27 +169,25 @@ Phase 2 - CI Scripts:
   [*] ci/fmt
   [*] ci/kani
 
-Phase 3 - Build:
+Check 3 - Build:
   [*] ci/check passes
   [*] payloadtool built
 
-Phase 4 - Benchmarking:
+Check 4 - Benchmarking:
   [*] hyperfine X.Y.Z
   [*] cargo-criterion X.Y.Z
 
-Phase 5 - Profiling:
+Check 5 - Profiling:
   [*] samply (or sample/perf)
 
-Phase 6 - Memory:
+Check 6 - Memory:
   [*] payloadtool --memory-stats
   [ ] heaptrack (optional)
 
-Phase 7 - Git:
+Check 7 - Git:
   [*] user.name configured
   [*] user.email configured
   [!] Working tree dirty (12 files)
-
-Ready for: /lading-optimize-hunt, /lading-optimize-review, /lading-optimize-rescue
 ```
 
 Or if failed:
@@ -269,7 +204,7 @@ Failed checks:
   [X] ci/validate - not executable
       Fix: chmod +x ci/validate
 
-DO NOT proceed with optimization skills until all required checks pass.
+DO NOT proceed until all required checks pass.
 ```
 
 ---
@@ -280,4 +215,3 @@ DO NOT proceed with optimization skills until all required checks pass.
 /lading-preflight             # Run full checklist
 ```
 
-**Run this at the start of every new Claude session before any optimization work.**
