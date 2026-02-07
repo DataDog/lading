@@ -6,24 +6,33 @@ use super::{BYTES_PER_KIBIBYTE, next_token};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
-pub(crate) enum Error {
+pub enum Error {
     /// Wrapper for [`std::io::Error`]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// Integer parsing error.
     #[error("Number Parsing: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+    /// Parsing error.
     #[error("Parsing: {0}")]
     Parsing(String),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Aggregator {
-    pub(crate) rss: u64,
-    pub(crate) pss: u64,
+/// Aggregator for memory metrics from smaps_rollup.
+pub struct Aggregator {
+    /// Resident Set Size in bytes.
+    pub rss: u64,
+    /// Proportional Set Size in bytes.
+    pub pss: u64,
 }
 
-// Read `/proc/{pid}/smaps_rollup` and parse it directly into metrics.
-pub(crate) async fn poll(
+/// Read `/proc/{pid}/smaps_rollup` and parse it directly into metrics.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed.
+pub async fn poll(
     pid: i32,
     labels: &[(&'static str, String)],
     aggr: &mut Aggregator,

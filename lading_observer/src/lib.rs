@@ -1,20 +1,26 @@
-//! Manage the target observer
+//! Observe target resource usage for lading.
 //!
-//! The interogation that lading does of the target sub-process is intentionally
-//! limited to in-process concerns, for the most part. The 'inspector' does
-//! allow for a sub-process to do out-of-band inspection of the target but
-//! cannot incorporate whatever it's doing into the capture data that lading
-//! produces. This observer, on Linux, looks up the target process in procfs and
-//! writes out key details about memory and CPU consumption into the capture
-//! data. On non-Linux systems the observer, if enabled, will emit a warning.
+//! This library supports the lading binary found elsewhere in this project. It
+//! samples target resource usage, primarily on Linux via procfs, and is not
+//! intended for external use.
 
-use std::io;
+#![deny(clippy::cargo)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::multiple_crate_versions)]
 
-use crate::target::TargetPidReceiver;
-use serde::Deserialize;
+use std::{io, time::Duration};
 
 #[cfg(target_os = "linux")]
-mod linux;
+use crate::linux::Sampler;
+use serde::Deserialize;
+use tokio::sync::broadcast;
+
+#[cfg(target_os = "linux")]
+/// Linux-specific observer functionality for cgroups and procfs.
+pub mod linux;
+
+/// Type used to receive the target PID once it is running.
+pub type TargetPidReceiver = broadcast::Receiver<Option<i32>>;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`]
@@ -38,13 +44,13 @@ pub enum Error {
 pub struct Config {}
 
 #[derive(Debug)]
-/// The inspector sub-process server.
+/// The observer sub-process server.
 ///
 /// This struct manages a sub-process that can be used to do further examination
-/// of the [`crate::target::Server`] by means of operating system facilities. The
-/// sub-process is not created until [`Server::run`] is called. It is assumed
-/// that only one instance of this struct will ever exist at a time, although
-/// there are no protections for that.
+/// of a target process by means of operating system facilities. The sub-process
+/// is not created until [`Server::run`] is called. It is assumed that only one
+/// instance of this struct will ever exist at a time, although there are no
+/// protections for that.
 pub struct Server {
     #[allow(dead_code)] // config is not actively used, left as a stub
     config: Config,
@@ -93,10 +99,8 @@ impl Server {
     pub async fn run(
         self,
         mut pid_snd: TargetPidReceiver,
-        sample_period: std::time::Duration,
+        sample_period: Duration,
     ) -> Result<(), Error> {
-        use crate::observer::linux::Sampler;
-
         let target_pid = pid_snd
             .recv()
             .await
@@ -143,7 +147,7 @@ impl Server {
     pub async fn run(
         self,
         _pid_snd: TargetPidReceiver,
-        _sample_period: std::time::Duration,
+        _sample_period: Duration,
     ) -> Result<(), Error> {
         tracing::warn!("observer unavailable on non-Linux system");
         Ok(())

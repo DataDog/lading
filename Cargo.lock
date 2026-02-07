@@ -1856,7 +1856,6 @@ dependencies = [
  "flate2",
  "fuser",
  "futures",
- "heck",
  "http",
  "http-body-util",
  "http-serde",
@@ -1867,6 +1866,7 @@ dependencies = [
  "kube-core",
  "lading-capture",
  "lading-capture-schema",
+ "lading-observer",
  "lading-payload",
  "lading-signal",
  "lading-throttle",
@@ -1874,12 +1874,10 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "nix 0.30.1",
- "num-traits",
  "num_cpus",
  "once_cell",
  "opentelemetry-proto",
  "parquet",
- "procfs",
  "proptest",
  "prost",
  "prost-build",
@@ -1952,6 +1950,25 @@ dependencies = [
 [[package]]
 name = "lading-fuzz"
 version = "0.1.0"
+
+[[package]]
+name = "lading-observer"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "lading-signal",
+ "metrics",
+ "nix 0.30.1",
+ "num-traits",
+ "num_cpus",
+ "procfs",
+ "regex",
+ "rustc-hash",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "lading-payload"

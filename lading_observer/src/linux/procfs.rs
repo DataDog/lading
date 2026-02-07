@@ -1,5 +1,5 @@
 /// Sampler implementation for procfs filesystems
-mod memory;
+pub mod memory;
 mod stat;
 mod uptime;
 mod vmstat;
@@ -14,7 +14,7 @@ use procfs::process::Process;
 use rustc_hash::FxHashMap;
 use tracing::{error, warn};
 
-use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
+use crate::linux::utils::process_descendents::ProcessDescendantsIterator;
 
 const BYTES_PER_KIBIBYTE: u64 = 1024;
 
