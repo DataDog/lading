@@ -1,15 +1,43 @@
 generator:
-  - id: "otel_traces_grpc"
-    grpc:
-      seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6]
-      target_uri: "http://127.0.0.1:4317"
-      variant:
-        opentelemetry_traces: {}
-      bytes_per_second: "100 Mb"
-      maximum_block_size: "1 Mb"
-      maximum_prebuild_cache_size_bytes: "10 Mb"
-      parallel_connections: 1
+    - id: "otel_traces_grpc"
+      grpc:
+          seed: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6]
+          target_uri: "http://127.0.0.1:4317"
+          variant:
+              opentelemetry_traces:
+                  services:
+                      - name: api-gateway
+                        service_type: http
+                        operations:
+                            - id: get-users
+                              method: GET
+                              route: "/users/{id}"
+                              suboperations:
+                                  - to: user-service/get-user
+                      - name: user-service
+                        service_type: grpc
+                        grpc:
+                            service: UserService
+                        operations:
+                            - id: get-user
+                              method: GetUser
+                              suboperations:
+                                  - to: postgres/select-users
+                      - name: postgres
+                        service_type: database
+                        database:
+                            system: postgresql
+                            name: mydb
+                        operations:
+                            - id: select-users
+                              table: users
+                              query: "SELECT * FROM users WHERE id = $1"
+                              suboperations: []
+          bytes_per_second: "100 Mb"
+          maximum_block_size: "1 Mb"
+          maximum_prebuild_cache_size_bytes: "10 Mb"
+          parallel_connections: 1
 
 blackhole:
-  - http:
-      binding_addr: "127.0.0.1:9999"
+    - http:
+          binding_addr: "127.0.0.1:9999"

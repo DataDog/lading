@@ -135,7 +135,7 @@ pub enum Config {
     Json,
     /// Generates a Apache Common log lines
     ApacheCommon,
-    /// Generates OpenTelemetry traces
+    /// Generates OpenTelemetry traces from a service topology graph
     OpentelemetryTraces(crate::opentelemetry::trace::Config),
     /// Generates OpenTelemetry logs
     OpentelemetryLogs(crate::opentelemetry::log::Config),

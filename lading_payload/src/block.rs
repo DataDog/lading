@@ -338,7 +338,7 @@ impl Cache {
                 )?
             }
             crate::Config::OpentelemetryTraces(config) => {
-                let mut pyld = crate::OpentelemetryTraces::with_config(*config, &mut rng)?;
+                let mut pyld = crate::OpentelemetryTraces::with_config(config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-traces");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?

@@ -461,7 +461,21 @@ generator:
           post:
             maximum_prebuild_cache_size_bytes: "8 MiB"
             variant:
-              opentelemetry_traces: {}
+              opentelemetry_traces:
+                services:
+                  - name: api-gateway
+                    service_type: http
+                    operations:
+                      - id: get-users
+                        method: GET
+                        route: "/users/{id}"
+                        suboperations:
+                          - to: backend/process
+                  - name: backend
+                    operations:
+                      - id: process
+                        span_name: "process"
+                        suboperations: []
         headers:
             Content-Type: "application/x-protobuf"
         "#,
