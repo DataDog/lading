@@ -3,17 +3,18 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
-//! `bytes_received_distr`: Distribution of compressed bytes per request (with `path` label)
+//! `bytes_received_gauge`: Compressed body sizes, in bytes (with `path` label)
 //! `decoded_bytes_received`: Total decoded bytes received
-//! `decoded_bytes_received_distr`: Distribution of decompressed bytes per request (with `path` label)
+//! `decoded_bytes_received_gauge`: Decompressed request body sizes, in bytes (with `path` label)
 //! `requests_received`: Total requests received
+//! `bytes_sent_gauge`: Response packets body sizes, in bytes (with `path` label)
 //!
 
 use bytes::Bytes;
 use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
-use metrics::{counter, histogram};
+use metrics::{counter, gauge}; // NOMERGE: temporarily remove histogram! calls as they're not yet supported in the metrics processing backends
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use tracing::error;
@@ -164,15 +165,17 @@ async fn srv(
 
     let mut labels_with_path = metric_labels.clone();
     labels_with_path.push(("path".to_string(), path));
-    histogram!("bytes_received_distr", &labels_with_path).record(body.len() as f64);
+    gauge!("bytes_received_gauge", &labels_with_path).set(body.len() as f64);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
-            histogram!("decoded_bytes_received_distr", &labels_with_path).record(body.len() as f64);
+            gauge!("decoded_bytes_received_gauge", &labels_with_path).set(body.len() as f64);
 
             tokio::time::sleep(response_delay).await;
+
+            gauge!("bytes_sent_gauge", &labels_with_path).set(body_bytes.len() as f64);
 
             let mut okay = Response::default();
             *okay.status_mut() = status;
