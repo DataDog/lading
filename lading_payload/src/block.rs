@@ -23,9 +23,6 @@ pub enum SpinError {
     /// Static payload creation error
     #[error(transparent)]
     Static(#[from] crate::statik::Error),
-    /// `StaticChunks` payload creation error
-    #[error(transparent)]
-    StaticChunks(#[from] crate::static_chunks::Error),
     /// rng slice is Empty
     #[error("RNG slice is empty")]
     EmptyRng,
@@ -360,6 +357,12 @@ impl Cache {
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
+            crate::Config::OpentelemetryTracesGraph(config) => {
+                let mut pyld = crate::OpentelemetryTracesGraph::with_config(config, &mut rng)?;
+                let span = span!(Level::INFO, "fixed", payload = "otel-traces-graph");
+                let _guard = span.enter();
+                construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
+            }
             crate::Config::OpentelemetryLogs(config) => {
                 match config.valid() {
                     Ok(()) => (),
@@ -404,28 +407,12 @@ impl Cache {
 
     /// Create a new handle for iterating through blocks.
     #[must_use]
-    #[inline]
     pub fn handle(&self) -> Handle {
         Handle { idx: 0 }
     }
 
-    /// Number of blocks in the cache.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Fixed { blocks, .. } => blocks.len(),
-        }
-    }
-
-    /// Whether the cache is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Get the total size of the cache in bytes.
     #[must_use]
-    #[inline]
     pub fn total_size(&self) -> u64 {
         match self {
             Self::Fixed {
@@ -436,7 +423,6 @@ impl Cache {
 
     /// Get the total bytes of the next block without advancing.
     #[must_use]
-    #[inline]
     pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
@@ -445,7 +431,6 @@ impl Cache {
 
     /// Get metadata of the next block without advancing.
     #[must_use]
-    #[inline]
     pub fn peek_next_metadata(&self, handle: &Handle) -> BlockMetadata {
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].metadata,
@@ -456,7 +441,6 @@ impl Cache {
     ///
     /// This advances the handle to the next block in the cache and returns a
     /// reference to the block corresponding to `Handle` internal position.
-    #[inline]
     pub fn advance<'a>(&'a self, handle: &mut Handle) -> &'a Block {
         match self {
             Self::Fixed { blocks, .. } => {
@@ -694,16 +678,7 @@ where
 {
     let mut block: Writer<BytesMut> = BytesMut::with_capacity(chunk_size as usize).writer();
     serializer.to_bytes(&mut rng, chunk_size as usize, &mut block)?;
-    let inner = block.into_inner();
-    // When the actual block data usage is under half of its allocated capacity (chunk_size),
-    // shrink its buffer to the actual size to avoid holding onto excess capacity.
-    // This ensures that generators with lots of small blocks respect the total cache size, and
-    // no block cache will hold more than 2x the total cache size in allocated buffers.
-    let bytes: Bytes = if inner.len() < inner.capacity() / 2 {
-        Bytes::copy_from_slice(&inner)
-    } else {
-        inner.freeze()
-    };
+    let bytes: Bytes = block.into_inner().freeze();
     if bytes.is_empty() {
         // Blocks should not be empty and if they are empty this is an
         // error. Caller may choose to handle this however they wish, often it
