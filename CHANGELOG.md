@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
   This reflects preexisting terminology.
+- **Breaking Change**: Counter metrics in capture files are now emitted as
+  deltas instead of cumulative values. Parquet files include new metadata fields
+  to identify the format.
 ## Added
 - Lading now supports histogram approximations in its capture files.
 - HTTP blackhole now tracks distribution of bytes received, both decoded and
