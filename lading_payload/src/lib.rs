@@ -25,6 +25,7 @@ pub use json::Json;
 pub use opentelemetry::log::OpentelemetryLogs;
 pub use opentelemetry::metric::OpentelemetryMetrics;
 pub use opentelemetry::trace::OpentelemetryTraces;
+pub use opentelemetry::trace_graph::OpentelemetryTracesGraph;
 pub use splunk_hec::SplunkHec;
 pub use static_chunks::StaticChunks;
 pub use statik::Static;
@@ -147,6 +148,8 @@ pub enum Config {
     ApacheCommon,
     /// Generates OpenTelemetry traces
     OpentelemetryTraces(crate::opentelemetry::trace::Config),
+    /// Generates realistic OpenTelemetry traces from a service topology graph
+    OpentelemetryTracesGraph(crate::opentelemetry::trace_graph::Config),
     /// Generates OpenTelemetry logs
     OpentelemetryLogs(crate::opentelemetry::log::Config),
     /// Generates OpenTelemetry metrics
@@ -183,6 +186,8 @@ pub enum Payload {
     Syslog(Syslog5424),
     /// OpenTelemetry traces
     OtelTraces(OpentelemetryTraces),
+    /// Realistic OpenTelemetry traces from a service topology
+    OtelTracesGraph(OpentelemetryTracesGraph),
     /// OpenTelemetry logs
     OtelLogs(OpentelemetryLogs),
     /// OpenTelemetry metrics
@@ -210,6 +215,7 @@ impl Serialize for Payload {
             Payload::StaticChunks(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::Syslog(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelTraces(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::OtelTracesGraph(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),

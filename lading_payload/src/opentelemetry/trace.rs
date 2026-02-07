@@ -25,13 +25,13 @@ use crate::Generator;
 const STRING_POOL_SIZE: usize = 1_000_000;
 const MAX_TRACE_DEPTH: usize = 8;
 const MAX_CONTEXTS: u32 = 1_000_000;
-const MAX_TRACE_DURATION_NS: u64 = 30 * 1_000_000_000; // 30 seconds
+pub(super) const MAX_TRACE_DURATION_NS: u64 = 30 * 1_000_000_000; // 30 seconds
 
 /// Minimum valid start timestamp (Year 2000 in nanoseconds since `UNIX_EPOCH`).
 ///
 /// While this isn't a limitation in OTLP, we do this for practical interoperation with the Datadog Agent and related
 /// components, which _do_ have a minimum timestamp requirement.
-const YEAR_2000_NANOS: u64 = 946_684_800_000_000_000;
+pub(super) const YEAR_2000_NANOS: u64 = 946_684_800_000_000_000;
 
 /// Configuration validation error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,7 +426,7 @@ impl crate::Serialize for OpentelemetryTraces {
     }
 }
 
-fn get_safe_start_end_timestamps<R>(rng: &mut R) -> (u64, u64)
+pub(super) fn get_safe_start_end_timestamps<R>(rng: &mut R) -> (u64, u64)
 where
     R: Rng + ?Sized,
 {
@@ -445,7 +445,7 @@ where
     (start_timestamp_ns, start_timestamp_ns + duration_ns)
 }
 
-fn str_kv(key: &str, value: &str) -> KeyValue {
+pub(super) fn str_kv(key: &str, value: &str) -> KeyValue {
     KeyValue {
         key: key.into(),
         value: Some(AnyValue {
