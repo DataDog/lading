@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
   This reflects preexisting terminology.
+- **Breaking Change**: Replace `opentelemetry_traces` payload with a brand-new
+  service topology-based configuration scheme. This allows for defining an 
+  imaginary distributed system -- service type, operations, attributes, etc --
+  which is then simulated to generate realistic-looking traces and spans.
 ## Added
 - Lading now supports histogram approximations in its capture files.
 - HTTP blackhole now tracks distribution of bytes received, both decoded and
