@@ -1,17 +1,26 @@
+id: dogstatsd-buffer-reuse
 target: dogstatsd.rs:to_bytes_unframed,to_bytes_length_prefix_framed
 technique: buffer-reuse
-status: success
 date: 2026-01-14
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
 measurements:
-  micro_benchmarks:
-    dogstatsd_all_1MiB: "-3% time"
-    dogstatsd_all_10MiB: "-9% time"
-    dogstatsd_all_100MiB: "-20% time"
-    dogstatsd_all_1GiB: "-26% time"
-  macro_benchmarks:
-    time: "~2% faster (within noise)"
-    memory: "-12.9% (27.28 MiB -> 23.75 MiB)"
-    allocations: "-8.6% (59,034 -> 53,960)"
+  benchmarks:
+    micro:
+      dogstatsd_all_1MiB_time: -3%
+      dogstatsd_all_10MiB_time: -9%
+      dogstatsd_all_100MiB_time: -20%
+      dogstatsd_all_1GiB_time: -26%
+    macro:
+      time: ~-2%
+      memory: 27.28 MiB -> 23.75 MiB (-12.9%)
+      allocations: 59,034 -> 53,960 (-8.6%)
 lessons: |
   Reusing a Vec<u8> buffer instead of allocating new Strings with format!()
   on each iteration provides significant performance gains that scale with
