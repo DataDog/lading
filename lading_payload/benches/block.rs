@@ -1,6 +1,6 @@
 //! Benchmarks for Block Cache operations.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::Config;
 use lading_payload::block::Cache;
 use rand::{SeedableRng, rngs::SmallRng};
@@ -155,8 +155,20 @@ fn cache_handle_creation(c: &mut Criterion) {
 }
 
 criterion_group!(
-    name = benches;
-    config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = cache_setup, cache_advance, cache_peek, cache_total_size,
-              cache_read_at, cache_handle_creation
+    name = setup_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(1));
+    targets = cache_setup,
 );
+
+criterion_group!(
+    name = operations_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(1));
+    targets = cache_advance, cache_peek, cache_total_size,
+              cache_read_at, cache_handle_creation,
+);
+
+criterion_main!(setup_benches, operations_benches);

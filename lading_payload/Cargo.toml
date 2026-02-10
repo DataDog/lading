@@ -42,11 +42,55 @@ fuzz = ["arbitrary"]
 doctest = false
 
 [[bench]]
-name = "default"
+name = "apache_common"
+harness = false
+
+[[bench]]
+name = "ascii"
+harness = false
+
+[[bench]]
+name = "block"
+harness = false
+
+[[bench]]
+name = "datadog_logs"
+harness = false
+
+[[bench]]
+name = "dogstatsd"
+harness = false
+
+[[bench]]
+name = "fluent"
+harness = false
+
+[[bench]]
+name = "json"
+harness = false
+
+[[bench]]
+name = "opentelemetry_log"
 harness = false
 
 [[bench]]
 name = "opentelemetry_metric"
+harness = false
+
+[[bench]]
+name = "opentelemetry_traces"
+harness = false
+
+[[bench]]
+name = "splunk_hec"
+harness = false
+
+[[bench]]
+name = "syslog"
+harness = false
+
+[[bench]]
+name = "trace_agent"
 harness = false
 
 [lints]
