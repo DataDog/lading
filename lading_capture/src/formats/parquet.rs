@@ -59,6 +59,8 @@ struct ColumnBuffers {
     values_histogram: Vec<Vec<u8>>,
 }
 
+/// Acts as sentinel when storing non-histogram metrics
+/// Won't be sent over the wire - we prune empty histograms in `buffers_to_record_batch`
 const EMPTY_HISTOGRAM: Vec<u8> = Vec::<_>::new();
 
 impl ColumnBuffers {
