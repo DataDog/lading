@@ -1,6 +1,6 @@
 //! Benchmarks for Fluent payload generation.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::{Fluent, Serialize};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
@@ -35,7 +35,19 @@ fn fluent_all(c: &mut Criterion) {
 }
 
 criterion_group!(
-    name = benches;
-    config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = fluent_setup, fluent_all,
+    name = setup_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(1));
+    targets = fluent_setup,
 );
+
+criterion_group!(
+    name = throughput_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(1));
+    targets = fluent_all,
+);
+
+criterion_main!(setup_benches, throughput_benches);
