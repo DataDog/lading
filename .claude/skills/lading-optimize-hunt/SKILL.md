@@ -62,6 +62,8 @@ Otherwise, check pending hunt issues or pick from hot subsystems:
 | `lading_throttle` | Capacity calculation, rate limiting |
 | `lading` | Generators, blackholes, target management |
 
+**CRITICAL: The target must have an associated criterion benchmark.**
+
 ---
 
 ## Phase 2: Analyze Target
@@ -97,23 +99,48 @@ Otherwise, check pending hunt issues or pick from hot subsystems:
 
 **CRITICAL: Capture baseline metrics BEFORE making any code changes.**
 
-### Stage 1: Micro-benchmark Baseline
+### Identify the Benchmark Target
 
-Use `cargo criterion` for micro-benchmarks.
+Each `lading_payload` source module has a matching benchmark target. Use `--bench <name>` to run **only** the relevant benchmark instead of the full suite.
+
+| Source module | `--bench` target | Fingerprint config dir |
+|---|---|---|
+| `apache_common.rs` | `apache_common` | `ci/fingerprints/apache_common/` |
+| `ascii.rs` | `ascii` | `ci/fingerprints/ascii/` |
+| `block.rs` | `block` | *(none — use json)* |
+| `datadog_logs.rs` | `datadog_logs` | `ci/fingerprints/datadog_logs/` |
+| `dogstatsd.rs` | `dogstatsd` | `ci/fingerprints/dogstatsd/` |
+| `fluent.rs` | `fluent` | `ci/fingerprints/fluent/` |
+| `json.rs` | `json` | `ci/fingerprints/json/` |
+| `opentelemetry_log.rs` | `opentelemetry_log` | `ci/fingerprints/otel_logs/` |
+| `opentelemetry_metric.rs` | `opentelemetry_metric` | `ci/fingerprints/otel_metrics/` |
+| `opentelemetry_traces.rs` | `opentelemetry_traces` | `ci/fingerprints/otel_traces/` |
+| `splunk_hec.rs` | `splunk_hec` | `ci/fingerprints/splunk_hec/` |
+| `syslog.rs` | `syslog` | `ci/fingerprints/syslog/` |
+| `trace_agent.rs` | `trace_agent` | `ci/fingerprints/trace_agent_v04/` |
+
+Set these once and use them throughout:
 
 ```bash
-cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
+BENCH=<target>   # e.g. json, syslog, dogstatsd
+CONFIG=ci/fingerprints/<config_dir>/lading.yaml
+```
+
+### Stage 1: Micro-benchmark Baseline
+
+Run **only** the benchmark for your target:
+
+```bash
+cargo criterion --bench "$BENCH" 2>&1 | tee /tmp/criterion-baseline.log
 ```
 
 **Note:** Criterion stores baseline data automatically for later comparison.
 
 ### Stage 2: Macro-benchmark Baseline
 
-Choose a config file that exercises your target code path:
+Use the matching fingerprint config:
 
 ```bash
-# Common configs: ci/fingerprints/{json,syslog,dogstatsd}/lading.yaml
-CONFIG=ci/fingerprints/json/lading.yaml
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --runs 10 --export-json /tmp/baseline.json \
   "./target/release/payloadtool $CONFIG"
@@ -145,10 +172,10 @@ ci/validate
 
 ### Stage 1: Micro-benchmarks (inner loops)
 
-Re-run the same criterion benchmarks with your changes:
+Re-run the **same** benchmark target with your changes:
 
 ```bash
-cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
+cargo criterion --bench "$BENCH" 2>&1 | tee /tmp/criterion-optimized.log
 ```
 
 Note: Criterion automatically compares against the last run and reports percentage changes.
@@ -166,11 +193,9 @@ Example output looks like: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.12
 
 ### Stage 2: Macro-benchmarks (end-to-end payloadtool)
 
-Only run this if Stage 1 showed improvement. Use the SAME config as baseline:
+Only run this if Stage 1 showed improvement. Use the SAME `$CONFIG` as Phase 3:
 
 ```bash
-# Use same CONFIG as Phase 3
-CONFIG=ci/fingerprints/json/lading.yaml
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --export-json /tmp/optimized.json \
   "./target/release/payloadtool $CONFIG"
