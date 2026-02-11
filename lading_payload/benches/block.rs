@@ -157,7 +157,7 @@ fn cache_handle_creation(c: &mut Criterion) {
 criterion_group!(
     name = setup_benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(30))
+        .measurement_time(Duration::from_secs(5))
         .warm_up_time(Duration::from_secs(1));
     targets = cache_setup,
 );
@@ -165,7 +165,7 @@ criterion_group!(
 criterion_group!(
     name = operations_benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(10))
+        .measurement_time(Duration::from_secs(5))
         .warm_up_time(Duration::from_secs(1));
     targets = cache_advance, cache_peek, cache_total_size,
               cache_read_at, cache_handle_creation,
