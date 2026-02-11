@@ -469,12 +469,14 @@ impl Cache {
 
     /// Read data starting from a given offset and up to the specified size.
     ///
+    /// When the entire read fits within a single block, returns a zero-copy
+    /// slice of the block's `Bytes`. Otherwise falls back to copying across
+    /// block boundaries.
+    ///
     /// # Panics
     ///
     /// Function will panic if reads are larger than machine word bytes wide.
     pub fn read_at(&self, offset: u64, size: usize) -> Bytes {
-        let mut data = BytesMut::with_capacity(size);
-
         let (blocks, total_cycle_size) = match self {
             Cache::Fixed {
                 blocks,
@@ -487,45 +489,63 @@ impl Cache {
             ),
         };
 
-        let mut remaining = size;
-        let mut current_offset =
+        let current_offset =
             usize::try_from(offset).expect("offset larger than machine word bytes");
+        let offset_within_cycle = current_offset % total_cycle_size;
 
-        while remaining > 0 {
-            // The plan is this. We treat the blocks as one infinite cycle. We
-            // map our offset into the domain of the blocks, then seek forward
-            // until we find the block we need to start reading from. Then we
-            // read into `data`.
+        // Find the starting block.
+        let mut block_start = 0;
+        for block in blocks {
+            let block_size = block.total_bytes.get() as usize;
+            if offset_within_cycle < block_start + block_size {
+                let block_offset = offset_within_cycle - block_start;
+                let bytes_in_block = block_size - block_offset;
 
-            let offset_within_cycle = current_offset % total_cycle_size;
-            let mut block_start = 0;
-            for block in blocks {
-                let block_size = block.total_bytes.get() as usize;
-                if offset_within_cycle < block_start + block_size {
-                    // Offset is within this block. Begin reading into `data`.
-                    let block_offset = offset_within_cycle - block_start;
-                    let bytes_in_block = (block_size - block_offset).min(remaining);
-
-                    data.extend_from_slice(
-                        &block.bytes[block_offset..block_offset + bytes_in_block],
-                    );
-
-                    remaining -= bytes_in_block;
-                    current_offset += bytes_in_block;
-                    break;
+                // Fast path: entire read fits in this one block. Return a
+                // zero-copy slice, avoiding allocation and memcpy.
+                if size <= bytes_in_block {
+                    return block.bytes.slice(block_offset..block_offset + size);
                 }
-                block_start += block_size;
-            }
 
-            // If we couldn't find a block this suggests something seriously
-            // wacky has happened.
-            if remaining > 0 && block_start >= total_cycle_size {
-                error!("Offset exceeds total cycle size");
-                break;
+                // Slow path: read spans multiple blocks. Allocate and copy.
+                let mut data = BytesMut::with_capacity(size);
+                data.extend_from_slice(&block.bytes[block_offset..block_offset + bytes_in_block]);
+                let mut remaining = size - bytes_in_block;
+                let mut current_offset = current_offset + bytes_in_block;
+
+                while remaining > 0 {
+                    let offset_within_cycle = current_offset % total_cycle_size;
+                    let mut inner_block_start = 0;
+                    for blk in blocks {
+                        let blk_size = blk.total_bytes.get() as usize;
+                        if offset_within_cycle < inner_block_start + blk_size {
+                            let blk_offset = offset_within_cycle - inner_block_start;
+                            let bytes_avail = (blk_size - blk_offset).min(remaining);
+                            data.extend_from_slice(
+                                &blk.bytes[blk_offset..blk_offset + bytes_avail],
+                            );
+                            remaining -= bytes_avail;
+                            current_offset += bytes_avail;
+                            break;
+                        }
+                        inner_block_start += blk_size;
+                    }
+
+                    if remaining > 0 && inner_block_start >= total_cycle_size {
+                        error!("Offset exceeds total cycle size");
+                        break;
+                    }
+                }
+
+                return data.freeze();
             }
+            block_start += block_size;
         }
 
-        data.freeze()
+        // If we get here, no block contained the offset. This shouldn't
+        // happen with a valid cache, but return empty bytes defensively.
+        error!("Offset exceeds total cycle size");
+        Bytes::new()
     }
 }
 

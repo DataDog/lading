@@ -1,0 +1,49 @@
+id: block-cache-read-at-zero-copy
+target: lading_payload/src/block.rs::Cache::read_at
+technique: zero-copy-slice
+verdict: approved
+date: 2026-02-11
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
+measurements:
+  cache_read_at_1KiB:
+    time_baseline: 36.691 ns
+    time_optimized: 4.812 ns
+    time_change: -86.9%
+    throughput_baseline: 26 GiB/s
+    throughput_optimized: 198 GiB/s
+    throughput_change: +663%
+  cache_read_at_64KiB:
+    time_baseline: 1.019 us
+    time_optimized: 4.882 ns
+    time_change: -99.5%
+    throughput_baseline: 60 GiB/s
+    throughput_optimized: 12502 GiB/s
+    throughput_change: +20737%
+  cache_read_at_1MiB:
+    time_baseline: 13.962 us
+    time_optimized: 14.049 us
+    time_change: ~0% (expected, spans multiple blocks)
+  macro: N/A (payloadtool does not exercise read_at; uses advance() instead)
+reason: |
+  When a read fits entirely within a single block (the common case for
+  logrotate_fs file reads), returns Bytes::slice() instead of allocating
+  BytesMut and copying. This is O(1) reference counting vs O(n) memcpy.
+  For reads spanning multiple blocks, falls back to original copy behavior.
+  Unanimous 5/5 approval based on extraordinary micro-benchmark results.
+lessons: |
+  Bytes::slice() is a powerful zero-copy optimization for read paths where
+  the source data is already in Bytes format and the read is contained
+  within a single buffer. The key insight is checking whether the read
+  fits within one block before allocating any output buffer. This pattern
+  applies whenever:
+  1. Source data is stored as Bytes (immutable, reference-counted)
+  2. Reads are typically smaller than the source buffer
+  3. The fast path (single buffer) is the common case
+  Macro benchmark gap: read_at is exercised by logrotate_fs file generator,
+  not by the TCP/HTTP generators that payloadtool fingerprint configs use.
+  A file_gen fingerprint config would close this gap.

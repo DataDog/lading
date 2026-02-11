@@ -1,0 +1,20 @@
+target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+technique: buffer-reuse
+status: failure
+date: 2026-02-11
+reason: |
+  Serialization cost dominates wall-clock time. Buffer allocation/deallocation
+  for Vec::with_capacity(max_bytes) in the growth loop and binary search is
+  handled efficiently by the system allocator. Criterion showed no timing
+  improvement at any payload size (1MiB: +0.34%, 10MiB: +0.11%, 100MiB: -0.49%,
+  all within noise). Memory stats showed 65.6% reduction in total allocated
+  bytes but this didn't translate to timing improvement.
+lessons: |
+  Buffer reuse in to_bytes() is a cold path for trace_agent. The system
+  allocator (macOS) recycles large allocations efficiently via mmap/munmap,
+  so repeated Vec::with_capacity(N) + drop cycles for large N don't cost
+  much in wall-clock time. The hot path is msgpack serialization via
+  rmp_serde, not buffer allocation. Future optimization should target:
+  1. Incremental size tracking to avoid re-serialization in binary search
+  2. BTreeMap creation cost in create_span() (per-span allocation)
+  3. Serialization format efficiency (struct_map overhead)

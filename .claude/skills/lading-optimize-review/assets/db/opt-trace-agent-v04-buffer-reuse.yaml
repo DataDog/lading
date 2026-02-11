@@ -1,0 +1,28 @@
+id: trace-agent-v04-buffer-reuse
+target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+technique: buffer-reuse
+verdict: rejected
+date: 2026-02-11
+votes:
+  duplicate_hunter: approve
+  skeptic: reject
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
+reason: |
+  Skeptic rejected: criterion micro-benchmarks showed no timing improvement
+  at any payload size (1MiB, 10MiB, 100MiB - all within noise threshold).
+  The >=5% timing gate was not met. While payloadtool --memory-stats showed
+  a 65.6% reduction in total allocated memory (33.5 MiB -> 11.5 MiB), this
+  was measured from a single run without statistical rigor. The system
+  allocator handles large allocation recycling efficiently enough that the
+  redundant Vec::with_capacity(max_bytes) calls in the growth loop and
+  binary search don't manifest as a performance bottleneck.
+lessons: |
+  Buffer reuse in trace_agent to_bytes() reduces allocator pressure but
+  doesn't improve wall-clock time because msgpack serialization dominates
+  the cost. The system allocator (macOS) recycles large allocations
+  efficiently via mmap/munmap. This is a cold path for allocation overhead.
+  Future optimization efforts on trace_agent should target serialization
+  cost (e.g., incremental size tracking to avoid re-serialization in the
+  binary search) rather than allocation cost.

@@ -1,0 +1,25 @@
+target: lading_payload/src/block.rs::Cache::read_at
+technique: zero-copy-slice
+status: success
+date: 2026-02-11
+measurements:
+  time:
+    cache_read_at_1KiB: -86.9% (36.7ns -> 4.8ns)
+    cache_read_at_64KiB: -99.5% (1.02us -> 4.9ns)
+    cache_read_at_1MiB: ~0% (expected, spans multiple blocks)
+  memory: N/A (macro benchmark does not exercise read_at)
+  allocations: N/A (macro benchmark does not exercise read_at)
+lessons: |
+  Bytes::slice() provides zero-copy reads when the entire read fits within
+  a single block. The optimization checks this condition before allocating
+  any output buffer. For single-block reads (the common case in logrotate_fs),
+  this eliminates both the BytesMut allocation and the memcpy, reducing
+  the operation to an O(1) reference count increment.
+
+  Key factors for success:
+  1. Block data is stored as immutable Bytes (already reference-counted)
+  2. Most reads are smaller than block size (256KiB blocks, typical reads 1-64KiB)
+  3. The fast path check (size <= bytes_in_block) is a single comparison
+  4. The slow path (multi-block reads) is unchanged from the original
+
+  Review: Approved 5/5 by all personas.
