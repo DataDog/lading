@@ -48,9 +48,35 @@ Rather than generating flow records directly, we simulate a network of
 hosts doing things hosts do. Flow records are a byproduct of that simulation,
 just as they are on a real network.
 
+### Exporters Model Network Devices
+
+Each exporter in the configuration represents a single network device — a
+router, firewall, or L3 switch — that observes traffic and exports flow
+records. This matches real-world NetFlow deployment: routers export flows
+describing the traffic they forward; the collector (Datadog Agent) aggregates
+by exporter address.
+
+An exporter has:
+
+- **Bind address** (`addr`): The IP address the exporter's UDP socket binds to.
+  The Datadog Agent uses the source IP of received packets as the `ExporterAddr`
+  aggregation key.
+- **Protocol version**: `v5` or `v9`. Different exporters can use different
+  versions, matching real networks where legacy and modern devices coexist.
+- **Source ID** (`source_id`): The v9 observation domain ID or v5
+  `engine_type`/`engine_id`. Identifies this exporter in the packet header.
+- **Flows per second**: The throttle rate for this exporter.
+- **Actor pool**: The set of network hosts whose traffic this exporter observes.
+  Each exporter has its own independent actor pool — an edge router sees its
+  subnet, a core router sees different subnets.
+
+The generator manages one UDP socket, one throttle, and one actor simulation
+per exporter. These run concurrently and independently.
+
 ### Actors Have Identity
 
-Each actor represents a host on the simulated network. An actor has:
+Each actor represents a host on the simulated network, observed by the
+exporter (router) it belongs to. An actor has:
 
 - **IP address**: Drawn from configured subnets (e.g., `10.0.1.0/24` for
   servers, `10.0.2.0/24` for desktops)
@@ -246,19 +272,20 @@ precedent set by `ProcessTree`, `FileTree`, `Container`, and `Kubernetes` —
 generators that own their simulation and use `lading_throttle::Throttle`
 directly, bypassing the block cache and `lading_payload::Serialize` entirely.
 
-The generator's spin loop:
+Each exporter's spin loop:
 
 1. **At init**: Create actor pool, assign identities and roles from
-   configuration and seeded RNG. Create a UDP socket. Initialize the throttle
-   (packets/sec or bytes/sec).
+   configuration and seeded RNG. Bind a UDP socket to the exporter's `addr`.
+   Initialize the throttle (flows/sec).
 2. **At runtime**: Throttle → advance the simulation by one tick → serialize
    flows into a datagram with live wall-clock timestamps and a monotonically
-   increasing sequence counter → `send_to`. The simulation (`tick()`) is
-   cheap — RNG sampling and struct fills, no I/O, no complex allocation.
+   increasing sequence counter → `send_to(collector_addr)`. The simulation
+   (`tick()`) is cheap — RNG sampling and struct fills, no I/O, no complex
+   allocation.
 
-The generator owns the clock, the sequence counter, the socket, and the
-throttle. The `Serialize` trait is not involved — the generator calls the
-simulation and serialization functions directly.
+Each exporter owns its clock, sequence counter, socket, and throttle. The
+`Serialize` trait is not involved — the generator calls the simulation and
+serialization functions directly.
 
 ### Determinism
 
@@ -356,9 +383,8 @@ more Data FlowSets. Because UDP is unreliable, templates must be retransmitted
 periodically; if a collector misses a template packet, subsequent data is
 undecodable until the next template arrives. The v9 serializer handles this via
 a configurable `template_interval` (default: 1, meaning every packet includes
-the template). No separate generator is needed — the existing UDP generator
-sends the datagrams produced by the v9 serializer, which includes template and
-data FlowSets together.
+the template). The exporter's spin loop sends the datagrams produced by the v9
+serializer, which includes template and data FlowSets together.
 
 ### Protocol-Agnostic Design
 
@@ -377,8 +403,8 @@ This proves the actor model is truly decoupled from serialization. Adding a new
 wire format (IPFIX, sFlow) requires only a new serializer module — no changes
 to the actor model or `Flow` struct.
 
-The `netflow::Config` enum (`V5(v5::Config)` / `V9(v9::Config)`) lets users
-select the wire format in YAML config.
+Each exporter selects its wire format via `protocol_version: v5` or
+`protocol_version: v9`.
 
 ### Integration with Existing Infrastructure
 
@@ -390,27 +416,69 @@ at the top level of the YAML config, not nested under a transport generator's
 ```yaml
 generator:
   - netflow:
-      addr: "127.0.0.1:9995"
-      protocol_version: v9
-      flows_per_second: 10000
-      actors:
-        actor_count:
-          inclusive:
-            min: 10
-            max: 100
-        role_weights:
-          desktop: 50
-          web_server: 20
-          dns_server: 5
-          database_server: 10
-          file_server: 15
-        subnets:
-          - cidr: "10.0.1.0"
-            mask: 24
-            weight: 60
-          - cidr: "10.0.2.0"
-            mask: 24
-            weight: 40
+      collector_addr: "127.0.0.1:9995"
+      exporters:
+        - addr: "127.0.0.1"          # exporter bind address (Agent sees as ExporterAddr)
+          protocol_version: v9
+          source_id: 1
+          flows_per_second: 10000
+          actors:
+            actor_count:
+              inclusive:
+                min: 10
+                max: 100
+            role_weights:
+              desktop: 50
+              web_server: 20
+              dns_server: 5
+              database_server: 10
+              file_server: 15
+            subnets:
+              - cidr: "10.0.1.0"
+                mask: 24
+                weight: 60
+              - cidr: "10.0.2.0"
+                mask: 24
+                weight: 40
+```
+
+Multiple exporters simulate multiple network devices reporting to the same
+collector:
+
+```yaml
+generator:
+  - netflow:
+      collector_addr: "127.0.0.1:9995"
+      exporters:
+        - addr: "127.0.0.1"          # edge router
+          protocol_version: v9
+          source_id: 1
+          flows_per_second: 8000
+          actors:
+            actor_count:
+              inclusive: { min: 50, max: 200 }
+            role_weights:
+              desktop: 50
+              web_server: 20
+            subnets:
+              - cidr: "10.0.1.0"
+                mask: 24
+                weight: 100
+
+        - addr: "127.0.0.2"          # IoT gateway
+          protocol_version: v5
+          source_id: 2
+          flows_per_second: 3000
+          actors:
+            actor_count:
+              inclusive: { min: 10, max: 30 }
+            role_weights:
+              iot_sensor: 80
+              iot_gateway: 20
+            subnets:
+              - cidr: "10.0.2.0"
+                mask: 24
+                weight: 100
 ```
 
 The existing UDP generator and all other generators are unchanged. NetFlow does
@@ -475,44 +543,46 @@ or future generators. Two options:
   # Minimal: generate everything randomly
   generator:
     - netflow:
-        addr: "127.0.0.1:9995"
-        protocol_version: v5
-        flows_per_second: 10000
-        actors: random
+        collector_addr: "127.0.0.1:9995"
+        exporters:
+          - actors: random
 
   # Explicit: full control
   generator:
     - netflow:
-        addr: "127.0.0.1:9995"
-        protocol_version: v5
-        flows_per_second: 10000
-        actors:
-          actor_count:
-            inclusive:
-              min: 50
-              max: 200
-          role_weights:
-            desktop: 60
-            web_server: 20
-          subnets:
-            - cidr: "10.0.1.0"
-              mask: 24
-              weight: 70
-            - cidr: "10.0.2.0"
-              mask: 24
-              weight: 30
-          autonomous_system:  # BGP autonomous system numbers per subnet
-            inclusive:
-              min: 64512
-              max: 65534
-          interfaces:  # SNMP ifIndex values on the simulated router
-            inclusive:
-              min: 1
-              max: 48
-          behaviors_per_tick:  # how many behaviors each actor fires per tick
-            inclusive:
-              min: 1
-              max: 5
+        collector_addr: "127.0.0.1:9995"
+        exporters:
+          - addr: "127.0.0.1"
+            protocol_version: v5
+            source_id: 1
+            flows_per_second: 10000
+            actors:
+              actor_count:
+                inclusive:
+                  min: 50
+                  max: 200
+              role_weights:
+                desktop: 60
+                web_server: 20
+              subnets:
+                - cidr: "10.0.1.0"
+                  mask: 24
+                  weight: 70
+                - cidr: "10.0.2.0"
+                  mask: 24
+                  weight: 30
+              autonomous_system:  # BGP autonomous system numbers per subnet
+                inclusive:
+                  min: 64512
+                  max: 65534
+              interfaces:  # SNMP ifIndex values on the simulated router
+                inclusive:
+                  min: 1
+                  max: 48
+              behaviors_per_tick:  # how many behaviors each actor fires per tick
+                inclusive:
+                  min: 1
+                  max: 5
   ```
 - **Semantic assumptions**: The behavior definitions encode assumptions about
   "realistic" traffic that may not match all deployment environments
