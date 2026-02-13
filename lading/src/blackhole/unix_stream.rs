@@ -4,6 +4,7 @@
 //!
 //! `connection_accepted`: Incoming connections received
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total requests received
 //!
 
@@ -17,6 +18,7 @@ use tokio_util::io::ReaderStream;
 use tracing::info;
 
 use super::General;
+use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`UnixStream`].
@@ -127,7 +129,9 @@ impl UnixStream {
         while let Some(msg) = stream.next().await {
             counter!("message_received", labels).increment(1);
             if let Ok(msg) = msg {
-                counter!("bytes_received", labels).increment(msg.len() as u64);
+                let len = msg.len() as u64;
+                counter!("bytes_received", labels).increment(len);
+                counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(len);
             }
         }
     }
