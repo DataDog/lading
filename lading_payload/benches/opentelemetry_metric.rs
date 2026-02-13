@@ -71,8 +71,19 @@ fn opentelemetry_metric_all(c: &mut Criterion) {
 }
 
 criterion_group!(
-    name = benches;
-    config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = opentelemetry_metric_setup, opentelemetry_metric_all
+    name = setup_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(1));
+    targets = opentelemetry_metric_setup,
 );
-criterion_main!(benches);
+
+criterion_group!(
+    name = throughput_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(1));
+    targets = opentelemetry_metric_all,
+);
+
+criterion_main!(setup_benches, throughput_benches);
