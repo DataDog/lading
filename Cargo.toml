@@ -8,6 +8,7 @@ members = [
   "lading_capture",
   "lading_fuzz",
   "lading_payload",
+  "lading_observer",
   "lading_throttle",
 ]
 
@@ -60,6 +61,11 @@ http-body-util = { version = "0.1" }
 http-serde = { version = "2.1" }
 hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
+heck = { version = "0.5", default-features = false }
+nix = { version = "0.30" }
+num-traits = { version = "0.2", default-features = false }
+num_cpus = "1.17"
+regex = { version = "1.12" }
 sysinfo = { version = "0.37", default-features = false }
 opentelemetry-proto = "0.31"
 ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = [
