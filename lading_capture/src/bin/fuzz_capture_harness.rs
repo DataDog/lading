@@ -11,8 +11,11 @@
 use anyhow::{Context, Result};
 use arbitrary::Arbitrary;
 use lading_capture::{
-    formats::jsonl, line::Line, manager::CaptureManager, manager::RealClock,
-    test::writer::InMemoryWriter, validate,
+    formats::jsonl,
+    line::Line,
+    manager::{CaptureManager, SignalWatchers, DEFAULT_TICK_DURATION_MS},
+    test::writer::InMemoryWriter,
+    validate,
 };
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::io::{self, Read};
@@ -354,14 +357,17 @@ async fn run_capture_manager(config: &FuzzInput) -> Result<InMemoryWriter> {
     let (target_watcher, target_broadcast) = lading_signal::signal();
 
     let format = jsonl::Format::new(writer.clone());
+    let signals = SignalWatchers {
+        shutdown: shutdown_watcher,
+        experiment_started: experiment_watcher,
+        target_running: target_watcher,
+    };
     let manager = CaptureManager::new_with_format(
         format,
         1,
-        shutdown_watcher,
-        experiment_watcher,
-        target_watcher,
+        DEFAULT_TICK_DURATION_MS,
         Duration::from_secs(3600),
-        RealClock::default(),
+        signals,
     );
 
     let start = Instant::now();
