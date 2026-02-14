@@ -18,7 +18,10 @@ use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
+
+use tokio::time::Instant;
 
 use byte_unit::Byte;
 use futures::future::join_all;
@@ -117,6 +120,11 @@ pub enum Error {
     ThrottleConversion(#[from] ThrottleConversionError),
 }
 
+#[allow(clippy::unnecessary_wraps)]
+fn default_flush_every() -> Option<Duration> {
+    Some(Duration::from_secs(1))
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
@@ -150,6 +158,10 @@ pub struct Config {
     /// Throughput profile controlling emission rate (bytes or blocks).
     #[serde(default)]
     pub throttle: Option<ThrottleConfig>,
+    /// Force flush at a regular interval. Defaults to 1 second.
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
+    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    pub flush_every: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -240,6 +252,7 @@ impl Server {
                 throughput_throttle,
                 shutdown.clone(),
                 child_labels,
+                config.flush_every,
             );
 
             handles.push(tokio::spawn(child.spin()));
@@ -290,6 +303,7 @@ struct Child {
     throttle: BlockThrottle,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
+    flush_every: Option<Duration>,
 }
 
 impl Child {
@@ -303,6 +317,7 @@ impl Child {
         throttle: BlockThrottle,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
+        flush_every: Option<Duration>,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));
@@ -325,6 +340,7 @@ impl Child {
             throttle,
             shutdown,
             labels,
+            flush_every,
         }
     }
 
@@ -335,6 +351,7 @@ impl Child {
             .maximum_capacity_bytes(self.maximum_block_size);
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
+        let mut last_flush = Instant::now();
 
         let total_names = self.names.len();
         // SAFETY: By construction there is guaranteed to be at least one name.
@@ -374,7 +391,7 @@ impl Child {
                 result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
                     match result {
                         Ok(()) => {
-                            write_bytes(self.block_cache.advance(&mut handle),
+                            let did_rotate = write_bytes(self.block_cache.advance(&mut handle),
                                     &mut fp,
                                     &mut total_bytes_written,
                                     buffer_capacity,
@@ -383,6 +400,12 @@ impl Child {
                                     &self.names,
                                     last_name,
                                     &self.labels).await?;
+                            if did_rotate {
+                                last_flush = Instant::now();
+                            } else if self.flush_every.is_some_and(|d| last_flush.elapsed() >= d) {
+                                fp.flush().await.map_err(|err| Error::IoFlush { err })?;
+                                last_flush = Instant::now();
+                            }
                         }
                         Err(err) => {
                             error!("Discarding block due to throttle error: {err}");
@@ -401,6 +424,8 @@ impl Child {
     }
 }
 
+/// Writes a block to the file, rotating if necessary.
+/// Returns `true` if a rotation occurred (and thus the file was flushed).
 #[allow(clippy::too_many_arguments)]
 async fn write_bytes(
     blk: &block::Block,
@@ -412,7 +437,7 @@ async fn write_bytes(
     names: &[PathBuf],
     last_name: &Path,
     labels: &[(String, String)],
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let total_bytes = u64::from(blk.total_bytes.get());
 
     {
@@ -479,7 +504,8 @@ async fn write_bytes(
                 })?,
         );
         *total_bytes_written = 0;
+        return Ok(true);
     }
 
-    Ok(())
+    Ok(false)
 }
