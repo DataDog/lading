@@ -1,12 +1,12 @@
 //! Manage the target observer
 //!
-//! The interogation that lading does of the target sub-process is intentionally
-//! limited to in-process concerns, for the most part. The 'inspector' does
-//! allow for a sub-process to do out-of-band inspection of the target but
-//! cannot incorporate whatever it's doing into the capture data that lading
-//! produces. This observer, on Linux, looks up the target process in procfs and
-//! writes out key details about memory and CPU consumption into the capture
-//! data. On non-Linux systems the observer, if enabled, will emit a warning.
+//! The interrogation that lading does of the target sub-process is
+//! intentionally limited to in-process concerns, for the most part. The
+//! 'inspector' does allow for a sub-process to do out-of-band inspection of the
+//! target but cannot incorporate whatever it's doing into the capture data that
+//! lading produces. In contrast, an observer does out-of-band inspection of the
+//! target that incorporates information it collects into capture data that
+//! lading produces.
 
 use std::io;
 
@@ -31,11 +31,46 @@ pub enum Error {
     Linux(#[from] linux::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 /// Configuration for [`Server`]
-pub struct Config {}
+pub enum Inner {
+    /// A Linux observer. See [`crate::observer::linux::Config`] for details.
+    Linux(linux::Config),
+}
+
+/// Temporary implementation to foreshadow how observer config will be exposed in
+/// `lading.yaml`. This scaffolding will be removed once the
+/// `#[serde(skip_deserializing)]` decorator is removed from
+/// [`crate::config::Config`].
+impl Default for Inner {
+    fn default() -> Self {
+        Self::Linux(linux::Config::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+/// Configuration for [`Server`]
+pub struct Config {
+    /// The generator config
+    #[serde(flatten)]
+    pub inner: Inner,
+}
+
+/// Temporary implementation to foreshadow how observer config will be exposed in
+/// `lading.yaml`. This scaffolding will be removed once the
+/// `#[serde(skip_deserializing)]` decorator is removed from
+/// [`crate::config::Config`].
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            inner: Inner::default(),
+        }
+    }
+}
 
 #[derive(Debug)]
 /// The inspector sub-process server.
