@@ -8,15 +8,16 @@ allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*
 
 Systematically explores the lading codebase, implements optimizations, validates with benchmarks. **Finding bugs is equally valuable as finding optimizations.**
 
-## Valuable Outcomes
+## Role: Coordinator and Recorder
 
-| Outcome | Value | Action |
-|---------|-------|--------|
-| **Optimization works** | Memory/time improved | Submit to `/lading-optimize-review` |
-| **Optimization fails** | Learned cold path | Record, next target |
-| **Bug discovered** | Found correctness issue | Invoke `/lading-optimize-validate` |
+Hunt is the **coordinator and recorder** — it finds targets, captures baselines, implements changes, hands off to review, and records all outcomes. 
 
-**All three outcomes build institutional knowledge.**
+Hunt does NOT:
+- Run post-change benchmarks (review does this)
+- Make pass/fail decisions on optimizations (review does this)
+
+Hunt DOES:
+- Record all verdicts and outcomes in db.yaml after review returns
 
 ---
 
@@ -25,14 +26,11 @@ Systematically explores the lading codebase, implements optimizations, validates
 Run `/lading-preflight` first. Then check what's already been done:
 
 ```bash
-# Check previous hunts
+# Check previous hunts (includes review verdicts)
 cat .claude/skills/lading-optimize-hunt/assets/db.yaml
-
-# Check previous reviews
-cat .claude/skills/lading-optimize-review/assets/db.yaml
 ```
 
-**If a target/technique combination exists in either db.yaml, SKIP IT.**
+**If a target/technique combination exists in db.yaml, SKIP IT.**
 
 ---
 
@@ -87,6 +85,16 @@ Otherwise, check pending hunt issues or pick from hot subsystems:
 
 **Watch for bugs while analyzing - they're valuable findings.**
 
+### Bug Discovery During Analysis
+
+If you discover a correctness bug **before implementing any optimization**, invoke validation immediately:
+
+```
+/lading-optimize-validate
+```
+
+After validation completes, return here and select the next target. Do not attempt an optimization on code with a known bug.
+
 ### Lading-Specific Concerns
 
 - **Determinism**: Any optimization must preserve deterministic output
@@ -123,10 +131,19 @@ Set these once and use them throughout:
 
 ```bash
 BENCH=<target>   # e.g. json, syslog, dogstatsd
-CONFIG=ci/fingerprints/<config_dir>/lading.yaml
+PAYLOADTOOL_CONFIG=ci/fingerprints/<config_dir>/lading.yaml
 ```
 
-### Stage 1: Micro-benchmark Baseline
+### Stage 1: Clear previous benchmarks
+
+Clear any previously captured baselines so stale data cannot contaminate this run.
+
+```bash
+rm -f /tmp/criterion-baseline.log /tmp/baseline.json /tmp/baseline-mem.txt
+rm -rf target/criterion
+```
+
+### Stage 2: Micro-benchmark Baseline
 
 Run **only** the benchmark for your target:
 
@@ -134,21 +151,24 @@ Run **only** the benchmark for your target:
 cargo criterion --bench "$BENCH" 2>&1 | tee /tmp/criterion-baseline.log
 ```
 
-**Note:** Criterion stores baseline data automatically for later comparison.
-
-### Stage 2: Macro-benchmark Baseline
+### Stage 3: Macro-benchmark Baseline
 
 Use the matching fingerprint config:
 
 ```bash
 cargo build --release --bin payloadtool
-hyperfine --warmup 3 --runs 10 --export-json /tmp/baseline.json \
-  "./target/release/payloadtool $CONFIG"
+hyperfine --warmup 3 --runs 30 --export-json /tmp/baseline.json \
+  "./target/release/payloadtool $PAYLOADTOOL_CONFIG"
 
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/baseline-mem.txt
+./target/release/payloadtool "$PAYLOADTOOL_CONFIG" --memory-stats 2>&1 | tee /tmp/baseline-mem.txt
 ```
 
-**Baseline captured. Now proceed to implementation.**
+**Baseline captured.** These files will be consumed by review:
+- `/tmp/criterion-baseline.log` — micro-benchmark baseline
+- `/tmp/baseline.json` — macro-benchmark timing baseline
+- `/tmp/baseline-mem.txt` — macro-benchmark memory baseline
+
+**CRITICAL: All benchmarks must complete before continuing.**
 
 ---
 
@@ -164,150 +184,38 @@ ci/validate
 
 **No exceptions. If ci/validate fails, fix the issue before continuing.**
 
----
+If `ci/validate` repeatedly fails on what appears to be a **pre-existing bug** (not caused by your change), invoke validation:
 
-## Phase 5: Re-benchmark and Compare
-
-**Two-stage gate: micro THEN macro. Both must show improvement.**
-
-### Stage 1: Micro-benchmarks (inner loops)
-
-Re-run the **same** benchmark target with your changes:
-
-```bash
-cargo criterion --bench "$BENCH" 2>&1 | tee /tmp/criterion-optimized.log
-```
-
-Note: Criterion automatically compares against the last run and reports percentage changes.
-
-Compare results manually - look for "change:" lines showing improvement/regression
-
-Example output looks like: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678% -4.0123%]`
-
-#### Micro Decision Point
-
-| Result | Action |
-|--------|--------|
-| Time improved >=5% | Proceed to Stage 2 |
-| No change or regression | Process to Phase 8 and record FAILURE |
-
-### Stage 2: Macro-benchmarks (end-to-end payloadtool)
-
-Only run this if Stage 1 showed improvement. Use the SAME `$CONFIG` as Phase 3:
-
-```bash
-cargo build --release --bin payloadtool
-hyperfine --warmup 3 --export-json /tmp/optimized.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/optimized-mem.txt
-```
-
-#### Macro Decision Point
-
-| Result | Action |
-|--------|--------|
-| Time improved >=5% | Proceed to Phase 6 |
-| Memory reduced >=10% | Proceed to Phase 6 |
-| Allocations reduced >=20% | Proceed to Phase 6 |
-| No change or regression | Process to Phase 8 and record FAILURE (micro win, macro loss) |
-| **ci/validate fails** | Might be a **BUG** |
-| **Determinism broken** | Might be a **BUG** |
-
-**All three gates must pass to proceed:**
-1. Micro-benchmark shows improvement (>=5% time)
-2. Macro-benchmark shows improvement (>=5% time OR >=10% memory OR >=20% allocations)
-3. ci/validate passes (correctness preserved)
-
----
-
-## Phase 6: Handle Bug Discovery
-
-If during hunting you discover a bug (not an optimization):
-
-### Invoke Correctness Validation
 ```
 /lading-optimize-validate
 ```
 
-This skill will:
-1. Attempt Kani proof first (if feasible)
-2. Fall back to property test if Kani fails
-3. Verify fix works
-4. Record in its db.yaml
-
-### After Validation
-
-Return here and record as BUG_FOUND in Phase 8, then **continue hunting** - don't stop.
+After validation completes, return here and select the next target.
 
 ---
 
-## Phase 7: Review
+## Phase 5: Hand Off to Review
 
-Invoke the review process: `/lading-optimize-review`
+Invoke the review process:
 
-**Only consider this a valid optimization if the review passes.**
+```
+/lading-optimize-review
+```
+
+**Review returns a YAML report (as a fenced code block). It does NOT record results or create files. Hunt records everything in Phase 6.**
 
 ---
 
-## Phase 8: Record the results
+## Phase 6: Recording
 
-### MANDATORY: Update db.yaml
+After review returns its YAML report (or after a bug is validated), record the result. Every outcome MUST be recorded.
 
-1. Add entry to `assets/db.yaml` index
-2. Create detailed file in `assets/db/` directory
+### Step 1: Write the Report
 
-**assets/db.yaml entry:**
-```yaml
-entries:
-  - target: <file:function>
-    technique: <prealloc|avoid-clone|cache|etc>
-    status: <success|failure|bug_found>
-    file: assets/db/<target-technique>.yaml
-```
+Write review's YAML report **verbatim** to `assets/db/<id>.yaml`. Do not modify, reformat, or add to the report content — it is the authoritative record from review.
 
-**assets/db/<target-technique>.yaml** for SUCCESS:
-```yaml
-target: <file:function>
-technique: <prealloc|avoid-clone|cache|etc>
-status: success
-date: <YYYY-MM-DD>
-measurements:
-  time: <-X% or ~>
-  memory: <-X% or ~>
-  allocations: <-X% or ~>
-lessons: |
-  <pattern learned>
-```
+### Step 2: Update the Index
 
-**assets/db/<target-technique>.yaml** for FAILURE:
-```yaml
-target: <file:function>
-technique: <prealloc|avoid-clone|cache|etc>
-status: failure
-date: <YYYY-MM-DD>
-reason: <cold path|already optimized|etc>
-lessons: |
-  <why it didn't work - this is valuable knowledge>
-```
-
-**assets/db/<target-technique>.yaml** for BUG_FOUND:
-```yaml
-target: <file:function>
-technique: <what was being tried>
-status: bug_found
-date: <YYYY-MM-DD>
-bug_description: <what was found>
-validation_file: <path to validate db entry>
-lessons: |
-  <what was learned>
-```
+Add an entry to `assets/db.yaml` following the format in `assets/index.template.yaml`.
 
 ---
-
-## Usage
-
-```
-/lading-optimize-hunt
-```
-
-A 10% combined success rate (optimizations + bugs) is excellent. Most targets are cold paths - that's expected.
