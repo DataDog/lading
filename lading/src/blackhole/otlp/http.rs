@@ -197,6 +197,7 @@ impl OtlpHttpHandler {
             && length == 0
         {
             counter!("bytes_received", &self.labels).increment(0);
+            counter!("total_bytes_received").increment(0);
 
             let (response_bytes, content_type) = match (path_ref, response_format) {
                 ("/v1/metrics", ResponseFormat::Json) => (
@@ -236,7 +237,9 @@ impl OtlpHttpHandler {
 
         let body_bytes = body.collect().await?.to_bytes();
 
-        counter!("bytes_received", &self.labels).increment(body_bytes.len() as u64);
+        let body_len = body_bytes.len() as u64;
+        counter!("bytes_received", &self.labels).increment(body_len);
+        counter!("total_bytes_received").increment(body_len);
 
         let response_bytes =
             match crate::codec::decode(content_encoding.as_ref(), body_bytes.clone()) {

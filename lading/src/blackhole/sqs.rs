@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total messages received
 //!
 
@@ -235,7 +236,9 @@ async fn srv(
 
     let (_, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &metric_labels).increment(bytes.len() as u64);
+    let bytes_len = bytes.len() as u64;
+    counter!("bytes_received", &metric_labels).increment(bytes_len);
+    counter!("total_bytes_received").increment(bytes_len);
 
     let action = match serde_qs::from_bytes::<Action>(&bytes) {
         Ok(a) => a,

@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `packet_received`: Total packets received
 //!
 
@@ -109,6 +110,7 @@ impl Udp {
                     })?;
                     counter!("packet_received", &self.metric_labels).increment(1);
                     counter!("bytes_received", &self.metric_labels).increment(bytes as u64);
+                    counter!("total_bytes_received").increment(bytes as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");
