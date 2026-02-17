@@ -1,6 +1,6 @@
 ---
 name: lading-optimize-validate
-description: Validates discovered bugs with reproducing tests and validates fixes with regression tests. Called by other skills when bugs are found during optimization hunting. Creates property tests (proptest) and Kani proofs when feasible.
+description: Validates discovered bugs with reproducing tests and validates fixes with regression tests. Called by review when bugs are found during optimization, or by hunt when bugs are found during analysis. Creates property tests (proptest) and Kani proofs when feasible.
 allowed-tools: Bash(ci/*:*) Bash(cargo:*) Bash(*/payloadtool:*) Bash(diff:*) Read Write Edit Glob Grep
 ---
 
@@ -10,25 +10,49 @@ When optimization hunting discovers a bug instead of an optimization opportunity
 
 ## When This Skill Is Called
 
-Other skills invoke `/lading-optimize-validate` when:
-- `/lading-optimize-hunt` discovers a bug instead of an optimization
-- `/lading-optimize-rescue` finds broken code during salvage
-- `/lading-optimize-review` identifies correctness issues during review
+### Primary Caller: Review
+
+`/lading-optimize-review` invokes this skill when:
+- The Skeptic persona finds benchmark anomalies suggesting correctness issues
+- The Conservative persona finds correctness violations (broken determinism, semantic changes)
+- ci/validate fails after an optimization that appeared correct
+
+### Secondary Caller: Hunt
+
+`/lading-optimize-hunt` invokes this skill when:
+- A bug is found during code analysis (Phase 2), before any optimization is attempted
+- ci/validate repeatedly fails on what appears to be a pre-existing bug (Phase 4)
 
 ```
-Optimization hunt discovers bug
+Review or Hunt discovers potential bug
             |
             v
     /lading-optimize-validate
             |
+            +-- Confirm this is actually a bug (Phase 1.0)
             +-- Attempt Kani proof (if feasible)
             +-- Create property test (proptest)
             +-- Validate fix works
             +-- Record in assets/db.yaml
             |
             v
-    Return to calling skill with VALIDATED status
+    Return to calling skill with status
 ```
+
+### Bug vs. Failed Optimization Triage
+
+Not every failure is a bug. Use this table before proceeding:
+
+| Signal | Bug? | Action |
+|--------|------|--------|
+| ci/validate fails on changed code | Possible | Investigate — may be bug or bad optimization |
+| ci/validate fails on unchanged code | Likely pre-existing bug | Proceed with validation |
+| Determinism broken after optimization | Possible | Investigate — optimization may have introduced it |
+| Determinism broken on main branch | Pre-existing bug | Proceed with validation |
+| Benchmark regression but correct output | NOT a bug | Return `NOT_A_BUG` — this is a failed optimization |
+| No improvement but correct output | NOT a bug | Return `NOT_A_BUG` — this is a failed optimization |
+| Wrong output regardless of optimization | Bug | Proceed with validation |
+| Panic on valid input | Bug | Proceed with validation |
 
 ---
 
@@ -66,6 +90,27 @@ Kani constraints:
 ---
 
 ## Phase 1: Understand the Bug
+
+### 1.0 Confirm This Is a Bug
+
+Before investing in test infrastructure, verify this is actually a correctness bug:
+
+| Check | Expected | If Not Met |
+|-------|----------|-----------|
+| Output is incorrect for valid input | Yes | If output is correct, return `NOT_A_BUG` |
+| Issue reproduces without the optimization | Check main branch | If only with optimization, it's a bad optimization — return `NOT_A_BUG` |
+| Issue is a correctness problem, not perf | Yes | If purely performance, return `NOT_A_BUG` |
+| Issue is in lading code, not test harness | Yes | If test harness, fix test instead |
+
+**If this is NOT a bug**, return immediately:
+
+```yaml
+validation_result:
+  status: NOT_A_BUG
+  reason: "<explanation — e.g., failed optimization, not correctness issue>"
+```
+
+The calling skill (review or hunt) will handle this as a rejected optimization, not a bug.
 
 ### 1.1 Document the Bug
 ```yaml
@@ -286,7 +331,7 @@ After validation complete, return status to the calling skill:
 
 ```yaml
 validation_result:
-  status: VALIDATED  # or INVALID, NEEDS_WORK
+  status: VALIDATED  # or INVALID, NEEDS_WORK, NOT_A_BUG
   bug_confirmed: true
   fix_confirmed: true
   kani_proof_added: true  # or false
@@ -296,18 +341,19 @@ validation_result:
   ready_for_merge: true
 ```
 
+### Status Values
+
+| Status | Meaning |
+|--------|---------|
+| `VALIDATED` | Bug confirmed, fix verified, tests added |
+| `INVALID` | Reported issue could not be reproduced |
+| `NEEDS_WORK` | Bug confirmed but fix is incomplete |
+| `NOT_A_BUG` | Issue is a failed optimization, not a correctness bug |
+
 The calling skill should:
 1. Record the bug discovery as a SUCCESS (not failure)
 2. Include validation status in the review
 3. Proceed with merge if VALIDATED
-
----
-
-## Usage
-
-```
-/lading-optimize-validate
-```
 
 ---
 

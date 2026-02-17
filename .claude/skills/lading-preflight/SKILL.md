@@ -1,6 +1,6 @@
 ---
 name: lading-preflight
-description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, hyperfine, profilers, payloadtool, git, and database access.
+description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, build, benchmarking tools, profilers, memory tools, and git state.
 allowed-tools: Bash
 ---
 
@@ -74,6 +74,12 @@ cargo criterion --version 2>/dev/null || echo "WARN: cargo-criterion not found"
 ```
 **Expected:** Version like `cargo-criterion 1.X.X`
 **If missing:** `cargo install cargo-criterion`
+
+```bash
+which gnuplot > /dev/null 2>&1 && gnuplot --version || echo "WARN: gnuplot not found (needed for criterion graphs)"
+```
+**Expected:** Version like `gnuplot 5.X`
+**If missing:** `brew install gnuplot` (macOS) or `apt install gnuplot` (Linux)
 
 ```bash
 grep -rq "criterion" lading_payload/Cargo.toml 2>/dev/null && echo "criterion: found in lading_payload" || echo "WARN: criterion not found"
@@ -176,6 +182,7 @@ Check 3 - Build:
 Check 4 - Benchmarking:
   [*] hyperfine X.Y.Z
   [*] cargo-criterion X.Y.Z
+  [ ] gnuplot X.Y.Z (optional)
 
 Check 5 - Profiling:
   [*] samply (or sample/perf)
@@ -208,10 +215,3 @@ DO NOT proceed until all required checks pass.
 ```
 
 ---
-
-## Usage
-
-```
-/lading-preflight             # Run full checklist
-```
-

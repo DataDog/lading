@@ -43,13 +43,18 @@ Run `/lading-optimize-hunt`.
 **CRITICAL: After `/lading-optimize-hunt` completes, you MUST return here to Phase 3.**
 
 The hunt workflow will:
-- Benchmark baseline
+- Select and analyze optimization targets
+- Capture baseline benchmarks
 - Implement optimization
-- Re-benchmark with changes
-- Run review process (/lading-optimize-review)
-- Record results in db.yaml
+- Run basic ci/validate check
+- Invoke /lading-optimize-review (which runs post-change benchmarks and judges)
+
+**The hunt will:**
+- Record the verdict in db.yaml after review returns
 
 **BUT the hunt does NOT:**
+- Run post-change benchmarks (review does this)
+- Make pass/fail decisions (review does this)
 - Create git branches
 - Commit changes
 - Push to remote
@@ -137,15 +142,4 @@ Ready for `/lading-optimize-review`.
 EOF
 )"
 ```
-
----
-
-## Usage
-
-```
-/lading-optimize-submit
-```
-
-**This skill provides the full git workflow. Use `/lading-optimize-hunt` if you want manual control over git operations.**
-
 ---
