@@ -1,7 +1,0 @@
-entries:
-  - id: fluent-on-demand-serialization
-    verdict: approved
-    file: assets/db/opt-fluent-on-demand-serialization.yaml
-  - id: payload-cache-inline
-    verdict: approved
-    file: assets/db/opt-payload-cache-inline.yaml

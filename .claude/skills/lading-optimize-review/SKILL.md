@@ -1,16 +1,18 @@
 ---
 name: lading-optimize-review
 description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
-allowed-tools: Bash(cat:*) Bash(ci/*:*) Read Write Edit Glob Grep Skill
+allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
 ---
 
 # Optimization Patch Review
 
 A rigorous 5-persona peer review system for optimization patches in lading. Requires unanimous approval backed by concrete benchmark data. **Duplicate Hunter persona prevents redundant work.**
 
-## CRITICAL: Recording is MANDATORY
+## Role: Judge
 
-**EVERY review outcome MUST be recorded in db.yaml.**
+**Review is the decision-maker. It does NOT record results.**
+
+Review judges using benchmarks and 5-persona review, then returns a structured report.
 
 ## Valuable Outcomes
 
@@ -24,62 +26,43 @@ A rigorous 5-persona peer review system for optimization patches in lading. Requ
 
 ---
 
-## Phase 0: Pre-flight
+## Phase 1: Benchmark Execution
 
-Run `/lading-preflight` first. Then check for duplicate work:
+### Step 1: Read Baseline Data
 
-```bash
-# Check previous reviews
-cat .claude/skills/lading-optimize-review/assets/db.yaml
+Read the baseline benchmark files captured:
 
-# Check previous hunts
-cat .claude/skills/lading-optimize-hunt/assets/db.yaml
-```
+- `/tmp/criterion-baseline.log` — micro-benchmark baseline
+- `/tmp/baseline.json` — macro-benchmark timing baseline
+- `/tmp/baseline-mem.txt` — macro-benchmark memory baseline
 
-**Check for:**
-- Same optimization already reviewed -> REJECT as "DUPLICATE"
-- Same file + technique already approved -> REJECT as "DUPLICATE"
+**If baseline data is missing -> REJECT. Baselines must be captured before any code change and before this gets invoked.**
 
----
-
-## Phase 1: Validation Gate
-
-**MANDATORY: ci/validate must pass before any review proceeds.**
+### Step 2: Run Post-Change Micro-benchmarks
 
 ```bash
-ci/validate
+cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 ```
 
-**If ci/validate fails -> REJECT immediately. No exceptions.**
+Note: Criterion automatically compares against the last run and reports percentage changes.
 
----
+Compare results — look for "change:" lines showing improvement/regression.
 
-## Phase 2: Measurement
+Example output: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678% -4.0123%]`
 
-**Review existing benchmark data.** The optimization should already have benchmark results. If missing, request them or REJECT.
+### Step 3: Run Post-Change Macro-benchmarks
 
-**The optimization being reviewed MUST provide benchmark data.** Review should focus on analyzing existing data, not generating new benchmarks.
+Use the config provided by the caller (stored in `$PAYLOADTOOL_CONFIG`):
 
-### Expected Benchmark Data
-
-The optimization should include:
-
-**Micro-benchmarks (criterion):**
-- Benchmark name and throughput change
-- Example: `syslog_100MiB: +42.0% throughput (481 -> 683 MiB/s)`
-
-**Macro-benchmarks (payloadtool with hyperfine):**
-- Time change with absolute values
-- Memory change with absolute values
-- Allocation count change with absolute values
-- Example:
-  ```
-  Time: -14.5% (8.3 ms -> 7.1 ms)
-  Memory: -35.8% (6.17 MiB -> 3.96 MiB)
-  Allocations: -49.3% (67,688 -> 34,331)
-  ```
+```bash
+cargo build --release --bin payloadtool
+hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
+  "./target/release/payloadtool $PAYLOADTOOL_CONFIG"
+./target/release/payloadtool "$PAYLOADTOOL_CONFIG" --memory-stats 2>&1 | tee /tmp/optimized-mem.txt
+```
 
 ### Statistical Requirements
+
 - Minimum 30 runs for hyperfine (`--runs 30`)
 - Criterion handles statistical significance internally
 - Time improvement >= 5% for significance
@@ -88,31 +71,33 @@ The optimization should include:
 
 ### NO EXCEPTIONS
 
-**If benchmark data is missing -> REJECT. Period.**
-
-- "Test dependencies don't work" -> REJECT. Fix deps first.
+- "Test dependencies don't work" -> REJECT. Fix dependencies first.
 - "Theoretically better" -> REJECT. Prove it with numbers.
 - "Obviously an improvement" -> REJECT. Obvious is not measured.
 - "Will benchmark later" -> REJECT. Benchmark now.
 
 ---
 
-## Phase 3: Five-Persona Review
+## Phase 2: Five-Persona Review
 
 ### 1. Duplicate Hunter (Checks for Redundant Work)
-- [ ] Optimization not already in reviews.yaml
+- [ ] Optimization not already in db.yaml
 - [ ] File + technique combo not already approved
 - [ ] No substantially similar optimization exists
 - [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing entry>"
 
 ### 2. Skeptic (Demands Proof)
+- [ ] Baseline data verified present
+- [ ] Post-change benchmarks executed with identical methodology
 - [ ] Hot path verified via profiling (not just guessed)
-- [ ] Benchmark improvement meets thresholds (5% time, 10% mem, 20% allocs)
+- [ ] Micro threshold met (>=5% time)
+- [ ] Macro threshold met (>=5% time OR >=10% mem OR >=20% allocs)
 - [ ] Statistical significance confirmed (p<0.05 or criterion "faster")
 - [ ] Improvement is real, not measurement noise
+- [ ] Benchmark methodology sound (same config, same machine)
 
 ### 3. Conservative (Guards Correctness)
-- [ ] `ci/validate` passes completely
+- [ ] Run `ci/validate` and validate that it passes completely
 - [ ] No semantic changes to output
 - [ ] **Determinism preserved** (same seed -> same output)
 - [ ] No `.unwrap()` or `.expect()` added (lading MUST NOT panic)
@@ -136,7 +121,7 @@ The optimization should include:
 
 ---
 
-## Phase 4: Kani/Property Test Check
+## Phase 3: Kani/Property Test Check
 
 If the optimization touches critical code:
 
@@ -162,14 +147,26 @@ ci/kani lading_payload
 
 ---
 
-## Phase 5: Decision
+## Phase 4: Decision
 
 | Outcome | Votes | Action |
 |---------|-------|--------|
-| **APPROVED** | 5/5 APPROVE | Record success |
-| **REJECTED** | Any REJECT | Record lesson |
-| **DUPLICATE** | Duplicate Hunter REJECT | Record as DUPLICATE |
-| **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate` |
+| **APPROVED** | 5/5 APPROVE | Return APPROVED report |
+| **REJECTED** | Any REJECT | Return REJECTED report |
+| **DUPLICATE** | Duplicate Hunter REJECT | Return DUPLICATE report |
+| **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate`, return BUG_FOUND report |
+
+### Bug Triage
+
+When issues are discovered, determine the correct action:
+
+| Signal                                  | Is It a Bug? | Action                             |
+| --------------------------------------- | ------------ | ---------------------------------- |
+| ci/validate fails after optimization    | Possible bug | Invoke `/lading-optimize-validate` |
+| Determinism broken                      | Possible bug | Invoke `/lading-optimize-validate` |
+| Conservative finds correctness issue    | Possible bug | Invoke `/lading-optimize-validate` |
+| Benchmark regression but correct output | NOT a bug    | REJECT optimization                |
+| No improvement but correct output       | NOT a bug    | REJECT optimization                |
 
 ### When Bug Is Found
 
@@ -180,101 +177,31 @@ If review discovers a bug instead of an optimization:
 ```
 
 The validate skill will:
-1. Attempt Kani proof (if feasible)
-2. Create property test reproducing the bug
-3. Verify the fix works
-4. Record in its db.yaml
+1. Confirm this is actually a bug (not just a failed optimization)
+2. Attempt Kani proof (if feasible)
+3. Create property test reproducing the bug
+4. Verify the fix works
+5. Record in its db.yaml
 
-Then return here to record the finding as BUG_FOUND in Phase 6.
-
----
-
-## Phase 6: MANDATORY Recording
-
-### Update db.yaml
-
-1. Add entry to `assets/db.yaml` index
-2. Create detailed file in `assets/db/` directory
-
-**assets/db.yaml entry:**
-```yaml
-entries:
-  - id: <descriptive-name>
-    verdict: <approved|rejected|duplicate|bug_found>
-    file: assets/db/<review-name>.yaml
-```
-
-**assets/db/<review-name>.yaml** for APPROVED:
-```yaml
-id: <descriptive-name>
-target: <file:function>
-technique: <technique>
-verdict: approved
-date: <YYYY-MM-DD>
-votes:
-  duplicate_hunter: approve
-  skeptic: approve
-  conservative: approve
-  rust_expert: approve
-  greybeard: approve
-measurements:
-  time: <-X%>
-  memory: <-X%>
-  allocations: <-X%>
-reason: |
-  <summary of why approved>
-lessons: |
-  <pattern learned>
-```
-
-**assets/db/<review-name>.yaml** for REJECTED:
-```yaml
-id: <descriptive-name>
-target: <file:function>
-technique: <technique>
-verdict: rejected
-date: <YYYY-MM-DD>
-votes:
-  duplicate_hunter: <approve|reject>
-  skeptic: <approve|reject>
-  conservative: <approve|reject>
-  rust_expert: <approve|reject>
-  greybeard: <approve|reject>
-reason: |
-  <why rejected - which persona(s) and why>
-lessons: |
-  <what NOT to do next time>
-```
-
-**assets/db/<review-name>.yaml** for DUPLICATE:
-```yaml
-id: <descriptive-name>
-target: <file:function>
-technique: <technique>
-verdict: duplicate
-date: <YYYY-MM-DD>
-duplicate_of: <existing entry>
-reason: |
-  <explanation of duplication>
-```
-
-**assets/db/<review-name>.yaml** for BUG_FOUND:
-```yaml
-id: <descriptive-name>
-target: <file:function>
-verdict: bug_found
-date: <YYYY-MM-DD>
-validation_file: <path to validate db entry>
-reason: |
-  <what bug was found>
-lessons: |
-  <what was learned>
-```
+Then return here to return a BUG_FOUND report in Phase 6.
 
 ---
 
-## Usage
+## Phase 5: Return Report
 
-```
-/lading-optimize-review
-```
+**Review does NOT record results and does NOT create files. Return a structured YAML report to the caller.**
+
+Fill in the appropriate template and return the completed YAML:
+
+| Verdict   | Template                         |
+| --------- | -------------------------------- |
+| approved  | `assets/approved.template.yaml`  |
+| rejected  | `assets/rejected.template.yaml`  |
+| duplicate | `assets/duplicate.template.yaml` |
+| bug_found | `assets/bug-found.template.yaml` |
+
+1. Read the appropriate template from the `assets/` directory
+2. Fill in all placeholder values with actual data from the review
+3. Return the filled-in report
+
+---

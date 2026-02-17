@@ -1,0 +1,8 @@
+id: <descriptive-name>
+target: <file:function>
+technique: <technique>
+date: <YYYY-MM-DD>
+status: failure
+verdict: bug_found
+reason: |
+  <what bug was found>
