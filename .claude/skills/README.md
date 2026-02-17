@@ -14,22 +14,22 @@ Run preflight first. It validates your environment and tells you what to do next
 
 | Skill | Purpose |
 |-------|---------|
-| `/lading:preflight` | Environment validation - run first every session |
-| `/lading:optimize:hunt` | Find optimization targets using profiling data |
-| `/lading:optimize:review` | 5-persona peer review before merge |
-| `/lading:optimize:validate` | Bug validation with Kani proofs or property tests |
-| `/lading:optimize:rescue` | Salvage optimization work lacking benchmarks |
+| `/lading-preflight` | Environment validation - run first every session |
+| `/lading-optimize-hunt` | Find optimization targets using profiling data |
+| `/lading-optimize-review` | 5-persona peer review before merge |
+| `/lading-optimize-validate` | Bug validation with Kani proofs or property tests |
+| `/lading-optimize-rescue` | Salvage optimization work lacking benchmarks |
 
 ## Workflow
 
 ```
-preflight --> hunt --> [success] --> review --> [approved] --> merge
-                |                       |
-                v                       v
-           [bug found]             [rejected]
-                |                       |
-                v                       v
-            validate                record lesson
+preflight --> hunt --> [implement] --> review --> submit
+                |                        |
+                v                        v 
+           [bug found]         [approved / rejected]
+                |                        |
+                v                        v
+            validate               record lesson
 ```
 
 ## Critical Context for LLMs
@@ -60,7 +60,7 @@ Changes below these thresholds are noise, not optimization.
 
 ## Tracking Results
 
-Each skill maintains its own `assets/db.yaml` index with detailed entries in `assets/db/*.yaml`:
+Hunt maintains `assets/db.yaml` as the central index with detailed entries in `assets/db/*.yaml`. Review owns the report templates (in `lading-optimize-review/assets/`) and returns filled-in YAML reports; hunt persists them verbatim to `assets/db/`.
 
 ```
 lading:optimize:hunt/
@@ -68,27 +68,7 @@ lading:optimize:hunt/
 └── assets/
     ├── db.yaml   # Index of all hunts
     └── db/
-        └── payload-prealloc.yaml  # Detailed hunt record
-```
-
-**assets/db.yaml** (index):
-```yaml
-entries:
-  - target: lading_payload::block
-    technique: prealloc
-    status: failure
-    file: assets/db/payload-prealloc.yaml
-```
-
-**assets/db/*.yaml** (detail):
-```yaml
-target: lading_payload::block
-technique: prealloc
-status: failure
-date: 2026-01-14
-reason: cold path
-lessons: |
-  Block construction not in hot path for JSON payloads.
+        └── payload-prealloc.yaml  # Detailed hunt report
 ```
 
 Query past results:
