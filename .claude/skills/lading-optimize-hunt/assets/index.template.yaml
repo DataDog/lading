@@ -1,0 +1,7 @@
+entries:
+  - id: <descriptive-name>
+    target: <file:function>
+    technique: <technique>
+    status: <success|failure>
+    verdict: <approved|rejected|duplicate|bug_found>
+    file: assets/db/<name>.yaml
