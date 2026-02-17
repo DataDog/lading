@@ -45,7 +45,6 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, info, trace, warn};
 
 use super::General;
-use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 use crate::proto::datadog::intake::metrics::MetricPayload;
 
 #[derive(thiserror::Error, Debug)]
@@ -221,7 +220,7 @@ async fn handle_request(
 
     let body_len = whole_body.len() as u64;
     counter!("bytes_received", labels).increment(body_len);
-    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(body_len);
+    counter!("total_bytes_received").increment(body_len);
 
     let content_type = headers
         .get(header::CONTENT_TYPE)

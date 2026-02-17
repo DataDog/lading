@@ -20,7 +20,7 @@ use std::{net::SocketAddr, time::Duration};
 use tracing::error;
 
 use super::General;
-use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
+use crate::blackhole::common;
 
 fn default_concurrent_requests_max() -> usize {
     100
@@ -163,7 +163,7 @@ async fn srv(
 
     let body_len = body.len() as u64;
     counter!("bytes_received", &metric_labels).increment(body_len);
-    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(body_len);
+    counter!("total_bytes_received").increment(body_len);
 
     let mut labels_with_path = metric_labels.clone();
     labels_with_path.push(("path".to_string(), path));

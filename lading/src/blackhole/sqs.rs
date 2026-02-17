@@ -17,7 +17,7 @@ use std::{fmt::Write, net::SocketAddr};
 use tracing::{debug, error};
 
 use super::General;
-use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
+use crate::blackhole::common;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Sqs`]
@@ -238,7 +238,7 @@ async fn srv(
     let bytes = body.boxed().collect().await?.to_bytes();
     let bytes_len = bytes.len() as u64;
     counter!("bytes_received", &metric_labels).increment(bytes_len);
-    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(bytes_len);
+    counter!("total_bytes_received").increment(bytes_len);
 
     let action = match serde_qs::from_bytes::<Action>(&bytes) {
         Ok(a) => a,

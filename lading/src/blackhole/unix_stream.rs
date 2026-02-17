@@ -18,7 +18,6 @@ use tokio_util::io::ReaderStream;
 use tracing::info;
 
 use super::General;
-use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`UnixStream`].
@@ -131,7 +130,7 @@ impl UnixStream {
             if let Ok(msg) = msg {
                 let len = msg.len() as u64;
                 counter!("bytes_received", labels).increment(len);
-                counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(len);
+                counter!("total_bytes_received").increment(len);
             }
         }
     }

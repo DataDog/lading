@@ -15,7 +15,6 @@ use tokio::net;
 use tracing::info;
 
 use super::General;
-use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`UnixDatagram`].
@@ -110,7 +109,7 @@ impl UnixDatagram {
                         source: Box::new(source),
                     })?;
                     counter!("bytes_received", &self.metric_labels).increment(n as u64);
-                    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(n as u64);
+                    counter!("total_bytes_received").increment(n as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

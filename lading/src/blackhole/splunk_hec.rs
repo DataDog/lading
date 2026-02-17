@@ -20,7 +20,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::General;
-use crate::blackhole::common::{self, COMMON_BLACKHOLE_LABELS};
+use crate::blackhole::common;
 
 static ACK_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -105,7 +105,7 @@ async fn srv(
     let bytes = body.boxed().collect().await?.to_bytes();
     let bytes_len = bytes.len() as u64;
     counter!("bytes_received", &*labels).increment(bytes_len);
-    counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(bytes_len);
+    counter!("total_bytes_received").increment(bytes_len);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(*response),

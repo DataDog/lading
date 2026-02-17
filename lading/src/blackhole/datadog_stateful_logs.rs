@@ -30,7 +30,6 @@ use tonic::{Request, Response, Status, transport};
 use tracing::{error, info};
 
 use super::General;
-use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`DatadogStatefulLogs`].
@@ -188,7 +187,7 @@ impl StatefulLogsService for StatefulLogsServiceImpl {
                         let size = batch.encoded_len() as u64;
 
                         counter!("bytes_received", &labels).increment(size);
-                        counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(size);
+                        counter!("total_bytes_received").increment(size);
                         counter!("batches_received", &labels).increment(1);
 
                         // Count data items in the batch

@@ -1,6 +1,5 @@
 //! gRPC implementation of the OTLP blackhole.
 
-use crate::blackhole::common::COMMON_BLACKHOLE_LABELS;
 use metrics::counter;
 use opentelemetry_proto::tonic::collector::logs::v1::{
     ExportLogsServiceRequest, ExportLogsServiceResponse,
@@ -87,7 +86,7 @@ impl MetricsService for OtlpMetricsService {
         let size = request.encoded_len() as u64;
 
         counter!("bytes_received", &self.labels).increment(size);
-        counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_points: u64 = 0;
@@ -137,7 +136,7 @@ impl TraceService for OtlpTracesService {
         let size = request.encoded_len() as u64;
 
         counter!("bytes_received", &self.labels).increment(size);
-        counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_spans: u64 = 0;
@@ -177,7 +176,7 @@ impl LogsService for OtlpLogsService {
         let size = request.encoded_len() as u64;
 
         counter!("bytes_received", &self.labels).increment(size);
-        counter!("total_bytes_received", COMMON_BLACKHOLE_LABELS).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_logs: u64 = 0;
