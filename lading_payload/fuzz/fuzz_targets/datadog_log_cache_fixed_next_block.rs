@@ -33,7 +33,7 @@ fuzz_target!(|input: Input| {
     }
 
     let mut rng = SmallRng::from_seed(input.seed);
-    let payload = lading_payload::Config::DatadogLog;
+    let payload = lading_payload::Config::DatadogLog(Default::default());
     
     let cache = match Cache::fixed_with_max_overhead(
         &mut rng,

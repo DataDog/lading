@@ -310,8 +310,8 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
-            crate::Config::DatadogLog => {
-                let mut serializer = crate::DatadogLog::new(&mut rng);
+            crate::Config::DatadogLog(config) => {
+                let mut serializer = crate::DatadogLog::new(config, &mut rng);
                 let span = span!(Level::INFO, "fixed", payload = "datadog-log");
                 let _guard = span.enter();
                 construct_block_cache_inner(

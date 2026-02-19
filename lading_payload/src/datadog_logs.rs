@@ -3,8 +3,9 @@
 use std::io::Write;
 
 use rand::{Rng, distr::StandardUniform, prelude::Distribution, seq::IndexedRandom};
+use serde::Deserialize;
 
-use crate::{Error, Generator, common::strings};
+use crate::{Error, Generator, common::config::ConfRange, common::strings};
 
 const STATUSES: [&str; 3] = ["notice", "info", "warning"];
 const HOSTNAMES: [&str; 4] = ["alpha", "beta", "gamma", "localhost"];
@@ -19,6 +20,23 @@ const SOURCES: [&str; 7] = [
     "herzog",
 ];
 const TAG_OPTIONS: [&str; 4] = ["", "env:prod", "env:dev", "env:prod,version:1.1"];
+
+/// Configure the `DatadogLog` payload.
+#[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// Range of message body sizes in bytes
+    pub message_size: ConfRange<u16>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            message_size: ConfRange::Inclusive { min: 1, max: 15 },
+        }
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Structured {
@@ -49,14 +67,19 @@ pub(crate) enum Message<'a> {
     Structured(String),
 }
 
-fn message<'a, R>(rng: &mut R, str_pool: &'a strings::RandomStringPool) -> Message<'a>
+fn message<'a, R>(
+    rng: &mut R,
+    str_pool: &'a strings::RandomStringPool,
+    config: &Config,
+) -> Message<'a>
 where
     R: rand::Rng + ?Sized,
 {
+    let size = config.message_size.sample(rng) as usize;
     match rng.random_range(0..2) {
         0 => Message::Unstructured(
             str_pool
-                .of_size_range(rng, 1_u8..16)
+                .of_size(rng, size)
                 .expect("failed to generate string"),
         ),
         1 => Message::Structured(
@@ -89,16 +112,18 @@ pub struct Member<'a> {
 /// Datadog log format payload
 pub struct DatadogLog {
     str_pool: strings::RandomStringPool,
+    config: Config,
 }
 
 impl DatadogLog {
     /// Create a new instance of `DatadogLog`
-    pub fn new<R>(rng: &mut R) -> Self
+    pub fn new<R>(config: &Config, rng: &mut R) -> Self
     where
         R: rand::Rng + ?Sized,
     {
         Self {
             str_pool: strings::RandomStringPool::with_size(rng, 1_000_000),
+            config: *config,
         }
     }
 }
@@ -112,7 +137,7 @@ impl<'a> Generator<'a> for DatadogLog {
         R: rand::Rng + ?Sized,
     {
         Ok(Member {
-            message: message(&mut rng, &self.str_pool),
+            message: message(&mut rng, &self.str_pool, &self.config),
             status: STATUSES.choose(rng).expect("failed to generate status"),
             timestamp: rng.random(),
             hostname: HOSTNAMES.choose(rng).expect("failed to generate hostnames"),
@@ -171,7 +196,7 @@ mod test {
     use proptest::prelude::*;
     use rand::{SeedableRng, rngs::SmallRng};
 
-    use super::Member;
+    use super::{Config, Member};
     use crate::{DatadogLog, Serialize};
 
     // We want to be sure that the serialized size of the payload does not
@@ -181,7 +206,7 @@ mod test {
         fn payload_not_exceed_max_bytes(seed: u64, max_bytes: u16) {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut ddlogs = DatadogLog::new(&mut rng);
+            let mut ddlogs = DatadogLog::new(&Config::default(), &mut rng);
 
             let mut bytes = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
@@ -200,7 +225,7 @@ mod test {
         fn every_payload_deserializes(seed: u64, max_bytes: u16)  {
             let max_bytes = max_bytes as usize;
             let mut rng = SmallRng::seed_from_u64(seed);
-            let mut ddlogs = DatadogLog::new(&mut rng);
+            let mut ddlogs = DatadogLog::new(&Config::default(), &mut rng);
 
             let mut bytes: Vec<u8> = Vec::with_capacity(max_bytes);
             ddlogs.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
