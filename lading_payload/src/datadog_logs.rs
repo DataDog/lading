@@ -70,7 +70,7 @@ pub(crate) enum Message<'a> {
 fn message<'a, R>(
     rng: &mut R,
     str_pool: &'a strings::RandomStringPool,
-    config: &Config,
+    config: Config,
 ) -> Message<'a>
 where
     R: rand::Rng + ?Sized,
@@ -137,7 +137,7 @@ impl<'a> Generator<'a> for DatadogLog {
         R: rand::Rng + ?Sized,
     {
         Ok(Member {
-            message: message(&mut rng, &self.str_pool, &self.config),
+            message: message(&mut rng, &self.str_pool, self.config),
             status: STATUSES.choose(rng).expect("failed to generate status"),
             timestamp: rng.random(),
             hostname: HOSTNAMES.choose(rng).expect("failed to generate hostnames"),
