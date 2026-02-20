@@ -11,7 +11,7 @@ fn datadog_logs_setup(c: &mut Criterion) {
     c.bench_function("datadog_logs_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19_690_716);
-            let _dd = DatadogLog::new(&mut rng);
+            let _dd = DatadogLog::new(&Default::default(), &mut rng);
         });
     });
 }
@@ -24,7 +24,7 @@ fn datadog_logs_throughput(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let mut rng = SmallRng::seed_from_u64(19_690_716);
-                    let dd = DatadogLog::new(&mut rng);
+                    let dd = DatadogLog::new(&Default::default(), &mut rng);
                     (rng, dd, Vec::with_capacity(size))
                 },
                 |(rng, mut dd, mut writer)| {

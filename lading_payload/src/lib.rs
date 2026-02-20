@@ -124,7 +124,7 @@ pub enum Config {
         encoding: splunk_hec::Encoding,
     },
     /// Generates Datadog Logs JSON messages
-    DatadogLog,
+    DatadogLog(crate::datadog_logs::Config),
     /// Generates a static, user supplied data
     Static {
         /// Defines the file path to read static variant data from. Content is
