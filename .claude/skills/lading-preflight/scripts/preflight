@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Validate environment for lading optimization work
+# Runs all checks and produces a structured report.
+# Exit code: 0 = PASS, 1 = FAIL (required check failed)
+#
+# Auto-detects the repo root via git, so this script works
+# regardless of where it is invoked from.
+
+usage() {
+  echo "Usage: $(basename "$0") [options]"
+  echo ""
+  echo "Validate environment for lading optimization work."
+  echo ""
+  echo "Options:"
+  echo "  -h, --help  Show this help"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $arg"; usage; exit 1 ;;
+  esac
+done
+
+# This is needed for the ci/scripts to work correctly
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "ERROR: Not inside a git repository. Run from within the lading repo."
+  exit 1
+}
+cd "$REPO_ROOT"
+
+PASS=0
+FAIL=0
+WARN=0
+REPORT=""
+
+pass() { REPORT+="  [*] $1"$'\n'; PASS=$((PASS + 1)); }
+fail() { REPORT+="  [X] $1"$'\n'; FAIL=$((FAIL + 1)); }
+warn() { REPORT+="  [ ] $1 (optional)"$'\n'; WARN=$((WARN + 1)); }
+note() { REPORT+="  [!] $1"$'\n'; }
+section() { REPORT+=$'\n'"$1:"$'\n'; }
+
+# ── Check 1: Rust Toolchain ──────────────────────────────────────────
+section "Check 1 - Rust Toolchain"
+
+if RUSTC_VER=$(rustc --version 2>/dev/null | awk '{print $2}'); then
+  pass "rustc $RUSTC_VER"
+else
+  fail "rustc not found"
+fi
+
+if CARGO_VER=$(cargo --version 2>/dev/null | awk '{print $2}'); then
+  pass "cargo $CARGO_VER"
+else
+  fail "cargo not found"
+fi
+
+if NEXTEST_VER=$(cargo nextest --version 2>/dev/null | head -1 | awk '{print $2}'); then
+  pass "cargo-nextest $NEXTEST_VER"
+else
+  fail "cargo-nextest not found"
+fi
+
+# ── Check 2: CI Scripts ──────────────────────────────────────────────
+section "Check 2 - CI Scripts"
+
+# Required: ci/validate and all scripts it calls
+for script in validate test check clippy fmt shellcheck deny custom_lints config-validation loom; do
+  if [ -x "ci/$script" ]; then
+    pass "ci/$script"
+  else
+    fail "ci/$script not executable"
+  fi
+done
+
+# Optional CI scripts
+for script in kani buf; do
+  if [ -x "ci/$script" ]; then
+    pass "ci/$script"
+  else
+    warn "ci/$script"
+  fi
+done
+
+# ── Check 3: Build ───────────────────────────────────────────────────
+section "Check 3 - Build"
+
+if ci/check >/dev/null 2>&1; then
+  pass "ci/check passes"
+else
+  fail "ci/check failed"
+fi
+
+if cargo build --release --bin payloadtool >/dev/null 2>&1; then
+  pass "payloadtool built"
+else
+  fail "payloadtool build failed"
+fi
+
+# ── Check 4: Benchmarking ────────────────────────────────────────────
+section "Check 4 - Benchmarking"
+
+if HF_VER=$(hyperfine --version 2>/dev/null); then
+  pass "$HF_VER"
+else
+  fail "hyperfine not found"
+fi
+
+if CC_VER=$(cargo criterion --version 2>/dev/null); then
+  pass "$CC_VER"
+else
+  fail "cargo-criterion not found"
+fi
+
+if GP_VER=$(gnuplot --version 2>/dev/null); then
+  pass "$GP_VER"
+else
+  warn "gnuplot"
+fi
+
+if grep -rq "criterion" lading_payload/Cargo.toml 2>/dev/null && ls lading_payload/benches/*.rs >/dev/null 2>&1; then
+  pass "criterion benchmarks present"
+else
+  fail "criterion benchmarks missing"
+fi
+
+# ── Check 5: Profiling ───────────────────────────────────────────────
+section "Check 5 - Profiling"
+
+FOUND_PROFILER=false
+for tool in samply cargo-flamegraph; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    pass "$tool"
+    FOUND_PROFILER=true
+  fi
+done
+# Platform-specific profilers
+if command -v sample >/dev/null 2>&1; then
+  pass "sample (macOS)"
+  FOUND_PROFILER=true
+fi
+if command -v perf >/dev/null 2>&1; then
+  pass "perf (Linux)"
+  FOUND_PROFILER=true
+fi
+if ! $FOUND_PROFILER; then
+  warn "no profilers found"
+fi
+
+# ── Check 6: Memory ──────────────────────────────────────────────────
+section "Check 6 - Memory"
+
+if ./target/release/payloadtool --help 2>&1 | grep -q "memory-stats"; then
+  pass "payloadtool --memory-stats"
+else
+  fail "payloadtool --memory-stats not supported"
+fi
+
+for tool in heaptrack valgrind; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    pass "$tool"
+  else
+    warn "$tool"
+  fi
+done
+
+# ── Check 7: Git ─────────────────────────────────────────────────────
+section "Check 7 - Git"
+
+if GIT_NAME=$(git config user.name 2>/dev/null) && [ -n "$GIT_NAME" ]; then
+  pass "user.name: $GIT_NAME"
+else
+  fail "git user.name not set"
+fi
+
+if GIT_EMAIL=$(git config user.email 2>/dev/null) && [ -n "$GIT_EMAIL" ]; then
+  pass "user.email: $GIT_EMAIL"
+else
+  fail "git user.email not set"
+fi
+
+DIRTY=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+if [ "$DIRTY" -gt 0 ]; then
+  note "Working tree dirty ($DIRTY files)"
+else
+  pass "Working tree clean"
+fi
+
+# ── Report ────────────────────────────────────────────────────────────
+echo "LADING PREFLIGHT REPORT"
+echo "======================="
+echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+
+if [ "$FAIL" -gt 0 ]; then
+  echo "Status: FAIL ($FAIL required checks failed, $PASS passed, $WARN optional missing)"
+else
+  echo "Status: PASS ($PASS passed, $WARN optional missing)"
+fi
+
+echo "$REPORT"
+exit "$( [ "$FAIL" -gt 0 ] && echo 1 || echo 0 )"
