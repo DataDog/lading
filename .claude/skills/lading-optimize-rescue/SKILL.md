@@ -189,49 +189,8 @@ ci/validate
 
 ---
 
-## Phase 7: Record
+## Phase 7: Report
 
-### MANDATORY: Update db.yaml
-
-1. Add entry to `assets/db.yaml` index
-2. Create detailed file in `assets/db/` directory
-
-**assets/db.yaml entry:**
-```yaml
-entries:
-  - id: <descriptive-name>
-    status: <rescued|partial|bug_found>
-    file: assets/db/<rescue-name>.yaml
-```
-
-**assets/db/<id>.yaml:**
-```yaml
-id: <descriptive-name>
-date: <YYYY-MM-DD>
-statistics:
-  audited: <N>
-  kept: <N>
-  discarded: <N>
-  bugs_found: <N>
-kept_changes:
-  - file: <file>
-    technique: <technique>
-    time: <delta>
-    memory: <delta>
-discarded_changes:
-  - file: <file>
-    reason: <reason>
-bugs_found:
-  - file: <file>
-    validation_file: <path to validate db entry>
-lessons: |
-  <pattern learned>
-```
+Report if the rescue was successful.
 
 ---
-
-## Usage
-
-```
-/lading-optimize-rescue
-```
