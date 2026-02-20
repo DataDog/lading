@@ -1,0 +1,30 @@
+id: <descriptive-name>
+target: <file:function>
+technique: <technique>
+date: <YYYY-MM-DD>
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
+measurements:
+  benchmarks:
+    micro:
+      # Flat keys: {name}_{size}_{metric}
+      # With raw values:    {name}_{size}_{metric}: <baseline> -> <optimized> (<improvement%>)
+      # Without raw values: {name}_{size}_{metric}: <improvement%>
+    macro:
+      # Required: time, memory, allocations
+      # Optional: peak_live
+      # With raw values:    <category>: <baseline> -> <optimized> (<improvement%>)
+      # Without raw values: <category>: <improvement%>
+      time:
+      memory:
+      allocations:
+reason: |
+  <summary of why approved>
+lessons: |
+  <pattern learned if any>
