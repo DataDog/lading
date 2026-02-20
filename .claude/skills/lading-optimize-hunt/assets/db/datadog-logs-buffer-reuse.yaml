@@ -1,17 +1,26 @@
+id: datadog-logs-buffer-reuse
 target: lading_payload/src/datadog_logs.rs::DatadogLog::to_bytes
 technique: buffer-reuse
-status: success
 date: 2026-01-21
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
 measurements:
-  micro:
-    datadog_logs_100MiB_time: +5.41%
-    datadog_logs_1000MiB_time: +8.39%
-    datadog_logs_100MiB_throughput: +5.72%
-    datadog_logs_1000MiB_throughput: +9.16%
-  macro:
-    time: -2.51%
-    memory: -26.07%
-    allocations: -8.22%
+  benchmarks:
+    micro:
+      datadog_logs_100MiB_time: +5.41%
+      datadog_logs_1000MiB_time: +8.39%
+      datadog_logs_100MiB_throughput: +5.72%
+      datadog_logs_1000MiB_throughput: +9.16%
+    macro:
+      time: -2.51%
+      memory: -26.07%
+      allocations: -8.22%
 lessons: |
   The to_bytes method was performing binary search to find the right number of
   members to serialize within max_bytes. Each iteration called serde_json::to_string()
