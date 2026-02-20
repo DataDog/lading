@@ -26,7 +26,7 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let mut bytes = Vec::with_capacity(budget);
 
-    let mut serializer = lading_payload::DatadogLog::new(&mut rng);
+    let mut serializer = lading_payload::DatadogLog::new(&lading_payload::datadog_logs::Config::default(), &mut rng);
 
     if serializer.to_bytes(&mut rng, budget, &mut bytes).is_ok() {
         assert!(bytes.len() <= budget);

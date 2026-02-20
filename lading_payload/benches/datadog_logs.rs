@@ -1,7 +1,7 @@
 //! Benchmarks for Datadog Logs payload generation.
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use lading_payload::{DatadogLog, Serialize};
+use lading_payload::{DatadogLog, Serialize, datadog_logs};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ fn datadog_logs_setup(c: &mut Criterion) {
     c.bench_function("datadog_logs_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19_690_716);
-            let _dd = DatadogLog::new(&mut rng);
+            let _dd = DatadogLog::new(&datadog_logs::Config::default(), &mut rng);
         });
     });
 }
@@ -24,7 +24,7 @@ fn datadog_logs_throughput(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let mut rng = SmallRng::seed_from_u64(19_690_716);
-                    let dd = DatadogLog::new(&mut rng);
+                    let dd = DatadogLog::new(&datadog_logs::Config::default(), &mut rng);
                     (rng, dd, Vec::with_capacity(size))
                 },
                 |(rng, mut dd, mut writer)| {
