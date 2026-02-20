@@ -1,80 +1,88 @@
+id: fluent-on-demand-serialization
 target: lading_payload/src/fluent.rs::to_bytes
 technique: on-demand-serialization
-status: success
 date: 2026-01-22
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
 measurements:
-  micro_benchmarks:
-    - size: 1 MiB
-      baseline_throughput: 34.27 MiB/s
-      optimized_throughput: 79.65 MiB/s
-      improvement: +132%
-    - size: 10 MiB
-      baseline_throughput: 97.57 MiB/s
-      optimized_throughput: 117.97 MiB/s
-      improvement: +21%
-    - size: 100 MiB
-      baseline_throughput: 118.68 MiB/s
-      optimized_throughput: 122.22 MiB/s
-      improvement: +3%
+  benchmarks:
+    micro:
+      fluent_1MiB_throughput: 34.27 MiB/s -> 79.65 MiB/s (+132%)
+      fluent_10MiB_throughput: 97.57 MiB/s -> 117.97 MiB/s (+21%)
+      fluent_100MiB_throughput: 118.68 MiB/s -> 122.22 MiB/s (+3%)
+    macro:
+      time: 2347 ms -> 409.8 ms (-82.6%)
+      memory: 1.499 GiB -> 143.1 MiB (-90.7%)
+      allocations: 3,622,824 -> 629,596 (-82.6%)
+reason: |
+  Unanimous approval from all five personas.
 
-  macro_benchmarks:
-    time:
-      baseline: 2347 ms
-      optimized: 409.8 ms
-      improvement: -82.6%
-    allocations:
-      baseline: 3,622,824
-      optimized: 629,596
-      improvement: -82.6%
-    total_allocated:
-      baseline: 1.499 GiB
-      optimized: 143.1 MiB
-      improvement: -90.7%
-    peak_live:
-      baseline: 12.66 MiB
-      optimized: 5.87 MiB
-      improvement: -53.6%
+  Duplicate Hunter: No duplicate work detected. This is a unique optimization of fluent.rs
+  using on-demand serialization technique.
 
-validation:
-  - cargo test: passed (60 tests)
-  - cargo fmt: passed
-  - cargo clippy: passed (after fixing mem_replace_with_default)
-  - shellcheck: passed
+  Skeptic: Outstanding benchmark data exceeding all thresholds by wide margins:
+  - Time improvement: -82.6% (threshold: 5%) - 16x better than required
+  - Memory improvement: -90.7% (threshold: 10%) - 9x better than required
+  - Allocation reduction: -82.6% (threshold: 20%) - 4x better than required
+  Micro-benchmarks show 132% throughput improvement at 1 MiB. Statistical significance
+  confirmed with Criterion (100 samples) and hyperfine (10 runs).
+
+  Conservative: All correctness requirements met:
+  - ci/validate passes completely (60/60 tests)
+  - No semantic changes to output format
+  - Determinism preserved (same seed produces same output)
+  - No unwrap/expect added (uses ? for error propagation)
+  - Property test payload_not_exceed_max_bytes validates core invariant
+
+  Rust Expert: Excellent Rust patterns demonstrated:
+  - Use statements properly at file top
+  - Pre-computation in initialization (buffer with 4096 capacity)
+  - Proper borrow checker handling with std::mem::take idiom
+  - No unnecessary allocations in hot path
+  - Eliminated Vec<Vec<u8>> pattern completely
+
+  Greybeard: Simplicity achieved:
+  - Actually simpler than original (one loop vs two-loop binary search)
+  - Clear comments explain non-obvious borrow checker pattern
+  - Minimal scope (41 lines removed, 35 added)
+  - Classic streaming serialization pattern ("obviously fast")
+  - Complexity fully justified by 90.7% memory reduction
 
 lessons: |
-  Massive optimization success by eliminating Vec<Vec<u8>> pre-serialization pattern.
+  This is a textbook example of a successful optimization:
 
-  Changes made:
-  1. Added reusable Vec<u8> buffer field to Fluent struct
-  2. Changed from pre-generating all members into Vec<Vec<u8>> to on-demand serialization
-  3. Used std::mem::take to move buffer out temporarily to satisfy borrow checker
-  4. Serialize directly into reusable buffer using rmp_serde::Serializer
-  5. Write to output as we go, stopping when max_bytes reached
+  1. **Clear hot path identification**: Vec<Vec<u8>> pre-serialization was obvious bottleneck
 
-  Key findings:
-  - Micro-benchmarks showed 132% improvement at 1 MiB (well above 5% threshold)
-  - Macro-benchmarks showed 82.6% speedup and 82.6% reduction in allocations
-  - Total memory allocated reduced by 90.7% (1.5 GiB -> 143 MiB)
-  - The optimization is most effective for smaller payloads where allocation overhead dominates
-  - At larger sizes (100 MiB), improvement diminishes to 3% as serialization dominates
+  2. **Classic optimization pattern**: Stream serialization instead of batch-then-serialize
 
-  Pattern is highly effective: eliminate Vec<Vec<u8>> allocations by:
-  * Adding a reusable buffer to the struct
-  * Serializing on-demand rather than pre-serializing
-  * Using std::mem::take to work around borrow checker when Member<'a> borrows from self
-  * Writing directly to output as payloads are generated
+  3. **Overwhelming performance gains**:
+     - 5.7x speedup (2347ms -> 409ms)
+     - 10x memory reduction (1.5 GiB -> 143 MiB)
+     - Eliminated 3 million allocations per run
 
-  This pattern should be applied to other payload serializers that use Vec<Vec<u8>>:
-  - Check if other formats pre-serialize into collections
-  - Look for opportunities to stream serialization instead
+  4. **No correctness compromises**: All tests pass, determinism preserved
 
-  The optimization is safe because:
-  - RNG sequence is preserved (same random choices)
-  - Output format is identical (validated by property tests)
-  - Determinism maintained (seed-based generation)
-  - All 60 tests pass
+  5. **Proper Rust idioms**: std::mem::take for borrow checker, ? for errors
 
-  Next targets to explore:
-  1. Other formats that may use similar Vec<Vec<u8>> patterns
-  2. Formats that could benefit from streaming serialization
-  3. Buffer size tuning - current 4096 bytes, could be optimized per format
+  6. **Actually simpler**: Replaced complex two-loop algorithm with single streaming loop
+
+  Pattern to replicate:
+  - Identify Vec<Vec<T>> pre-collection patterns
+  - Replace with on-demand processing + reusable buffer
+  - Use std::mem::take when buffer and data source share ownership
+  - Stream output incrementally rather than batch processing
+
+  This optimization should be considered the gold standard for lading payload optimizations.
+  It demonstrates that the biggest wins come from eliminating algorithmic inefficiencies
+  (batch processing) rather than micro-optimizing hot loops.
+
+  Future work:
+  - Survey other payload formats for similar Vec<Vec<u8>> patterns
+  - Consider if buffer size (4096) is optimal or should be tuned per format
+  - Document this pattern in contribution guidelines for future optimizers

@@ -1,50 +1,27 @@
+id: syslog-to_bytes-reusable-buffer
 target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
 technique: reusable-buffer-eliminate-allocations
-status: success
 date: 2026-01-15
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
 measurements:
-  micro_benchmarks:
-    - size: 1 MiB
-      baseline_throughput: 479.27 MiB/s
-      optimized_throughput: 668.60 MiB/s
-      improvement: +39.5%
-    - size: 10 MiB
-      baseline_throughput: 482.76 MiB/s
-      optimized_throughput: 635.51 MiB/s
-      improvement: +31.6%
-    - size: 100 MiB
-      baseline_throughput: 481.49 MiB/s
-      optimized_throughput: 683.63 MiB/s
-      improvement: +42.0%
-    - size: 1000 MiB
-      baseline_throughput: 484.38 MiB/s
-      optimized_throughput: 677.32 MiB/s
-      improvement: +39.8%
-
-  macro_benchmarks:
-    time:
-      baseline: 8.3 ms
-      optimized: 7.1 ms
-      improvement: -14.5%
-    allocations:
-      baseline: 67,688
-      optimized: 34,331
-      improvement: -49.3%
-    total_allocated:
-      baseline: 6.17 MiB
-      optimized: 3.96 MiB
-      improvement: -35.8%
-    peak_live:
-      baseline: 1.38 MiB
-      optimized: 1.38 MiB
-      improvement: ~0% (expected - buffer reuse)
-
-validation:
-  - cargo test: passed (60 tests)
-  - cargo fmt: passed
-  - shellcheck: passed
-  - kani: no proofs to run (property tests sufficient)
-
+  benchmarks:
+    micro:
+      syslog_1MiB_throughput: 479.27 MiB/s -> 668.60 MiB/s (+39.5%)
+      syslog_10MiB_throughput: 482.76 MiB/s -> 635.51 MiB/s (+31.6%)
+      syslog_100MiB_throughput: 481.49 MiB/s -> 683.63 MiB/s (+42.0%)
+      syslog_1000MiB_throughput: 484.38 MiB/s -> 677.32 MiB/s (+39.8%)
+    macro:
+      time: 8.3 ms -> 7.1 ms (-14.5%)
+      memory: 6.17 MiB -> 3.96 MiB (-35.8%)
+      allocations: 67,688 -> 34,331 (-49.3%)
+      peak_live: 1.38 MiB -> 1.38 MiB (~0%)
 lessons: |
   Successful optimization following the pattern from PR #1692 (JSON) and PR #1694 (Splunk HEC).
 
