@@ -443,10 +443,7 @@ mod test {
         for tag_str in &ddlogs.tag_strings {
             // Each tag string should contain key:value pairs
             for part in tag_str.split(',') {
-                assert!(
-                    part.contains(':'),
-                    "expected key:value format, got: {part}"
-                );
+                assert!(part.contains(':'), "expected key:value format, got: {part}");
             }
         }
     }
