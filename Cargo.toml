@@ -49,7 +49,7 @@ uuid = { version = "1.18", default-features = false, features = [
   "v4",
 ] }
 once_cell = "1.21"
-arrow = { version = "57.0", default-features = false }
+arrow = { version = "57.2", default-features = false }
 parquet = { version = "57.1", default-features = false }
 proptest = "1.9"
 proptest-derive = { version = "0.7" }
