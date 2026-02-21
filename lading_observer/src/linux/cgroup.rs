@@ -1,5 +1,5 @@
 /// Code to read cgroup information.
-pub(crate) mod v2;
+pub mod v2;
 
 use std::{collections::VecDeque, io, path::PathBuf};
 

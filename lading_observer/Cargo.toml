@@ -1,0 +1,34 @@
+[package]
+name = "lading-observer"
+version = "0.1.0"
+authors = [
+  "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+  "George Hahn <george.hahn@datadoghq.com>",
+]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["random_test", "generator"]
+categories = ["development-tools::profiling"]
+description = "A tool for load testing daemons."
+
+[dependencies]
+lading-signal = { version = "0.1", path = "../lading_signal" }
+metrics = { workspace = true }
+nix = { workspace = true, features = ["fs", "signal"] }
+num-traits = { workspace = true }
+num_cpus = { workspace = true }
+procfs = { version = "0.18", default-features = false, features = [] }
+regex = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "sync", "time"] }
+tracing = { workspace = true }
+heck = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

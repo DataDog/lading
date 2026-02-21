@@ -7,7 +7,7 @@ use std::{
 };
 use tracing::debug;
 
-use crate::observer::linux::utils::process_descendents::ProcessDescendantsIterator;
+use crate::linux::utils::process_descendents::ProcessDescendantsIterator;
 
 mod pfnset;
 use pfnset::PfnSet;
