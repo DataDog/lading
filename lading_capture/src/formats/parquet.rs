@@ -59,6 +59,8 @@ struct ColumnBuffers {
     values_histogram: Vec<Vec<u8>>,
 }
 
+const EMPTY_HISTOGRAM: Vec<u8> = Vec::<_>::new();
+
 impl ColumnBuffers {
     /// Create new column buffers with default capacity
     fn new() -> Self {
@@ -111,10 +113,17 @@ impl ColumnBuffers {
             line::LineValue::Int(v) => {
                 self.values_int.push(Some(v));
                 self.values_float.push(None);
+                self.values_histogram.push(EMPTY_HISTOGRAM);
             }
             line::LineValue::Float(v) => {
                 self.values_int.push(None);
                 self.values_float.push(Some(v));
+                self.values_histogram.push(EMPTY_HISTOGRAM);
+            }
+            line::LineValue::ExternalHistogram => {
+                self.values_int.push(None);
+                self.values_float.push(None);
+                self.values_histogram.push(line.value_histogram.clone());
             }
         }
 
@@ -125,8 +134,6 @@ impl ColumnBuffers {
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         self.label_offsets.push(self.label_keys.len() as i32);
-
-        self.values_histogram.push(line.value_histogram.clone());
     }
 
     /// Check if buffers are empty
