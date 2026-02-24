@@ -1,5 +1,5 @@
 id: payload-cache-inline
-target: lading_payload/src/block.rs:Cache methods
+target: lading_payload/src/block.rs:Cache
 technique: inline
 date: 2026-01-20
 status: success

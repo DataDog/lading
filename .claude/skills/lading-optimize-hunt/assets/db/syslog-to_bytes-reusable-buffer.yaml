@@ -1,6 +1,6 @@
 id: syslog-to_bytes-reusable-buffer
 target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
-technique: reusable-buffer-eliminate-allocations
+technique: buffer-reuse
 date: 2026-01-15
 status: success
 verdict: approved

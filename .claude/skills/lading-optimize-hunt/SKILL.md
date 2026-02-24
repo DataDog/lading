@@ -10,7 +10,7 @@ Systematically explores the lading codebase, implements optimizations, validates
 
 ## Role: Coordinator and Recorder
 
-Hunt is the **coordinator and recorder** — it finds targets, captures baselines, implements changes, hands off to review, and records all outcomes. 
+Hunt is the **coordinator and recorder** — it captures baselines, implements changes, hands off to review, and records all outcomes.
 
 Hunt does NOT:
 - Run post-change benchmarks (review does this)
@@ -23,115 +23,29 @@ Hunt DOES:
 
 ## Phase 0: Pre-flight
 
-Run `/lading-preflight` first. Then check what's already been done:
-
-```bash
-# Check previous hunts (includes review verdicts)
-cat .claude/skills/lading-optimize-hunt/assets/db.yaml
-```
-
-**If a target/technique combination exists in db.yaml, SKIP IT.**
+Run `/lading-preflight`.
 
 ---
 
-## Phase 1: Select Target
+## Phase 1: Find Target
 
-### Target Sources
+Run `/lading-optimize-find-target`.
 
-Use profiling data when available:
-```bash
-# CPU profiling (Mac)
-sample <pid> 10 -file /tmp/profile.txt
-
-# Or with samply (if installed)
-samply record ./target/release/payloadtool ci/fingerprints/json/lading.yaml
-
-# Memory profiling (use existing fingerprint configs)
-./target/release/payloadtool ci/fingerprints/json/lading.yaml --memory-stats
-```
-
-**Note:** payloadtool takes a config YAML as its first argument. See `ci/fingerprints/*/lading.yaml` for examples. Config controls `seed`, `maximum_prebuild_cache_size_bytes`, and generator type.
-
-Otherwise, check pending hunt issues or pick from hot subsystems:
-
-| Crate | Hot Paths |
-|-------|-----------|
-| `lading_payload` | Block generation, cache, payload construction |
-| `lading_throttle` | Capacity calculation, rate limiting |
-| `lading` | Generators, blackholes, target management |
-
-**CRITICAL: The target must have an associated criterion benchmark.**
+Find-target returns a YAML block with 6 fields: `pattern`, `technique`, `target`, `file`, `bench`, `fingerprint`.
 
 ---
 
-## Phase 2: Analyze Target
-
-### Identify Opportunity Type
-
-| Pattern | Technique | Bug Risk |
-|---------|-----------|----------|
-| `Vec::new()` + repeated push | `Vec::with_capacity(n)` | None |
-| `String::new()` + repeated push | `String::with_capacity(n)` | None |
-| `FxHashMap::default()` hot insert | `FxHashMap::with_capacity(n)` | None |
-| `format!()` in hot loop | `write!()` to reused buffer | Format errors, buffer sizing |
-| `&Vec<T>` or `&String` parameter | `&[T]` or `&str` slice | None |
-| Allocation in hot loop | Move outside loop | Lifetime issues |
-| Repeated temp allocations | Object pool/buffer reuse | Lifetime complexity, state bugs |
-| Clone where borrow works | Use reference | Lifetime complexity |
-| Hot cross-crate fn call | `#[inline]` attribute | Binary size bloat |
-| Intermediate `.collect()` calls | Iterator chains without collect | Off-by-one, logic errors |
-| Large struct by value | Box or reference | Nil/lifetime risk |
-| Unbounded growth | Bounded buffer | Semantic change |
-
-**Watch for bugs while analyzing - they're valuable findings.**
-
-### Bug Discovery During Analysis
-
-If you discover a correctness bug **before implementing any optimization**, invoke validation immediately:
-
-```
-/lading-optimize-validate
-```
-
-After validation completes, return here and select the next target. Do not attempt an optimization on code with a known bug.
-
-### Lading-Specific Concerns
-
-- **Determinism**: Any optimization must preserve deterministic output
-- **Pre-computation**: Prefer moving work to initialization over runtime
-- **Worst-case behavior**: Optimize for worst-case, not average-case
-
----
-
-## Phase 3: Establish Baseline
+## Phase 2: Establish Baseline
 
 **CRITICAL: Capture baseline metrics BEFORE making any code changes.**
 
 ### Identify the Benchmark Target
 
-Each `lading_payload` source module has a matching benchmark target. Use `--bench <name>` to run **only** the relevant benchmark instead of the full suite.
-
-| Source module | `--bench` target | Fingerprint config dir |
-|---|---|---|
-| `apache_common.rs` | `apache_common` | `ci/fingerprints/apache_common/` |
-| `ascii.rs` | `ascii` | `ci/fingerprints/ascii/` |
-| `block.rs` | `block` | *(none — use json)* |
-| `datadog_logs.rs` | `datadog_logs` | `ci/fingerprints/datadog_logs/` |
-| `dogstatsd.rs` | `dogstatsd` | `ci/fingerprints/dogstatsd/` |
-| `fluent.rs` | `fluent` | `ci/fingerprints/fluent/` |
-| `json.rs` | `json` | `ci/fingerprints/json/` |
-| `opentelemetry_log.rs` | `opentelemetry_log` | `ci/fingerprints/otel_logs/` |
-| `opentelemetry_metric.rs` | `opentelemetry_metric` | `ci/fingerprints/otel_metrics/` |
-| `opentelemetry_traces.rs` | `opentelemetry_traces` | `ci/fingerprints/otel_traces/` |
-| `splunk_hec.rs` | `splunk_hec` | `ci/fingerprints/splunk_hec/` |
-| `syslog.rs` | `syslog` | `ci/fingerprints/syslog/` |
-| `trace_agent.rs` | `trace_agent` | `ci/fingerprints/trace_agent_v04/` |
-
-Set these once and use them throughout:
+Use the `bench` and `fingerprint` fields from find-target's output — they are repo-relative paths ready to use:
 
 ```bash
-BENCH=<target>   # e.g. json, syslog, dogstatsd
-PAYLOADTOOL_CONFIG=ci/fingerprints/<config_dir>/lading.yaml
+BENCH=<bench field without extension>   # e.g. from "lading_payload/benches/syslog.rs" use "--bench syslog"
+PAYLOADTOOL_CONFIG=<fingerprint field>  # e.g. "ci/fingerprints/syslog/lading.yaml"
 ```
 
 ### Stage 1: Clear previous benchmarks
@@ -172,7 +86,7 @@ hyperfine --warmup 3 --runs 30 --export-json /tmp/baseline.json \
 
 ---
 
-## Phase 4: Implement
+## Phase 3: Implement
 
 Make ONE change. Keep it focused and minimal.
 
@@ -194,21 +108,17 @@ After validation completes, return here and select the next target.
 
 ---
 
-## Phase 5: Hand Off to Review
+## Phase 4: Hand Off to Review
 
-Invoke the review process:
+Run `/lading-optimize-review`
 
-```
-/lading-optimize-review
-```
-
-**Review returns a YAML report (as a fenced code block). It does NOT record results or create files. Hunt records everything in Phase 6.**
+**Review returns a YAML report (as a fenced code block). It does NOT record results or create files. Hunt records everything in Phase 5.**
 
 ---
 
-## Phase 6: Recording
+## Phase 5: Recording
 
-After review returns its YAML report (or after a bug is validated), record the result. Every outcome MUST be recorded.
+After review returns its YAML report, record the result. Every outcome MUST be recorded.
 
 ### Step 1: Write the Report
 
