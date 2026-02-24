@@ -7,7 +7,7 @@ entries:
     file: assets/db/dogstatsd-buffer-reuse.yaml
   - id: syslog-to_bytes-reusable-buffer
     target: lading_payload/src/syslog.rs::Syslog5424::to_bytes
-    technique: reusable-buffer-eliminate-allocations
+    technique: buffer-reuse
     status: success
     verdict: approved
     file: assets/db/syslog-to_bytes-reusable-buffer.yaml
@@ -18,7 +18,7 @@ entries:
     verdict: approved
     file: assets/db/fluent-on-demand-serialization.yaml
   - id: payload-cache-inline
-    target: lading_payload/src/block.rs:Cache methods
+    target: lading_payload/src/block.rs:Cache
     technique: inline
     status: success
     verdict: approved

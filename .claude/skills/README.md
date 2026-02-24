@@ -5,7 +5,7 @@ Systematic optimization hunting for lading. Combines profiling, benchmarking, an
 ## Quick Start
 
 ```
-/lading:preflight
+/lading-preflight
 ```
 
 Run preflight first. It validates your environment and tells you what to do next.
@@ -15,21 +15,23 @@ Run preflight first. It validates your environment and tells you what to do next
 | Skill | Purpose |
 |-------|---------|
 | `/lading-preflight` | Environment validation - run first every session |
-| `/lading-optimize-hunt` | Find optimization targets using profiling data |
+| `/lading-optimize-find-target` | Select and analyze an optimization target |
+| `/lading-optimize-hunt` | Baseline, implement, review, and record optimizations |
 | `/lading-optimize-review` | 5-persona peer review before merge |
 | `/lading-optimize-validate` | Bug validation with Kani proofs or property tests |
+| `/lading-optimize-submit` | Git branch, commits, and optional PR for optimizations |
 | `/lading-optimize-rescue` | Salvage optimization work lacking benchmarks |
 
 ## Workflow
 
 ```
-preflight --> hunt --> [implement] --> review --> submit
-                |                        |
-                v                        v 
-           [bug found]         [approved / rejected]
-                |                        |
-                v                        v
-            validate               record lesson
+preflight --> find-target --> hunt --> [implement] --> review --> submit
+                                                         |
+                                                         v
+                                                [approved / rejected]
+                                                         |
+                                                         v
+                                                   record lesson
 ```
 
 ## Critical Context for LLMs
@@ -63,7 +65,7 @@ Changes below these thresholds are noise, not optimization.
 Hunt maintains `assets/db.yaml` as the central index with detailed entries in `assets/db/*.yaml`. Review owns the report templates (in `lading-optimize-review/assets/`) and returns filled-in YAML reports; hunt persists them verbatim to `assets/db/`.
 
 ```
-lading:optimize:hunt/
+lading-optimize-hunt/
 ├── SKILL.md      # Instructions
 └── assets/
     ├── db.yaml   # Index of all hunts
@@ -73,8 +75,8 @@ lading:optimize:hunt/
 
 Query past results:
 ```bash
-grep "prealloc" .claude/skills/lading:optimize:hunt/assets/db.yaml
-cat .claude/skills/lading:optimize:hunt/assets/db/payload-prealloc.yaml
+grep "prealloc" .claude/skills/lading-optimize-hunt/assets/db.yaml
+cat .claude/skills/lading-optimize-hunt/assets/db/payload-prealloc.yaml
 ```
 
 ## Prerequisites
