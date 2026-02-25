@@ -2,12 +2,13 @@
 name: lading-preflight
 description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, build, benchmarking tools, profilers, memory tools, and git state.
 allowed-tools: Bash
+context: fork
 ---
 
 # Run preflight script
 
 ```bash
-scripts/preflight
+.claude/skills/lading-preflight/scripts/preflight
 ```
 
 **STOP on any failure.** Use the table below to resolve `[X]` items:

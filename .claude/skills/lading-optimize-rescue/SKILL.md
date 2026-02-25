@@ -165,7 +165,7 @@ If rescue uncovers a bug instead of an optimization:
 ```
 
 After validation:
-1. Bug recorded in validate's assets/db.yaml (via /lading-optimize-validate)
+1. Bug recorded in `.claude/skills/lading-optimize-hunt/assets/db.yaml` (via /lading-optimize-validate)
 2. Record rescue as BUG_FOUND in Phase 7
 3. The bug fix remains in working directory (with tests!)
 

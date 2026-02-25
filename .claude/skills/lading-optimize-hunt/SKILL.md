@@ -1,7 +1,7 @@
 ---
 name: lading-optimize-hunt
 description: Systematic optimization hunter for lading. Finds memory optimizations AND bugs - both are valuable. Run /lading-optimize-validate when bugs are discovered.
-allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
+allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill Task
 ---
 
 # Optimization Hunt
@@ -17,7 +17,7 @@ Hunt does NOT:
 - Make pass/fail decisions on optimizations (review does this)
 
 Hunt DOES:
-- Record all verdicts and outcomes in db.yaml after review returns
+- Record all verdicts and outcomes in `.claude/skills/lading-optimize-hunt/assets/db.yaml` after review returns
 
 ---
 
@@ -31,7 +31,7 @@ Run `/lading-preflight`.
 
 Run `/lading-optimize-find-target`.
 
-Find-target returns a YAML block with 6 fields: `pattern`, `technique`, `target`, `file`, `bench`, `fingerprint`.
+It returns a YAML block with 6 fields: `pattern`, `technique`, `target`, `file`, `bench`, `fingerprint` - Print it out.
 
 ---
 
@@ -110,9 +110,20 @@ After validation completes, return here and select the next target.
 
 ## Phase 4: Hand Off to Review
 
-Run `/lading-optimize-review`
+Run `/lading-optimize-review` with the target fields as positional arguments:
 
-**Review returns a YAML report (as a fenced code block). It does NOT record results or create files. Hunt records everything in Phase 5.**
+```
+/lading-optimize-review <bench> <fingerprint> <file> <target> <technique>
+```
+
+Where:
+- `<bench>` — benchmark name from find-target's `bench` field, without path or extension (e.g. `trace_agent`)
+- `<fingerprint>` — repo-relative path from find-target's `fingerprint` field
+- `<file>` — repo-relative path from find-target's `file` field
+- `<target>` — function name from find-target's `target` field
+- `<technique>` — technique from find-target's `technique` field
+
+It returns a YAML report. Print it out.
 
 ---
 
@@ -122,10 +133,10 @@ After review returns its YAML report, record the result. Every outcome MUST be r
 
 ### Step 1: Write the Report
 
-Write review's YAML report **verbatim** to `assets/db/<id>.yaml`. Do not modify, reformat, or add to the report content — it is the authoritative record from review.
+Write review's YAML report **verbatim** to `.claude/skills/lading-optimize-hunt/assets/db/<id>.yaml`. Do not modify, reformat, or add to the report content — it is the authoritative record from review.
 
 ### Step 2: Update the Index
 
-Add an entry to `assets/db.yaml` following the format in `assets/index.template.yaml`.
+Add an entry to `.claude/skills/lading-optimize-hunt/assets/db.yaml` following the format in `.claude/skills/lading-optimize-hunt/assets/index.template.yaml`.
 
 ---
