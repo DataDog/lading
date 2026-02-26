@@ -1,8 +1,0 @@
-id: <descriptive-name>
-target: <file:function>
-technique: <technique>
-date: <YYYY-MM-DD>
-status: failure
-verdict: duplicate
-reason: |
-  <explanation of duplication with mention of existing entry>

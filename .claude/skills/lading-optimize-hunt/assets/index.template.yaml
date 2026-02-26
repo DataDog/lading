@@ -3,5 +3,5 @@ entries:
     target: <file:function>
     technique: <technique>
     status: <success|failure>
-    verdict: <approved|rejected|duplicate|bug_found>
+    verdict: <approved|rejected>
     file: assets/db/<name>.yaml
