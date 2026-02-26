@@ -1,7 +1,9 @@
 ---
 name: lading-optimize-review
 description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
+argument-hint: "[bench] [fingerprint] [file] [target] [technique]"
 allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
+context: fork
 ---
 
 # Optimization Patch Review
@@ -26,6 +28,31 @@ Review judges using benchmarks and 5-persona review, then returns a structured r
 
 ---
 
+## Arguments
+
+This skill requires 5 positional arguments passed by the caller:
+
+| Arg | Field | Example | Used for |
+|-----|-------|---------|----------|
+| `$ARGUMENTS[0]` | bench | `trace_agent` | `cargo criterion --bench` flag |
+| `$ARGUMENTS[1]` | fingerprint | `ci/fingerprints/trace_agent_v04/lading.yaml` | payloadtool config path |
+| `$ARGUMENTS[2]` | file | `lading_payload/src/trace_agent/v04.rs` | report + duplicate check |
+| `$ARGUMENTS[3]` | target | `V04::to_bytes` | report |
+| `$ARGUMENTS[4]` | technique | `buffer-reuse` | report + duplicate check |
+
+**If any argument is missing -> REJECT. All 5 are required.**
+
+### Generate Report ID
+
+Derive the `id` from the file and technique arguments:
+1. Take the filename stem from `$ARGUMENTS[2]` (e.g. `lading_payload/src/trace_agent/v04.rs` → `trace-agent-v04`)
+2. Append the technique `$ARGUMENTS[4]` (e.g. `buffer-reuse`)
+3. Join with `-` → `trace-agent-v04-buffer-reuse`
+
+Use this `id` in the report.
+
+---
+
 ## Phase 1: Benchmark Execution
 
 ### Step 1: Read Baseline Data
@@ -41,7 +68,7 @@ Read the baseline benchmark files captured:
 ### Step 2: Run Post-Change Micro-benchmarks
 
 ```bash
-cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
+cargo criterion --bench $ARGUMENTS[0] 2>&1 | tee /tmp/criterion-optimized.log
 ```
 
 Note: Criterion automatically compares against the last run and reports percentage changes.
@@ -52,13 +79,11 @@ Example output: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678
 
 ### Step 3: Run Post-Change Macro-benchmarks
 
-Use the config provided by the caller (stored in `$PAYLOADTOOL_CONFIG`):
-
 ```bash
 cargo build --release --bin payloadtool
 hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
-  "./target/release/payloadtool $PAYLOADTOOL_CONFIG"
-./target/release/payloadtool "$PAYLOADTOOL_CONFIG" --memory-stats 2>&1 | tee /tmp/optimized-mem.txt
+  "./target/release/payloadtool $ARGUMENTS[1]"
+./target/release/payloadtool "$ARGUMENTS[1]" --memory-stats 2>&1 | tee /tmp/optimized-mem.txt
 ```
 
 ### Statistical Requirements
@@ -81,7 +106,7 @@ hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
 ## Phase 2: Five-Persona Review
 
 ### 1. Duplicate Hunter (Checks for Redundant Work)
-- [ ] Optimization not already in db.yaml
+- [ ] Check `.claude/skills/lading-optimize-hunt/assets/db.yaml` for `$ARGUMENTS[2]` + `$ARGUMENTS[4]` combo
 - [ ] File + technique combo not already approved
 - [ ] No substantially similar optimization exists
 - [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing entry>"
@@ -181,7 +206,7 @@ The validate skill will:
 2. Attempt Kani proof (if feasible)
 3. Create property test reproducing the bug
 4. Verify the fix works
-5. Record in its db.yaml
+5. Record in `.claude/skills/lading-optimize-hunt/assets/db.yaml`
 
 Then return here to return a BUG_FOUND report in Phase 6.
 
@@ -193,15 +218,19 @@ Then return here to return a BUG_FOUND report in Phase 6.
 
 Fill in the appropriate template and return the completed YAML:
 
-| Verdict   | Template                         |
-| --------- | -------------------------------- |
-| approved  | `assets/approved.template.yaml`  |
-| rejected  | `assets/rejected.template.yaml`  |
-| duplicate | `assets/duplicate.template.yaml` |
-| bug_found | `assets/bug-found.template.yaml` |
+| Verdict   | Template                                                               |
+| --------- | ---------------------------------------------------------------------- |
+| approved  | `.claude/skills/lading-optimize-review/assets/approved.template.yaml`  |
+| rejected  | `.claude/skills/lading-optimize-review/assets/rejected.template.yaml`  |
+| duplicate | `.claude/skills/lading-optimize-review/assets/duplicate.template.yaml` |
+| bug_found | `.claude/skills/lading-optimize-review/assets/bug-found.template.yaml` |
 
-1. Read the appropriate template from the `assets/` directory
-2. Fill in all placeholder values with actual data from the review
-3. Return the filled-in report
+1. Read the appropriate template from the `.claude/skills/lading-optimize-review/assets/` directory
+2. Fill in placeholders using argument values:
+   - `id` → generated ID (see "Generate Report ID" above)
+   - `target` → `$ARGUMENTS[2]:$ARGUMENTS[3]` (e.g. `lading_payload/src/trace_agent/v04.rs:V04::to_bytes`)
+   - `technique` → `$ARGUMENTS[4]`
+3. Fill remaining fields with actual benchmark data from the review
+4. Return the filled-in report
 
 ---

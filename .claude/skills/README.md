@@ -62,10 +62,10 @@ Changes below these thresholds are noise, not optimization.
 
 ## Tracking Results
 
-Hunt maintains `assets/db.yaml` as the central index with detailed entries in `assets/db/*.yaml`. Review owns the report templates (in `lading-optimize-review/assets/`) and returns filled-in YAML reports; hunt persists them verbatim to `assets/db/`.
+Hunt maintains `.claude/skills/lading-optimize-hunt/assets/db.yaml` as the central index with detailed entries in `.claude/skills/lading-optimize-hunt/assets/db/*.yaml`. Review owns the report templates (in `.claude/skills/lading-optimize-review/assets/`) and returns filled-in YAML reports; hunt persists them verbatim to `.claude/skills/lading-optimize-hunt/assets/db/`.
 
 ```
-lading-optimize-hunt/
+.claude/skills/lading-optimize-hunt/
 ├── SKILL.md      # Instructions
 └── assets/
     ├── db.yaml   # Index of all hunts

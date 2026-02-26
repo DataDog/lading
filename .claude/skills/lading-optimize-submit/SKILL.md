@@ -50,7 +50,7 @@ The hunt workflow will:
 - Invoke /lading-optimize-review (which runs post-change benchmarks and judges)
 
 **The hunt will:**
-- Record the verdict in db.yaml after review returns
+- Record the verdict in `.claude/skills/lading-optimize-hunt/assets/db.yaml` after review returns
 
 **BUT the hunt does NOT:**
 - Run post-change benchmarks (review does this)
@@ -79,7 +79,7 @@ git checkout -b opt/<crate>-<technique>
 git add .
 ```
 
-Using the template in `assets/commit-template.txt`, commit the changes:
+Using the template in `.claude/skills/lading-optimize-submit/assets/commit-template.txt`, commit the changes:
 
 ```bash
 # Example:

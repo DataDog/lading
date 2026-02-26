@@ -2,6 +2,7 @@
 name: lading-optimize-find-target
 description: Finds a valid optimization target in lading. Returns a filled target.yaml template with pattern, technique, target, file, bench, and fingerprint. Use before /lading-optimize-hunt or when selecting a new optimization target.
 allowed-tools: Bash Read Glob Grep
+context: fork
 ---
 
 ## Phase 1: Discover Benchmark-Eligible Modules
@@ -90,7 +91,7 @@ Show the full matrix as a table. Every cell must have a value. Do NOT skip any c
 
 Remove any opportunity that:
 
-1. **Already in db.yaml** — same function + semantically equivalent technique already exists
+1. **Already in `.claude/skills/lading-optimize-hunt/assets/db.yaml`** — same function + semantically equivalent technique already exists
 2. **No benchmark** — module has no matching bench file in `lading_payload/benches/`
 
 If zero survive, STOP: "No valid optimization targets found."
@@ -101,11 +102,11 @@ If zero survive, STOP: "No valid optimization targets found."
 
 Sort by two dimensions:
 
-1. **Technique impact** — techniques with measured history in db.yaml rank higher (compute avg % improvement from `measurements.benchmarks.macro`). Unknown techniques rank last.
+1. **Technique impact** — techniques with measured history in `.claude/skills/lading-optimize-hunt/assets/db.yaml` rank higher (compute avg % improvement from `measurements.benchmarks.macro`). Unknown techniques rank last.
 2. **Allocation intensity** — modules with higher allocation counts from profiling rank higher.
 
 Sort by technique impact first, allocation intensity second.
-**Tiebreaker:** Prefer modules with no prior db.yaml entries, then alphabetical file name.
+**Tiebreaker:** Prefer modules with no prior `.claude/skills/lading-optimize-hunt/assets/db.yaml` entries, then alphabetical file name.
 
 Show sorted results in a table.
 
@@ -113,7 +114,7 @@ Show sorted results in a table.
 
 ## Phase 7: Return Result
 
-Pick the top-ranked opportunity. Return as a fenced YAML code block. **Do NOT write to disk.**
+Pick the top-ranked opportunity. Return as a fenced YAML code block. **Do NOT write to disk.** **Do not include intermediate tables, matrices, or analysis.**
 
 ```yaml
 pattern: "<description of the code pattern found>"

@@ -33,7 +33,7 @@ Review or Hunt discovers potential bug
             +-- Attempt Kani proof (if feasible)
             +-- Create property test (proptest)
             +-- Validate fix works
-            +-- Record in assets/db.yaml
+            +-- Record in .claude/skills/lading-optimize-hunt/assets/db.yaml
             |
             v
     Return to calling skill with status
@@ -285,20 +285,20 @@ diff /tmp/run1.txt /tmp/run2.txt  # Must be identical
 
 ### MANDATORY: Update db.yaml
 
-1. Add entry to `assets/db.yaml` index
-2. Create detailed file in `assets/db/` directory
+1. Add entry to `.claude/skills/lading-optimize-hunt/assets/db.yaml` index
+2. Create detailed file in `.claude/skills/lading-optimize-hunt/assets/db/` directory
 
-**assets/db.yaml entry:**
+**`.claude/skills/lading-optimize-hunt/assets/db.yaml` entry:**
 ```yaml
 entries:
   - file: <file path>
     function: <function name>
     category: <off-by-one|capacity|determinism|overflow|logic|panic>
     status: validated
-    detail_file: assets/db/<file-function>.yaml
+    detail_file: .claude/skills/lading-optimize-hunt/assets/db/<file-function>.yaml
 ```
 
-**assets/db/<file-function>.yaml:**
+**`.claude/skills/lading-optimize-hunt/assets/db/<file-function>.yaml`:**
 ```yaml
 file: <file path>
 function: <function name>
@@ -369,4 +369,4 @@ Before returning VALIDATED:
 - [ ] `ci/validate` passes
 - [ ] Determinism verified (same seed = same output)
 - [ ] No `.unwrap()` or `.expect()` in fix (use Result)
-- [ ] Recorded in assets/db.yaml with detail file
+- [ ] Recorded in `.claude/skills/lading-optimize-hunt/assets/db.yaml` with detail file
