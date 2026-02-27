@@ -1,16 +1,13 @@
 ---
 name: lading-optimize-submit
 description: Full optimization workflow with git branch creation, commits, and optional PR. Wraps /lading-optimize-hunt with git automation.
-allowed-tools: Bash(git:*) Bash(gh:*) Bash(cat:*) Read Write Edit Skill
+allowed-tools: Bash(git:*) Bash(gh:*) Bash(cat:*) Read Skill
 ---
 
 # Optimization Submit Workflow
 
 **Complete optimization workflow with git automation.** This skill wraps `/lading-optimize-hunt` and handles:
 - Git branch creation
-- Baseline benchmarking
-- Code changes
-- Re-benchmarking with changes
 - Git commit with formatted results
 - Optional push and PR creation
 
@@ -135,8 +132,6 @@ gh pr create \
 - [x] ci/validate passes
 - [x] Kani proofs pass (or N/A: <reason>)
 - [x] Determinism verified
-
-Ready for `/lading-optimize-review`.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
