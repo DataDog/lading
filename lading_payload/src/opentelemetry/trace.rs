@@ -8,7 +8,6 @@
 //! [Specification](https://opentelemetry.io/docs/reference/specification/protocol/otlp/)
 
 use crate::{Error, Generator, common::strings};
-use bytes::BytesMut;
 use opentelemetry_proto::tonic::{
     collector::trace,
     common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value::Value},
@@ -18,7 +17,6 @@ use opentelemetry_proto::tonic::{resource::v1::Resource, trace::v1};
 use prost::Message;
 use rand::{Rng, seq::IndexedRandom};
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     io::Write,
     rc::Rc,
@@ -1010,7 +1008,6 @@ pub struct OpentelemetryTraces {
     topology: CompiledTopology,
     error_rate: f32,
     str_pool: Rc<strings::RandomStringPool>,
-    scratch: RefCell<BytesMut>,
 }
 
 impl OpentelemetryTraces {
@@ -1083,7 +1080,6 @@ impl OpentelemetryTraces {
             topology,
             error_rate: config.error_rate,
             str_pool,
-            scratch: RefCell::new(BytesMut::with_capacity(4096)),
         })
     }
 }
@@ -1554,18 +1550,9 @@ impl crate::Serialize for OpentelemetryTraces {
     {
         let request = self.generate(&mut rng)?;
         let trimmed = trim_to_fit(request, max_bytes);
-        let needed = trimmed.encoded_len();
-        {
-            let mut buf = self.scratch.borrow_mut();
-            buf.clear();
-            let capacity = buf.capacity();
-            if capacity < needed {
-                buf.reserve(needed - capacity);
-            }
-            trimmed.encode(&mut *buf)?;
-            if buf.len() <= max_bytes {
-                writer.write_all(&buf)?;
-            }
+        let buf = trimmed.encode_to_vec();
+        if buf.len() <= max_bytes {
+            writer.write_all(&buf)?;
         }
         Ok(())
     }
