@@ -31,11 +31,26 @@ pub enum Error {
     Linux(#[from] linux::Error),
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration for [`Server`]
-pub struct Config {}
+pub struct Config {
+    /// Enable per-mapping memory metrics from `/proc/{pid}/smaps`.
+    /// Sampled every 10th tick when enabled.
+    pub enable_smaps: bool,
+
+    /// Enable aggregate memory metrics from `/proc/{pid}/smaps_rollup`.
+    pub enable_smaps_rollup: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enable_smaps: true,
+            enable_smaps_rollup: true,
+        }
+    }
+}
 
 #[derive(Debug)]
 /// The inspector sub-process server.
@@ -46,7 +61,7 @@ pub struct Config {}
 /// that only one instance of this struct will ever exist at a time, although
 /// there are no protections for that.
 pub struct Server {
-    #[allow(dead_code)] // config is not actively used, left as a stub
+    #[allow(dead_code)] // unused on non-Linux targets
     config: Config,
     #[allow(dead_code)] // this field is unused when target_os is not "linux"
     shutdown: lading_signal::Watcher,
@@ -109,6 +124,8 @@ impl Server {
         let mut sampler = Sampler::new(
             target_pid,
             vec![(String::from("focus"), String::from("target"))],
+            self.config.enable_smaps,
+            self.config.enable_smaps_rollup,
         )?;
 
         let shutdown_wait = self.shutdown.recv();
