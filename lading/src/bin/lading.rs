@@ -17,7 +17,7 @@ use lading::{
     target::{self, Behavior, Output},
     target_metrics,
 };
-use lading_capture::manager::CaptureManager;
+use lading_capture::manager::{CaptureManager, SignalWatchers, DEFAULT_TICK_DURATION_MS};
 use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use regex::Regex;
@@ -452,13 +452,17 @@ async fn inner_main(
             format,
         } => match format {
             config::CaptureFormat::Jsonl { flush_seconds } => {
+                let signals = SignalWatchers {
+                    shutdown: shutdown_watcher.register()?,
+                    experiment_started: experiment_started_watcher.clone(),
+                    target_running: target_running_watcher.clone(),
+                };
                 let mut capture_manager = CaptureManager::new_jsonl(
                     path,
                     flush_seconds,
-                    shutdown_watcher.register()?,
-                    experiment_started_watcher.clone(),
-                    target_running_watcher.clone(),
+                    DEFAULT_TICK_DURATION_MS,
                     expiration,
+                    signals,
                 )
                 .await?;
                 for (k, v) in global_labels {
@@ -475,14 +479,18 @@ async fn inner_main(
                 flush_seconds,
                 compression_level,
             } => {
+                let signals = SignalWatchers {
+                    shutdown: shutdown_watcher.register()?,
+                    experiment_started: experiment_started_watcher.clone(),
+                    target_running: target_running_watcher.clone(),
+                };
                 let mut capture_manager = CaptureManager::new_multi(
                     path,
-                    flush_seconds,
                     compression_level,
-                    shutdown_watcher.register()?,
-                    experiment_started_watcher.clone(),
-                    target_running_watcher.clone(),
+                    flush_seconds,
+                    DEFAULT_TICK_DURATION_MS,
                     expiration,
+                    signals,
                 )
                 .await
                 .map_err(io::Error::other)?;
@@ -500,14 +508,18 @@ async fn inner_main(
                 flush_seconds,
                 compression_level,
             } => {
+                let signals = SignalWatchers {
+                    shutdown: shutdown_watcher.register()?,
+                    experiment_started: experiment_started_watcher.clone(),
+                    target_running: target_running_watcher.clone(),
+                };
                 let mut capture_manager = CaptureManager::new_parquet(
                     path,
-                    flush_seconds,
                     compression_level,
-                    shutdown_watcher.register()?,
-                    experiment_started_watcher.clone(),
-                    target_running_watcher.clone(),
+                    flush_seconds,
+                    DEFAULT_TICK_DURATION_MS,
                     expiration,
+                    signals,
                 )
                 .await
                 .map_err(io::Error::other)?;
