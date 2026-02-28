@@ -1,9 +1,22 @@
+//! Linux observer
+//!
+//! On Linux, this observer looks up the target process in procfs and writes
+//! out key details about memory and CPU consumption into the capture data. On
+//! non-Linux systems the observer, if enabled, will emit a warning.
+
 mod cgroup;
 mod procfs;
 mod utils;
 mod wss;
 
+use serde::Deserialize;
 use tracing::{error, warn};
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+/// Configuration for Linux observer
+pub struct Config {}
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by functions in this module
