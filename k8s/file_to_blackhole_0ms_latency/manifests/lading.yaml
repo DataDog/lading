@@ -1,0 +1,94 @@
+# Lading file generator for file_to_blackhole experiment
+#
+# Generates rotating log files at /var/log/lading that the Datadog Agent tails.
+# Uses the logrotate generator (NOT logrotate_fs) - no FUSE required.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lading-config
+  namespace: default
+data:
+  lading.yaml: |
+    generator:
+      - file_gen:
+          logrotate:
+            seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+                   59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+            root: /var/log/lading
+            concurrent_logs: 8
+            maximum_bytes_per_log: 100MiB
+            total_rotations: 4
+            max_depth: 1
+            variant: "ascii"
+            maximum_prebuild_cache_size_bytes: 1GiB
+            throttle:
+              stable:
+                bytes_per_second: "1.3 MiB"
+                timeout_millis: 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lading
+  namespace: default
+  labels:
+    app: lading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lading
+  template:
+    metadata:
+      labels:
+        app: lading
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+    spec:
+      containers:
+      - name: lading
+        image: ghcr.io/datadog/lading:0.29.2
+        command: ["lading"]
+        args:
+        - "--config-path"
+        - "/etc/lading/lading.yaml"
+        - "--no-target"
+        - "--prometheus-addr"
+        - "0.0.0.0:9000"
+        - "--experiment-duration-infinite"
+        resources:
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/lading
+          readOnly: true
+        - name: logs
+          mountPath: /var/log/lading
+      volumes:
+      - name: config
+        configMap:
+          name: lading-config
+      - name: logs
+        hostPath:
+          path: /var/log/lading
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lading
+  namespace: default
+spec:
+  selector:
+    app: lading
+  ports:
+  - name: prometheus
+    port: 9000
+    targetPort: 9000
