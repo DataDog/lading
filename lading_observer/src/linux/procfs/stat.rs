@@ -1,7 +1,7 @@
 use metrics::gauge;
 use tokio::fs;
 
-use crate::observer::linux::cgroup;
+use crate::linux::cgroup;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

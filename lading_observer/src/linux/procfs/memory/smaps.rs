@@ -3,7 +3,7 @@ use std::{fs, io::Read};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::observer::linux::procfs::BYTES_PER_KIBIBYTE;
+use crate::linux::procfs::BYTES_PER_KIBIBYTE;
 
 use super::next_token;
 
