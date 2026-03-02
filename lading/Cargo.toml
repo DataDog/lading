@@ -70,7 +70,7 @@ rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_qs = { version = "0.15", default-features = false }
-serde_yaml = { version = "0.9" }
+serde_yaml = { workspace = true }
 sha2 = { workspace = true, features = ["std"] }
 sysinfo = { workspace = true, features = ["system"] }
 thiserror = { workspace = true }

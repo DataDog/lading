@@ -29,6 +29,7 @@ pub use splunk_hec::SplunkHec;
 pub use static_chunks::StaticChunks;
 pub use statik::Static;
 pub use syslog::Syslog5424;
+pub use templated_json::TemplatedJson;
 
 pub mod apache_common;
 pub mod ascii;
@@ -43,6 +44,7 @@ pub mod splunk_hec;
 pub mod static_chunks;
 pub mod statik;
 pub mod syslog;
+pub mod templated_json;
 pub mod trace_agent;
 
 /// Errors related to serialization
@@ -80,6 +82,12 @@ pub enum Error {
     /// Validation error
     #[error("Validation error: {0}")]
     Validation(String),
+    /// Template YAML could not be parsed
+    #[error("Template YAML could not be parsed: {0}")]
+    TemplateYaml(#[from] serde_yaml::Error),
+    /// Template generation error (invalid references, unbound variables, etc.)
+    #[error("Template generation error: {0}")]
+    TemplateError(String),
 }
 
 /// To serialize into bytes
@@ -157,6 +165,12 @@ pub enum Config {
     /// Generates `TraceAgent` payloads in `MsgPack` format
     #[serde(rename = "trace_agent")]
     TraceAgent(crate::trace_agent::Config),
+    /// Generates JSON records from a user-supplied YAML template file
+    TemplatedJson {
+        /// Path to the external template file. The file is read once at
+        /// startup and can be shared across multiple lading configs.
+        template_path: PathBuf,
+    },
 }
 
 /// Unified payload type for all serializers
@@ -191,6 +205,8 @@ pub enum Payload {
     DogStatsdD(DogStatsD),
     /// Datadog Trace Agent format
     TraceAgent(crate::trace_agent::v04::V04),
+    /// JSON generated from a user-supplied template file
+    TemplatedJson(TemplatedJson),
 }
 
 impl Serialize for Payload {
@@ -214,6 +230,7 @@ impl Serialize for Payload {
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::TemplatedJson(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 
