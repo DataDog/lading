@@ -110,7 +110,7 @@ mod test {
                     (k0, k1, v0, v1)
                 })
                 .collect();
-            sorted_handles.sort();
+            sorted_handles.sort_unstable();
 
             let mut context_hasher = hash_builder.build_hasher();
             for (k0, k1, v0, v1) in &sorted_handles {
@@ -213,14 +213,14 @@ mod test {
 
             // Create a string list pool with enough strings to generate unique tagsets
             let string_list: Vec<String> = (0..1_000)
-                .map(|i| format!("string_{}", i))
+                .map(|i| format!("string_{i}"))
                 .collect();
             let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
 
             let tag_list: Vec<String> = (0..1_000)
-                .map(|i| format!("string_{}", i))
+                .map(|i| format!("string_{i}"))
                 .collect();
             let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
             let generator =
@@ -339,12 +339,12 @@ mod test {
 
             // Create a string list pool with enough strings to generate unique tagsets
             let string_list: Vec<String> = (0..10_000)
-                .map(|i| format!("key_{}", i))
+                .map(|i| format!("key_{i}"))
                 .collect();
             let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
 
             let tag_list: Vec<String> = (0..10_000)
-                .map(|i| format!("value_{}", i))
+                .map(|i| format!("value_{i}"))
                 .collect();
             let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
 
@@ -388,12 +388,12 @@ mod test {
 
             // Create a string list pool with enough strings to generate unique tagsets
             let string_list: Vec<String> = (0..10_000)
-                .map(|i| format!("key_{}", i))
+                .map(|i| format!("key_{i}"))
                 .collect();
             let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
 
             let tag_list: Vec<String> = (0..10_000)
-                .map(|i| format!("value_{}", i))
+                .map(|i| format!("value_{i}"))
                 .collect();
             let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
 

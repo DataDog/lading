@@ -195,7 +195,7 @@ impl Valve {
         let intervals_passed = current_interval.saturating_sub(self.interval);
 
         // Convert to usize, capping at MAX_ROLLED_INTERVALS
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let intervals_to_store = (intervals_passed.min(u64::from(MAX_ROLLED_INTERVALS))) as usize;
         debug_assert!(
             intervals_to_store > 0,
@@ -354,7 +354,7 @@ mod verification {
             }
         }
 
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         fn request(
             &mut self,
             ticks_elapsed: u64,

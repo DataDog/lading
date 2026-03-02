@@ -37,7 +37,7 @@ pub(crate) struct MetricGenerator {
 }
 
 impl MetricGenerator {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new<R>(
         num_contexts: usize,
         name_length: ConfRange<u16>,
@@ -98,7 +98,7 @@ impl<'a> Generator<'a> for MetricGenerator {
     type Output = Metric<'a>;
     type Error = Error;
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn generate<R>(&'a self, mut rng: &mut R) -> Result<Self::Output, Self::Error>
     where
         R: rand::Rng + ?Sized,

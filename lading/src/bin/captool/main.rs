@@ -1,6 +1,6 @@
 //! Capture analysis tool for lading capture files.
 
-#![allow(clippy::print_stdout)]
+#![expect(clippy::print_stdout)]
 
 mod analyze;
 
@@ -71,7 +71,7 @@ pub enum Error {
 }
 
 #[tokio::main(flavor = "current_thread")]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::FULL)

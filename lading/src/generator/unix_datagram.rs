@@ -147,7 +147,7 @@ impl UnixDatagram {
     ///
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: &Config,

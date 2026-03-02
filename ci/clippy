@@ -4,6 +4,6 @@ set -o nounset
 set -o pipefail
 
 echo "Running cargo clippy..."
-cargo clippy --all-features
+cargo clippy --all-targets --all-features
 
 echo "Cargo clippy passed!"

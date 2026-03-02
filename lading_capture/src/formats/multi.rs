@@ -153,14 +153,14 @@ mod tests {
 
         let mut format = Format::new(jsonl_format, parquet_format);
 
-        for i in 0..5 {
+        for i in 0_u32..5 {
             let line = Line {
                 run_id: Uuid::new_v4(),
-                time: 1000 + (i as u128),
-                fetch_index: i as u64,
+                time: 1000 + u128::from(i),
+                fetch_index: u64::from(i),
                 metric_name: format!("metric_{i}"),
                 metric_kind: MetricKind::Gauge,
-                value: LineValue::Float(i as f64),
+                value: LineValue::Float(f64::from(i)),
                 labels: FxHashMap::default(),
                 value_histogram: Vec::new(),
             };

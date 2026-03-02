@@ -18,7 +18,10 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(clippy::struct_field_names)] // The _ticks is useful even if clippy doesn't like it.
+#[expect(
+    clippy::struct_field_names,
+    reason = "the _ticks suffix is useful for clarity even though it repeats the struct name"
+)]
 struct Stats {
     user_ticks: u64,
     system_ticks: u64,
@@ -49,7 +52,7 @@ impl Sampler {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub(crate) async fn poll(
         &mut self,
         pid: i32,

@@ -85,7 +85,7 @@ struct CliKeyValues {
 impl CliKeyValues {
     #[cfg(test)]
     fn get(&self, key: &str) -> Option<&str> {
-        self.inner.get(key).map(|s| s.as_str())
+        self.inner.get(key).map(String::as_str)
     }
 }
 
@@ -163,7 +163,7 @@ struct CliFlatLegacy {
 
 // Shared arguments used by both modes
 #[derive(clap::Args)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
@@ -396,7 +396,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
     Ok(config)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
@@ -807,9 +807,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn inner_main_capture_has_data() {
-        let contents = r#"
+        let contents = r"
 generator: []
-"#;
+";
 
         let tmp_dir = tempfile::tempdir().expect("directory could not be created");
         let capture_path = tmp_dir.path().join("capture");
@@ -827,7 +827,7 @@ generator: []
         .await;
 
         if let Err(e) = exit_code {
-            panic!("inner_main failed: {:?}", e);
+            panic!("inner_main failed: {e:?}");
         }
 
         let contents = std::fs::read_to_string(capture_path)
@@ -945,7 +945,7 @@ generator: []
             CliKeyValues::from_str(&input).expect("String cannot be converted into CliKeyValues");
 
         for (k, v) in &labels {
-            let actual = deser.get(*k).unwrap_or_else(|| {
+            let actual = deser.get(k).unwrap_or_else(|| {
                 panic!(
                     "key '{k}' missing from parsed result; got keys: {:?}",
                     deser.inner.keys().collect::<Vec<_>>()
@@ -1000,9 +1000,9 @@ telemetry:
     #[test]
     fn missing_telemetry_returns_error() {
         // Test that missing telemetry (no CLI flags, no YAML) returns an error
-        let contents = r#"
+        let contents = r"
 generator: []
-"#;
+";
 
         let args = vec!["lading", "--no-target"];
         let legacy_cli = CliFlatLegacy::parse_from(args);
@@ -1014,7 +1014,7 @@ generator: []
         );
         match result.unwrap_err() {
             Error::MissingTelemetry => {} // Expected error
-            other => panic!("Expected MissingTelemetry error, got: {:?}", other),
+            other => panic!("Expected MissingTelemetry error, got: {other:?}"),
         }
     }
 }

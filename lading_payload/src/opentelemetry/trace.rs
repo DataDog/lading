@@ -1574,8 +1574,9 @@ mod test {
 
     /// A minimal but representative topology for testing.
     ///
-    /// Linear chain: api-gateway → user-service → cache → postgres,
+    /// Linear chain: api-gateway -> user-service -> cache -> postgres,
     /// using suboperations for the call graph.
+    #[expect(clippy::too_many_lines)]
     fn test_config() -> Config {
         Config {
             services: vec![
@@ -1996,16 +1997,15 @@ mod test {
         for rs in &request.resource_spans {
             if let Some(resource) = &rs.resource {
                 for kv in &resource.attributes {
-                    if kv.key == "service.name" {
-                        if let Some(AnyValue {
+                    if kv.key == "service.name"
+                        && let Some(AnyValue {
                             value: Some(Value::StringValue(ref name)),
                         }) = kv.value
-                        {
-                            assert!(
-                                expected_names.contains(name.as_str()),
-                                "unexpected service name: {name}"
-                            );
-                        }
+                    {
+                        assert!(
+                            expected_names.contains(name.as_str()),
+                            "unexpected service name: {name}"
+                        );
                     }
                 }
             }

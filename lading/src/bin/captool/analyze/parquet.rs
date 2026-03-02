@@ -89,8 +89,8 @@ pub(crate) fn list_metrics<P: AsRef<Path>>(path: P) -> Result<Vec<MetricInfo>, E
 /// # Errors
 ///
 /// Returns an error if the file cannot be read or has invalid schema.
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::cast_precision_loss)]
+#[expect(clippy::too_many_lines)]
+#[expect(clippy::cast_precision_loss)]
 pub(crate) fn analyze_metric<P: AsRef<Path>>(
     path: P,
     metric_name: &str,

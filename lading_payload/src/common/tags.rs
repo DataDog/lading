@@ -306,7 +306,7 @@ mod test {
     use super::{MAX_UNIQUE_TAG_RATIO, MIN_TAG_LENGTH, WARN_UNIQUE_TAG_RATIO};
     use crate::Generator;
     use crate::common::config::ConfRange;
-    use crate::common::strings::{PoolKind, RandomStringPool};
+    use crate::common::strings::{Handle, PoolKind, RandomStringPool};
 
     proptest! {
         #[test]
@@ -423,7 +423,6 @@ mod test {
                 unique_tag_ratio
             ).expect("Tag generator to be valid");
 
-            use crate::common::strings::Handle;
             let mut unique_tagsets: HashSet<Vec<(Handle, Handle)>> = HashSet::new();
             for _ in 0..desired_num_tagsets {
                 let ts = generator.generate(&mut rng)?;

@@ -5,7 +5,7 @@
 //! runs `CaptureManager` for the specified duration, and validates the the
 //! capture file maintains all essential properties.
 
-#![allow(clippy::print_stderr)]
+#![expect(clippy::print_stderr)]
 #![allow(clippy::cast_precision_loss)]
 
 use anyhow::{Context, Result};
@@ -238,7 +238,7 @@ fn read_input() -> Result<Vec<u8>> {
     Ok(input)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn execute_op(op: Op, ops: &OpIterator, start: Instant) {
     match op {
         Op::AdvanceTime { millis } => {

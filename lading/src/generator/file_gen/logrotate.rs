@@ -173,8 +173,8 @@ impl Server {
     ///
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::cast_possible_truncation)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn new(
         general: General,
         config: Config,
@@ -401,7 +401,7 @@ impl Child {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn write_bytes(
     blk: &block::Block,
     fp: &mut BufWriter<fs::File>,

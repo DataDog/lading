@@ -129,7 +129,7 @@ pub enum LineValue {
 impl LineValue {
     /// Get an f64 representation of this value. Extremely large integers will be truncated.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss)]
     pub fn as_f64(&self) -> f64 {
         match self {
             LineValue::Int(int) => *int as f64,
@@ -192,7 +192,7 @@ pub struct Line {
 
 impl Line {
     #[must_use]
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     /// Returns the number of seconds since unix epoch
     pub fn seconds_since_epoch(&self) -> u64 {
         let seconds: u128 = self.time / 1_000;

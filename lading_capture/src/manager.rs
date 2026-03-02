@@ -352,7 +352,7 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
     /// # Errors
     ///
     /// Will return an error if there is already a global recorder set.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub async fn start(mut self) -> Result<(), Error> {
         // Initialize historical sender to allow generators to send metrics with
         // Instant timestamps. Manager converts these to ticks using clock.start()

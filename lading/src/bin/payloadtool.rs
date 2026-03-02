@@ -1,7 +1,7 @@
 //! Payload generation tool for lading configurations.
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
+#![expect(clippy::print_stdout)]
+#![expect(clippy::print_stderr)]
 
 /// Memory allocation tracking for payloadtool statistics.
 ///
@@ -347,7 +347,7 @@ fn generate_and_check(
     Ok(fingerprint)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn check_generator(
     config: &generator::Config,
     compute_fingerprint: bool,
@@ -362,7 +362,7 @@ fn check_generator(
         }
         generator::Inner::UnixDatagram(g) => {
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -374,7 +374,7 @@ fn check_generator(
             )
         }
         generator::Inner::Tcp(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -386,7 +386,7 @@ fn check_generator(
             )
         }
         generator::Inner::Udp(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
@@ -406,7 +406,7 @@ fn check_generator(
                     block_cache_method: _,
                 } => (variant, maximum_prebuild_cache_size_bytes),
             };
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -432,7 +432,7 @@ fn check_generator(
             unimplemented!("FileTree not supported")
         }
         generator::Inner::Grpc(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -444,7 +444,7 @@ fn check_generator(
             )
         }
         generator::Inner::UnixStream(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -456,7 +456,7 @@ fn check_generator(
             )
         }
         generator::Inner::PassthruFile(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             generate_and_check(
@@ -511,7 +511,7 @@ fn check_generator(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn inner_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
@@ -665,6 +665,7 @@ fn main() -> Result<()> {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp)]
 mod tests {
     use super::shannon_entropy;
     use proptest::prelude::*;
@@ -765,7 +766,7 @@ mod tests {
             // only on frequency counts, not on the order bytes appear. Sorting the data
             // preserves frequencies, so entropy must be identical.
             let original = shannon_entropy(&data);
-            data.sort();
+            data.sort_unstable();
             let sorted_entropy = shannon_entropy(&data);
             prop_assert!(
                 (original - sorted_entropy).abs() < 1e-10,
@@ -793,8 +794,8 @@ mod tests {
             // This is the theoretical upper bound for any distribution over n symbols.
             // Testing the full byte range (2..=256) verifies we handle all byte values
             // correctly, including high bytes (128-255) that could expose indexing bugs.
-            let data: Vec<u8> = (0..n).map(|i| i as u8).cycle().take(n as usize * repetitions).collect();
-            let expected = (n as f64).log2();
+            let data: Vec<u8> = (0..n).map(|i| u8::try_from(i).unwrap()).cycle().take(n as usize * repetitions).collect();
+            let expected = f64::from(n).log2();
             let actual = shannon_entropy(&data);
             prop_assert!(
                 (actual - expected).abs() < 1e-10,
@@ -809,7 +810,7 @@ mod tests {
             // excessive CI runtime. The entropy calculation sums 256 terms; larger data
             // means smaller per-bucket probabilities, testing precision at small p values.
             let entropy = shannon_entropy(&data);
-            prop_assert!(entropy >= 0.0 && entropy <= 8.0, "Bounds violated for large data: {entropy}");
+            prop_assert!((0.0..=8.0).contains(&entropy), "Bounds violated for large data: {entropy}");
             prop_assert!(!entropy.is_nan(), "NaN for large data");
             prop_assert!(!entropy.is_infinite(), "Infinity for large data");
         }

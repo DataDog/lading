@@ -166,7 +166,7 @@ pub(crate) const INTERVALS: usize = 60;
 const BUFFER_SIZE: usize = INTERVALS + 1;
 
 #[inline]
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 fn interval_idx(tick: u64) -> usize {
     // Use BUFFER_SIZE for modulo to utilize the extra guard slot
     (tick % (BUFFER_SIZE as u64)) as usize
@@ -557,7 +557,7 @@ impl Accumulator {
             } else {
                 // Number of ticks to flush
                 let to_flush = last_with_data - next_to_flush + 1;
-                #[allow(clippy::cast_possible_truncation)]
+                #[expect(clippy::cast_possible_truncation)]
                 {
                     to_flush.min(INTERVALS as u64) as usize
                 }
@@ -565,7 +565,7 @@ impl Accumulator {
         } else {
             // No flushes yet. We can flush all ticks that have data (0 to current_tick-1)
             // Capped at INTERVALS since that's all we can store
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             {
                 self.current_tick.min(INTERVALS as u64) as usize
             }
@@ -581,20 +581,22 @@ impl Accumulator {
     fn get_counter_value(&self, key: &Key, tick: u64) -> u64 {
         self.counters
             .get(key)
-            .map(|intervals| intervals[interval_idx(tick)])
-            .unwrap_or(0)
+            .map_or(0, |intervals| intervals[interval_idx(tick)])
     }
 
     #[cfg(test)]
     fn get_gauge_value(&self, key: &Key, tick: u64) -> f64 {
         self.gauges
             .get(key)
-            .map(|intervals| intervals[interval_idx(tick)])
-            .unwrap_or(0.0)
+            .map_or(0.0, |intervals| intervals[interval_idx(tick)])
     }
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    reason = "stored values must round-trip exactly; any deviation is a bug"
+)]
 mod tests {
     use super::*;
     use crate::metric::{Counter, CounterValue, Gauge, GaugeValue, Histogram};
@@ -933,7 +935,7 @@ mod tests {
         let mut acc = Accumulator::new();
 
         counter_increment(&mut acc, key1.clone(), 0, 42).unwrap();
-        gauge_set(&mut acc, key2.clone(), 0, 3.14).unwrap();
+        gauge_set(&mut acc, key2.clone(), 0, 3.15).unwrap();
 
         assert!(
             acc.flush().count() == 0,
@@ -964,7 +966,7 @@ mod tests {
                 }
                 "gauge" => {
                     if let MetricValue::Gauge(v) = value {
-                        assert!((v - 3.14).abs() < 1e-10);
+                        assert!((v - 3.15).abs() < 1e-10);
                     } else {
                         panic!("Expected gauge value");
                     }
@@ -1272,11 +1274,11 @@ mod tests {
         // All values should be present, including zeros
         assert_eq!(results.len(), 4);
 
-        let keys: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
-        assert!(keys.contains(&"counter_zero"));
-        assert!(keys.contains(&"counter_nonzero"));
-        assert!(keys.contains(&"gauge_zero"));
-        assert!(keys.contains(&"gauge_nonzero"));
+        let key_names: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
+        assert!(key_names.contains(&"counter_zero"));
+        assert!(key_names.contains(&"counter_nonzero"));
+        assert!(key_names.contains(&"gauge_zero"));
+        assert!(key_names.contains(&"gauge_nonzero"));
 
         // Verify zero values are actually returned
         for (key, value, _tick) in results {
@@ -1313,7 +1315,7 @@ mod tests {
         // Write to multiple keys
         counter_increment(&mut acc, key1.clone(), 0, 10).unwrap();
         counter_increment(&mut acc, key2.clone(), 0, 20).unwrap();
-        gauge_set(&mut acc, key3.clone(), 0, 3.14).unwrap();
+        gauge_set(&mut acc, key3.clone(), 0, 3.15).unwrap();
 
         // Advance to INTERVALS so data becomes flushable
         while acc.current_tick < INTERVALS as u64 {
@@ -1325,10 +1327,10 @@ mod tests {
         assert_eq!(results.len(), 3);
 
         // Verify all keys are present
-        let keys: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
-        assert!(keys.contains(&"counter1"));
-        assert!(keys.contains(&"counter2"));
-        assert!(keys.contains(&"gauge1"));
+        let key_names: Vec<_> = results.iter().map(|(k, _, _)| k.name()).collect();
+        assert!(key_names.contains(&"counter1"));
+        assert!(key_names.contains(&"counter2"));
+        assert!(key_names.contains(&"gauge1"));
 
         // Verify values
         for (key, value, _tick) in results {
@@ -1341,7 +1343,7 @@ mod tests {
                 }
                 "gauge1" => {
                     if let MetricValue::Gauge(v) = value {
-                        assert!((v - 3.14).abs() < 1e-10);
+                        assert!((v - 3.15).abs() < 1e-10);
                     } else {
                         panic!("Expected gauge value");
                     }
@@ -1976,7 +1978,7 @@ mod tests {
             let sketch = deserialize_histogram(sketch_bytes);
             assert_eq!(
                 sketch.count(),
-                samples.len() as u32,
+                u32::try_from(samples.len()).expect("samples fit in u32"),
                 "Sketch count should match number of samples inserted"
             );
             assert_eq!(sketch.min(), Some(1.0));
@@ -2013,8 +2015,8 @@ mod tests {
             let max = sketch.max().expect("should have max");
 
             // Verify min/max are within sample bounds
-            assert_eq!(min, -3.7, "Min should be smallest sample");
-            assert_eq!(max, 42.0, "Max should be largest sample");
+            assert_eq!(min, -3.7_f64, "Min should be smallest sample");
+            assert_eq!(max, 42.0_f64, "Max should be largest sample");
 
             // Verify all samples are within min/max range
             for &sample in &samples {
@@ -2057,13 +2059,16 @@ mod tests {
             if let MetricValue::Histogram(sketch_bytes) = &hist.1 {
             let sketch = deserialize_histogram(sketch_bytes);
                 // Verify sketch has the expected sample count
-                prop_assert_eq!(sketch.count(), samples.len() as u32);
+                prop_assert_eq!(
+                    sketch.count(),
+                    u32::try_from(samples.len()).expect("samples fit in u32")
+                );
 
-                let p0 = sketch.min().unwrap();
+                let p0 = sketch.min().expect("sketch has samples");
                 let p25 = sketch.quantile(0.25).unwrap_or(f64::NAN);
                 let p50 = sketch.quantile(0.5).unwrap_or(f64::NAN);
                 let p75 = sketch.quantile(0.75).unwrap_or(f64::NAN);
-                let p100 = sketch.max().unwrap();
+                let p100 = sketch.max().expect("sketch has samples");
 
                 // Only verify ordering for quantiles that exist (non-NaN)
                 // DDSketch may return NaN for quantiles with insufficient samples

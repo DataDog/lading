@@ -340,11 +340,12 @@ pub(crate) fn parse_prometheus_metrics(
     }
 }
 
-#[allow(clippy::needless_raw_string_hashes)]
-#[allow(clippy::mutable_key_type)]
+#[expect(clippy::needless_raw_string_hashes)]
+#[expect(clippy::mutable_key_type)]
 #[cfg(test)]
+#[expect(clippy::needless_pass_by_value)]
 mod tests {
-    use std::{collections::HashMap, net};
+    use std::net;
 
     use super::*;
     use bytes::Bytes;
@@ -360,7 +361,7 @@ mod tests {
     fn parse_and_get_metrics(
         s: &str,
         tags: Option<FxHashMap<String, String>>,
-    ) -> HashMap<
+    ) -> FxHashMap<
         CompositeKey,
         (
             Option<metrics::Unit>,
@@ -375,13 +376,13 @@ mod tests {
             parse_prometheus_metrics(s, tags.as_ref(), None);
         });
 
-        snapshotter.snapshot().into_hashmap()
+        snapshotter.snapshot().into_hashmap().into_iter().collect()
     }
 
     async fn run_scrape_and_parse_metrics(
         s: &str,
         tags: Option<FxHashMap<String, String>>,
-    ) -> HashMap<
+    ) -> FxHashMap<
         CompositeKey,
         (
             Option<metrics::Unit>,
@@ -458,7 +459,7 @@ mod tests {
 
         p.scrape_metrics().await;
 
-        snapshotter.snapshot().into_hashmap()
+        snapshotter.snapshot().into_hashmap().into_iter().collect()
     }
 
     #[test]

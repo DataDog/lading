@@ -6,8 +6,8 @@
 //! surprise.
 
 #![deny(clippy::cargo)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::multiple_crate_versions)]
+#![expect(clippy::cast_precision_loss)]
+#![expect(clippy::multiple_crate_versions)]
 
 use http_body_util::BodyExt;
 

@@ -352,7 +352,9 @@ mod tests {
                                 let mut sketch = DDSketch::default();
                                 for (i, _) in samples.iter().enumerate() {
                                     // Insert values very close together
-                                    sketch.insert(1.0 + (i as f64 * 1e-10));
+                                    #[expect(clippy::cast_precision_loss, reason = "i is always less than 10")]
+                                    let offset = i as f64;
+                                    sketch.insert(1.0 + (offset * 1e-10));
                                 }
                                 sketch_to_protobuf(&sketch)
                             }),
@@ -397,6 +399,7 @@ mod tests {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     fn read_parquet_lines(bytes: &[u8]) -> Result<Vec<Line>, Box<dyn std::error::Error>> {
         let bytes_buf = Bytes::copy_from_slice(bytes);
         let reader_builder = ParquetRecordBatchReaderBuilder::try_new(bytes_buf)?;
@@ -479,7 +482,7 @@ mod tests {
                 let run_id = Uuid::parse_str(run_id_array.value(row_idx)).expect("parse UUID");
 
                 // Parquet stores timestamps as non-negative milliseconds since epoch
-                #[allow(clippy::cast_sign_loss)]
+                #[expect(clippy::cast_sign_loss)]
                 let time = time_array.value(row_idx) as u128;
 
                 let fetch_index = fetch_index_array.value(row_idx);

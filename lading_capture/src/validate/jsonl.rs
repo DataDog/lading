@@ -31,7 +31,7 @@ use crate::validate::ValidationResult;
 ///
 /// This is the canonical validation logic used by captool and tests.
 #[must_use]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationResult {
     // Phase 1: Streaming assertions
     let mut fetch_index_to_time: FxHashMap<u64, u128> = FxHashMap::default();
@@ -151,7 +151,7 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
         )
     {
         // Convert milliseconds to seconds
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let time_span_seconds = ((max_time - min_time) / 1000) as u64;
 
         if time_span_seconds < min_secs {

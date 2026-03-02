@@ -61,8 +61,8 @@ pub enum Error {
 ///
 /// Returns an error if the file cannot be opened or read, or if the parquet
 /// schema doesn't match the expected capture format.
-#[allow(clippy::cast_sign_loss)]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::cast_sign_loss)]
+#[expect(clippy::too_many_lines)]
 pub fn validate_parquet<P: AsRef<Path>>(
     path: P,
     min_seconds: Option<u64>,
@@ -283,7 +283,7 @@ pub fn validate_parquet<P: AsRef<Path>>(
             fetch_index_to_time.values().max(),
         )
     {
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let time_span_seconds = ((max_time - min_time) / 1000) as u64;
 
         if time_span_seconds < min_secs {

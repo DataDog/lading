@@ -97,7 +97,7 @@ impl ColumnBuffers {
     /// Add a metric line to the buffers
     fn push(&mut self, line: &line::Line) {
         self.run_ids.push(line.run_id.to_string());
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         self.times.push(line.time as i64);
         self.fetch_indices.push(line.fetch_index);
         self.metric_names.push(line.metric_name.clone());
@@ -123,7 +123,7 @@ impl ColumnBuffers {
             self.label_keys.push(k.clone());
             self.label_values.push(v.clone());
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         self.label_offsets.push(self.label_keys.len() as i32);
 
         self.values_histogram.push(line.value_histogram.clone());
@@ -379,14 +379,14 @@ mod tests {
         let mut format = Format::new(buffer, 3).expect("create format");
 
         // Write multiple metrics
-        for i in 0..5 {
+        for i in 0_u32..5 {
             let line = Line {
                 run_id: Uuid::new_v4(),
-                time: 1000 + (i as u128),
-                fetch_index: i as u64,
+                time: 1000 + u128::from(i),
+                fetch_index: u64::from(i),
                 metric_name: format!("metric_{i}"),
                 metric_kind: MetricKind::Gauge,
-                value: LineValue::Float(i as f64),
+                value: LineValue::Float(f64::from(i)),
                 labels: FxHashMap::default(),
                 value_histogram: Vec::new(),
             };
