@@ -97,7 +97,7 @@ pub struct Config {
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
     /// The observer that watches the target
-    #[serde(skip_deserializing)]
+    #[serde(default)]
     pub observer: observer::Config,
     /// The period on which target observations -- if any -- are made.
     #[serde(default = "default_sample_period")]
@@ -130,6 +130,9 @@ pub struct PartialConfig {
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
+    /// The observer that watches the target.
+    #[serde(default)]
+    pub observer: observer::Config,
     /// The period on which target observations are made.
     pub sample_period_milliseconds: Option<u64>,
     /// The blackhole to supply for the target.
@@ -267,7 +270,7 @@ impl Config {
         Ok(Self {
             telemetry: partial.telemetry,
             generator: partial.generator,
-            observer: observer::Config::default(),
+            observer: partial.observer,
             sample_period_milliseconds: partial
                 .sample_period_milliseconds
                 .unwrap_or_else(default_sample_period),
@@ -529,6 +532,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: generators,
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: None,
@@ -541,6 +545,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: vec![],
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: blackholes,
             target_metrics: None,
@@ -553,6 +558,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: vec![],
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: Some(metrics),

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imaginary distributed system -- service type, operations, attributes, etc --
   which is then simulated to generate realistic-looking traces and spans.
 ## Added
+- Observer config now supports `enable_smaps` and `enable_smaps_rollup` options
+  to toggle `/proc/{pid}/smaps` and `/proc/{pid}/smaps_rollup` collection.
 - Lading now supports histogram approximations in its capture files.
 - HTTP blackhole now tracks distribution of bytes received, both decoded and
   compressed.
