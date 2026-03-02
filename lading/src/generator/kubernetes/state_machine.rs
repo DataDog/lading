@@ -568,8 +568,6 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(seed);
         let mut events = Vec::new();
-        let _current_state = State::Initializing { index: None };
-
         events.push(Event::Started);
 
         let success = rng.random_bool(0.5);
@@ -579,8 +577,6 @@ mod tests {
             events.push(Event::AllInstancesDeleted { success: true });
             return events;
         }
-
-        let _current_state = State::Running { index: 0 };
 
         // Generate some recreation cycles, maybe shutting down early.
         let cycles = rng.random_range(0..10);

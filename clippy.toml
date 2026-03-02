@@ -1,6 +1,10 @@
 # https://rust-lang.github.io/rust-clippy/master/index.html#doc_markdown
 doc-valid-idents = ["OpenTelemetry", "gRPC", ".."]
 
+# Allow unwrap() and print!/println! in test code without per-module suppressions
+allow-unwrap-in-tests = true
+allow-print-in-tests = true
+
 # https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_types
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "Use rustc_hash::FxHashMap for better performance." },

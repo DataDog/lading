@@ -49,7 +49,7 @@ struct Region {
 
 impl Region {
     #[allow(clippy::similar_names)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn from_str(contents: &str) -> Result<Self, Error> {
         let mut lines = contents.lines();
 

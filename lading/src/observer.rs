@@ -138,7 +138,10 @@ impl Server {
     /// # Panics
     ///
     /// None are known.
-    #[allow(clippy::unused_async)]
+    #[expect(
+        clippy::unused_async,
+        reason = "signature must match the Linux async fn run for cross-platform callers"
+    )]
     #[cfg(not(target_os = "linux"))]
     pub async fn run(
         self,

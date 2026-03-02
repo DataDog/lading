@@ -8,7 +8,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use crate::Error;
 
 #[derive(Debug, Default, Clone, Copy)]
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 /// Syslog 5424 payload
 pub struct Syslog5424 {}

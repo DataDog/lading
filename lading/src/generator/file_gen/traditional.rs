@@ -144,8 +144,8 @@ impl Server {
     ///
     /// Function will panic if variant is Static and the `static_path` is not
     /// set.
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::cast_possible_truncation)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn new(
         general: General,
         config: Config,

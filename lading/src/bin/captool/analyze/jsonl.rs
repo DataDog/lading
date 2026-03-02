@@ -37,7 +37,7 @@ pub(crate) fn list_metrics(lines: &[Line]) -> Vec<MetricInfo> {
 ///
 /// Returns statistics grouped by label set (context).
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[expect(clippy::cast_precision_loss)]
 pub(crate) fn analyze_metric(
     lines: &[Line],
     metric_name: &str,

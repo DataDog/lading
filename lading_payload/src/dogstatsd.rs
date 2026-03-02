@@ -361,7 +361,7 @@ pub(crate) struct StringPools {
 }
 
 impl MemberGenerator {
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     fn new<R>(
         contexts: ConfRange<u32>,
         service_check_names: ConfRange<u16>,
@@ -763,11 +763,10 @@ mod test {
         let validation_result = config.valid();
         assert!(validation_result.is_err());
         // The error message could be either one, both indicate 0 contexts is invalid
-        let err = validation_result.unwrap_err();
+        let err = validation_result.expect_err("expected validation to fail");
         assert!(
             err == "Contexts start value cannot be 0" || err == "Contexts cannot be 0",
-            "Expected error about 0 contexts, got: {}",
-            err
+            "Expected error about 0 contexts, got: {err}"
         );
     }
 

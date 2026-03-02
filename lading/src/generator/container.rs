@@ -225,7 +225,7 @@ impl Container {
     /// # Panics
     ///
     /// Panics if container index cannot be converted to u32.
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn spin(mut self) -> Result<(), Error> {
         info!(
             "Container generator running: {repository}:{tag}",
@@ -683,7 +683,7 @@ impl Config {
     fn to_container_config(&self, full_image: &str) -> ContainerCreateBody {
         // Docker API requires exposed ports as {"<port>/<protocol>": {}}
         // Bollard represents the empty object as HashMap<(), ()>
-        #[allow(clippy::zero_sized_map_values)]
+        #[expect(clippy::zero_sized_map_values)]
         // A lot of the properties of `ContainerCreateBody` require `HashMap` and as such this lint must be disabled here.
         #[allow(clippy::disallowed_types)]
         let exposed_ports = if self.exposed_ports.is_empty() {

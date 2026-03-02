@@ -146,7 +146,7 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate severity weights - at least one must be non-zero
         if self.severity_weights.trace == 0
@@ -587,11 +587,10 @@ mod test {
                 if let Ok(resource_logs) = logs.generate(&mut rng, &mut step_budget) {
                     // All logs within a single generate() call have the same timestamp
                     // We just need to verify one
-                    if let Some(scope_logs) = resource_logs.scope_logs.first() {
-                        if let Some(log) = scope_logs.log_records.first() {
+                    if let Some(scope_logs) = resource_logs.scope_logs.first()
+                        && let Some(log) = scope_logs.log_records.first() {
                             timestamps.push(log.time_unix_nano);
                         }
-                    }
                 } else {
                     break;
                 }

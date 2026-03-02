@@ -25,7 +25,7 @@ impl Iterator for ProcessDescendantsIterator {
             for task in tasks.flatten() {
                 if let Ok(children) = task.children() {
                     for child in children {
-                        #[allow(clippy::cast_possible_wrap)]
+                        #[expect(clippy::cast_possible_wrap)]
                         if let Ok(c) = Process::new(child as i32) {
                             self.stack.push(c);
                         }
@@ -38,6 +38,7 @@ impl Iterator for ProcessDescendantsIterator {
 }
 
 #[cfg(test)]
+#[expect(clippy::cast_possible_wrap)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -47,7 +48,7 @@ mod tests {
 
     use nix::{sys::signal, unistd};
 
-    /// Test the ProcessDescendentsIterator by creating a process tree.
+    /// Test the `ProcessDescendentsIterator` by creating a process tree.
     /// Each process will print its PID to stdout.
     /// The test will read the PIDs from stdout and check that the iterator returns all of them.
     #[test]

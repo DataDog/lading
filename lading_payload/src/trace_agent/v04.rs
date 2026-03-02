@@ -178,7 +178,10 @@ impl Config {
 /// the datadog-agent expects when calling `pb.Traces.UnmarshalMsg()` in
 /// pkg/trace/api/api.go:897.
 #[derive(Debug, serde::Serialize)]
-#[allow(clippy::struct_field_names)] // Field names match protobuf definition exactly
+#[expect(
+    clippy::struct_field_names,
+    reason = "field names match protobuf definition exactly"
+)]
 pub struct Span<'a> {
     /// `service` is the name of the service with which this span is associated.
     service: &'a str,
@@ -417,7 +420,7 @@ impl<'a> Generator<'a> for V04 {
 
 impl V04 {
     /// Create a single span with the provided strings
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn create_span<'a, R>(
         &'a self,
         rng: &mut R,
@@ -592,13 +595,15 @@ mod test {
             contexts_max in 1u32..=1000,
             error_rate in 0.0f32..=1.0
         ) {
-            let mut config = Config::default();
-            config.contexts = if contexts_min <= contexts_max {
-                ConfRange::Inclusive { min: contexts_min, max: contexts_max }
-            } else {
-                ConfRange::Inclusive { min: contexts_max, max: contexts_min }
+            let config = Config {
+                contexts: if contexts_min <= contexts_max {
+                    ConfRange::Inclusive { min: contexts_min, max: contexts_max }
+                } else {
+                    ConfRange::Inclusive { min: contexts_max, max: contexts_min }
+                },
+                error_rate,
+                ..Default::default()
             };
-            config.error_rate = error_rate;
 
             prop_assert!(config.valid().is_ok());
         }
@@ -648,8 +653,10 @@ mod test {
         fn contexts_are_bounded(seed: u64, contexts in 1u32..1_000, total_traces in 1u32..1_000) {
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let mut config = Config::default();
-            config.contexts = ConfRange::Constant(contexts);
+            let config = Config {
+                contexts: ConfRange::Constant(contexts),
+                ..Default::default()
+            };
 
             let generator = V04::with_config(config, &mut rng)?;
 
@@ -670,11 +677,16 @@ mod test {
 
     #[test]
     fn config_validation_catches_invalid_error_rate() {
-        let mut config = Config::default();
-        config.error_rate = 1.5; // Invalid
+        let config = Config {
+            error_rate: 1.5, // Invalid
+            ..Default::default()
+        };
         assert!(config.valid().is_err());
 
-        config.error_rate = -0.1; // Invalid
+        let config = Config {
+            error_rate: -0.1, // Invalid
+            ..Default::default()
+        };
         assert!(config.valid().is_err());
     }
 
@@ -682,21 +694,28 @@ mod test {
     fn config_validation_catches_too_many_contexts() {
         use crate::common::config::ConfRange;
 
-        let mut config = Config::default();
-        config.contexts = ConfRange::Constant(super::MAX_CONTEXTS + 1);
+        let config = Config {
+            contexts: ConfRange::Constant(super::MAX_CONTEXTS + 1),
+            ..Default::default()
+        };
         assert_eq!(config.valid(), Err(super::ConfigError::TooManyContexts));
 
-        config.contexts = ConfRange::Inclusive {
-            min: 1,
-            max: super::MAX_CONTEXTS + 100,
+        let config = Config {
+            contexts: ConfRange::Inclusive {
+                min: 1,
+                max: super::MAX_CONTEXTS + 100,
+            },
+            ..Default::default()
         };
         assert_eq!(config.valid(), Err(super::ConfigError::TooManyContexts));
     }
 
     #[test]
     fn config_validation_catches_zero_contexts() {
-        let mut config = Config::default();
-        config.contexts = ConfRange::Constant(0);
+        let config = Config {
+            contexts: ConfRange::Constant(0),
+            ..Default::default()
+        };
         assert!(config.valid().is_err());
     }
 
@@ -709,14 +728,24 @@ mod test {
         let template_size = std::mem::size_of::<super::TraceTemplate>();
         assert_eq!(template_size, 64);
 
-        let mut small_config = Config::default();
-        small_config.contexts = ConfRange::Constant(1000);
-        let small_generator = V04::with_config(small_config, &mut rng).unwrap();
+        let small_generator = V04::with_config(
+            Config {
+                contexts: ConfRange::Constant(1000),
+                ..Default::default()
+            },
+            &mut rng,
+        )
+        .unwrap();
         assert_eq!(small_generator.templates.len(), 1000);
 
-        let mut large_config = Config::default();
-        large_config.contexts = ConfRange::Constant(100_000);
-        let large_generator = V04::with_config(large_config, &mut rng).unwrap();
+        let large_generator = V04::with_config(
+            Config {
+                contexts: ConfRange::Constant(100_000),
+                ..Default::default()
+            },
+            &mut rng,
+        )
+        .unwrap();
         assert_eq!(large_generator.templates.len(), 100_000);
 
         let trace = large_generator.generate(&mut rng).unwrap();

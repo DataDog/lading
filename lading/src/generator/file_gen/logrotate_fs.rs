@@ -1,7 +1,10 @@
 //! A filesystem that mimics logs with rotation
 
-#![allow(clippy::cast_sign_loss)] // TODO remove these clippy allows
-#![allow(clippy::cast_possible_truncation)]
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "TODO: remove once all casts are made safe"
+)]
+#![expect(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
 use crate::generator;
@@ -278,7 +281,10 @@ impl LogrotateFS {
 }
 
 #[tracing::instrument(skip(state))]
-#[allow(clippy::similar_names)] // ctime and crtime are standard Unix file time names
+#[expect(
+    clippy::similar_names,
+    reason = "ctime and crtime are standard Unix file time names"
+)]
 fn getattr_helper(
     state: &mut MutexGuard<model::State>,
     start_time_system: SystemTime,
@@ -536,7 +542,7 @@ mod tests {
     struct Wrapper {
         load_profile: LoadProfile,
     }
-    /// Helper to deserialize Wrapper using singleton_map_recursive
+    /// Helper to deserialize Wrapper using `singleton_map_recursive`
     /// (matches how the main config deserializes nested enums)
     fn parse_wrapper(yaml: &str) -> Wrapper {
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
@@ -561,11 +567,11 @@ mod tests {
 
     #[test]
     fn load_profile_constant_blocks_per_second() {
-        let yaml = r#"
+        let yaml = r"
                 load_profile:
                     constant:
                         blocks_per_second: 100
-            "#;
+            ";
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Constant(_)));
         if let LoadProfile::Constant(rate) = w.load_profile {
@@ -594,7 +600,7 @@ mod tests {
             }
             assert!(matches!(rate, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = rate {
-                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
             }
         }
     }
@@ -612,7 +618,7 @@ mod tests {
         if let LoadProfile::Linear { initial, rate } = w.load_profile {
             assert!(matches!(initial, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = initial {
-                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
             }
             assert!(matches!(rate, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = rate {
@@ -623,14 +629,14 @@ mod tests {
 
     #[test]
     fn load_profile_linear_blocks_per_second() {
-        let yaml = r#"
+        let yaml = r"
                 load_profile:
                     linear:
                         initial:
                             blocks_per_second: 100
                         rate:
                             blocks_per_second: 10
-            "#;
+            ";
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
         if let LoadProfile::Linear { initial, rate } = w.load_profile {

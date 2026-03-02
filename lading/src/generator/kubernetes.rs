@@ -193,7 +193,7 @@ impl Kubernetes {
     /// # Errors
     ///
     /// Will return an error if Kubernetes connection fails or if resource creation fails.
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn spin(mut self) -> Result<(), Error> {
         use state_machine::{Event, Operation, StateMachine};
 
@@ -456,7 +456,7 @@ mod tests {
     /// Kubernetes API server for testing IO behavior
     ///
     /// We avoid testing the state machine as those tests are handled in
-    /// state_machine.rs.
+    /// `state_machine.rs`.
     struct ApiMock {
         handle: mock::Handle<Request<Body>, Response<Body>>,
         resources: Arc<Mutex<FxHashMap<String, Resource>>>,
@@ -481,9 +481,9 @@ mod tests {
             let path = request.uri().path();
             let method = request.method();
 
-            match method {
-                &Method::POST => self.handle_create(request).await,
-                &Method::DELETE => self.handle_delete(path).await,
+            match *method {
+                Method::POST => self.handle_create(request).await,
+                Method::DELETE => self.handle_delete(path),
                 _ => Response::builder()
                     .status(StatusCode::NOT_FOUND)
                     .body(Body::empty())
@@ -496,22 +496,20 @@ mod tests {
                 .into_body()
                 .collect()
                 .await
-                .map(|collected| collected.to_bytes())
+                .map(http_body_util::Collected::to_bytes)
                 .unwrap_or_default();
 
             // Try to deserialize as any supported resource type
             if let Ok(pod) = serde_json::from_slice::<Pod>(&body_bytes) {
                 self.create_resource(
                     pod.metadata.name.as_deref().unwrap_or("unknown"),
-                    Resource::Pod(pod.clone()),
+                    &Resource::Pod(pod.clone()),
                 )
-                .await
             } else if let Ok(node) = serde_json::from_slice::<Node>(&body_bytes) {
                 self.create_resource(
                     node.metadata.name.as_deref().unwrap_or("unknown"),
-                    Resource::Node(node.clone()),
+                    &Resource::Node(node.clone()),
                 )
-                .await
             } else {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -520,25 +518,22 @@ mod tests {
             }
         }
 
-        async fn create_resource(&self, name: &str, resource: Resource) -> Response<Body> {
+        fn create_resource(&self, name: &str, resource: &Resource) -> Response<Body> {
             let mut resources = self.resources.lock().unwrap();
 
             if resources.contains_key(name) {
                 return Response::builder()
                     .status(StatusCode::CONFLICT)
                     .body(Body::from(
-                        format!(
-                            r#"{{"kind":"Status","message":"{name} already exists"}}"#,
-                            name = name
-                        )
-                        .into_bytes(),
+                        format!(r#"{{"kind":"Status","message":"{name} already exists"}}"#)
+                            .into_bytes(),
                     ))
                     .unwrap();
             }
 
             resources.insert(name.to_string(), resource.clone());
 
-            let json_bytes = match &resource {
+            let json_bytes = match resource {
                 Resource::Pod(pod) => serde_json::to_vec(pod).unwrap(),
                 Resource::Node(node) => serde_json::to_vec(node).unwrap(),
                 Resource::Namespace(ns) => serde_json::to_vec(ns).unwrap(),
@@ -552,8 +547,8 @@ mod tests {
                 .unwrap()
         }
 
-        async fn handle_delete(&self, path: &str) -> Response<Body> {
-            let name = path.split('/').last().unwrap_or("");
+        fn handle_delete(&self, path: &str) -> Response<Body> {
+            let name = path.split('/').next_back().unwrap_or("");
             let mut resources = self.resources.lock().unwrap();
 
             if resources.remove(name).is_some() {

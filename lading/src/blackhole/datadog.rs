@@ -285,7 +285,7 @@ fn unix_to_instant(timestamp_secs: i64) -> Instant {
     let now_system = SystemTime::now();
     let now_instant = Instant::now();
 
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_sign_loss)]
     let point_time = UNIX_EPOCH + Duration::from_secs(timestamp_secs.max(0) as u64);
 
     match now_system.duration_since(point_time) {
@@ -346,7 +346,7 @@ async fn handle_v2_protobuf(
                     let metrics_res = match series.r#type {
                         1 => {
                             // COUNT
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let value = point.value.round() as u64;
                             counter_incr(&series.metric, &tag_pairs, value, timestamp).await
                         }
@@ -360,7 +360,7 @@ async fn handle_v2_protobuf(
                                 );
                                 continue;
                             }
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let val = (point.value * interval as f64).round() as u64;
                             counter_incr(&series.metric, &tag_pairs, val, timestamp).await
                         }

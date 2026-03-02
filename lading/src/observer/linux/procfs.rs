@@ -442,7 +442,7 @@ mod tests {
             exe in arb_exe_path(),
             cmdline in arb_cmdline(),
             comm in "[a-zA-Z0-9_-]+",
-            pid in 1..100000i32,
+            pid in 1..100_000_i32,
         ) -> ProcessInfo {
             ProcessInfo {
                 exe,
@@ -461,8 +461,8 @@ mod tests {
             cmdline in arb_cmdline(),
             comm1 in "[a-zA-Z0-9_-]+",
             comm2 in "[a-zA-Z0-9_-]+",
-            pid1 in 1..100000i32,
-            pid2 in 1..100000i32,
+            pid1 in 1..100_000_i32,
+            pid2 in 1..100_000_i32,
         ) {
             let parent = ProcessInfo {
                 exe: exe.clone(),
@@ -562,11 +562,11 @@ mod tests {
             };
 
             // If cmdlines differ (even by whitespace), should NOT be detected as forked-but-not-execed
-            if base_cmdline != modified_cmdline {
+            if base_cmdline == modified_cmdline {
+                assert!(forked_but_not_execd(&child, &parent));
+            } else {
                 assert!(!forked_but_not_execd(&child, &parent),
                     "Even whitespace differences should mean the process has exec'd");
-            } else {
-                assert!(forked_but_not_execd(&child, &parent));
             }
         }
     }

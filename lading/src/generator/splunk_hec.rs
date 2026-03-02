@@ -191,7 +191,7 @@ impl SplunkHec {
     ///
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: Config,
@@ -337,7 +337,7 @@ impl SplunkHec {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,

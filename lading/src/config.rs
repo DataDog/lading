@@ -476,6 +476,7 @@ fn load_directory_configs(dir: &Path) -> Result<Config, Error> {
 }
 
 #[cfg(test)]
+#[expect(clippy::cast_possible_truncation)]
 mod tests {
     use std::io::Write;
     use std::str::FromStr;
@@ -523,7 +524,7 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just generators
+    /// Create a minimal `PartialConfig` with just generators
     fn make_partial_with_generators(generators: Vec<generator::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
@@ -535,7 +536,7 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just blackholes
+    /// Create a minimal `PartialConfig` with just blackholes
     fn make_partial_with_blackholes(blackholes: Vec<blackhole::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
@@ -547,7 +548,7 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just target_metrics
+    /// Create a minimal `PartialConfig` with just `target_metrics`
     fn make_partial_with_target_metrics(metrics: Vec<target_metrics::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
@@ -559,7 +560,7 @@ mod tests {
         }
     }
 
-    /// Create a prometheus target_metrics config
+    /// Create a prometheus `target_metrics` config
     fn make_prometheus_target_metrics(uri: &str) -> target_metrics::Config {
         target_metrics::Config::Prometheus(target_metrics::prometheus::Config {
             uri: uri.to_string(),

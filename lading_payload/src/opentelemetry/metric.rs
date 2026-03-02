@@ -137,7 +137,7 @@ impl Config {
     ///
     /// # Errors
     /// Function will error if the configuration is invalid
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn valid(&self) -> Result<(), String> {
         // Validate metric weights - both types must have non-zero probability to ensure
         // we can generate a diverse set of metrics
@@ -542,8 +542,9 @@ mod test {
     use proptest::prelude::*;
     use prost::Message;
     use rand::{SeedableRng, rngs::SmallRng};
+    use rustc_hash::FxHashMap;
     use std::{
-        collections::{HashMap, HashSet},
+        collections::HashSet,
         hash::{DefaultHasher, Hash, Hasher},
     };
 
@@ -845,10 +846,10 @@ mod test {
         if let Some(resource) = &metric.resource {
             for attr in &resource.attributes {
                 attr.key.hash(&mut hasher);
-                if let Some(value) = &attr.value {
-                    if let Some(any_value::Value::StringValue(s)) = &value.value {
-                        s.hash(&mut hasher);
-                    }
+                if let Some(value) = &attr.value
+                    && let Some(any_value::Value::StringValue(s)) = &value.value
+                {
+                    s.hash(&mut hasher);
                 }
             }
         }
@@ -859,10 +860,10 @@ mod test {
             if let Some(scope) = &scope_metrics.scope {
                 for attr in &scope.attributes {
                     attr.key.hash(&mut hasher);
-                    if let Some(value) = &attr.value {
-                        if let Some(any_value::Value::StringValue(s)) = &value.value {
-                            s.hash(&mut hasher);
-                        }
+                    if let Some(value) = &attr.value
+                        && let Some(any_value::Value::StringValue(s)) = &value.value
+                    {
+                        s.hash(&mut hasher);
                     }
                 }
             }
@@ -875,10 +876,10 @@ mod test {
                 // Hash metric attributes
                 for attr in &metric.metadata {
                     attr.key.hash(&mut hasher);
-                    if let Some(value) = &attr.value {
-                        if let Some(any_value::Value::StringValue(s)) = &value.value {
-                            s.hash(&mut hasher);
-                        }
+                    if let Some(value) = &attr.value
+                        && let Some(any_value::Value::StringValue(s)) = &value.value
+                    {
+                        s.hash(&mut hasher);
                     }
                 }
 
@@ -979,7 +980,7 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
-            let mut timestamps_by_metric: HashMap<u64, Vec<u64>> = HashMap::new();
+            let mut timestamps_by_metric: FxHashMap<u64, Vec<u64>> = FxHashMap::default();
 
             for _ in 0..steps {
                 if let Ok(resource_metric) = otel_metrics.generate(&mut rng, &mut budget) {
@@ -993,7 +994,7 @@ mod test {
                                         for point in &gauge.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
-                                                .or_insert_with(Vec::new)
+                                                .or_default()
                                                 .push(point.time_unix_nano);
                                         }
                                     },
@@ -1001,7 +1002,7 @@ mod test {
                                         for point in &sum.data_points {
                                             timestamps_by_metric
                                                 .entry(id)
-                                                .or_insert_with(Vec::new)
+                                                .or_default()
                                                 .push(point.time_unix_nano);
                                         }
                                     },
@@ -1104,7 +1105,7 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
 
-            let mut values: HashMap<u64, f64> = HashMap::new();
+            let mut values: FxHashMap<u64, f64> = FxHashMap::default();
 
             // Generate the initial batch of values. It's entirely possible we
             // will not run into the same context_ids again. Please run this
@@ -1117,29 +1118,26 @@ mod test {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(Data::Sum(sum)) = &metric.data {
-                                if sum.is_monotonic {
-                                    for point in sum.data_points.iter() {
+                            if let Some(Data::Sum(sum)) = &metric.data
+                                && sum.is_monotonic {
+                                    for point in &sum.data_points {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
                                             values.insert(id, v);
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }
             }
-
-            let mut budget = budget;
             {
                 if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
                     let id = context_id(&resource_metrics);
                     for scope_metric in &resource_metrics.scope_metrics {
                         for metric in &scope_metric.metrics {
-                            if let Some(Data::Sum(sum)) = &metric.data {
-                                if sum.is_monotonic {
-                                    for point in sum.data_points.iter() {
+                            if let Some(Data::Sum(sum)) = &metric.data
+                                && sum.is_monotonic {
+                                    for point in &sum.data_points {
                                         if let Some(number_data_point::Value::AsDouble(v)) = point.value {
                                             if let Some(&previous_value) = values.get(&id) {
                                                 prop_assert!(
@@ -1151,7 +1149,6 @@ mod test {
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -1176,8 +1173,8 @@ mod test {
 
         let metric = Metric {
             name: "x".into(), // Minimal valid name
-            description: "".into(),
-            unit: "".into(),
+            description: String::new(),
+            unit: String::new(),
             data: Some(Data::Gauge(gauge)),
             metadata: Vec::new(), // No metadata
         };
@@ -1185,13 +1182,13 @@ mod test {
         let scope_metrics = ScopeMetrics {
             scope: None, // No scope info
             metrics: vec![metric],
-            schema_url: "".into(),
+            schema_url: String::new(),
         };
 
         let resource_metrics = ResourceMetrics {
             resource: None, // No resource info
             scope_metrics: vec![scope_metrics],
-            schema_url: "".into(),
+            schema_url: String::new(),
         };
 
         // The most minimal request we care to support, just one single data point
@@ -1208,6 +1205,7 @@ mod test {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn config_validation() {
         // Valid configuration
         let valid_config = Config {

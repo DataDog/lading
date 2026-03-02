@@ -286,15 +286,13 @@ mod tests {
                 // Check running state index
                 if let State::Running { next_recycle_index } = machine.state() {
                     assert!(*next_recycle_index < containers,
-                            "Running index {index} out of bounds for {count} containers",
-                            index = next_recycle_index, count = containers);
+                            "Running index {next_recycle_index} out of bounds for {containers} containers");
                 }
 
                 // Trigger recycle and check operation index
                 if let Operation::RecycleContainer { index } = machine.next(Event::RecycleNext).unwrap() {
                     assert!(index < containers,
-                            "Recycle index {index} out of bounds for {count} containers",
-                            index = index, count = containers);
+                            "Recycle index {index} out of bounds for {containers} containers");
 
                     // Complete the recycle
                     machine.next(Event::ContainerRecycled { index }).unwrap();

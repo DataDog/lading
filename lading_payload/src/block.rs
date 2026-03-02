@@ -194,8 +194,8 @@ impl Cache {
     ///
     /// Function will return an error if `maximum_block_bytes` is greater than
     /// `u32::MAX` or if it is larger than `total_bytes`.
-    #[allow(clippy::too_many_lines)]
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn fixed_with_max_overhead<R>(
         mut rng: &mut R,
         total_bytes: NonZeroU32,
@@ -548,8 +548,8 @@ impl Cache {
 /// would like to propagate this error to the caller.
 #[inline]
 #[tracing::instrument(skip_all)]
-#[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::cast_sign_loss)]
+#[expect(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_sign_loss)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &mut S,

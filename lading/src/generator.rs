@@ -142,7 +142,7 @@ pub enum Inner {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 /// The generator server.
 ///
 /// All generators supported by lading are a variant of this enum. Please see

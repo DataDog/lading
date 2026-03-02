@@ -80,7 +80,7 @@ ls -l /sys/kernel/mm/page_idle/bitmap
             // As a consequence, the poll interval impacts the measure.
             // That’s why we need to be sure we don’t poll more often than once per minute.
             if sample_wss {
-                wss.poll().await?;
+                wss.poll()?;
             }
         }
 

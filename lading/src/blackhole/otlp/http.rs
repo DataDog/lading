@@ -144,7 +144,7 @@ impl OtlpHttpHandler {
             .expect("Creating HTTP response should not fail"))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn handle_request(
         self,
         req: Request<hyper::body::Incoming>,

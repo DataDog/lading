@@ -60,9 +60,8 @@ impl Sampler {
         })
     }
 
-    #[allow(clippy::unused_async)]
-    pub(crate) async fn poll(&mut self) -> Result<(), Error> {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn poll(&mut self) -> Result<(), Error> {
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let page_size = unsafe { nix::libc::sysconf(nix::libc::_SC_PAGESIZE) as usize };
         let mut pfn_set = PfnSet::new();
 
@@ -78,9 +77,9 @@ impl Sampler {
                     continue; // page idle tracking is user mem only
                 }
                 debug!("Memory region: {:#x} — {:#x}", begin, end);
-                #[allow(clippy::cast_possible_truncation)]
+                #[expect(clippy::cast_possible_truncation)]
                 let begin = begin as usize / page_size;
-                #[allow(clippy::cast_possible_truncation)]
+                #[expect(clippy::cast_possible_truncation)]
                 let end = end as usize / page_size;
                 for page in pagemap.get_range_info(begin..end)? {
                     if let PageInfo::MemoryPage(memory_page_flags) = page

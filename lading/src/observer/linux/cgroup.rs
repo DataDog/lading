@@ -52,7 +52,7 @@ impl Sampler {
         })
     }
 
-    #[allow(clippy::cast_possible_wrap)]
+    #[expect(clippy::cast_possible_wrap)]
     pub(crate) async fn poll(&mut self) -> Result<(), Error> {
         // Every sample run we collect all the child processes rooted at the
         // parent. As noted by the procfs documentation is this done by
