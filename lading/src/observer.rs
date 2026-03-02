@@ -38,7 +38,6 @@ pub struct Config {
     /// Enable per-mapping memory metrics from `/proc/{pid}/smaps`.
     /// Sampled every 10th tick when enabled.
     pub enable_smaps: bool,
-
     /// Enable aggregate memory metrics from `/proc/{pid}/smaps_rollup`.
     pub enable_smaps_rollup: bool,
 }
