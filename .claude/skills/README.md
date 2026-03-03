@@ -18,9 +18,7 @@ Run preflight first. It validates your environment and tells you what to do next
 | `/lading-optimize-find-target` | Select and analyze an optimization target |
 | `/lading-optimize-hunt` | Baseline, implement, review, and record optimizations |
 | `/lading-optimize-review` | 5-persona peer review before merge |
-| `/lading-optimize-validate` | Bug validation with Kani proofs or property tests |
 | `/lading-optimize-submit` | Git branch, commits, and optional PR for optimizations |
-| `/lading-optimize-rescue` | Salvage optimization work lacking benchmarks |
 
 ## Workflow
 
