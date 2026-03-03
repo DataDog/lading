@@ -508,6 +508,13 @@ fn check_generator(
                 compute_fingerprint,
             )
         }
+        generator::Inner::Neper(_) => {
+            if compute_fingerprint {
+                warn!("Neper not supported for fingerprinting");
+                return Ok(None);
+            }
+            unimplemented!("Neper not supported")
+        }
     }
 }
 
