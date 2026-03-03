@@ -6,6 +6,7 @@
 
 use std::{io, path::PathBuf, process::Stdio};
 
+use nix::sys::resource::{Resource, getrlimit, setrlimit};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{info, warn};
@@ -37,6 +38,9 @@ pub enum Error {
     /// IO error
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// Failed to set resource limits.
+    #[error("failed to set rlimit: {0}")]
+    Rlimit(#[from] nix::errno::Errno),
     /// Neper process exited with a non-zero status.
     #[error("neper server exited with {status}: {stderr}")]
     NeperFailed {
@@ -84,6 +88,12 @@ impl Neper {
     /// status before shutdown.
     pub async fn run(self) -> Result<(), Error> {
         let _ = &self.metric_labels; // reserved for future metrics
+
+        // Raise the open file descriptor limit to the hard limit. Neper opens
+        // many sockets and can easily exceed the default soft limit.
+        let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE)?;
+        setrlimit(Resource::RLIMIT_NOFILE, hard, hard)?;
+        info!(nofile_limit = hard, "raised RLIMIT_NOFILE to hard limit");
 
         let binary = PathBuf::from(NEPER_BIN_DIR).join(self.config.workload.binary_name());
 

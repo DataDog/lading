@@ -12,6 +12,7 @@
 use std::{io, path::PathBuf, process::Stdio};
 
 use metrics::gauge;
+use nix::sys::resource::{Resource, getrlimit, setrlimit};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{info, warn};
@@ -85,6 +86,9 @@ pub enum Error {
     /// IO error
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// Failed to set resource limits.
+    #[error("failed to set rlimit: {0}")]
+    Rlimit(#[from] nix::errno::Errno),
     /// Neper process exited with a non-zero status.
     #[error("neper exited with {status}: {stderr}")]
     NeperFailed {
@@ -135,6 +139,12 @@ impl Neper {
     /// Returns an error if spawning neper fails, it exits with a non-zero
     /// status, or the output cannot be parsed.
     pub async fn spin(self) -> Result<(), Error> {
+        // Raise the open file descriptor limit to the hard limit. Neper opens
+        // many sockets and can easily exceed the default soft limit.
+        let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE)?;
+        setrlimit(Resource::RLIMIT_NOFILE, hard, hard)?;
+        info!(nofile_limit = hard, "raised RLIMIT_NOFILE to hard limit");
+
         // Give the server time to come up.
         let delay = tokio::time::Duration::from_secs(self.config.startup_delay_seconds);
         info!(
