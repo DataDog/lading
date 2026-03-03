@@ -10,22 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This reflects preexisting terminology.
 ## Added
 - Lading now supports histogram approximations in its capture files.
-- HTTP blackhole now tracks distribution of bytes received, both decoded and
-  compressed.
-- New "Static Chunks" generator that divides static files by lines into blocks
-  (as opposed to static which turns each file into a block).
-- Fingerprint mechanism now calculates Shannon entropy.
-- Lading now supports a '--json-logs' flag to output logs in structured JSON
-  format.
-- Resize blocks after payload generation so that when a significant portion of
-  the buffer is unused it frees that memory.
-- Add support for throttling based on block rate instead of bytes. This can be useful
-  for generators (like "Static Chunks") that output variably sized blocks intentionally.
-- UDP generator now accepts a `bind_addr` configuration value, maintaining the
-  previous hard-coded value as a default.
-- dogstatsd generator can be configured to use metric names, tag names and tag
-  values from a configured list. Configured with `metric_names`, `tag_names` and
-  `tag_values`.
 
 ## [0.30.0]
 ## Added
