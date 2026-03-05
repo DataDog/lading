@@ -136,6 +136,95 @@ pub(super) enum Generator {
     /// !timestamp
     /// ```
     Timestamp,
+
+    /// Generate a JSON array whose elements are drawn from a sub-generator.
+    ///
+    /// The number of elements is controlled by the `length` field, which
+    /// accepts three forms:
+    ///
+    /// - A plain integer: every array has exactly that many elements.
+    /// - A range mapping `{min: N, max: M}`: the count is drawn uniformly
+    ///   from `[N, M]` (inclusive) on each call.
+    /// - A sequence of integers `[N, M, ...]`: one length is chosen uniformly
+    ///   at random from the list on each call.
+    ///
+    /// ```yaml
+    /// # Fixed length
+    /// !array
+    ///   length: 3
+    ///   element: !range { min: 1, max: 100 }
+    ///
+    /// # Uniform random length
+    /// !array
+    ///   length: { min: 1, max: 5 }
+    ///   element: !const "hello"
+    ///
+    /// # Choose length from a set
+    /// !array
+    ///   length: [2, 3, 5]
+    ///   element: !reference my_def
+    /// ```
+    Array(ArraySpec),
+}
+
+// ── Array types ───────────────────────────────────────────────────────────────
+
+/// Determines how many elements a `!array` generator produces per call.
+///
+/// Deserializes from three YAML forms:
+/// - scalar integer   → `Fixed`
+/// - sequence         → `Choose`
+/// - mapping          → `Range`
+#[derive(Clone)]
+pub(super) enum ArrayLength {
+    /// Always produce exactly `n` elements.
+    Fixed(usize),
+    /// Draw the count uniformly from `[min, max]` inclusive.
+    Range { min: usize, max: usize },
+    /// Choose the count uniformly from the given list of values.
+    Choose(Vec<usize>),
+}
+
+impl<'de> Deserialize<'de> for ArrayLength {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Untagged: integer -> Fixed, sequence -> Choose, mapping -> Range.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RawArrayLength {
+            Fixed(usize),
+            Choose(Vec<usize>),
+            Range { min: usize, max: usize },
+        }
+        match RawArrayLength::deserialize(deserializer)? {
+            RawArrayLength::Fixed(n) => Ok(Self::Fixed(n)),
+            RawArrayLength::Choose(choices) => {
+                if choices.is_empty() {
+                    return Err(<D::Error as serde::de::Error>::custom(
+                        "!array length list must not be empty",
+                    ));
+                }
+                Ok(Self::Choose(choices))
+            }
+            RawArrayLength::Range { min, max } => {
+                if min > max {
+                    return Err(<D::Error as serde::de::Error>::custom(format!(
+                        "!array length range min ({min}) must be <= max ({max})"
+                    )));
+                }
+                Ok(Self::Range { min, max })
+            }
+        }
+    }
+}
+
+/// Configuration for a `!array` generator node.
+#[derive(Clone, Deserialize)]
+pub(super) struct ArraySpec {
+    pub length: ArrayLength,
+    pub element: Box<Generator>,
 }
 
 /// Return the JSON string body encoding of `s`: the bytes that would appear
@@ -231,11 +320,11 @@ impl<'de> Deserialize<'de> for RangeSpec {
     {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Raw {
+        struct RawRangeSpec {
             min: i64,
             max: i64,
         }
-        let raw = Raw::deserialize(deserializer)?;
+        let raw = RawRangeSpec::deserialize(deserializer)?;
         if raw.min > raw.max {
             return Err(<D::Error as serde::de::Error>::custom(format!(
                 "!range min ({}) must be <= max ({})",
@@ -279,11 +368,11 @@ impl<'de> Deserialize<'de> for FormatSpec {
     {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Raw {
+        struct RawFormatSpec {
             template: String,
             args: Vec<Generator>,
         }
-        let raw = Raw::deserialize(deserializer)?;
+        let raw = RawFormatSpec::deserialize(deserializer)?;
 
         // Split at each `{}` placeholder to get N+1 literal parts.
         let parts: Vec<&str> = raw.template.split("{}").collect();

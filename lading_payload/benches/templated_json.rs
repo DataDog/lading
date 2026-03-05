@@ -18,23 +18,26 @@ use rand::{SeedableRng, rngs::SmallRng};
 
 const MIB: usize = 1_048_576;
 
-fn template_path() -> &'static Path {
-    Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../examples/templates/bench_templated_json.yaml"
-    ))
-}
+const TEMPLATE_BUILTIN_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../examples/templates/templated_json_builtin.yaml"
+);
+
+const TEMPLATE_FEATURES_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../examples/templates/templated_json_features.yaml"
+);
 
 fn templated_json_setup(c: &mut Criterion) {
-    let path = template_path();
+    let path = Path::new(TEMPLATE_FEATURES_PATH);
     c.bench_function("templated_json_setup", |b| {
         b.iter(|| TemplatedJson::from_path(path).expect("failed to load template"));
     });
 }
 
-fn templated_json_throughput(c: &mut Criterion) {
-    let path = template_path();
-    let mut group = c.benchmark_group("templated_json_throughput");
+fn templated_json_throughput(c: &mut Criterion, path: &str, group_name: &str) {
+    let path = Path::new(path);
+    let mut group = c.benchmark_group(group_name);
     for size in &[MIB, 10 * MIB, 100 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
@@ -55,6 +58,22 @@ fn templated_json_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+fn templated_json_builtin_throughput(c: &mut Criterion) {
+    templated_json_throughput(
+        c,
+        TEMPLATE_BUILTIN_PATH,
+        "templated_json_builtin_throughput",
+    );
+}
+
+fn templated_json_features_throughput(c: &mut Criterion) {
+    templated_json_throughput(
+        c,
+        TEMPLATE_FEATURES_PATH,
+        "templated_json_features_throughput",
+    );
+}
+
 criterion_group!(
     name = setup_benches;
     config = Criterion::default()
@@ -68,7 +87,7 @@ criterion_group!(
     config = Criterion::default()
         .measurement_time(Duration::from_secs(30))
         .warm_up_time(Duration::from_secs(1));
-    targets = templated_json_throughput,
+    targets = templated_json_builtin_throughput, templated_json_features_throughput,
 );
 
 criterion_main!(setup_benches, throughput_benches);

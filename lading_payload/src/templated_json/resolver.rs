@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use super::config::{FormatSpec, ObjectFields, WeightedList, WithSpec};
+use super::config::{ArraySpec, FormatSpec, ObjectFields, WeightedList, WithSpec};
 use super::{TemplateConfig, config, generator};
 use crate::Error;
 
@@ -209,6 +209,7 @@ impl config::Generator {
             Self::Format(f) => f.resolve(resolver)?,
             Self::Object(fields) => fields.resolve(resolver)?,
             Self::Timestamp => generator::Generator::Timestamp(generator::Timestamp::new()),
+            Self::Array(spec) => spec.resolve(resolver)?,
         })
     }
 }
@@ -317,6 +318,29 @@ impl WithSpec {
         Ok(generator::Generator::With(generator::WithSpec::new(
             bind, body,
         )))
+    }
+}
+
+impl ArraySpec {
+    /// Resolve the element sub-generator into its indexed counterpart.
+    ///
+    /// The `length` field contains only plain integers and requires no
+    /// name resolution; it is copied verbatim into the generator type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the element generator fails to resolve.
+    fn resolve(self, resolver: &mut Resolver) -> Result<generator::Generator, Error> {
+        let length = match self.length {
+            config::ArrayLength::Fixed(n) => generator::ArrayLength::Fixed(n),
+            config::ArrayLength::Range { min, max } => generator::ArrayLength::Range { min, max },
+            config::ArrayLength::Choose(choices) => generator::ArrayLength::Choose(choices),
+        };
+        let element = Box::new((*self.element).resolve(resolver)?);
+        Ok(generator::Generator::Array(generator::ArraySpec {
+            length,
+            element,
+        }))
     }
 }
 

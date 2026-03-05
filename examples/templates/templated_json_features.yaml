@@ -12,6 +12,7 @@
 #   !weighted   - probability-weighted random selection
 #   !range      - random integer sampled from the closed interval [min, max]
 #   !format     - format string; {} placeholders filled by sub-generators
+#   !array      - generate a JSON array with generator-valued elements
 #   !object     - generate a JSON object with generator-valued fields
 #   !with       - bind one or more generated values into a local scope
 #   !var        - read back a value that was bound by an enclosing !with
@@ -71,6 +72,9 @@ definitions:
   request_id_suffix:
     !range { min: 100000, max: 999999 }
 
+  flag_words:
+    !choose ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+
 generator:
   !with
     bind:
@@ -121,6 +125,16 @@ generator:
             - !var svc
             - !reference request_id_suffix
 
+      flags:
+        !array
+          length: { min: 0, max: 3 }
+          element: !reference flag_words
+
+      bytes:
+        !array
+          length: { min: 1, max: 20 }
+          element: !range { min: 0, max: 255 }
+
       # Nested !with: introduces a new binding (env) visible only inside its body
       metadata:
         !with
@@ -136,3 +150,4 @@ generator:
                 args:
                   - !var pod
                   - !var env
+
