@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tag_values`.
 - All blackholes now emit a `total_bytes_received` metric (no labels),
   providing an aggregated byte count across all blackhole types and IDs.
+- `payloadtool` now supports a `--dump=FILENAME` option which saves the generated data
+  blocks to the named file.
 ## Fixed
 - Fixed a race condition in `lading_signal` that caused lading to hang on shutdown.
 - Fixed a tag parsing bug that resulted in tags with hyphenated keys being merged with proceeding tag values.
