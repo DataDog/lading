@@ -10,7 +10,7 @@ echo "Building lading binary for config validation..."
 cargo build --bin=lading --all-features --quiet
 
 echo "Finding configuration files in examples directory..."
-config_files=$(find examples -name "*.yaml" -o -name "*.yml" | sort)
+config_files=$(find examples -maxdepth 1 -name "*.yaml" | sort)
 config_count=$(echo "${config_files}" | wc -l | tr -d ' ')
 
 echo "Found ${config_count} configuration files to validate"

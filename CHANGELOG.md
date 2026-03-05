@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tag_values`.
 - All blackholes now emit a `total_bytes_received` metric (no labels),
   providing an aggregated byte count across all blackhole types and IDs.
+- Added new payload generator `templated_json` that uses a user-specificied
+  payload template to produce JSON lines. See
+  `lading_payload/README.templated_json.md` for more details.
 - `payloadtool` now supports a `--dump=FILENAME` option which saves the generated data
   blocks to the named file.
 ## Fixed

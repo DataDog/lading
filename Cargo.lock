@@ -1972,6 +1972,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tuple",
+ "serde_yaml",
  "thiserror 2.0.17",
  "time",
  "tokio",
