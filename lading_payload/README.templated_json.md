@@ -70,6 +70,7 @@ The config DSL in `opw_tools::json_generator` supports these YAML tags:
 - `!with`: bind generated values to variables, then evaluate `in`
 - `!var`: read a bound variable
 - `!timestamp`: deterministic monotonically-advancing UTC timestamp (whole-second RFC-3339)
+- `!array`: generate a JSON array; element count is fixed, a uniform random range, or chosen from a set
 
 ## Example template
 
@@ -115,6 +116,11 @@ generator:
           args:
             - !var svc
             - !range { min: 1, max: 2000 }
+      data: !array
+        length: { min: 4, max: 32 }
+        # or: length: 3
+        # or: length: [1, 2, 4, 8, 16]
+        element: !range { min: 0, max: 255 }
 ```
 
 This produces newline-delimited JSON like:
@@ -137,3 +143,4 @@ For future work:
 
 - Strings of bounded random length range pulled from configurable text generators (hexadecimal,
   chosen words, etc).
+- Timestamps with sub-second fractions, different increment ranges, other configurations.

@@ -1,0 +1,18 @@
+# Approximate equivalent of the built-in Json generator.
+#
+# The template system cannot produce byte-identical output because:
+#
+#   - id and name are u64, but !range uses i64, restricting the
+#     upper bound to i64::MAX (roughly half the u64 range).
+#
+#   - !object emits fields alphabetically (BTreeMap); Json serializes in
+#     declaration order (id, name, seed, byte_parade).
+
+generator:
+  !object
+    id: !range { min: 0, max: 9223372036854775807 }
+    name: !range { min: 0, max: 9223372036854775807 }
+    seed: !range { min: 0, max: 65535 }
+    byte_parade: !array
+      length: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+      element: !range { min: 0, max: 255 }

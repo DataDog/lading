@@ -48,6 +48,7 @@ pub(super) enum Generator {
     /// Index into the context vec.
     Var(usize),
     Timestamp(Timestamp),
+    Array(ArraySpec),
 }
 
 pub(super) struct RangeSpec {
@@ -101,6 +102,19 @@ impl WithSpec {
             scratch: RefCell::new((0..n).map(|_| JsonString::with_capacity(64)).collect()),
         }
     }
+}
+
+/// How many elements a `!array` generator produces per call.
+pub(super) enum ArrayLength {
+    Fixed(usize),
+    Range { min: usize, max: usize },
+    Choose(Vec<usize>),
+}
+
+/// Resolved `!array` generator node.
+pub(super) struct ArraySpec {
+    pub(super) length: ArrayLength,
+    pub(super) element: Box<Generator>,
 }
 
 /// State for a single `!timestamp` generator node.
@@ -200,6 +214,8 @@ impl Generator {
             }
 
             Self::Timestamp(ts) => ts.generate(rng, out)?,
+
+            Self::Array(spec) => spec.generate(rng, ctx, defs, out)?,
         }
         Ok(())
     }
@@ -288,6 +304,48 @@ impl FormatSpec {
         out.push_raw_str(&self.trailing_escaped);
         out.push_char('"');
         Ok(())
+    }
+}
+
+impl ArraySpec {
+    /// Generate a JSON array into `out`.
+    ///
+    /// The element count is determined by `self.length`; then `self.element`
+    /// is called once per slot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the length list is empty or if any element
+    /// generator fails.
+    pub(super) fn generate(
+        &self,
+        rng: &mut impl Rng,
+        ctx: &mut Context,
+        defs: &[Generator],
+        out: &mut JsonString,
+    ) -> Result<(), Error> {
+        let count = self.length.choose(rng)?;
+        out.push_char('[');
+        for i in 0..count {
+            if i > 0 {
+                out.push_char(',');
+            }
+            self.element.generate(rng, ctx, defs, out)?;
+        }
+        out.push_char(']');
+        Ok(())
+    }
+}
+
+impl ArrayLength {
+    fn choose(&self, rng: &mut impl Rng) -> Result<usize, Error> {
+        Ok(match self {
+            Self::Fixed(n) => *n,
+            Self::Range { min, max } => rng.random_range(*min..=*max),
+            Self::Choose(choices) => *choices
+                .choose(rng)
+                .ok_or_else(|| Error::TemplateError("!array length list is empty".to_string()))?,
+        })
     }
 }
 
