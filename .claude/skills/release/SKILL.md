@@ -44,5 +44,6 @@ allowed-tools: Read, Edit, Bash, AskUserQuestion
 - After the PR is merged, remind the user to tag the merge commit on main:
   - `git checkout main && git pull`
   - `git tag -a v<version> -m "v<version>"`
-  - `git push --tags`
+  - `git push origin v<version>`
+- **NEVER use `git push --tags`** — always push exactly one tag at a time.
 - The `release.yml` GitHub Actions workflow will automatically create a GitHub Release from the tag, pulling notes from CHANGELOG.md.
