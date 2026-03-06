@@ -20,7 +20,10 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
+    time::Duration,
 };
+
+use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use byte_unit::Byte;
 use metrics::counter;
@@ -78,6 +81,10 @@ fn default_rotation() -> bool {
     true
 }
 
+fn default_flush_every() -> Duration {
+    Duration::MAX
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
@@ -121,6 +128,10 @@ pub struct Config {
     rotate: bool,
     /// The load throttle configuration
     pub throttle: Option<ThrottleConfig>,
+    /// Force flush at a regular interval. Defaults to `Duration::MAX`.
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
+    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    pub flush_every: Duration,
 }
 
 #[derive(Debug)]
@@ -200,6 +211,7 @@ impl Server {
                 file_index: Arc::clone(&file_index),
                 rotate: config.rotate,
                 shutdown: shutdown.clone(),
+                flush_every: config.flush_every,
             };
 
             handles.spawn(child.spin());
@@ -275,6 +287,7 @@ struct Child {
     rotate: bool,
     file_index: Arc<AtomicU32>,
     shutdown: lading_signal::Watcher,
+    flush_every: Duration,
 }
 
 impl Child {
@@ -287,8 +300,6 @@ impl Child {
         let mut path = path_from_template(&self.path_template, file_index);
 
         let mut handle = self.block_cache.handle();
-        // Setting write buffer capacity (per second) approximately equal to the throttle's maximum capacity
-        // (converted to bytes if necessary) to approximate flush every second.
         let buffer_capacity = self
             .throttle
             .maximum_capacity_bytes(self.maximum_block_size);
@@ -312,6 +323,8 @@ impl Child {
         );
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
+        let mut flush_interval = interval_at(Instant::now() + self.flush_every, self.flush_every);
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 result = self.throttle.wait_for_block(&self.block_cache, &handle) => {
@@ -362,6 +375,9 @@ impl Child {
                             self.block_cache.advance(&mut handle);
                         }
                     }
+                }
+                _tick = flush_interval.tick() => {
+                    fp.flush().await?;
                 }
                 () = &mut shutdown_wait => {
                     fp.flush().await?;
