@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.31.1]
+## Removed
+- Reverted HTTP blackhole histogram distribution tracking (`bytes_received_distr`,
+  `decoded_bytes_received_distr`) added in 0.31.0 due to back-compat issues.
+
 ## [0.31.0]
 ## Changed
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
