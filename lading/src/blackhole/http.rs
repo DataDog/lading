@@ -4,7 +4,9 @@
 //!
 //! `bytes_received`: Total bytes received
 //! `total_bytes_received`: Aggregated bytes received across all blackhole types
+//! `bytes_received_distr`: Distribution of compressed bytes per request (with `path` label)
 //! `decoded_bytes_received`: Total decoded bytes received
+//! `decoded_bytes_received_distr`: Distribution of decompressed bytes per request (with `path` label)
 //! `requests_received`: Total requests received
 //!
 
@@ -12,7 +14,7 @@ use bytes::Bytes;
 use http::{HeaderMap, header::InvalidHeaderValue, status::InvalidStatusCode};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
-use metrics::counter;
+use metrics::{counter, histogram};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use tracing::error;
@@ -153,20 +155,25 @@ async fn srv(
 ) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
-    // Split into parts
+    let path = req.uri().path().to_string();
+
     let (parts, body) = req.into_parts();
 
-    // Convert the `Body` into `Bytes`
     let body: Bytes = body.boxed().collect().await?.to_bytes();
 
     let body_len = body.len() as u64;
     counter!("bytes_received", &metric_labels).increment(body_len);
     counter!("total_bytes_received").increment(body_len);
 
+    let mut labels_with_path = metric_labels.clone();
+    labels_with_path.push(("path".to_string(), path));
+    histogram!("bytes_received_distr", &labels_with_path).record(body.len() as f64);
+
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), body) {
         Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
+            histogram!("decoded_bytes_received_distr", &labels_with_path).record(body.len() as f64);
 
             tokio::time::sleep(response_delay).await;
 
