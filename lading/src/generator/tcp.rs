@@ -26,7 +26,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::Duration,
 };
-use tracing::{error, info, trace};
+use tracing::{debug, info, trace};
 
 use lading_payload::block;
 
@@ -271,7 +271,8 @@ impl TcpWorker {
                             }
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

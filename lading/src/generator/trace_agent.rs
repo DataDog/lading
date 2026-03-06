@@ -38,7 +38,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const MAX_RETRY_MILLIS: u16 = 6_400;
 
@@ -380,7 +380,8 @@ impl TraceAgent {
                             });
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 },
