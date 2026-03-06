@@ -30,7 +30,7 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     task::{JoinError, JoinHandle},
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use lading_payload::block;
 
@@ -385,7 +385,8 @@ impl Child {
                                     &self.labels).await?;
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

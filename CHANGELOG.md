@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.31.2]
+## Changed
+- Work around tight error loop when a generated block exceeds the throttle's
+  maximum capacity. Oversized blocks are now skipped instead of retried
+  indefinitely, and the log is downgraded from ERROR to DEBUG.
+## Removed
+- Reverted HTTP blackhole histogram distribution tracking (`bytes_received_distr`,
+  `decoded_bytes_received_distr`) that was reapplied after 0.31.1.
+
 ## [0.31.1]
 ## Removed
 - Reverted HTTP blackhole histogram distribution tracking (`bytes_received_distr`,
@@ -23,8 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Observer config now supports `enable_smaps` and `enable_smaps_rollup` options
   to toggle `/proc/{pid}/smaps` and `/proc/{pid}/smaps_rollup` collection.
 - Lading now supports histogram approximations in its capture files.
-- HTTP blackhole now tracks distribution of bytes received, both decoded and
-  compressed.
 - New "Static Chunks" generator that divides static files by lines into blocks
   (as opposed to static which turns each file into a block).
 - Fingerprint mechanism now calculates Shannon entropy.
