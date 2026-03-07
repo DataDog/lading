@@ -1,0 +1,79 @@
+apiVersion: datadoghq.com/v2alpha1
+kind: DatadogAgent
+metadata:
+  name: datadog
+  namespace: default
+spec:
+  global:
+    clusterName: lading-test
+    site: datadoghq.com
+    credentials:
+      apiSecret:
+        secretName: datadog-secret
+        keyName: api-key
+    endpoint:
+      url: http://lading-intake:8080
+
+  features:
+    logCollection:
+      enabled: true
+
+    prometheusScrape:
+      enabled: true
+      enableServiceEndpoints: true
+
+  override:
+    clusterAgent:
+      containers:
+        cluster-agent:
+          livenessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+          readinessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+    nodeAgent:
+      image:
+        name: gcr.io/datadoghq/agent:7.72.1
+      extraConfd:
+        configMap:
+          name: agent-logs-config
+      containers:
+        agent:
+          env:
+            - name: DD_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: DD_TAGS
+              value: "{{ DD_TAGS }}"
+          resources:
+            limits:
+              memory: "{{ AGENT_MEMORY_MB }}Mi"
+          volumeMounts:
+            - name: lading-logs
+              mountPath: /var/log/lading
+              readOnly: true
+      volumes:
+        - name: lading-logs
+          hostPath:
+            path: /var/log/lading
+            type: DirectoryOrCreate
+---
+# Log collection configuration for the agent
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-logs-config
+  namespace: default
+data:
+  lading.yaml: |
+    logs:
+      - type: file
+        path: /var/log/lading/*.log
+        service: lading-logrotate
+        source: lading
