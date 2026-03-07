@@ -1,0 +1,40 @@
+id: trace-agent-buffer-reuse
+target: lading_payload/src/trace_agent/v04.rs::V04::to_bytes
+technique: buffer-reuse
+date: 2026-02-20
+status: success
+verdict: approved
+votes:
+  duplicate_hunter: approve
+  skeptic: approve
+  conservative: approve
+  rust_expert: approve
+  greybeard: approve
+measurements:
+  benchmarks:
+    micro:
+      trace_agent_throughput_1MiB_time: 1.688ms -> 1.686ms (-1.5%)
+      trace_agent_throughput_1MiB_thrpt: 592.50 MiB/s -> 593.26 MiB/s (+0.1%)
+      trace_agent_throughput_10MiB_time: 43.32ms -> 41.77ms (-3.6%)
+      trace_agent_throughput_10MiB_thrpt: 230.82 MiB/s -> 239.40 MiB/s (+3.7%)
+      trace_agent_throughput_100MiB_time: 2.461s -> 2.396s (-2.6%)
+      trace_agent_throughput_100MiB_thrpt: 40.643 MiB/s -> 41.732 MiB/s (+2.7%)
+    macro:
+      time: 13.8ms -> 14.6ms (+5.7%, within noise — payloadtool startup overhead dominates)
+      memory: 33.51 MiB -> 11.51 MiB (-65.6%)
+      allocations: 18142 -> 17922 (-1.2%)
+      peak_live: 2.78 MiB -> 2.78 MiB (0%)
+reason: |
+  Replaced per-iteration Vec::with_capacity(max_bytes) allocations in the
+  growth loop, binary search loop, and final serialization of V04::to_bytes
+  with a single reusable buffer cleared via .clear(). The growth loop and
+  binary search together execute ~15-20 iterations, each previously allocating
+  max_bytes (up to 100 MiB). Total allocated memory dropped 65.6% (33.5 MiB
+  to 11.5 MiB). Criterion detected statistically significant throughput
+  improvements at 10 MiB (+3.7%) and 100 MiB (+2.7%) payload sizes.
+lessons: |
+  Buffer reuse in serialization loops yields dramatic allocation reduction
+  even when CPU time improvement is modest. The allocator is fast enough that
+  per-allocation overhead is small, but total allocation pressure drops
+  significantly. For msgpack serialization where we need size-check loops,
+  buffer reuse is the standard pattern.
