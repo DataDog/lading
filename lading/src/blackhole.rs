@@ -18,6 +18,7 @@ pub mod tcp;
 pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
+pub mod neper;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`].
@@ -52,6 +53,9 @@ pub enum Error {
     /// See [`crate::blackhole::otlp::Error`] for details.
     #[error(transparent)]
     Otlp(otlp::Error),
+    /// See [`crate::blackhole::neper::Error`] for details.
+    #[error(transparent)]
+    Neper(neper::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -101,6 +105,8 @@ pub enum Inner {
     Sqs(sqs::Config),
     /// See [`crate::blackhole::otlp::Config`] for details.
     Otlp(otlp::Config),
+    /// See [`crate::blackhole::neper::Config`] for details.
+    Neper(neper::Config),
 }
 
 #[derive(Debug)]
@@ -129,6 +135,8 @@ pub enum Server {
     Sqs(sqs::Sqs),
     /// See [`crate::blackhole::otlp::Otlp`] for details.
     Otlp(otlp::Otlp),
+    /// See [`crate::blackhole::neper::Neper`] for details.
+    Neper(neper::Neper),
 }
 
 impl Server {
@@ -169,6 +177,9 @@ impl Server {
             Inner::Otlp(conf) => {
                 Self::Otlp(otlp::Otlp::new(&config.general, &conf, &shutdown).map_err(Error::Otlp)?)
             }
+            Inner::Neper(conf) => {
+                Self::Neper(neper::Neper::new(config.general, &conf, shutdown))
+            }
         };
         Ok(server)
     }
@@ -196,6 +207,7 @@ impl Server {
             Server::Sqs(inner) => inner.run().await.map_err(Error::Sqs),
             Server::SplunkHec(inner) => inner.run().await.map_err(Error::SplunkHec),
             Server::Otlp(inner) => inner.run().await.map_err(Error::Otlp),
+            Server::Neper(inner) => inner.run().await.map_err(Error::Neper),
         }
     }
 }

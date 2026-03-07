@@ -77,13 +77,29 @@ RUN --mount=type=secret,id=aws_access_key_id \
     export RUSTC_WRAPPER=sccache && \
     cargo build --release --locked --bin lading --features logrotate_fs
 
-# Stage 3: Runtime
+# Stage 3: Build neper binaries
+FROM docker.io/debian:bookworm-20241202-slim AS neper-builder
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    libsctp-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/google/neper.git /tmp/neper \
+    && cd /tmp/neper \
+    && make \
+    && cp tcp_rr tcp_crr tcp_stream /usr/local/bin/ \
+    && rm -rf /tmp/neper
+
+# Stage 4: Runtime
 FROM docker.io/debian:bookworm-20241202-slim
 RUN apt-get update && apt-get install -y \
     libfuse3-dev=3.14.0-4 \
     fuse3=3.14.0-4 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/lading /usr/bin/lading
+COPY --from=neper-builder /usr/local/bin/tcp_rr /usr/local/bin/tcp_rr
+COPY --from=neper-builder /usr/local/bin/tcp_crr /usr/local/bin/tcp_crr
+COPY --from=neper-builder /usr/local/bin/tcp_stream /usr/local/bin/tcp_stream
 
 # Smoke test
 RUN ["/usr/bin/lading", "--help"]

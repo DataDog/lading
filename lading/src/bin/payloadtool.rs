@@ -493,6 +493,13 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             let conf = lading_payload::Config::TraceAgent(g.variant);
             generate_and_check(&conf, g.seed, total_bytes, g.maximum_block_size, args)
         }
+        generator::Inner::Neper(_) => {
+            if compute_fingerprint {
+                warn!("Neper not supported for fingerprinting");
+                return Ok(None);
+            }
+            unimplemented!("Neper not supported")
+        }
     }
 }
 
