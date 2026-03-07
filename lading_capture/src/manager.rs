@@ -31,9 +31,192 @@ use rustc_hash::FxHashMap;
 use state_machine::{Event, Operation, StateMachine};
 use tracing::{error, info, warn};
 
-/// Duration of a single `Accumulator` tick in milliseconds, drives the
-/// `CaptureManager` polling interval.
-const TICK_DURATION_MS: u128 = 1_000;
+/// Default duration of a single `Accumulator` tick in milliseconds.
+/// Can be overridden via [`CaptureManagerBuilder::tick_duration_ms`].
+pub const DEFAULT_TICK_DURATION_MS: u64 = 1_000;
+
+/// Signal watchers required by [`CaptureManager`].
+///
+/// Groups the three signal watchers to reduce argument count in constructors.
+#[derive(Debug)]
+pub struct SignalWatchers {
+    /// Watcher for shutdown signal.
+    pub shutdown: lading_signal::Watcher,
+    /// Watcher for experiment started signal.
+    pub experiment_started: lading_signal::Watcher,
+    /// Watcher for target running signal.
+    pub target_running: lading_signal::Watcher,
+}
+
+/// Builder for [`CaptureManager`].
+///
+/// # Example
+///
+/// ```ignore
+/// let manager = CaptureManagerBuilder::new(format)
+///     .flush_seconds(5)
+///     .tick_duration_ms(100)  // 10Hz sampling
+///     .expiration(Duration::from_secs(120))
+///     .shutdown(shutdown_watcher)
+///     .experiment_started(experiment_watcher)
+///     .target_running(target_watcher)
+///     .build();
+/// ```
+pub struct CaptureManagerBuilder<F: OutputFormat, C: Clock = RealClock> {
+    format: F,
+    flush_seconds: u64,
+    tick_duration_ms: u64,
+    expiration: Duration,
+    shutdown: Option<lading_signal::Watcher>,
+    experiment_started: Option<lading_signal::Watcher>,
+    target_running: Option<lading_signal::Watcher>,
+    clock: C,
+}
+
+impl<F: OutputFormat, C: Clock> std::fmt::Debug for CaptureManagerBuilder<F, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureManagerBuilder")
+            .field("flush_seconds", &self.flush_seconds)
+            .field("tick_duration_ms", &self.tick_duration_ms)
+            .field("expiration", &self.expiration)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F: OutputFormat> CaptureManagerBuilder<F, RealClock> {
+    /// Create a new builder with the given output format.
+    ///
+    /// Uses sensible defaults:
+    /// - `flush_seconds`: 1
+    /// - `tick_duration_ms`: 1000 (1Hz)
+    /// - `expiration`: 60 seconds
+    /// - `clock`: [`RealClock`]
+    pub fn new(format: F) -> Self {
+        Self {
+            format,
+            flush_seconds: 1,
+            tick_duration_ms: DEFAULT_TICK_DURATION_MS,
+            expiration: Duration::from_secs(60),
+            shutdown: None,
+            experiment_started: None,
+            target_running: None,
+            clock: RealClock::default(),
+        }
+    }
+}
+
+impl<F: OutputFormat, C: Clock> CaptureManagerBuilder<F, C> {
+    /// Set the flush interval in seconds.
+    #[must_use]
+    pub fn flush_seconds(mut self, seconds: u64) -> Self {
+        self.flush_seconds = seconds;
+        self
+    }
+
+    /// Set the tick duration in milliseconds.
+    ///
+    /// This controls the sampling frequency:
+    /// - 1000ms = 1Hz (default)
+    /// - 100ms = 10Hz
+    /// - 10ms = 100Hz
+    #[must_use]
+    pub fn tick_duration_ms(mut self, ms: u64) -> Self {
+        self.tick_duration_ms = ms;
+        self
+    }
+
+    /// Set the metric expiration duration.
+    #[must_use]
+    pub fn expiration(mut self, expiration: Duration) -> Self {
+        self.expiration = expiration;
+        self
+    }
+
+    /// Set the shutdown signal watcher (required).
+    #[must_use]
+    pub fn shutdown(mut self, watcher: lading_signal::Watcher) -> Self {
+        self.shutdown = Some(watcher);
+        self
+    }
+
+    /// Set the experiment started signal watcher (required).
+    #[must_use]
+    pub fn experiment_started(mut self, watcher: lading_signal::Watcher) -> Self {
+        self.experiment_started = Some(watcher);
+        self
+    }
+
+    /// Set the target running signal watcher (required).
+    #[must_use]
+    pub fn target_running(mut self, watcher: lading_signal::Watcher) -> Self {
+        self.target_running = Some(watcher);
+        self
+    }
+
+    /// Set all signal watchers at once (required).
+    #[must_use]
+    pub fn signals(mut self, signals: SignalWatchers) -> Self {
+        self.shutdown = Some(signals.shutdown);
+        self.experiment_started = Some(signals.experiment_started);
+        self.target_running = Some(signals.target_running);
+        self
+    }
+
+    /// Set a custom clock (for testing).
+    #[must_use]
+    pub fn clock<C2: Clock>(self, clock: C2) -> CaptureManagerBuilder<F, C2> {
+        CaptureManagerBuilder {
+            format: self.format,
+            flush_seconds: self.flush_seconds,
+            tick_duration_ms: self.tick_duration_ms,
+            expiration: self.expiration,
+            shutdown: self.shutdown,
+            experiment_started: self.experiment_started,
+            target_running: self.target_running,
+            clock,
+        }
+    }
+
+    /// Build the [`CaptureManager`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `shutdown`, `experiment_started`, or `target_running` were not set.
+    pub fn build(self) -> CaptureManager<F, C>
+    where
+        C: Clone + 'static,
+    {
+        let shutdown = self
+            .shutdown
+            .expect("shutdown watcher is required - call .shutdown()");
+        let experiment_started = self
+            .experiment_started
+            .expect("experiment_started watcher is required - call .experiment_started()");
+        let target_running = self
+            .target_running
+            .expect("target_running watcher is required - call .target_running()");
+
+        let registry = Arc::new(Registry::new(AtomicStorage));
+        let (snd, recv) = mpsc::channel(10_000);
+        let accumulator = Accumulator::new();
+
+        CaptureManager {
+            expiration: self.expiration,
+            format: self.format,
+            flush_seconds: self.flush_seconds,
+            tick_duration_ms: self.tick_duration_ms,
+            shutdown: Some(shutdown),
+            _experiment_started: experiment_started,
+            target_running,
+            registry,
+            accumulator,
+            global_labels: FxHashMap::default(),
+            snd,
+            recv,
+            clock: self.clock,
+        }
+    }
+}
 
 pub(crate) struct Sender {
     pub(crate) snd: mpsc::Sender<Metric>,
@@ -266,6 +449,8 @@ pub struct CaptureManager<F: OutputFormat, C: Clock = RealClock> {
     expiration: Duration,
     format: F,
     flush_seconds: u64,
+    /// Duration of a single tick in milliseconds (default: 1000ms = 1Hz)
+    tick_duration_ms: u64,
     shutdown: Option<lading_signal::Watcher>,
     _experiment_started: lading_signal::Watcher,
     target_running: lading_signal::Watcher,
@@ -287,35 +472,29 @@ impl<F: OutputFormat, C: Clock> std::fmt::Debug for CaptureManager<F, C> {
 }
 
 impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
-    /// Create a new [`CaptureManager`] with a custom format and clock
+    /// Create a new [`CaptureManager`] with a custom format and clock.
+    ///
+    /// Consider using [`CaptureManagerBuilder`] for a more ergonomic API.
+    ///
+    /// # Arguments
+    ///
+    /// * `tick_duration_ms` - Duration of a single tick in milliseconds (e.g., 1000 for 1Hz,
+    ///   500 for 2Hz, 100 for 10Hz). This controls the sampling frequency.
     pub fn new_with_format(
         format: F,
         flush_seconds: u64,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
+        tick_duration_ms: u64,
         expiration: Duration,
+        signals: SignalWatchers,
         clock: C,
     ) -> Self {
-        let registry = Arc::new(Registry::new(AtomicStorage));
-
-        let (snd, recv) = mpsc::channel(10_000); // total arbitrary constant
-        let accumulator = Accumulator::new();
-
-        Self {
-            expiration,
-            format,
-            flush_seconds,
-            shutdown: Some(shutdown),
-            _experiment_started: experiment_started,
-            target_running,
-            registry,
-            accumulator,
-            global_labels: FxHashMap::default(),
-            snd,
-            recv,
-            clock,
-        }
+        CaptureManagerBuilder::new(format)
+            .flush_seconds(flush_seconds)
+            .tick_duration_ms(tick_duration_ms)
+            .expiration(expiration)
+            .signals(signals)
+            .clock(clock)
+            .build()
     }
 
     /// Install the [`CaptureManager`] as global [`metrics::Recorder`]
@@ -374,7 +553,7 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
 
         let mut flush_interval = self
             .clock
-            .interval(Duration::from_millis(TICK_DURATION_MS as u64));
+            .interval(Duration::from_millis(self.tick_duration_ms));
         let shutdown_wait = self
             .shutdown
             .take()
@@ -387,6 +566,7 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
             self.expiration,
             self.format,
             self.flush_seconds,
+            self.tick_duration_ms,
             self.registry,
             self.accumulator,
             self.global_labels,
@@ -417,36 +597,40 @@ impl<F: OutputFormat, C: Clock + Clone + 'static> CaptureManager<F, C> {
 impl CaptureManager<formats::jsonl::Format<BufWriter<std::fs::File>>, RealClock> {
     /// Create a new [`CaptureManager`] with file-based JSONL writer
     ///
+    /// # Arguments
+    ///
+    /// * `tick_duration_ms` - Duration of a single tick in milliseconds (e.g., 1000 for 1Hz)
+    ///
     /// # Errors
     ///
     /// Function will error if the underlying capture file cannot be opened.
     pub async fn new_jsonl(
         capture_path: PathBuf,
         flush_seconds: u64,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
+        tick_duration_ms: u64,
         expiration: Duration,
+        signals: SignalWatchers,
     ) -> Result<Self, io::Error> {
         let fp = fs::File::create(&capture_path).await?;
         let fp = fp.into_std().await;
         let writer = BufWriter::new(fp);
         let format = jsonl::Format::new(writer);
 
-        Ok(Self::new_with_format(
-            format,
-            flush_seconds,
-            shutdown,
-            experiment_started,
-            target_running,
-            expiration,
-            RealClock::default(),
-        ))
+        Ok(CaptureManagerBuilder::new(format)
+            .flush_seconds(flush_seconds)
+            .tick_duration_ms(tick_duration_ms)
+            .expiration(expiration)
+            .signals(signals)
+            .build())
     }
 }
 
 impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealClock> {
     /// Create a new [`CaptureManager`] with file-based Parquet writer
+    ///
+    /// # Arguments
+    ///
+    /// * `tick_duration_ms` - Duration of a single tick in milliseconds (e.g., 1000 for 1Hz)
     ///
     /// # Errors
     ///
@@ -454,12 +638,11 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
     /// if Parquet writer creation fails.
     pub async fn new_parquet(
         capture_path: PathBuf,
-        flush_seconds: u64,
         compression_level: i32,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
+        flush_seconds: u64,
+        tick_duration_ms: u64,
         expiration: Duration,
+        signals: SignalWatchers,
     ) -> Result<Self, formats::Error> {
         let fp = fs::File::create(&capture_path)
             .await
@@ -468,15 +651,12 @@ impl CaptureManager<formats::parquet::Format<BufWriter<std::fs::File>>, RealCloc
         let writer = BufWriter::new(fp);
         let format = parquet::Format::new(writer, compression_level)?;
 
-        Ok(Self::new_with_format(
-            format,
-            flush_seconds,
-            shutdown,
-            experiment_started,
-            target_running,
-            expiration,
-            RealClock::default(),
-        ))
+        Ok(CaptureManagerBuilder::new(format)
+            .flush_seconds(flush_seconds)
+            .tick_duration_ms(tick_duration_ms)
+            .expiration(expiration)
+            .signals(signals)
+            .build())
     }
 }
 
@@ -492,18 +672,21 @@ impl
     /// is used to generate two output files: `{base_path}.jsonl` and
     /// `{base_path}.parquet`.
     ///
+    /// # Arguments
+    ///
+    /// * `tick_duration_ms` - Duration of a single tick in milliseconds (e.g., 1000 for 1Hz)
+    ///
     /// # Errors
     ///
     /// Function will error if either capture file cannot be opened or if
     /// format creation fails.
     pub async fn new_multi(
         base_path: PathBuf,
-        flush_seconds: u64,
         compression_level: i32,
-        shutdown: lading_signal::Watcher,
-        experiment_started: lading_signal::Watcher,
-        target_running: lading_signal::Watcher,
+        flush_seconds: u64,
+        tick_duration_ms: u64,
         expiration: Duration,
+        signals: SignalWatchers,
     ) -> Result<Self, formats::Error> {
         let jsonl_path = base_path.with_extension("jsonl");
         let parquet_path = base_path.with_extension("parquet");
@@ -524,15 +707,12 @@ impl
 
         let format = multi::Format::new(jsonl_format, parquet_format);
 
-        Ok(Self::new_with_format(
-            format,
-            flush_seconds,
-            shutdown,
-            experiment_started,
-            target_running,
-            expiration,
-            RealClock::default(),
-        ))
+        Ok(CaptureManagerBuilder::new(format)
+            .flush_seconds(flush_seconds)
+            .tick_duration_ms(tick_duration_ms)
+            .expiration(expiration)
+            .signals(signals)
+            .build())
     }
 }
 
