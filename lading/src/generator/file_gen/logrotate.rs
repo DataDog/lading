@@ -18,7 +18,10 @@ use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
+
+use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use byte_unit::Byte;
 use futures::future::join_all;
@@ -117,6 +120,10 @@ pub enum Error {
     ThrottleConversion(#[from] ThrottleConversionError),
 }
 
+fn default_flush_every() -> Duration {
+    Duration::MAX
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration of [`FileGen`]
@@ -150,6 +157,10 @@ pub struct Config {
     /// Throughput profile controlling emission rate (bytes or blocks).
     #[serde(default)]
     pub throttle: Option<ThrottleConfig>,
+    /// Force flush at a regular interval. Defaults to `Duration::MAX`.
+    /// Accepts human-readable durations (e.g., "1s", "500ms", "2s").
+    #[serde(default = "default_flush_every", with = "humantime_serde")]
+    pub flush_every: Duration,
 }
 
 #[derive(Debug)]
@@ -240,6 +251,7 @@ impl Server {
                 throughput_throttle,
                 shutdown.clone(),
                 child_labels,
+                config.flush_every,
             );
 
             handles.push(tokio::spawn(child.spin()));
@@ -290,6 +302,7 @@ struct Child {
     throttle: BlockThrottle,
     shutdown: lading_signal::Watcher,
     labels: Vec<(String, String)>,
+    flush_every: Duration,
 }
 
 impl Child {
@@ -303,6 +316,7 @@ impl Child {
         throttle: BlockThrottle,
         shutdown: lading_signal::Watcher,
         labels: Vec<(String, String)>,
+        flush_every: Duration,
     ) -> Self {
         let mut names = Vec::with_capacity((total_rotations + 1).into());
         names.push(PathBuf::from(basename));
@@ -325,6 +339,7 @@ impl Child {
             throttle,
             shutdown,
             labels,
+            flush_every,
         }
     }
 
@@ -335,6 +350,8 @@ impl Child {
             .maximum_capacity_bytes(self.maximum_block_size);
         let mut total_bytes_written: u64 = 0;
         let maximum_bytes_per_log: u64 = u64::from(self.maximum_bytes_per_log.get());
+        let mut flush_interval = interval_at(Instant::now() + self.flush_every, self.flush_every);
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         let total_names = self.names.len();
         // SAFETY: By construction there is guaranteed to be at least one name.
@@ -390,6 +407,9 @@ impl Child {
                         }
                     }
                 }
+                _tick = flush_interval.tick() => {
+                    fp.flush().await.map_err(|err| Error::IoFlush { err })?;
+                }
                 () = &mut shutdown_wait => {
                     fp.flush().await.map_err(|err| Error::IoFlush { err })?;
                     drop(fp);
@@ -401,7 +421,7 @@ impl Child {
         }
     }
 }
-
+/// Writes a block to the file, rotating if necessary.
 #[expect(clippy::too_many_arguments)]
 async fn write_bytes(
     blk: &block::Block,
@@ -480,6 +500,7 @@ async fn write_bytes(
                 })?,
         );
         *total_bytes_written = 0;
+        return Ok(());
     }
 
     Ok(())
