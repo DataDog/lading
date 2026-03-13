@@ -1,0 +1,6 @@
+lading:
+  version: 0.31.2
+
+target:
+  ddprof_replicas: 0
+  internal_profiling_replicas: 0
