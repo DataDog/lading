@@ -17,6 +17,7 @@
 #   !with       - bind one or more generated values into a local scope
 #   !var        - read back a value that was bound by an enclosing !with
 #   !timestamp  - deterministic monotonically-advancing UTC timestamp (whole-second RFC-3339)
+#   !concat     - generate each listed element and merge same-typed results left-to-right
 
 definitions:
   # !weighted: severity skewed toward INFO, with WARN and ERROR as tails
@@ -67,8 +68,6 @@ definitions:
   geo_country: !choose ["US", "DE", "JP", "GB", "FR", "IN", "BR", "AU"]
   geo_region:  !choose ["us-east-1", "us-west-2", "eu-west-1", "ap-northeast-1", "ap-south-1"]
 
-  # !join: concatenate sub-generators to produce a numeric-suffix request ID
-  # The number comes from !range; render_format_arg_string keeps it as digits.
   request_id_suffix:
     !range { min: 100000, max: 999999 }
 
@@ -125,10 +124,15 @@ generator:
             - !var svc
             - !reference request_id_suffix
 
+      # !concat: merge a fixed marker into a variable-length array of flag words.
+      # The constant singleton ["info"] is always present; zero to three additional
+      # words drawn from flag_words are appended via array splicing.
       flags:
-        !array
-          length: { min: 0, max: 3 }
-          element: !reference flag_words
+        !concat
+          - !const ["info"]
+          - !array
+              length: { min: 0, max: 3 }
+              element: !reference flag_words
 
       bytes:
         !array

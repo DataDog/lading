@@ -71,6 +71,7 @@ The config DSL in `opw_tools::json_generator` supports these YAML tags:
 - `!var`: read a bound variable
 - `!timestamp`: deterministic monotonically-advancing UTC timestamp (whole-second RFC-3339)
 - `!array`: generate a JSON array; element count is fixed, a uniform random range, or chosen from a set
+- `!concat`: generate each sub-generator in order and merge same-typed results left-to-right; strings are concatenated, array elements are appended, object fields are merged; type mismatches replace the accumulator
 
 ## Example template
 
@@ -121,12 +122,18 @@ generator:
         # or: length: 3
         # or: length: [1, 2, 4, 8, 16]
         element: !range { min: 0, max: 255 }
+      tags:
+        !concat
+          - !const ["app"]
+          - !array
+              length: { min: 0, max: 2 }
+              element: !choose ["debug", "trace", "perf"]
 ```
 
 This produces newline-delimited JSON like:
 
 ```json
-{"timestamp":"2024-03-01T12:00:00Z","level":"INFO","service":"api-gateway","request_id":"4821-583920-7341","duration_ms":142,"message":"api-gateway handled request in 89ms"}
+{"timestamp":"2024-03-01T12:00:00Z","level":"INFO","service":"api-gateway","request_id":"4821-583920-7341","duration_ms":142,"message":"api-gateway handled request in 89ms","data":[12,255,7,43],"tags":["app","debug"]}
 ```
 
 ## Authoring tips
@@ -136,6 +143,8 @@ This produces newline-delimited JSON like:
 - Use `!weighted` when you need realistic event distribution (for example, mostly INFO with fewer ERROR logs).
 - Keep the top-level `generator` producing one complete event per call so output lines stay self-contained.
 - `!timestamp` draws a random starting second from the RNG, then advances by a random 1--1000 ms increment on every call. Only whole seconds appear in the output. Because all randomness comes from the configured seed, output is fully reproducible.
+- Use `!concat` to grow arrays or objects incrementally: a fixed `!const` base provides guaranteed fields or elements, and one or more `!array` / `!object` generators append variable content. When types differ the later value replaces the accumulator, so `!concat` also works as a conditional override.
+- When concatenating objects, ensure the merged parts have disjoint keys. `!concat` splices raw JSON text without deduplicating fields, so overlapping keys produce an object with duplicate keys. The JSON specification permits this, but some parsers treat it as an error.
 
 ## Missing Features
 

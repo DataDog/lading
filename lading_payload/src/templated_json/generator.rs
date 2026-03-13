@@ -49,6 +49,7 @@ pub(super) enum Generator {
     Var(usize),
     Timestamp(Timestamp),
     Array(ArraySpec),
+    Concat(ConcatSpec),
 }
 
 pub(super) struct RangeSpec {
@@ -115,6 +116,34 @@ pub(super) enum ArrayLength {
 pub(super) struct ArraySpec {
     pub(super) length: ArrayLength,
     pub(super) element: Box<Generator>,
+}
+
+/// Initial byte capacity for each `!concat` scratch buffer.
+///
+/// Sized to hold a typical generated JSON value without reallocation. Both
+/// `current` and `next` start at this capacity and grow on demand if a
+/// particular value is larger.
+const CONCAT_SCRATCH_CAPACITY: usize = 256;
+
+/// Resolved `!concat` generator node.
+///
+/// Holds pre-allocated scratch buffers so the hot path never allocates.
+pub(super) struct ConcatSpec {
+    pub(super) parts: Vec<Generator>,
+    /// Accumulates the running merged result across parts.
+    current: RefCell<JsonString>,
+    /// Receives each new part before merging into `current`.
+    next: RefCell<JsonString>,
+}
+
+impl ConcatSpec {
+    pub(super) fn new(parts: Vec<Generator>) -> Self {
+        Self {
+            parts,
+            current: RefCell::new(JsonString::with_capacity(CONCAT_SCRATCH_CAPACITY)),
+            next: RefCell::new(JsonString::with_capacity(CONCAT_SCRATCH_CAPACITY)),
+        }
+    }
 }
 
 /// State for a single `!timestamp` generator node.
@@ -216,6 +245,8 @@ impl Generator {
             Self::Timestamp(ts) => ts.generate(rng, out)?,
 
             Self::Array(spec) => spec.generate(rng, ctx, defs, out)?,
+
+            Self::Concat(spec) => spec.generate(rng, ctx, defs, out)?,
         }
         Ok(())
     }
@@ -346,6 +377,41 @@ impl ArrayLength {
                 .choose(rng)
                 .ok_or_else(|| Error::TemplateError("!array length list is empty".to_string()))?,
         })
+    }
+}
+
+impl ConcatSpec {
+    /// Generate each part in order and fold the results via
+    /// [`JsonString::merge_concat`] into `out`.
+    ///
+    /// The generator tree is acyclic, so this method is never called
+    /// re-entrantly on the same `ConcatSpec` instance; `RefCell` borrows
+    /// therefore never panic.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any part generator fails.
+    pub(super) fn generate(
+        &self,
+        rng: &mut impl Rng,
+        ctx: &mut Context,
+        defs: &[Generator],
+        out: &mut JsonString,
+    ) -> Result<(), Error> {
+        if self.parts.is_empty() {
+            return Ok(());
+        }
+        let mut current = self.current.borrow_mut();
+        let mut next = self.next.borrow_mut();
+        current.clear();
+        self.parts[0].generate(rng, ctx, defs, &mut current)?;
+        for part in &self.parts[1..] {
+            next.clear();
+            part.generate(rng, ctx, defs, &mut next)?;
+            current.merge_concat(&mut next);
+        }
+        out.push_raw_str(current.as_str());
+        Ok(())
     }
 }
 

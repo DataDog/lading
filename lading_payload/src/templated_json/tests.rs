@@ -283,42 +283,37 @@ proptest! {
         let vgen = parse_generator(&yaml);
         prop_assert_eq!(run(&vgen, seed), json!(value));
     }
+}
 
-    // Bindings must be removed when the !with scope exits; two sibling !with
-    // blocks using the same key must not observe each other's values.
-    #[test]
-    fn with_binding_does_not_outlive_scope(seed in any::<u64>()) {
-        let vgen = parse_generator(
-            "!object\n  \
-               a:\n    \
-                 !with\n      \
-                   bind:\n        k: !const \"first\"\n      \
-                   in: !var k\n  \
-               b:\n    \
-                 !with\n      \
-                   bind:\n        k: !const \"second\"\n      \
-                   in: !var k",
-        );
-        let obj = run(&vgen, seed);
-        prop_assert_eq!(&obj["a"], &json!("first"));
-        prop_assert_eq!(&obj["b"], &json!("second"));
-    }
+// Bindings must be removed when the !with scope exits; two sibling !with
+// blocks using the same key must not observe each other's values.
+#[test]
+fn with_binding_does_not_outlive_scope() {
+    let vgen = parse_generator(
+        "!object\n  \
+           a:\n    \
+             !with\n      \
+               bind:\n        k: !const \"first\"\n      \
+               in: !var k\n  \
+           b:\n    \
+             !with\n      \
+               bind:\n        k: !const \"second\"\n      \
+               in: !var k",
+    );
+    let obj = run(&vgen, 0);
+    assert_eq!(&obj["a"], &json!("first"));
+    assert_eq!(&obj["b"], &json!("second"));
 }
 
 // ── !reference ─────────────────────────────────────────────────────────────
 
-proptest! {
-    // !reference must produce exactly what the named definition would produce.
-    #[test]
-    fn reference_delegates_to_definition(seed in any::<u64>()) {
-        let mut defs = FxHashMap::default();
-        defs.insert(
-            "my_def".to_string(),
-            parse_generator(r#"!const "defined""#),
-        );
-        let vgen = parse_generator("!reference my_def");
-        prop_assert_eq!(run_with_defs(&vgen, seed, &defs), json!("defined"));
-    }
+// !reference must produce exactly what the named definition would produce.
+#[test]
+fn reference_delegates_to_definition() {
+    let mut defs = FxHashMap::default();
+    defs.insert("my_def".to_string(), parse_generator(r#"!const "defined""#));
+    let vgen = parse_generator("!reference my_def");
+    assert_eq!(run_with_defs(&vgen, 0, &defs), json!("defined"));
 }
 
 // ── !timestamp ─────────────────────────────────────────────────────────────
@@ -370,11 +365,103 @@ generator: !timestamp
     }
 }
 
+// ── !concat ────────────────────────────────────────────────────────────────
+
+// Empty !concat list must be rejected at parse time.
+#[test]
+fn concat_empty_list_is_rejected() {
+    assert!(serde_yaml::from_str::<config::Generator>("!concat []").is_err());
+}
+
+proptest! {
+    // Two const strings must be joined without any separator.
+    #[test]
+    fn concat_two_strings(a in "[a-z]{1,8}", b in "[a-z]{1,8}") {
+        let yaml = format!("!concat\n  - !const \"{a}\"\n  - !const \"{b}\"");
+        let vgen = parse_generator(&yaml);
+        let val = run(&vgen, 0);
+        let expected = format!("{a}{b}");
+        prop_assert_eq!(val.as_str().expect("not a string"), expected.as_str());
+    }
+
+    // A single-element concat must produce the same output as the element alone.
+    #[test]
+    fn concat_single_element_identity(v in "[a-z]{1,8}") {
+        let yaml = format!("!concat\n  - !const \"{v}\"");
+        let vgen = parse_generator(&yaml);
+        prop_assert_eq!(run(&vgen, 0), serde_json::json!(v));
+    }
+
+    // Appending to an empty string must return only the non-empty operand.
+    #[test]
+    fn concat_string_with_empty(v in "[a-z]{1,8}") {
+        let yaml_prefix = format!("!concat\n  - !const \"\"\n  - !const \"{v}\"");
+        let yaml_suffix = format!("!concat\n  - !const \"{v}\"\n  - !const \"\"");
+        let vgen_prefix = parse_generator(&yaml_prefix);
+        let vgen_suffix = parse_generator(&yaml_suffix);
+        prop_assert_eq!(run(&vgen_prefix, 0), serde_json::json!(v));
+        prop_assert_eq!(run(&vgen_suffix, 0), serde_json::json!(v));
+    }
+}
+
+// Concatenating two objects merges their fields.
+#[test]
+fn concat_two_objects_merges_fields() {
+    let vgen =
+        parse_generator("!concat\n  - !object\n      a: !const 1\n  - !object\n      b: !const 2");
+    let val = run(&vgen, 0);
+    assert!(val.is_object(), "not a JSON object");
+    assert_eq!(val["a"].as_i64().unwrap(), 1);
+    assert_eq!(val["b"].as_i64().unwrap(), 2);
+}
+
+// Concatenating an empty object onto a non-empty object leaves it unchanged.
+#[test]
+fn concat_object_with_empty() {
+    let vgen = parse_generator("!concat\n  - !object\n      a: !const 1\n  - !object\n      {}");
+    let val = run(&vgen, 0);
+    assert!(val.is_object());
+    assert_eq!(val["a"].as_i64().unwrap(), 1);
+}
+
+// Concatenating two arrays appends their elements.
+#[test]
+fn concat_two_arrays_appends_elements() {
+    let vgen = parse_generator(
+        "!concat\n  - !array\n      length: 2\n      element: !const 1\n  \
+         - !array\n      length: 2\n      element: !const 2",
+    );
+    let val = run(&vgen, 0);
+    let arr = val.as_array().expect("not a JSON array");
+    assert_eq!(arr.len(), 4);
+    assert!(arr[0] == serde_json::json!(1) && arr[1] == serde_json::json!(1));
+    assert!(arr[2] == serde_json::json!(2) && arr[3] == serde_json::json!(2));
+}
+
+// Concatenating an empty array onto a non-empty array leaves it unchanged.
+#[test]
+fn concat_array_with_empty() {
+    let vgen = parse_generator(
+        "!concat\n  - !array\n      length: 2\n      element: !const 1\n  \
+         - !array\n      length: 0\n      element: !const 0",
+    );
+    let val = run(&vgen, 0);
+    let arr = val.as_array().expect("not a JSON array");
+    assert_eq!(arr.len(), 2);
+}
+
+// Type mismatch: the later value must replace the earlier one entirely.
+#[test]
+fn concat_type_mismatch_replaces() {
+    let vgen = parse_generator("!concat\n  - !const \"str\"\n  - !const 42");
+    assert_eq!(run(&vgen, 0), serde_json::json!(42));
+}
+
 // ── Determinism / no-panics ────────────────────────────────────────────────
 
 // A full template that exercises every tag through the complete TemplatedJson
 // pipeline: definitions, !reference, !with/!var, !weighted, !choose, !range,
-// !const, !format, !object, !timestamp.
+// !const, !format, !object, !timestamp, !concat.
 const DETERMINISTIC_TEMPLATE: &str = r#"
 definitions:
   pick: !choose ["x", "y", "z"]
@@ -410,6 +497,10 @@ generator:
           bind:
             inner: !reference pick
           in: !var inner
+      concat_str:
+        !concat
+          - !const "hello-"
+          - !var p
 "#;
 
 proptest! {
