@@ -29,6 +29,79 @@ impl JsonString {
         self.0.clear();
     }
 
+    /// Shorten the buffer to `len` bytes, dropping any trailing content.
+    ///
+    /// Callers must ensure `len` falls on a UTF-8 character boundary. In
+    /// practice this is always satisfied because we only truncate at the
+    /// position of a known ASCII terminator (`"`, `]`, or `}`).
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+
+    /// Merge `next` into `self` according to `!concat` semantics.
+    ///
+    /// Same-typed strings, arrays, and objects are spliced together by simple
+    /// suffix/prefix removal:
+    ///
+    /// - Both strings: the closing `"` is popped from `self` and the body of
+    ///   `next` (everything after its opening `"`) is appended, yielding one
+    ///   combined quoted string.
+    /// - Both arrays: the closing `]` is popped from `self`; a `,` separator
+    ///   is inserted unless `self` was an empty array (`[`); then the body of
+    ///   `next` (everything after its opening `[`) is appended.
+    /// - Both objects: same pattern as arrays, using `{` / `}`.
+    /// - Any other combination (type mismatch or non-concatenable scalar):
+    ///   `self` and `next` are swapped so that `self` holds the newer value.
+    ///   The caller is expected to clear `next` before its next use; no
+    ///   additional cleanup is needed here.
+    pub(super) fn merge_concat(&mut self, next: &mut Self) {
+        let cur_byte0 = self.as_str().as_bytes().first().copied();
+        let nxt_byte0 = next.as_str().as_bytes().first().copied();
+        match (cur_byte0, nxt_byte0) {
+            (Some(b'"'), Some(b'"')) => self.concat_delimited(next, "\"\"", false),
+            (Some(b'['), Some(b'[')) => self.concat_delimited(next, "[]", true),
+            (Some(b'{'), Some(b'{')) => self.concat_delimited(next, "{}", true),
+            _ => {
+                // Type mismatch or non-concatenable scalar: replace self with next via a zero-copy
+                // swap. The discarded value ends up in next to retain the allocated capacity, which
+                // we truncate to leave it empty.
+                std::mem::swap(self, next);
+                next.clear();
+            }
+        }
+    }
+
+    /// Append the body of `next` into `self` for any delimited JSON
+    /// type (strings, arrays, and objects).
+    ///
+    /// `empty` is the two-character sentinel for an empty value of this type
+    /// (e.g. `"\"\""` for strings, `"[]"` for arrays, `"{}"` for objects).
+    /// `needs_separator` controls whether a `','` is emitted between the
+    /// existing content and the new body; strings never need one, whereas
+    /// arrays and objects do.
+    ///
+    /// - If `next` is empty: no-op.
+    /// - If `self` is empty: swap `self` and `next` (zero-copy), then clear
+    ///   `next` so the caller starts the following iteration with a clean buffer.
+    /// - Otherwise: pop the trailing closing delimiter from `self`, optionally
+    ///   emit `','`, then append `next[1..]` (body + closing delimiter).
+    fn concat_delimited(&mut self, next: &mut Self, empty: &str, needs_separator: bool) {
+        if next.as_str() == empty {
+            return;
+        }
+        if self.as_str() == empty {
+            std::mem::swap(self, next);
+            next.clear();
+        } else {
+            let cur_len = self.as_str().len();
+            self.truncate(cur_len - 1);
+            if needs_separator {
+                self.push_char(',');
+            }
+            self.push_raw_str(&next.as_str()[1..]);
+        }
+    }
+
     pub(super) fn push_raw_str(&mut self, s: &str) {
         self.0.push_str(s);
     }

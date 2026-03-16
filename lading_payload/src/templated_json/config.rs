@@ -165,6 +165,60 @@ pub(super) enum Generator {
     ///   element: !reference my_def
     /// ```
     Array(ArraySpec),
+
+    /// Generate each sub-generator in order and concatenate the results.
+    ///
+    /// Adjacent results of the same JSON type (string, array, or object) are
+    /// merged by splicing their content together. When types differ the later
+    /// value replaces the earlier one. Duplicate object keys are not detected;
+    /// later values for the same key simply shadow earlier ones in the raw
+    /// JSON text.
+    ///
+    /// ```yaml
+    /// # String concat -> "hello world"
+    /// !concat
+    ///   - !const "hello"
+    ///   - !const " world"
+    ///
+    /// # Array concat -> [1,2,3,4]
+    /// !concat
+    ///   - !array
+    ///       length: 2
+    ///       element: !const 1
+    ///   - !array
+    ///       length: 2
+    ///       element: !const 2
+    ///
+    /// # Object concat -> {"a":1,"b":2}
+    /// !concat
+    ///   - !object
+    ///       a: !const 1
+    ///   - !object
+    ///       b: !const 2
+    /// ```
+    Concat(ConcatSpec),
+}
+
+// ── Concat spec ───────────────────────────────────────────────────────────────
+
+/// Configuration for a `!concat` generator node: a non-empty sequence of
+/// sub-generators whose outputs are merged left-to-right.
+#[derive(Clone)]
+pub(super) struct ConcatSpec(pub Vec<Generator>);
+
+impl<'de> Deserialize<'de> for ConcatSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let parts = Vec::<Generator>::deserialize(deserializer)?;
+        if parts.is_empty() {
+            return Err(<D::Error as serde::de::Error>::custom(
+                "!concat list must not be empty",
+            ));
+        }
+        Ok(Self(parts))
+    }
 }
 
 // ── Array types ───────────────────────────────────────────────────────────────

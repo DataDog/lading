@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use super::config::{ArraySpec, FormatSpec, ObjectFields, WeightedList, WithSpec};
+use super::config::{ArraySpec, ConcatSpec, FormatSpec, ObjectFields, WeightedList, WithSpec};
 use super::{TemplateConfig, config, generator};
 use crate::Error;
 
@@ -210,6 +210,7 @@ impl config::Generator {
             Self::Object(fields) => fields.resolve(resolver)?,
             Self::Timestamp => generator::Generator::Timestamp(generator::Timestamp::new()),
             Self::Array(spec) => spec.resolve(resolver)?,
+            Self::Concat(spec) => spec.resolve(resolver)?,
         })
     }
 }
@@ -341,6 +342,24 @@ impl ArraySpec {
             length,
             element,
         }))
+    }
+}
+
+impl ConcatSpec {
+    /// Resolve each part generator into its indexed counterpart.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any part generator fails to resolve.
+    fn resolve(self, resolver: &mut Resolver) -> Result<generator::Generator, Error> {
+        let parts = self
+            .0
+            .into_iter()
+            .map(|p| p.resolve(resolver))
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(generator::Generator::Concat(generator::ConcatSpec::new(
+            parts,
+        )))
     }
 }
 

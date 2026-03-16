@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Added
+- Added new `!concat` generator to the `templated_json` payload generator.
+
 ## [0.31.2]
 ## Changed
 - Work around tight error loop when a generated block exceeds the throttle's
