@@ -329,7 +329,13 @@ impl StringListPool {
     fn expand_range(range: &PatternRange) -> Vec<String> {
         match range {
             PatternRange::Char(start, end) => (*start..=*end).map(|c| c.to_string()).collect(),
-            PatternRange::Number(start, end) => (*start..=*end).map(|n| n.to_string()).collect(),
+            PatternRange::Number(start, end) => {
+                let numdigits = std::cmp::max(start.to_string().len(), end.to_string().len());
+
+                (*start..=*end)
+                    .map(|n| format!("{:0numdigits$}", n, numdigits = numdigits))
+                    .collect()
+            }
         }
     }
 
@@ -434,6 +440,12 @@ mod test {
     fn parse_range_number() {
         let range = StringListPool::parse_range("1-10");
         assert_eq!(range, Some(PatternRange::Number(1, 10)));
+    }
+
+    #[test]
+    fn parse_range_multidigit_number() {
+        let range = StringListPool::parse_range("102-10234");
+        assert_eq!(range, Some(PatternRange::Number(102, 10234)));
     }
 
     #[test]
@@ -796,6 +808,24 @@ mod test {
     fn pattern_large_number_range() {
         let result = StringListPool::expand_single_pattern("{{10-12}}");
         assert_eq!(result, vec!["10", "11", "12"]);
+    }
+
+    #[test]
+    fn pattern_large_number_different_lengths_range() {
+        let result = StringListPool::expand_single_pattern("{{8-12}}");
+        assert_eq!(result, vec!["08", "09", "10", "11", "12"]);
+    }
+
+    #[test]
+    fn pattern_large_number_different_lengths_huge_range() {
+        let result = StringListPool::expand_single_pattern("{{8-120}}");
+
+        assert_eq!(
+            result,
+            (8..=120)
+                .map(|num| format!("{:03}", num))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
