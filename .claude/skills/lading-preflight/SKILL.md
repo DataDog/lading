@@ -1,6 +1,6 @@
 ---
 name: lading-preflight
-description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, build, benchmarking tools, profilers, memory tools, and git state.
+description: Environment validation checklist. Run this FIRST when starting a new Claude session to verify the environment is ready for optimization work. Checks Rust toolchain, ci/ scripts, build, benchmarking tools, profilers, memory tools, git state, and SMP CLI.
 allowed-tools: Bash
 context: fork
 ---
@@ -11,9 +11,11 @@ context: fork
 .claude/skills/lading-preflight/scripts/preflight
 ```
 
-**STOP on any failure.** Use the table below to resolve `[X]` items:
+**STOP on any failure.** Use the table below to suggest fixes for `[X]` items.
 
-# Offer suggestions
+# Offer suggestions then ask before proceeding
+
+For each failed check, show the user the suggested fix from the table below and **ask if they want you to run it**. Do NOT automatically execute fixes — wait for user confirmation before taking action.
 
 | Failed Check                             | Fix                                                               |
 | ---------------------------------------- | ----------------------------------------------------------------- |
@@ -29,3 +31,6 @@ context: fork
 | payloadtool --memory-stats not supported | Rebuild payloadtool from current branch                           |
 | git user.name not set                    | `git config user.name "Your Name"`                                |
 | git user.email not set                   | `git config user.email "you@example.com"`                         |
+| gh not found                             | `brew install gh`                                                 |
+| aws CLI not found                        | `brew install awscli`                                             |
+| smp not found                            | `.claude/skills/lading-preflight/scripts/install_smp`             |
