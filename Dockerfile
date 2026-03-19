@@ -18,7 +18,7 @@ ENV CARGO_INCREMENTAL=0
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
-    libssl-dev=3.0.17-1~deb12u3 \
+    libssl-dev=3.0.18-1~deb12u2 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
@@ -56,7 +56,7 @@ ENV SCCACHE_REGION=${SCCACHE_REGION}
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
-    libssl-dev=3.0.17-1~deb12u3 \
+    libssl-dev=3.0.18-1~deb12u2 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
