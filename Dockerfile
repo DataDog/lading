@@ -43,7 +43,7 @@ RUN --mount=type=secret,id=aws_access_key_id \
     export AWS_ACCESS_KEY_ID=$(cat /run/secrets/aws_access_key_id) && \
     export AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/aws_secret_access_key) && \
     export AWS_SESSION_TOKEN=$(cat /run/secrets/aws_session_token) && \
-    export RUSTC_WRAPPER=sccache && \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then export RUSTC_WRAPPER=sccache; fi && \
     cargo chef cook --release --locked --features logrotate_fs --recipe-path recipe.json
 
 # Stage 2: Builder - Build source code
@@ -74,7 +74,7 @@ RUN --mount=type=secret,id=aws_access_key_id \
     export AWS_ACCESS_KEY_ID=$(cat /run/secrets/aws_access_key_id) && \
     export AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/aws_secret_access_key) && \
     export AWS_SESSION_TOKEN=$(cat /run/secrets/aws_session_token) && \
-    export RUSTC_WRAPPER=sccache && \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then export RUSTC_WRAPPER=sccache; fi && \
     cargo build --release --locked --bin lading --features logrotate_fs
 
 # Stage 3: Runtime
