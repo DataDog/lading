@@ -30,12 +30,18 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 arbitrary = { version = "1", optional = true, features = ["derive"] }
 enum_dispatch = { workspace = true }
+barkus-core = { workspace = true }
+barkus-ebnf = { workspace = true }
+barkus-peg = { workspace = true }
+barkus-antlr = { workspace = true }
+rand_0_8 = { package = "rand", version = "0.8", default-features = false, features = ["small_rng"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 criterion = { version = "0.8", features = ["html_reports"] }
 rustc-hash = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 default = []
