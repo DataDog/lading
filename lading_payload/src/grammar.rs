@@ -6,6 +6,9 @@
 
 use std::{io::Write, path::PathBuf};
 
+use barkus_core::error::GenerateError;
+use barkus_core::generate;
+use barkus_core::profile::Profile;
 use rand::Rng;
 use rand_0_8::SeedableRng;
 use serde::Deserialize;
@@ -13,9 +16,15 @@ use tracing::warn;
 
 use crate::Error;
 
+/// Rand 0.8 `SmallRng`, bridging lading's rand 0.9 to barkus's rand 0.8.
+type BarkusRng = rand_0_8::rngs::SmallRng;
+
 /// Maximum number of consecutive generation failures (empty output or budget
 /// exhaustion) before we stop retrying and return what we have so far.
 const MAX_CONSECUTIVE_FAILURES: u32 = 1_000;
+
+/// Default max recursion depth for grammar generation.
+const DEFAULT_MAX_DEPTH: u32 = 30;
 
 /// Grammar format understood by the parser.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq)]
@@ -30,11 +39,6 @@ pub enum GrammarFormat {
     Antlr,
 }
 
-/// Default max recursion depth for grammar generation.
-const fn default_max_depth() -> Option<u32> {
-    Some(30)
-}
-
 /// Configuration for the grammar-based payload generator.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -45,7 +49,7 @@ pub struct Config {
     /// Grammar format.
     pub format: GrammarFormat,
     /// Max recursion depth (default 30).
-    #[serde(default = "default_max_depth")]
+    #[serde(default)]
     pub max_depth: Option<u32>,
     /// Max total AST nodes per sample (default 20000).
     #[serde(default)]
@@ -55,7 +59,7 @@ pub struct Config {
 /// Grammar-based payload generator backed by barkus.
 pub struct Grammar {
     grammar_ir: barkus_core::ir::GrammarIr,
-    profile: barkus_core::profile::Profile,
+    profile: Profile,
 }
 
 impl std::fmt::Debug for Grammar {
@@ -92,10 +96,8 @@ impl Grammar {
             }
         };
 
-        let mut builder = barkus_core::profile::Profile::builder();
-        if let Some(depth) = config.max_depth {
-            builder = builder.max_depth(depth);
-        }
+        let mut builder = Profile::builder();
+        builder = builder.max_depth(config.max_depth.unwrap_or(DEFAULT_MAX_DEPTH));
         if let Some(nodes) = config.max_total_nodes {
             builder = builder.max_total_nodes(nodes);
         }
@@ -138,17 +140,13 @@ impl crate::Serialize for Grammar {
         // affects the outer RNG state. Determinism is preserved as long as
         // both the seed and the grammar behaviour are identical.
         let seed: u64 = rng.random();
-        let mut barkus_rng = rand_0_8::rngs::SmallRng::seed_from_u64(seed);
+        let mut barkus_rng = BarkusRng::seed_from_u64(seed);
 
         let mut bytes_remaining = max_bytes;
         let mut consecutive_failures: u32 = 0;
 
         loop {
-            match barkus_core::generate::generate(
-                &self.grammar_ir,
-                &self.profile,
-                &mut barkus_rng,
-            ) {
+            match generate::generate(&self.grammar_ir, &self.profile, &mut barkus_rng) {
                 Ok((ast, _tape, _tape_map)) => {
                     let sample = ast.serialize();
                     if sample.is_empty() {
@@ -168,7 +166,7 @@ impl crate::Serialize for Grammar {
                     writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
-                Err(barkus_core::error::GenerateError::BudgetExhausted { .. }) => {
+                Err(GenerateError::BudgetExhausted { .. }) => {
                     // Budget exhaustion is expected for complex grammars —
                     // retry with a fresh seed so we don't get stuck.
                     consecutive_failures += 1;
@@ -176,7 +174,7 @@ impl crate::Serialize for Grammar {
                         break;
                     }
                     let retry_seed: u64 = rng.random();
-                    barkus_rng = rand_0_8::rngs::SmallRng::seed_from_u64(retry_seed);
+                    barkus_rng = BarkusRng::seed_from_u64(retry_seed);
                 }
             }
         }
@@ -193,7 +191,7 @@ impl crate::Serialize for Grammar {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::Serialize as _;
+
     use proptest::prelude::*;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
@@ -217,6 +215,15 @@ mod test {
         (dir, config)
     }
 
+    /// Call `to_bytes` on a `Grammar` instance (brings `crate::Serialize`
+    /// into scope without an `as` import).
+    fn generate_bytes(grammar: &mut Grammar, rng: SmallRng, max_bytes: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        crate::Serialize::to_bytes(grammar, rng, max_bytes, &mut buf)
+            .expect("to_bytes should not fail");
+        buf
+    }
+
     // ── EBNF ────────────────────────────────────────────────────────────
 
     #[test]
@@ -225,9 +232,7 @@ mod test {
         let (_dir, config) = config_from_source(source, GrammarFormat::Ebnf, "ebnf");
 
         let mut grammar = Grammar::new(&config).unwrap();
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut buf = Vec::new();
-        grammar.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        let buf = generate_bytes(&mut grammar, SmallRng::seed_from_u64(42), 1024);
 
         assert!(!buf.is_empty(), "grammar should produce non-empty output");
         let output = String::from_utf8_lossy(&buf);
@@ -251,11 +256,12 @@ mod test {
         let (_dir, config) = config_from_source(source, GrammarFormat::Peg, "peg");
 
         let mut grammar = Grammar::new(&config).unwrap();
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut buf = Vec::new();
-        grammar.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        let buf = generate_bytes(&mut grammar, SmallRng::seed_from_u64(42), 1024);
 
-        assert!(!buf.is_empty(), "PEG grammar should produce non-empty output");
+        assert!(
+            !buf.is_empty(),
+            "PEG grammar should produce non-empty output"
+        );
         for line in String::from_utf8_lossy(&buf).lines() {
             assert!(
                 line == "hello" || line == "world",
@@ -272,9 +278,7 @@ mod test {
         let (_dir, config) = config_from_source(source, GrammarFormat::Antlr, "g4");
 
         let mut grammar = Grammar::new(&config).unwrap();
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut buf = Vec::new();
-        grammar.to_bytes(&mut rng, 1024, &mut buf).unwrap();
+        let buf = generate_bytes(&mut grammar, SmallRng::seed_from_u64(42), 1024);
 
         assert!(
             !buf.is_empty(),
@@ -334,14 +338,8 @@ mod test {
         let mut grammar1 = Grammar::new(&config).unwrap();
         let mut grammar2 = Grammar::new(&config).unwrap();
 
-        let mut buf1 = Vec::new();
-        let mut buf2 = Vec::new();
-        grammar1
-            .to_bytes(SmallRng::seed_from_u64(123), 2048, &mut buf1)
-            .unwrap();
-        grammar2
-            .to_bytes(SmallRng::seed_from_u64(123), 2048, &mut buf2)
-            .unwrap();
+        let buf1 = generate_bytes(&mut grammar1, SmallRng::seed_from_u64(123), 2048);
+        let buf2 = generate_bytes(&mut grammar2, SmallRng::seed_from_u64(123), 2048);
 
         assert_eq!(buf1, buf2, "same seed must produce identical output");
     }
@@ -355,9 +353,7 @@ mod test {
             let source = "item = \"abcdefghij\" ;";
             let (_dir, config) = config_from_source(source, GrammarFormat::Ebnf, "ebnf");
             let mut grammar = Grammar::new(&config).unwrap();
-            let mut rng = SmallRng::seed_from_u64(seed);
-            let mut buf = Vec::new();
-            grammar.to_bytes(&mut rng, max_bytes, &mut buf).unwrap();
+            let buf = generate_bytes(&mut grammar, SmallRng::seed_from_u64(seed), max_bytes);
             prop_assert!(
                 buf.len() <= max_bytes,
                 "output {} bytes exceeds budget of {max_bytes}",
@@ -373,10 +369,7 @@ mod test {
         let source = "item = \"hello\" ;";
         let (_dir, config) = config_from_source(source, GrammarFormat::Ebnf, "ebnf");
         let mut grammar = Grammar::new(&config).unwrap();
-        let mut buf = Vec::new();
-        grammar
-            .to_bytes(SmallRng::seed_from_u64(1), 0, &mut buf)
-            .unwrap();
+        let buf = generate_bytes(&mut grammar, SmallRng::seed_from_u64(1), 0);
         assert!(buf.is_empty());
     }
 }
