@@ -21,6 +21,7 @@ pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
 pub use dogstatsd::DogStatsD;
 pub use fluent::Fluent;
+pub use grammar::Grammar;
 pub use json::Json;
 pub use opentelemetry::log::OpentelemetryLogs;
 pub use opentelemetry::metric::OpentelemetryMetrics;
@@ -37,6 +38,7 @@ pub mod common;
 pub mod datadog_logs;
 pub mod dogstatsd;
 pub mod fluent;
+pub mod grammar;
 pub mod json;
 pub mod opentelemetry;
 pub mod procfs;
@@ -88,6 +90,9 @@ pub enum Error {
     /// Template generation error (invalid references, unbound variables, etc.)
     #[error("Template generation error: {0}")]
     TemplateError(String),
+    /// Grammar parse or compilation error
+    #[error("Grammar error: {0}")]
+    Grammar(String),
 }
 
 /// To serialize into bytes
@@ -171,6 +176,8 @@ pub enum Config {
         /// startup and can be shared across multiple lading configs.
         template_path: PathBuf,
     },
+    /// Generates payloads from a grammar file via barkus
+    Grammar(crate::grammar::Config),
 }
 
 /// Unified payload type for all serializers
@@ -207,6 +214,8 @@ pub enum Payload {
     TraceAgent(crate::trace_agent::v04::V04),
     /// JSON generated from a user-supplied template file
     TemplatedJson(TemplatedJson),
+    /// Grammar-based payload via barkus
+    Grammar(Grammar),
 }
 
 impl Serialize for Payload {
@@ -231,6 +240,7 @@ impl Serialize for Payload {
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TemplatedJson(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::Grammar(ser) => ser.to_bytes(rng, max_bytes, writer),
         }
     }
 

@@ -401,6 +401,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "barkus-antlr"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/barkus?rev=f05fbe4cd82b1cf4e87339f1f42f8940f037310f#f05fbe4cd82b1cf4e87339f1f42f8940f037310f"
+dependencies = [
+ "barkus-core",
+ "barkus-parser-common",
+]
+
+[[package]]
+name = "barkus-core"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/barkus?rev=f05fbe4cd82b1cf4e87339f1f42f8940f037310f#f05fbe4cd82b1cf4e87339f1f42f8940f037310f"
+dependencies = [
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barkus-ebnf"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/barkus?rev=f05fbe4cd82b1cf4e87339f1f42f8940f037310f#f05fbe4cd82b1cf4e87339f1f42f8940f037310f"
+dependencies = [
+ "barkus-core",
+ "barkus-parser-common",
+]
+
+[[package]]
+name = "barkus-parser-common"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/barkus?rev=f05fbe4cd82b1cf4e87339f1f42f8940f037310f#f05fbe4cd82b1cf4e87339f1f42f8940f037310f"
+dependencies = [
+ "barkus-core",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "barkus-peg"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/barkus?rev=f05fbe4cd82b1cf4e87339f1f42f8940f037310f#f05fbe4cd82b1cf4e87339f1f42f8940f037310f"
+dependencies = [
+ "barkus-core",
+ "barkus-parser-common",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1975,6 +2021,10 @@ name = "lading-payload"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "barkus-antlr",
+ "barkus-core",
+ "barkus-ebnf",
+ "barkus-peg",
  "byte-unit",
  "bytes",
  "criterion",
@@ -1983,6 +2033,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "prost",
+ "rand 0.8.5",
  "rand 0.9.2",
  "rmp-serde",
  "rustc-hash",
@@ -1990,6 +2041,7 @@ dependencies = [
  "serde_json",
  "serde_tuple",
  "serde_yaml",
+ "tempfile",
  "thiserror 2.0.17",
  "time",
  "tokio",
