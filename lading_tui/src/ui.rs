@@ -104,7 +104,11 @@ fn draw_template_editor_text(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = Vec::with_capacity(viewport_h);
     for row_idx in app.template_scroll..(app.template_scroll + viewport_h) {
-        let line_content = app.template_lines.get(row_idx).map(|s| s.as_str()).unwrap_or("");
+        let line_content = app
+            .template_lines
+            .get(row_idx)
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let num_span = Span::styled(
             format!("{:>width$} ", row_idx + 1, width = line_num_w - 1),
             Style::default().fg(Color::DarkGray),
@@ -113,12 +117,23 @@ fn draw_template_editor_text(frame: &mut Frame, app: &App, area: Rect) {
         if row_idx == app.template_cursor_row {
             let col = app.template_cursor_col.min(line_content.len());
             let before = &line_content[..col];
-            let cursor_ch = line_content[col..].chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
-            let after = if col < line_content.len() { &line_content[col + cursor_ch.len()..] } else { "" };
+            let cursor_ch = line_content[col..]
+                .chars()
+                .next()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| " ".to_string());
+            let after = if col < line_content.len() {
+                &line_content[col + cursor_ch.len()..]
+            } else {
+                ""
+            };
             lines.push(Line::from(vec![
                 num_span,
                 Span::raw(before.to_string()),
-                Span::styled(cursor_ch, Style::default().bg(Color::Yellow).fg(Color::Black)),
+                Span::styled(
+                    cursor_ch,
+                    Style::default().bg(Color::Yellow).fg(Color::Black),
+                ),
                 Span::raw(after.to_string()),
             ]));
         } else {
@@ -139,7 +154,9 @@ fn draw_template_editor_text(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let title_style = if app.template_just_saved {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
@@ -149,8 +166,7 @@ fn draw_template_editor_text(frame: &mut Frame, app: &App, area: Rect) {
         .title(format!(" Template Editor{title_suffix} "))
         .title_style(title_style);
 
-    let para = Paragraph::new(lines)
-        .block(block);
+    let para = Paragraph::new(lines).block(block);
     frame.render_widget(para, area);
 
     // Error line at the very bottom of the editor if any
@@ -220,7 +236,15 @@ fn draw_template_reference(frame: &mut Frame, area: Rect) {
 
  Tip: Tab inserts 2 spaces.
 ";
-    let lines: Vec<Line> = text.lines().map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::DarkGray)))).collect();
+    let lines: Vec<Line> = text
+        .lines()
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ))
+        })
+        .collect();
     let para = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" Reference "))
         .wrap(Wrap { trim: false });
@@ -251,8 +275,7 @@ fn draw_left(frame: &mut Frame, app: &App, area: Rect) {
     let mut state = ListState::default();
     state.select(Some(highlight_idx));
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Build "));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Build "));
     frame.render_stateful_widget(list, list_area, &mut state);
 
     if let (Some(err_area), Some(err)) = (error_area, &app.error) {
@@ -281,9 +304,13 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                 let label = variant_meta(app.selected_variant()).label;
                 let label_str = format!("  {arrow} {:<width$}", "Variant", width = LABEL_W - 4);
                 let row_style = if focused && !app.variant_expanded {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -291,7 +318,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     Span::styled(label_str, row_style),
                     Span::styled(label.to_string(), Style::default().fg(Color::Cyan)),
                 ])));
-                if focused && !app.variant_expanded { highlight_idx = item_idx; }
+                if focused && !app.variant_expanded {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
 
                 // Inline sub-list when expanded
@@ -302,7 +331,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                         let is_highlighted = vi == app.variant_sub_cursor;
                         let prefix = if is_selected { "     ✓ " } else { "       " };
                         let sub_style = if is_highlighted {
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
                         } else if is_selected {
                             Style::default().fg(Color::Green)
                         } else {
@@ -312,21 +343,30 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                             format!("{prefix}{}", meta.label),
                             sub_style,
                         ))));
-                        if is_highlighted { highlight_idx = item_idx; }
+                        if is_highlighted {
+                            highlight_idx = item_idx;
+                        }
                         item_idx += 1;
                     }
                 }
             }
 
             FormRow::LoadProfile => {
-                let arrow = if app.load_profile_expanded { "▼" } else { "▶" };
+                let arrow = if app.load_profile_expanded {
+                    "▼"
+                } else {
+                    "▶"
+                };
                 let lp_label = match app.load_profile_kind {
                     LoadProfileKind::Constant => "constant",
-                    LoadProfileKind::Linear   => "linear",
+                    LoadProfileKind::Linear => "linear",
                 };
-                let label_str = format!("  {arrow} {:<width$}", "Load Profile", width = LABEL_W - 4);
+                let label_str =
+                    format!("  {arrow} {:<width$}", "Load Profile", width = LABEL_W - 4);
                 let row_style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -334,7 +374,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     Span::styled(label_str, row_style),
                     Span::styled(lp_label.to_string(), Style::default().fg(Color::Cyan)),
                 ])));
-                if focused && !app.load_profile_expanded { highlight_idx = item_idx; }
+                if focused && !app.load_profile_expanded {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
 
                 if app.load_profile_expanded {
@@ -342,7 +384,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     for (oi, &opt) in options.iter().enumerate() {
                         let is_cur = oi == app.load_profile_sub_cursor;
                         let sub_style = if is_cur {
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(Color::DarkGray)
                         };
@@ -350,7 +394,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                             format!("       {opt}"),
                             sub_style,
                         ))));
-                        if is_cur { highlight_idx = item_idx; }
+                        if is_cur {
+                            highlight_idx = item_idx;
+                        }
                         item_idx += 1;
                     }
                 }
@@ -360,7 +406,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                 let arrow = if app.generator_expanded { "▼" } else { "▶" };
                 let label_str = format!("  {arrow} {:<width$}", "Generator", width = LABEL_W - 4);
                 let row_style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().add_modifier(Modifier::BOLD)
                 };
@@ -368,7 +416,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     Span::styled(label_str, row_style),
                     Span::styled("logrotate_fs", Style::default().fg(Color::DarkGray)),
                 ])));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
 
@@ -380,7 +430,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     n => format!("{n} entr{}", if n == 1 { "y" } else { "ies" }),
                 };
                 let row_style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().add_modifier(Modifier::BOLD)
                 };
@@ -388,16 +440,24 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     Span::styled(label_str, row_style),
                     Span::styled(count_str, Style::default().fg(Color::DarkGray)),
                 ])));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
 
             FormRow::BlackholeEntry(i) => {
                 let entry = &app.blackhole_entries[i];
                 let kind_str = format!("    {:<8}", entry.kind.label());
-                let addr_str = if editing { app.input.clone() } else { entry.addr.clone() };
+                let addr_str = if editing {
+                    app.input.clone()
+                } else {
+                    entry.addr.clone()
+                };
                 let kind_style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -417,7 +477,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     ));
                 }
                 items.push(ListItem::new(Line::from(spans)));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
 
@@ -428,7 +490,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     format!(" {}", app.template_path)
                 };
                 let style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -436,13 +500,17 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     Span::styled("    Edit template", style),
                     Span::styled(path_hint, Style::default().fg(Color::DarkGray)),
                 ])));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
 
             FormRow::BlackholeAddEntry => {
                 let style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -450,7 +518,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     "    + Add entry",
                     style,
                 ))));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
 
@@ -459,7 +529,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                 let (label, value) = form_row_display(app, row);
                 let label_str = format!("    {label:<width$}", width = LABEL_W);
                 let label_style = if focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -479,7 +551,9 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                     ));
                 }
                 items.push(ListItem::new(Line::from(spans)));
-                if focused { highlight_idx = item_idx; }
+                if focused {
+                    highlight_idx = item_idx;
+                }
                 item_idx += 1;
             }
         }
@@ -497,42 +571,46 @@ fn form_row_display(app: &App, row: FormRow) -> (&'static str, String) {
         app.input.clone()
     } else {
         match row {
-            FormRow::ConfigPath        => app.save_path.clone(),
-            FormRow::ConcurrentLogs    => app.concurrent_logs.to_string(),
-            FormRow::MaxBytesPerLog    => app.max_bytes_per_log.clone(),
-            FormRow::TotalRotations    => app.total_rotations.to_string(),
-            FormRow::MaxDepth          => app.max_depth.to_string(),
-            FormRow::MountPoint        => app.mount_point.clone(),
-            FormRow::ConstantRate      => app.constant_rate.clone(),
-            FormRow::LinearInitial     => app.linear_initial.clone(),
-            FormRow::LinearRate        => app.linear_rate.clone(),
-            FormRow::MaxPrebuildCache  => app.max_prebuild_cache.clone(),
-            FormRow::MaxBlockSize      => app.max_block_size.clone(),
+            FormRow::ConfigPath => app.save_path.clone(),
+            FormRow::ConcurrentLogs => app.concurrent_logs.to_string(),
+            FormRow::MaxBytesPerLog => app.max_bytes_per_log.clone(),
+            FormRow::TotalRotations => app.total_rotations.to_string(),
+            FormRow::MaxDepth => app.max_depth.to_string(),
+            FormRow::MountPoint => app.mount_point.clone(),
+            FormRow::ConstantRate => app.constant_rate.clone(),
+            FormRow::LinearInitial => app.linear_initial.clone(),
+            FormRow::LinearRate => app.linear_rate.clone(),
+            FormRow::MaxPrebuildCache => app.max_prebuild_cache.clone(),
+            FormRow::MaxBlockSize => app.max_block_size.clone(),
             FormRow::SplunkHecEncoding => {
-                if app.splunk_enc_cursor == 0 { "text".into() } else { "json".into() }
+                if app.splunk_enc_cursor == 0 {
+                    "text".into()
+                } else {
+                    "json".into()
+                }
             }
-            FormRow::StaticPath        => app.static_path.clone(),
+            FormRow::StaticPath => app.static_path.clone(),
             FormRow::TemplatedJsonPath => app.template_path.clone(),
-            FormRow::SavePath          => app.save_path.clone(),
+            FormRow::SavePath => app.save_path.clone(),
             _ => String::new(),
         }
     };
     let label = match row {
-        FormRow::ConfigPath        => "Config Path",
-        FormRow::ConcurrentLogs    => "Concurrent",
-        FormRow::MaxBytesPerLog    => "Max Bytes",
-        FormRow::TotalRotations    => "Rotations",
-        FormRow::MaxDepth          => "Max Depth",
-        FormRow::MountPoint        => "Mount",
-        FormRow::ConstantRate      => "Rate",
-        FormRow::LinearInitial     => "Initial",
-        FormRow::LinearRate        => "Rate/step",
-        FormRow::MaxPrebuildCache  => "Prebuild",
-        FormRow::MaxBlockSize      => "Block Size",
+        FormRow::ConfigPath => "Config Path",
+        FormRow::ConcurrentLogs => "Concurrent",
+        FormRow::MaxBytesPerLog => "Max Bytes",
+        FormRow::TotalRotations => "Rotations",
+        FormRow::MaxDepth => "Max Depth",
+        FormRow::MountPoint => "Mount",
+        FormRow::ConstantRate => "Rate",
+        FormRow::LinearInitial => "Initial",
+        FormRow::LinearRate => "Rate/step",
+        FormRow::MaxPrebuildCache => "Prebuild",
+        FormRow::MaxBlockSize => "Block Size",
         FormRow::SplunkHecEncoding => "Encoding",
-        FormRow::StaticPath        => "File Path",
+        FormRow::StaticPath => "File Path",
         FormRow::TemplatedJsonPath => "Template",
-        FormRow::SavePath          => "Save Path",
+        FormRow::SavePath => "Save Path",
         _ => "",
     };
     (label, value)
@@ -553,10 +631,7 @@ fn draw_right(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_form_guidance(frame: &mut Frame, app: &App, area: Rect) {
     let text = form_row_guidance(app);
-    let lines: Vec<Line> = text
-        .lines()
-        .map(|l| Line::from(format!("  {l}")))
-        .collect();
+    let lines: Vec<Line> = text.lines().map(|l| Line::from(format!("  {l}"))).collect();
     let para = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" Guidance "))
         .wrap(Wrap { trim: false });
@@ -567,24 +642,21 @@ fn form_row_guidance(app: &App) -> String {
     let rows = app.form_rows();
     let row = rows.get(app.form_row).copied();
     match row {
-        Some(FormRow::ConfigPath) => {
-            "Path to a saved lading YAML config file.\n\
+        Some(FormRow::ConfigPath) => "Path to a saved lading YAML config file.\n\
              \n\
              Press Enter to edit the path. If the file\n\
              at that path is a valid lading config, all\n\
              fields will be populated automatically.\n\
              \n\
              Ctrl+S saves the current config to this path."
-                .into()
-        }
+            .into(),
         Some(FormRow::Variant) if !app.variant_expanded => {
             // Show overview of all variants
-            let mut text =
-                "Select the log payload format.\n\
+            let mut text = "Select the log payload format.\n\
                  Press Enter to open the variant list.\n\
                  \n\
                  Available variants:\n"
-                    .to_string();
+                .to_string();
             for &vk in ALL_VARIANTS {
                 let m = variant_meta(vk);
                 let first = m.description.lines().next().unwrap_or("");
@@ -609,104 +681,81 @@ fn form_row_guidance(app: &App) -> String {
              Press Enter to change."
                 .into()
         }
-        Some(FormRow::LoadProfile) => {
-            match app.load_profile_sub_cursor {
-                0 => "constant: emit at a steady bytes/s rate\nthroughout the entire test run.".into(),
-                _ => "linear: start at the Initial rate and add\nRate/step each second.".into(),
-            }
-        }
-        Some(FormRow::ConcurrentLogs) => {
-            "How many log files to write simultaneously.\n\
+        Some(FormRow::LoadProfile) => match app.load_profile_sub_cursor {
+            0 => "constant: emit at a steady bytes/s rate\nthroughout the entire test run.".into(),
+            _ => "linear: start at the Initial rate and add\nRate/step each second.".into(),
+        },
+        Some(FormRow::ConcurrentLogs) => "How many log files to write simultaneously.\n\
              Higher values stress the target's file handling\n\
              but increase lading's CPU and memory usage.\n\
              \n\
              Default: 8"
-                .into()
-        }
-        Some(FormRow::MaxBytesPerLog) => {
-            "Maximum size of each log file before it is rotated.\n\
+            .into(),
+        Some(FormRow::MaxBytesPerLog) => "Maximum size of each log file before it is rotated.\n\
              \n\
              Accepted units: KiB  MiB  GiB\n\
              Examples: 100MiB   1GiB   512KiB\n\
              \n\
              Default: 100MiB"
-                .into()
-        }
-        Some(FormRow::TotalRotations) => {
-            "How many times each log file is rotated (archived)\n\
+            .into(),
+        Some(FormRow::TotalRotations) => "How many times each log file is rotated (archived)\n\
              before being deleted.\n\
              \n\
              High counts create more files and test rotation\n\
              handling in the target.\n\
              \n\
              Default: 4"
-                .into()
-        }
-        Some(FormRow::MaxDepth) => {
-            "Directory depth for log files below the mount point.\n\
+            .into(),
+        Some(FormRow::MaxDepth) => "Directory depth for log files below the mount point.\n\
              \n\
              0 = flat: all log files in the root directory.\n\
              1 = one level of subdirectories, etc.\n\
              \n\
              Default: 0"
-                .into()
-        }
-        Some(FormRow::MountPoint) => {
-            "Where the FUSE filesystem is mounted.\n\
+            .into(),
+        Some(FormRow::MountPoint) => "Where the FUSE filesystem is mounted.\n\
              \n\
              The path will be remapped under /tmp if it\n\
              is outside /tmp (no root required).\n\
              \n\
              Default: /tmp/logrotate"
-                .into()
-        }
-        Some(FormRow::ConstantRate) => {
-            "Bytes generated per second (held constant).\n\
+            .into(),
+        Some(FormRow::ConstantRate) => "Bytes generated per second (held constant).\n\
              \n\
              Use a byte string:  1MiB   500KiB   10MiB\n\
              \n\
              Default: 1MiB"
-                .into()
-        }
-        Some(FormRow::LinearInitial) => {
-            "Starting rate for linear load growth.\n\
+            .into(),
+        Some(FormRow::LinearInitial) => "Starting rate for linear load growth.\n\
              \n\
              The generator begins at this rate and increases\n\
              by the Rate/step amount each second.\n\
              \n\
              Default: 1MiB"
-                .into()
-        }
-        Some(FormRow::LinearRate) => {
-            "How much to increase the rate each second.\n\
+            .into(),
+        Some(FormRow::LinearRate) => "How much to increase the rate each second.\n\
              \n\
              Added to the current rate every second.\n\
              \n\
              Default: 100KiB"
-                .into()
-        }
-        Some(FormRow::MaxPrebuildCache) => {
-            "Maximum size of the pre-built payload cache.\n\
+            .into(),
+        Some(FormRow::MaxPrebuildCache) => "Maximum size of the pre-built payload cache.\n\
              \n\
              Lading pre-generates payloads to reduce CPU\n\
              overhead during the test. Larger cache means\n\
              more payload variety at higher memory cost.\n\
              \n\
              Default: 1GiB"
-                .into()
-        }
-        Some(FormRow::MaxBlockSize) => {
-            "Maximum size of a single pre-built payload block.\n\
+            .into(),
+        Some(FormRow::MaxBlockSize) => "Maximum size of a single pre-built payload block.\n\
              \n\
              Smaller blocks → finer granularity.\n\
              Larger blocks → less overhead.\n\
              Should be ≤ Max Bytes.\n\
              \n\
              Default: 2MiB"
-                .into()
-        }
-        Some(FormRow::SplunkHecEncoding) => {
-            "Encoding for Splunk HEC event payloads.\n\
+            .into(),
+        Some(FormRow::SplunkHecEncoding) => "Encoding for Splunk HEC event payloads.\n\
              \n\
              text  — raw string in the event field\n\
              json  — structured JSON in the event field\n\
@@ -714,38 +763,30 @@ fn form_row_guidance(app: &App) -> String {
              Press Enter to toggle.\n\
              \n\
              Default: json"
-                .into()
-        }
-        Some(FormRow::StaticPath) => {
-            "Path to the static content file.\n\
+            .into(),
+        Some(FormRow::StaticPath) => "Path to the static content file.\n\
              \n\
              The file is read once at startup and its\n\
              content is streamed into the log files.\n\
              \n\
              For static_chunks the file is split by\n\
              lines to fill blocks up to Max Block Size."
-                .into()
-        }
-        Some(FormRow::TemplatedJsonPath) => {
-            "Path to the YAML template file.\n\
+            .into(),
+        Some(FormRow::TemplatedJsonPath) => "Path to the YAML template file.\n\
              \n\
              The template defines the JSON schema and\n\
              value distributions for generated records.\n\
              \n\
              See lading_payload docs for template format."
-                .into()
-        }
-        Some(FormRow::SavePath) => {
-            "Output YAML file path.\n\
+            .into(),
+        Some(FormRow::SavePath) => "Output YAML file path.\n\
              \n\
              Press Enter to write the config file.\n\
              An existing file will be overwritten.\n\
              \n\
              Ctrl+S saves to this path at any time."
-                .into()
-        }
-        Some(FormRow::TemplateEditAction) => {
-            "Opens the template editor for this file.\n\
+            .into(),
+        Some(FormRow::TemplateEditAction) => "Opens the template editor for this file.\n\
              \n\
              Build the template YAML directly in the TUI.\n\
              Ctrl+S saves it to the Template Path above.\n\
@@ -755,15 +796,12 @@ fn form_row_guidance(app: &App) -> String {
              otherwise the default starter template is used.\n\
              \n\
              See the right panel for a tag quick-reference."
-                .into()
-        }
-        Some(FormRow::GeneratorComponent) => {
-            "The generator produces log files using the\n\
+            .into(),
+        Some(FormRow::GeneratorComponent) => "The generator produces log files using the\n\
              logrotate_fs FUSE filesystem.\n\
              \n\
              Press Enter to expand/collapse settings."
-                .into()
-        }
+            .into(),
         Some(FormRow::BlackholeComponent) => {
             "Blackhole servers absorb traffic generated by lading.\n\
              Each entry is a server that lading starts and\n\
@@ -775,8 +813,7 @@ fn form_row_guidance(app: &App) -> String {
              Use tcp/udp for raw socket targets."
                 .into()
         }
-        Some(FormRow::BlackholeEntry(_)) => {
-            "← →  change type (http / tcp / udp)\n\
+        Some(FormRow::BlackholeEntry(_)) => "← →  change type (http / tcp / udp)\n\
              Enter edit binding address\n\
              d     delete this entry\n\
              \n\
@@ -784,15 +821,12 @@ fn form_row_guidance(app: &App) -> String {
              Use tcp/udp for raw socket targets.\n\
              \n\
              Default address: 127.0.0.1:9091"
-                .into()
-        }
-        Some(FormRow::BlackholeAddEntry) => {
-            "Press Enter to add a new HTTP blackhole entry.\n\
+            .into(),
+        Some(FormRow::BlackholeAddEntry) => "Press Enter to add a new HTTP blackhole entry.\n\
              \n\
              The address is auto-assigned with the next\n\
              available port after the last entry."
-                .into()
-        }
+            .into(),
         _ => String::new(),
     }
 }
@@ -800,7 +834,11 @@ fn form_row_guidance(app: &App) -> String {
 fn draw_yaml_preview(frame: &mut Frame, app: &App, area: Rect) {
     let yaml = app.current_yaml();
     let para = Paragraph::new(yaml)
-        .block(Block::default().borders(Borders::ALL).title(" YAML Preview "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" YAML Preview "),
+        )
         .style(Style::default().fg(Color::Cyan))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, area);
@@ -844,8 +882,11 @@ fn draw_preview_idle(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled("█", Style::default().add_modifier(Modifier::RAPID_BLINK)),
     ]);
-    let input_para = Paragraph::new(display)
-        .block(Block::default().borders(Borders::ALL).title(" Config Path "));
+    let input_para = Paragraph::new(display).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Config Path "),
+    );
     frame.render_widget(input_para, rows[0]);
 
     let mut info_lines: Vec<Line> = vec![
@@ -954,7 +995,11 @@ fn draw_preview_building(frame: &mut Frame, app: &App, area: Rect) {
         .map(|&l| Line::from(format!("  {l}")))
         .collect();
     let right_para = Paragraph::new(display)
-        .block(Block::default().borders(Borders::ALL).title(" Build Output "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Build Output "),
+        )
         .style(Style::default().fg(Color::DarkGray))
         .wrap(Wrap { trim: false });
     frame.render_widget(right_para, right);
@@ -988,11 +1033,18 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| "—".into());
 
     let rotated_count = app.preview_rotated_files.len();
-    let rotated_arrow = if app.preview_rotated_expanded { "▼" } else { "▶" };
+    let rotated_arrow = if app.preview_rotated_expanded {
+        "▼"
+    } else {
+        "▶"
+    };
     let rotated_label = if rotated_count == 0 {
         format!("  {rotated_arrow} Rotated  none")
     } else {
-        format!("  {rotated_arrow} Rotated  {rotated_count} file{}", if rotated_count == 1 { "" } else { "s" })
+        format!(
+            "  {rotated_arrow} Rotated  {rotated_count} file{}",
+            if rotated_count == 1 { "" } else { "s" }
+        )
     };
 
     let mut left_lines = vec![
@@ -1013,10 +1065,7 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Refresh: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{secs}s ago"),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{secs}s ago"), Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -1049,7 +1098,9 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
             left_lines.push(Line::from(Span::styled(
                 format!("    {} {name}", if is_cur { "▶" } else { " " }),
                 if is_cur {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 },
@@ -1109,7 +1160,11 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     // Tab bar for log files
@@ -1168,7 +1223,10 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
         }
         None => {
             if app.preview_content_scroll > 0 {
-                format!(" {total_lines} lines  {bytes_str}  [↑ scrolled {}] ", app.preview_content_scroll)
+                format!(
+                    " {total_lines} lines  {bytes_str}  [↑ scrolled {}] ",
+                    app.preview_content_scroll
+                )
             } else {
                 format!(" {total_lines} lines  {bytes_str}  [tail] ")
             }
@@ -1221,10 +1279,12 @@ fn draw_snapshot_timeline(frame: &mut Frame, app: &App, area: Rect) {
         // Progress bar: how many slots of MAX_SNAPSHOTS have been captured
         let filled = (n * BAR_WIDTH) / MAX_SNAPSHOTS;
         // Animate the leading edge based on countdown
-        let pending_char = match next_in { 0 | 1 => "▒", _ => "░" };
-        let bar: String = "█".repeat(filled)
-            + pending_char
-            + &"░".repeat(BAR_WIDTH.saturating_sub(filled + 1));
+        let pending_char = match next_in {
+            0 | 1 => "▒",
+            _ => "░",
+        };
+        let bar: String =
+            "█".repeat(filled) + pending_char + &"░".repeat(BAR_WIDTH.saturating_sub(filled + 1));
 
         let elapsed_secs = n as u64 * 5;
         let elapsed_str = format_duration(elapsed_secs);
@@ -1248,7 +1308,11 @@ fn draw_snapshot_timeline(frame: &mut Frame, app: &App, area: Rect) {
         let active = app.preview_snapshot_idx.unwrap_or(n.saturating_sub(1));
 
         // Cursor position within the bar
-        let cursor_pos = if n > 1 { (active * BAR_WIDTH) / (n - 1) } else { BAR_WIDTH };
+        let cursor_pos = if n > 1 {
+            (active * BAR_WIDTH) / (n - 1)
+        } else {
+            BAR_WIDTH
+        };
         let bar: String = (0..=BAR_WIDTH)
             .map(|i| if i == cursor_pos { '█' } else { '░' })
             .collect();
@@ -1268,10 +1332,16 @@ fn draw_snapshot_timeline(frame: &mut Frame, app: &App, area: Rect) {
             ),
         ];
         if active > 0 {
-            spans.push(Span::styled("   [ back", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "   [ back",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         if active + 1 < n {
-            spans.push(Span::styled("   ] forward", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "   ] forward",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         Line::from(spans)
     };
@@ -1337,7 +1407,12 @@ fn draw_preview_failed(frame: &mut Frame, app: &App, area: Rect, msg: String) {
 
     let err_lines: Vec<Line> = msg
         .lines()
-        .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(Color::Red))))
+        .map(|l| {
+            Line::from(Span::styled(
+                format!("  {l}"),
+                Style::default().fg(Color::Red),
+            ))
+        })
         .collect();
     let build_log_lines: Vec<Line> = app
         .preview_build_log
@@ -1366,11 +1441,18 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
 
     let snapshot_count = app.preview_snapshots.len();
     let rotated_count = app.preview_rotated_files.len();
-    let rotated_arrow = if app.preview_rotated_expanded { "▼" } else { "▶" };
+    let rotated_arrow = if app.preview_rotated_expanded {
+        "▼"
+    } else {
+        "▶"
+    };
     let rotated_label = if rotated_count == 0 {
         format!("  {rotated_arrow} Rotated  none")
     } else {
-        format!("  {rotated_arrow} Rotated  {rotated_count} file{}", if rotated_count == 1 { "" } else { "s" })
+        format!(
+            "  {rotated_arrow} Rotated  {rotated_count} file{}",
+            if rotated_count == 1 { "" } else { "s" }
+        )
     };
 
     let mut left_lines = vec![
@@ -1383,7 +1465,10 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            format!("  {snapshot_count} snapshot{} captured", if snapshot_count == 1 { "" } else { "s" }),
+            format!(
+                "  {snapshot_count} snapshot{} captured",
+                if snapshot_count == 1 { "" } else { "s" }
+            ),
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
@@ -1399,7 +1484,9 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
             left_lines.push(Line::from(Span::styled(
                 format!("    {} {name}", if is_cur { "▶" } else { " " }),
                 if is_cur {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 },
@@ -1457,7 +1544,12 @@ fn draw_import_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let width = area.width.min(70);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
-    let overlay_area = Rect { x, y, width, height };
+    let overlay_area = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
 
     frame.render_widget(Clear, overlay_area);
 
@@ -1557,24 +1649,21 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             PreviewState::Stopped => {
                 " [/] snapshots or rotated   ←→ switch file/rotated   e toggle rotated   ↑↓ scroll   r run again   q quit"
             }
-            PreviewState::Failed(_) => {
-                " r retry   Tab build tab   q quit"
-            }
+            PreviewState::Failed(_) => " r retry   Tab build tab   q quit",
         }
     } else {
         let rows = app.form_rows();
         let current_row = rows.get(app.form_row).copied();
         match (app.form_mode(), current_row) {
-            (FormMode::Navigate, Some(FormRow::BlackholeEntry(_))) =>
-                " ← → kind   Enter edit addr   d delete   ↑↓ navigate   ^S save   q quit",
-            (FormMode::Navigate, _) =>
-                " ↑↓ navigate   Enter edit/expand   i import   Tab preview   r re-seed   ^S save   q quit",
-            (FormMode::VariantSubMenu, _) =>
-                " ↑↓ select variant   Enter confirm   Esc cancel",
-            (FormMode::LoadProfileSubMenu, _) =>
-                " ↑↓ select profile   Enter confirm   Esc cancel",
-            (FormMode::Editing, _) =>
-                " Type to edit   Enter confirm   Esc cancel",
+            (FormMode::Navigate, Some(FormRow::BlackholeEntry(_))) => {
+                " ← → kind   Enter edit addr   d delete   ↑↓ navigate   ^S save   q quit"
+            }
+            (FormMode::Navigate, _) => {
+                " ↑↓ navigate   Enter edit/expand   i import   Tab preview   r re-seed   ^S save   q quit"
+            }
+            (FormMode::VariantSubMenu, _) => " ↑↓ select variant   Enter confirm   Esc cancel",
+            (FormMode::LoadProfileSubMenu, _) => " ↑↓ select profile   Enter confirm   Esc cancel",
+            (FormMode::Editing, _) => " Type to edit   Enter confirm   Esc cancel",
         }
     };
     let para = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));

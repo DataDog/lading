@@ -106,10 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
 

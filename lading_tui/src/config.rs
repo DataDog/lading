@@ -18,15 +18,23 @@ impl BlackholeKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Http => "http",
-            Self::Tcp  => "tcp",
-            Self::Udp  => "udp",
+            Self::Tcp => "tcp",
+            Self::Udp => "udp",
         }
     }
     pub fn next(self) -> Self {
-        match self { Self::Http => Self::Tcp, Self::Tcp => Self::Udp, Self::Udp => Self::Http }
+        match self {
+            Self::Http => Self::Tcp,
+            Self::Tcp => Self::Udp,
+            Self::Udp => Self::Http,
+        }
     }
     pub fn prev(self) -> Self {
-        match self { Self::Http => Self::Udp, Self::Tcp => Self::Http, Self::Udp => Self::Tcp }
+        match self {
+            Self::Http => Self::Udp,
+            Self::Tcp => Self::Http,
+            Self::Udp => Self::Tcp,
+        }
     }
 }
 
@@ -87,7 +95,7 @@ pub enum LoadProfileKind {
 
 pub fn build_variant_value(
     kind: VariantKind,
-    splunk_enc: usize,   // 0 = text, 1 = json
+    splunk_enc: usize, // 0 = text, 1 = json
     static_path: &str,
     template_path: &str,
 ) -> Value {
@@ -238,10 +246,7 @@ pub fn parse_config(yaml: &str) -> Result<ImportedFields, String> {
     // seed: either a flow sequence [n, …] or block sequence
     let seed = lfs.get("seed").and_then(|v| {
         let items: Vec<u64> = match v {
-            Value::Sequence(seq) => seq
-                .iter()
-                .filter_map(|x| x.as_u64())
-                .collect(),
+            Value::Sequence(seq) => seq.iter().filter_map(|x| x.as_u64()).collect(),
             _ => return None,
         };
         if items.len() == 32 {
@@ -364,26 +369,29 @@ pub fn parse_config(yaml: &str) -> Result<ImportedFields, String> {
     }
 
     // blackhole: sequence of {http: {binding_addr}}, {tcp: {binding_addr}}, …
-    let blackhole_entries = root.get("blackhole").and_then(|v| v.as_sequence()).map(|seq| {
-        seq.iter()
-            .filter_map(|item| {
-                let m = item.as_mapping()?;
-                let (key, val) = m.iter().next()?;
-                let kind = match key.as_str()? {
-                    "http" => BlackholeKind::Http,
-                    "tcp"  => BlackholeKind::Tcp,
-                    "udp"  => BlackholeKind::Udp,
-                    _ => return None,
-                };
-                let addr = val
-                    .get("binding_addr")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("127.0.0.1:9091")
-                    .to_string();
-                Some(BlackholeEntry { kind, addr })
-            })
-            .collect::<Vec<_>>()
-    });
+    let blackhole_entries = root
+        .get("blackhole")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|item| {
+                    let m = item.as_mapping()?;
+                    let (key, val) = m.iter().next()?;
+                    let kind = match key.as_str()? {
+                        "http" => BlackholeKind::Http,
+                        "tcp" => BlackholeKind::Tcp,
+                        "udp" => BlackholeKind::Udp,
+                        _ => return None,
+                    };
+                    let addr = val
+                        .get("binding_addr")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("127.0.0.1:9091")
+                        .to_string();
+                    Some(BlackholeEntry { kind, addr })
+                })
+                .collect::<Vec<_>>()
+        });
 
     Ok(ImportedFields {
         seed,

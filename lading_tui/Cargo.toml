@@ -2,6 +2,12 @@
 name = "lading_tui"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["tui", "lading", "load-testing"]
+categories = ["development-tools::profiling"]
+description = "A TUI for configuring and running lading load tests."
+readme = "README.md"
 
 [[bin]]
 name = "lading_tui"

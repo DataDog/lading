@@ -31,8 +31,8 @@ fn fresh_seed() -> [u8; 32] {
 }
 
 use crate::config::{
-    BlackholeEntry, BlackholeKind, ImportedFields, LoadProfileKind,
-    build_load_profile_value, build_variant_value, build_yaml, parse_config,
+    BlackholeEntry, BlackholeKind, ImportedFields, LoadProfileKind, build_load_profile_value,
+    build_variant_value, build_yaml, parse_config,
 };
 use crate::variants::{ALL_VARIANTS, VariantKind};
 
@@ -54,9 +54,9 @@ pub enum FormRow {
     MaxDepth,
     MountPoint,
     LoadProfile,
-    ConstantRate,       // only when LoadProfileKind::Constant
-    LinearInitial,      // only when LoadProfileKind::Linear
-    LinearRate,         // only when LoadProfileKind::Linear
+    ConstantRate,  // only when LoadProfileKind::Constant
+    LinearInitial, // only when LoadProfileKind::Linear
+    LinearRate,    // only when LoadProfileKind::Linear
     MaxPrebuildCache,
     MaxBlockSize,
     SplunkHecEncoding,  // only when variant == SplunkHec
@@ -64,8 +64,8 @@ pub enum FormRow {
     TemplatedJsonPath,  // only when variant == TemplatedJson
     TemplateEditAction, // "Open template editor" button row
     // --- blackhole sub-rows (visible when blackhole_expanded) ---
-    BlackholeEntry(usize),  // one row per entry
-    BlackholeAddEntry,      // "+ Add entry" row
+    BlackholeEntry(usize), // one row per entry
+    BlackholeAddEntry,     // "+ Add entry" row
     // --- save ---
     SavePath,
 }
@@ -158,13 +158,13 @@ pub struct App {
     pub preview_build_log_rx: Option<Receiver<String>>,
     pub preview_lading_log: String,
     pub preview_lading_log_rx: Option<Receiver<String>>,
-    pub preview_log_files: Vec<PathBuf>,       // active .log files
+    pub preview_log_files: Vec<PathBuf>, // active .log files
     pub preview_file_tab: usize,
     pub preview_file_content: String,
-    pub preview_rotated_files: Vec<PathBuf>,   // .log.N rotated files
+    pub preview_rotated_files: Vec<PathBuf>, // .log.N rotated files
     pub preview_rotated_expanded: bool,
     pub preview_rotated_cursor: usize,
-    pub preview_viewing_rotated: bool,         // if true, show rotated content instead
+    pub preview_viewing_rotated: bool, // if true, show rotated content instead
     pub preview_rotated_content: String,
     pub preview_last_refresh: Instant,
     pub preview_mount_point: String,
@@ -172,8 +172,8 @@ pub struct App {
     pub preview_content_scroll: u16, // lines scrolled up from bottom (0 = follow tail)
     pub preview_snapshots: std::collections::VecDeque<(Instant, String, usize, usize)>, // (time, content, total_lines, total_bytes), max 120
     pub preview_snapshot_idx: Option<usize>, // None = live, Some(i) = viewing snapshot i
-    pub preview_file_total_lines: usize, // actual line count before the 2000-line display cap
-    pub preview_file_total_bytes: usize, // actual byte count of the file
+    pub preview_file_total_lines: usize,     // actual line count before the 2000-line display cap
+    pub preview_file_total_bytes: usize,     // actual byte count of the file
 
     // --- template editor ---
     pub template_editor_open: bool,
@@ -355,7 +355,11 @@ impl App {
             }
         }
 
-        let exited = self.preview_build_child.as_mut().and_then(|c| c.try_wait().ok()).flatten();
+        let exited = self
+            .preview_build_child
+            .as_mut()
+            .and_then(|c| c.try_wait().ok())
+            .flatten();
         if let Some(status) = exited {
             if status.success() {
                 self.preview_build_child = None;
@@ -426,15 +430,15 @@ impl App {
 
         // clamp tab index
         if !self.preview_log_files.is_empty() {
-            self.preview_file_tab =
-                self.preview_file_tab.min(self.preview_log_files.len() - 1);
+            self.preview_file_tab = self.preview_file_tab.min(self.preview_log_files.len() - 1);
         } else {
             self.preview_file_tab = 0;
         }
         // clamp rotated cursor
         if !self.preview_rotated_files.is_empty() {
-            self.preview_rotated_cursor =
-                self.preview_rotated_cursor.min(self.preview_rotated_files.len() - 1);
+            self.preview_rotated_cursor = self
+                .preview_rotated_cursor
+                .min(self.preview_rotated_files.len() - 1);
         } else {
             self.preview_rotated_cursor = 0;
             self.preview_rotated_expanded = false;
@@ -597,13 +601,18 @@ impl App {
 
     fn start_lading(&mut self) {
         let config_path = self.preview_run_config.clone();
-        let stderr_stdio = if self.verbose { Stdio::piped() } else { Stdio::null() };
+        let stderr_stdio = if self.verbose {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        };
         match Command::new("target/debug/lading")
             .args([
                 "--config-path",
                 &config_path,
                 "--no-target",
-                "--experiment-duration-seconds", "600",
+                "--experiment-duration-seconds",
+                "600",
                 "--capture-path",
                 "/tmp/lading_tui_capture.jsonl",
             ])
@@ -1014,10 +1023,10 @@ impl App {
 
     fn handle_form_key(&mut self, code: KeyCode) {
         match self.form_mode() {
-            FormMode::Navigate         => self.handle_form_navigate(code),
-            FormMode::VariantSubMenu   => self.handle_variant_submenu(code),
+            FormMode::Navigate => self.handle_form_navigate(code),
+            FormMode::VariantSubMenu => self.handle_variant_submenu(code),
             FormMode::LoadProfileSubMenu => self.handle_load_profile_submenu(code),
-            FormMode::Editing          => self.handle_form_editing(code),
+            FormMode::Editing => self.handle_form_editing(code),
         }
     }
 
@@ -1078,7 +1087,10 @@ impl App {
                     FormRow::BlackholeEntry(_) => self.begin_edit(),
                     FormRow::BlackholeAddEntry => {
                         let addr = next_blackhole_addr(&self.blackhole_entries);
-                        self.blackhole_entries.push(BlackholeEntry { kind: BlackholeKind::Http, addr });
+                        self.blackhole_entries.push(BlackholeEntry {
+                            kind: BlackholeKind::Http,
+                            addr,
+                        });
                         self.dirty = true;
                     }
                     _ => self.begin_edit(),
@@ -1356,10 +1368,15 @@ impl App {
     }
 
     pub fn form_mode(&self) -> FormMode {
-        if self.variant_expanded          { FormMode::VariantSubMenu }
-        else if self.load_profile_expanded { FormMode::LoadProfileSubMenu }
-        else if self.form_editing          { FormMode::Editing }
-        else                               { FormMode::Navigate }
+        if self.variant_expanded {
+            FormMode::VariantSubMenu
+        } else if self.load_profile_expanded {
+            FormMode::LoadProfileSubMenu
+        } else if self.form_editing {
+            FormMode::Editing
+        } else {
+            FormMode::Navigate
+        }
     }
 
     fn clamp_form_row(&mut self) {
@@ -1371,20 +1388,20 @@ impl App {
         let rows = self.form_rows();
         let row = rows[self.form_row];
         self.input = match row {
-            FormRow::ConfigPath       => self.save_path.clone(),
-            FormRow::ConcurrentLogs   => self.concurrent_logs.to_string(),
-            FormRow::MaxBytesPerLog   => self.max_bytes_per_log.clone(),
-            FormRow::TotalRotations   => self.total_rotations.to_string(),
-            FormRow::MaxDepth         => self.max_depth.to_string(),
-            FormRow::MountPoint       => self.mount_point.clone(),
-            FormRow::ConstantRate     => self.constant_rate.clone(),
-            FormRow::LinearInitial    => self.linear_initial.clone(),
-            FormRow::LinearRate       => self.linear_rate.clone(),
+            FormRow::ConfigPath => self.save_path.clone(),
+            FormRow::ConcurrentLogs => self.concurrent_logs.to_string(),
+            FormRow::MaxBytesPerLog => self.max_bytes_per_log.clone(),
+            FormRow::TotalRotations => self.total_rotations.to_string(),
+            FormRow::MaxDepth => self.max_depth.to_string(),
+            FormRow::MountPoint => self.mount_point.clone(),
+            FormRow::ConstantRate => self.constant_rate.clone(),
+            FormRow::LinearInitial => self.linear_initial.clone(),
+            FormRow::LinearRate => self.linear_rate.clone(),
             FormRow::MaxPrebuildCache => self.max_prebuild_cache.clone(),
-            FormRow::MaxBlockSize     => self.max_block_size.clone(),
-            FormRow::StaticPath       => self.static_path.clone(),
+            FormRow::MaxBlockSize => self.max_block_size.clone(),
+            FormRow::StaticPath => self.static_path.clone(),
             FormRow::TemplatedJsonPath => self.template_path.clone(),
-            FormRow::SavePath         => self.save_path.clone(),
+            FormRow::SavePath => self.save_path.clone(),
             FormRow::BlackholeEntry(i) => {
                 if i < self.blackhole_entries.len() {
                     self.blackhole_entries[i].addr.clone()
@@ -1423,16 +1440,14 @@ impl App {
                 self.preview_config_input = path;
                 self.form_editing = false;
             }
-            FormRow::ConcurrentLogs => {
-                match self.input.trim().parse::<u16>() {
-                    Ok(v) if v > 0 => {
-                        self.concurrent_logs = v;
-                        self.dirty = true;
-                        self.form_editing = false;
-                    }
-                    _ => self.error = Some("Must be a positive integer (1–65535)".into()),
+            FormRow::ConcurrentLogs => match self.input.trim().parse::<u16>() {
+                Ok(v) if v > 0 => {
+                    self.concurrent_logs = v;
+                    self.dirty = true;
+                    self.form_editing = false;
                 }
-            }
+                _ => self.error = Some("Must be a positive integer (1–65535)".into()),
+            },
             FormRow::MaxBytesPerLog => {
                 if self.input.trim().is_empty() {
                     self.error = Some("Cannot be empty — e.g. 100MiB".into());
@@ -1442,26 +1457,22 @@ impl App {
                     self.form_editing = false;
                 }
             }
-            FormRow::TotalRotations => {
-                match self.input.trim().parse::<u8>() {
-                    Ok(v) => {
-                        self.total_rotations = v;
-                        self.dirty = true;
-                        self.form_editing = false;
-                    }
-                    _ => self.error = Some("Must be 0–255".into()),
+            FormRow::TotalRotations => match self.input.trim().parse::<u8>() {
+                Ok(v) => {
+                    self.total_rotations = v;
+                    self.dirty = true;
+                    self.form_editing = false;
                 }
-            }
-            FormRow::MaxDepth => {
-                match self.input.trim().parse::<u8>() {
-                    Ok(v) => {
-                        self.max_depth = v;
-                        self.dirty = true;
-                        self.form_editing = false;
-                    }
-                    _ => self.error = Some("Must be 0–255".into()),
+                _ => self.error = Some("Must be 0–255".into()),
+            },
+            FormRow::MaxDepth => match self.input.trim().parse::<u8>() {
+                Ok(v) => {
+                    self.max_depth = v;
+                    self.dirty = true;
+                    self.form_editing = false;
                 }
-            }
+                _ => self.error = Some("Must be 0–255".into()),
+            },
             FormRow::MountPoint => {
                 if self.input.trim().is_empty() {
                     self.error = Some("Path cannot be empty".into());
@@ -1566,7 +1577,9 @@ impl App {
                     self.form_editing = false;
                 }
             }
-            _ => { self.form_editing = false; }
+            _ => {
+                self.form_editing = false;
+            }
         }
     }
 
@@ -1576,7 +1589,8 @@ impl App {
 
     fn do_save_to_path(&mut self) {
         if self.save_path.is_empty() {
-            self.error = Some("No save path set — navigate to Save Path row and press Enter".into());
+            self.error =
+                Some("No save path set — navigate to Save Path row and press Enter".into());
             return;
         }
         let yaml = self.current_yaml();
@@ -1597,11 +1611,19 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn try_auto_import(&mut self) {
-        if self.auto_import_done || self.dirty { return; }
+        if self.auto_import_done || self.dirty {
+            return;
+        }
         let path = self.save_path.clone();
-        if path.is_empty() { return; }
-        let Ok(yaml) = std::fs::read_to_string(&path) else { return; };
-        let Ok(fields) = parse_config(&yaml) else { return; };
+        if path.is_empty() {
+            return;
+        }
+        let Ok(yaml) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(fields) = parse_config(&yaml) else {
+            return;
+        };
         self.apply_import(fields);
         self.auto_import_done = true;
         self.preview_config_input = path;
@@ -1615,7 +1637,10 @@ fn remap_to_tmp(mount: &str) -> String {
     if p.starts_with("/tmp") {
         return mount.to_string();
     }
-    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("lading_mount");
+    let name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("lading_mount");
     format!("/tmp/{name}")
 }
 
