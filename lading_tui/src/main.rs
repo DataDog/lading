@@ -25,15 +25,12 @@ OPTIONS:
                           all form fields from it. The path is also used as
                           the default save destination.
 
-    -v, --verbose         Show lading's stderr output in the Preview tab
-                          while a run is active.
-
     -h, --help            Print this help message and exit.
 
 EXAMPLES:
     lading_tui
     lading_tui --config examples/lading-custom-30-30-40.yaml
-    lading_tui -c /tmp/my_config.yaml -v
+    lading_tui -c /tmp/my_config.yaml
 
 KEYS (Build tab):
     ↑ ↓           Navigate form rows
@@ -65,8 +62,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let verbose = args.iter().any(|a| a == "-v" || a == "--verbose");
-
     // --config <path> or -c <path>
     let config_path = args.windows(2).find_map(|w| {
         if w[0] == "--config" || w[0] == "-c" {
@@ -83,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(verbose, config_path);
+    let mut app = App::new(config_path);
     let result = run(&mut terminal, &mut app);
 
     // --- restore terminal ---

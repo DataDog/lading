@@ -1005,17 +1005,30 @@ fn draw_preview_building(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(right_para, right);
 }
 
-fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
-    let (left, right) = if app.verbose {
-        // Narrow the left panel a bit more to make room
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
-            .split(area);
-        (cols[0], cols[1])
+/// Appends a collapsible "▶/▼ Config" section to a left-panel line list.
+fn append_config_panel(lines: &mut Vec<Line>, app: &App) {
+    let arrow = if app.preview_config_panel_expanded {
+        "▼"
     } else {
-        preview_cols(area)
+        "▶"
     };
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("  {arrow} Config"),
+        Style::default().fg(Color::DarkGray),
+    )));
+    if app.preview_config_panel_expanded {
+        for l in app.preview_config_yaml.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("    {l}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+}
+
+fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
+    let (left, right) = preview_cols(area);
 
     // Left: status info
     let secs = app.preview_last_refresh.elapsed().as_secs();
@@ -1107,6 +1120,7 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
             )));
         }
     }
+    append_config_panel(&mut left_lines, app);
     left_lines.extend([
         Line::from(""),
         Line::from(Span::styled(
@@ -1122,6 +1136,10 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
+            "  c    toggle config",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
             "  q    stop lading",
             Style::default().fg(Color::DarkGray),
         )),
@@ -1131,22 +1149,7 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
         .wrap(Wrap { trim: false });
     frame.render_widget(left_para, left);
 
-    // Right: split vertically when verbose (files top, lading logs bottom)
-    let (files_area, logs_area) = if app.verbose {
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(right);
-        (rows[0], Some(rows[1]))
-    } else {
-        (right, None)
-    };
-
-    draw_file_tabs_panel(frame, app, files_area);
-
-    if let Some(area) = logs_area {
-        draw_lading_log_panel(frame, app, area);
-    }
+    draw_file_tabs_panel(frame, app, right);
 }
 
 fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -1201,10 +1204,10 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let total_lines = app.displayed_total_lines();
     // rows[1] height minus top/bottom borders
     let visible = rows[1].height.saturating_sub(2);
+    let max_scroll = displayed_lines.saturating_sub(visible);
+    app.preview_max_scroll.set(max_scroll);
     // Convert lines-from-bottom to lines-from-top
-    let scroll_top = displayed_lines
-        .saturating_sub(visible)
-        .saturating_sub(app.preview_content_scroll);
+    let scroll_top = max_scroll.saturating_sub(app.preview_content_scroll);
     let total_bytes = app.displayed_total_bytes();
     let bytes_str = format_bytes(total_bytes);
     let content_title = match app.preview_snapshot_idx {
@@ -1357,26 +1360,6 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-fn draw_lading_log_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let log = &app.preview_lading_log;
-    let lines_vec: Vec<&str> = log.lines().collect();
-    let start = lines_vec.len().saturating_sub(200);
-    let display: Vec<Line> = lines_vec[start..]
-        .iter()
-        .map(|&l| Line::from(format!("  {l}")))
-        .collect();
-    let para = Paragraph::new(display)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" lading logs ")
-                .style(Style::default().fg(Color::Yellow)),
-        )
-        .style(Style::default().fg(Color::DarkGray))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(para, area);
-}
-
 fn draw_preview_failed(frame: &mut Frame, app: &App, area: Rect, msg: String) {
     let (left, right) = preview_cols(area);
 
@@ -1493,6 +1476,7 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
             )));
         }
     }
+    append_config_panel(&mut left_lines, app);
     left_lines.extend([
         Line::from(""),
         Line::from(Span::styled(
@@ -1505,6 +1489,10 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from(Span::styled(
             "  e  toggle rotated files",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  c  toggle config",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
@@ -1633,6 +1621,14 @@ fn draw_import_overlay(frame: &mut Frame, app: &App, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
+    // Save notification takes priority
+    if let Some(_) = app.save_notification {
+        let msg = format!(" ✓ Config saved to {}", app.save_path);
+        let para = Paragraph::new(msg).style(Style::default().fg(Color::Green));
+        frame.render_widget(para, area);
+        return;
+    }
+
     let text = if app.template_editor_open {
         " ↑↓←→ navigate   Enter newline   Backspace/Del edit   Tab indent   Ctrl+S save   Esc close"
     } else if app.import_mode != ImportMode::Inactive {
@@ -1644,10 +1640,10 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             }
             PreviewState::Building => " q cancel build",
             PreviewState::Running => {
-                " ↑↓ scroll   ← → switch file   e rotated   [/] navigate rotated   q stop"
+                " ↑↓ scroll   t/b top/bottom   ← → switch file   e rotated   [/] navigate rotated   q stop"
             }
             PreviewState::Stopped => {
-                " [/] snapshots or rotated   ←→ switch file/rotated   e toggle rotated   ↑↓ scroll   r run again   q quit"
+                " ↑↓ scroll   t/b top/bottom   [/] snapshots or rotated   ←→ switch file/rotated   e rotated   r run again   q quit"
             }
             PreviewState::Failed(_) => " r retry   Tab build tab   q quit",
         }

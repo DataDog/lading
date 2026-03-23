@@ -135,6 +135,7 @@ pub struct App {
     pub save_path: String,
     pub saved: bool,
     pub dirty: bool,
+    pub save_notification: Option<Instant>, // set on save, cleared after ~3s
 
     // --- transient UI state ---
     pub input: String,
@@ -169,7 +170,10 @@ pub struct App {
     pub preview_last_refresh: Instant,
     pub preview_mount_point: String,
     pub preview_run_config: String, // patched copy of config with remapped mount_point
+    pub preview_config_yaml: String, // YAML content of the active run config
+    pub preview_config_panel_expanded: bool, // whether config panel is expanded in left panel
     pub preview_content_scroll: u16, // lines scrolled up from bottom (0 = follow tail)
+    pub preview_max_scroll: std::cell::Cell<u16>, // set by render each frame; max useful scroll value
     pub preview_snapshots: std::collections::VecDeque<(Instant, String, usize, usize)>, // (time, content, total_lines, total_bytes), max 120
     pub preview_snapshot_idx: Option<usize>, // None = live, Some(i) = viewing snapshot i
     pub preview_file_total_lines: usize,     // actual line count before the 2000-line display cap
@@ -182,13 +186,10 @@ pub struct App {
     pub template_cursor_col: usize,
     pub template_scroll: usize,
     pub template_just_saved: bool,
-
-    // --- flags ---
-    pub verbose: bool,
 }
 
 impl App {
-    pub fn new(verbose: bool, config_path: Option<String>) -> Self {
+    pub fn new(config_path: Option<String>) -> Self {
         let seed = fresh_seed();
 
         let mut app = App {
@@ -224,6 +225,7 @@ impl App {
             save_path: config_path.unwrap_or_else(|| "/tmp/lading_config.yaml".into()),
             saved: false,
             dirty: false,
+            save_notification: None,
             input: String::new(),
             error: None,
             tab: 0,
@@ -252,7 +254,10 @@ impl App {
             preview_last_refresh: Instant::now(),
             preview_mount_point: String::new(),
             preview_run_config: String::new(),
+            preview_config_yaml: String::new(),
+            preview_config_panel_expanded: false,
             preview_content_scroll: 0,
+            preview_max_scroll: std::cell::Cell::new(0),
             preview_snapshots: std::collections::VecDeque::new(),
             preview_snapshot_idx: None,
             preview_file_total_lines: 0,
@@ -263,7 +268,6 @@ impl App {
             template_cursor_col: 0,
             template_scroll: 0,
             template_just_saved: false,
-            verbose,
         };
         app.try_auto_import();
         app
@@ -339,6 +343,12 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn tick(&mut self) {
+        // Clear save notification after 3 seconds
+        if let Some(t) = self.save_notification {
+            if t.elapsed().as_secs() >= 3 {
+                self.save_notification = None;
+            }
+        }
         match &self.preview_state {
             PreviewState::Building => self.tick_building(),
             PreviewState::Running => self.tick_running(),
@@ -552,6 +562,8 @@ impl App {
             return;
         }
         self.preview_run_config = run_config;
+        self.preview_config_yaml = patched_yaml;
+        self.preview_config_panel_expanded = false;
 
         self.preview_config_error = None;
         self.preview_build_log = String::new();
@@ -601,11 +613,6 @@ impl App {
 
     fn start_lading(&mut self) {
         let config_path = self.preview_run_config.clone();
-        let stderr_stdio = if self.verbose {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        };
         match Command::new("target/debug/lading")
             .args([
                 "--config-path",
@@ -617,25 +624,10 @@ impl App {
                 "/tmp/lading_tui_capture.jsonl",
             ])
             .stdout(Stdio::null())
-            .stderr(stderr_stdio)
+            .stderr(Stdio::null())
             .spawn()
         {
-            Ok(mut child) => {
-                // In verbose mode, drain lading's stderr in a background thread
-                if self.verbose {
-                    if let Some(stderr) = child.stderr.take() {
-                        let (tx, rx) = mpsc::channel();
-                        std::thread::spawn(move || {
-                            let reader = BufReader::new(stderr);
-                            for line in reader.lines().flatten() {
-                                if tx.send(line).is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                        self.preview_lading_log_rx = Some(rx);
-                    }
-                }
+            Ok(child) => {
                 self.preview_lading_child = Some(child);
                 self.preview_state = PreviewState::Running;
                 self.refresh_log_files();
@@ -822,6 +814,7 @@ impl App {
                         return;
                     }
                     self.saved = true;
+                    self.save_notification = Some(Instant::now());
                     let path = self.import_pending_path.clone();
                     let yaml = match std::fs::read_to_string(&path) {
                         Ok(y) => y,
@@ -940,6 +933,15 @@ impl App {
                         self.load_rotated_file();
                     }
                 }
+                KeyCode::Char('t') => {
+                    self.preview_content_scroll = self.preview_max_scroll.get();
+                }
+                KeyCode::Char('b') => {
+                    self.preview_content_scroll = 0;
+                }
+                KeyCode::Char('c') => {
+                    self.preview_config_panel_expanded = !self.preview_config_panel_expanded;
+                }
                 KeyCode::Char('q') => self.stop_preview(),
                 _ => {}
             },
@@ -1010,6 +1012,15 @@ impl App {
                 }
                 KeyCode::Down => {
                     self.preview_content_scroll = self.preview_content_scroll.saturating_sub(3);
+                }
+                KeyCode::Char('t') => {
+                    self.preview_content_scroll = self.preview_max_scroll.get();
+                }
+                KeyCode::Char('b') => {
+                    self.preview_content_scroll = 0;
+                }
+                KeyCode::Char('c') => {
+                    self.preview_config_panel_expanded = !self.preview_config_panel_expanded;
                 }
                 KeyCode::Char('r') => {
                     self.preview_state = PreviewState::Idle;
@@ -1558,6 +1569,7 @@ impl App {
                         self.preview_config_input = path;
                         self.saved = true;
                         self.dirty = false;
+                        self.save_notification = Some(Instant::now());
                         self.form_editing = false;
                     }
                     Err(e) => {
@@ -1599,6 +1611,7 @@ impl App {
                 self.preview_config_input = self.save_path.clone();
                 self.saved = true;
                 self.dirty = false;
+                self.save_notification = Some(Instant::now());
             }
             Err(e) => {
                 self.error = Some(format!("Write failed: {e}"));
