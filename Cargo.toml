@@ -9,6 +9,7 @@ members = [
   "lading_fuzz",
   "lading_payload",
   "lading_throttle",
+  "lading_tui",
 ]
 
 [workspace.dependencies]

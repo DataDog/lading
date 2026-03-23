@@ -1,0 +1,35 @@
+[package]
+name = "lading_tui"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "lading_tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui  = "0.29"
+crossterm = "0.28"
+serde     = { workspace = true }
+serde_yaml = { workspace = true }
+rand      = { workspace = true, features = ["small_rng", "os_rng"] }
+
+# Override workspace lints — a TUI binary needs different rules than library crates.
+[lints.clippy]
+all         = "warn"
+pedantic    = "warn"
+# Allow things that are fine in a TUI binary
+unwrap_used                 = "allow"
+print_stdout                = "allow"
+print_stderr                = "allow"
+missing_docs_in_private_items = "allow"
+module_name_repetitions     = "allow"
+too_many_lines              = "allow"
+wildcard_imports            = "allow"
+match_wildcard_for_single_variants = "allow"
+
+[lints.rust]
+missing_docs                   = "allow"
+unreachable_pub                = "allow"
+missing_copy_implementations   = "allow"
+missing_debug_implementations  = "allow"

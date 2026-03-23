@@ -1,0 +1,21 @@
+definitions:
+  random_ipv4:
+    !format
+      template: "{}.{}.{}.{}"
+      args:
+        - !range { min: 1, max: 255 }
+        - !range { min: 0, max: 255 }
+        - !range { min: 0, max: 255 }
+        - !range { min: 1, max: 254 }
+
+generator:
+  !weighted
+    - weight: 30
+      value: !object
+        message: !const "error"
+    - weight: 30
+      value: !object
+        message: !reference random_ipv4
+    - weight: 40
+      value: !object
+        message: !const "hello world"
