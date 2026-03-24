@@ -3,17 +3,17 @@ generator:
     logrotate_fs:
       seed: [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7, 9, 5]
       concurrent_logs: 2
-      maximum_bytes_per_log: 10MiB
+      maximum_bytes_per_log: 100MiB
       total_rotations: 4
       max_depth: 0
       variant:
         templated_json:
           template_path: examples/templates/pii_mixed_logs.yaml
-      maximum_prebuild_cache_size_bytes: 100MiB
+      maximum_prebuild_cache_size_bytes: 500MiB
       maximum_block_size: 2MiB
       mount_point: /tmp/logrotate
       load_profile:
-        constant: 1MiB
+        constant: 10MiB
 blackhole:
 - tcp:
     binding_addr: 0.0.0.0:8080

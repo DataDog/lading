@@ -85,5 +85,5 @@ generator:
                 - !reference email_address
     tags:
       !array
-        length: { min: 2, max: 5 }
+        length: { min: 5, max: 15 }
         element: !reference tag_value

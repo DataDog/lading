@@ -152,6 +152,7 @@ pub struct App {
 
     // --- transient UI state ---
     pub input: String,
+    pub input_cursor: usize, // byte offset of text cursor within `input`
     pub error: Option<String>,
     pub tab: usize, // 0 = Build, 1 = Preview
     pub quit: bool,
@@ -187,8 +188,9 @@ pub struct App {
     pub preview_run_config: String, // patched copy of config with remapped mount_point
     pub preview_config_yaml: String, // YAML content of the active run config
     pub preview_config_panel_expanded: bool, // whether config panel is expanded in left panel
-    pub preview_content_scroll: u16, // lines scrolled up from bottom (0 = follow tail)
-    pub preview_max_scroll: std::cell::Cell<u16>, // set by render each frame; max useful scroll value
+    pub preview_pretty_mode: bool,           // line numbers + alternating colors (Stopped only)
+    pub preview_content_scroll: u32, // lines scrolled up from bottom (0 = follow tail)
+    pub preview_max_scroll: std::cell::Cell<u32>, // set by render each frame; max useful scroll value
 
     // --- template editor ---
     pub template_editor_open: bool,
@@ -238,6 +240,7 @@ impl App {
             dirty: false,
             save_notification: None,
             input: String::new(),
+            input_cursor: 0,
             error: None,
             tab: 0,
             quit: false,
@@ -269,6 +272,7 @@ impl App {
             preview_run_config: String::new(),
             preview_config_yaml: String::new(),
             preview_config_panel_expanded: false,
+            preview_pretty_mode: false,
             preview_content_scroll: 0,
             preview_max_scroll: std::cell::Cell::new(0),
             template_editor_open: false,
@@ -1138,6 +1142,9 @@ impl App {
                 KeyCode::Char('c') => {
                     self.preview_config_panel_expanded = !self.preview_config_panel_expanded;
                 }
+                KeyCode::Char('p') => {
+                    self.preview_pretty_mode = !self.preview_pretty_mode;
+                }
                 KeyCode::Char('r') => {
                     self.preview_state = PreviewState::Idle;
                 }
@@ -1428,12 +1435,54 @@ impl App {
     fn handle_form_editing(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char(c) => {
-                self.input.push(c);
+                self.input.insert(self.input_cursor, c);
+                self.input_cursor += c.len_utf8();
                 self.error = None;
             }
             KeyCode::Backspace => {
-                self.input.pop();
-                self.error = None;
+                if self.input_cursor > 0 {
+                    // Step back by the size of the preceding char.
+                    let prev = self.input[..self.input_cursor]
+                        .chars()
+                        .next_back()
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(1);
+                    self.input_cursor -= prev;
+                    self.input.remove(self.input_cursor);
+                    self.error = None;
+                }
+            }
+            KeyCode::Delete => {
+                if self.input_cursor < self.input.len() {
+                    self.input.remove(self.input_cursor);
+                    self.error = None;
+                }
+            }
+            KeyCode::Left => {
+                if self.input_cursor > 0 {
+                    let prev = self.input[..self.input_cursor]
+                        .chars()
+                        .next_back()
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(1);
+                    self.input_cursor -= prev;
+                }
+            }
+            KeyCode::Right => {
+                if self.input_cursor < self.input.len() {
+                    let next = self.input[self.input_cursor..]
+                        .chars()
+                        .next()
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(1);
+                    self.input_cursor += next;
+                }
+            }
+            KeyCode::Home => {
+                self.input_cursor = 0;
+            }
+            KeyCode::End => {
+                self.input_cursor = self.input.len();
             }
             KeyCode::Enter => self.commit_edit(),
             KeyCode::Esc => {
@@ -1538,6 +1587,7 @@ impl App {
             }
             _ => String::new(),
         };
+        self.input_cursor = self.input.len();
         self.form_editing = true;
         self.error = None;
     }

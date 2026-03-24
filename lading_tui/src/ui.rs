@@ -451,11 +451,6 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
             FormRow::BlackholeEntry(i) => {
                 let entry = &app.blackhole_entries[i];
                 let kind_str = format!("    {:<8}", entry.kind.label());
-                let addr_str = if editing {
-                    app.input.clone()
-                } else {
-                    entry.addr.clone()
-                };
                 let kind_style = if focused {
                     Style::default()
                         .fg(Color::Yellow)
@@ -463,21 +458,24 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                let addr_style = if editing {
-                    Style::default().add_modifier(Modifier::BOLD)
+                let spans = if editing {
+                    let addr = &app.input;
+                    let col = app.input_cursor.min(addr.len());
+                    let before = &addr[..col];
+                    let cursor_ch = addr[col..].chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+                    let after = if col < addr.len() { &addr[col + cursor_ch.len()..] } else { "" };
+                    vec![
+                        Span::styled(kind_str, kind_style),
+                        Span::styled(before.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                        Span::styled(cursor_ch, Style::default().bg(Color::Yellow).fg(Color::Black)),
+                        Span::styled(after.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                    ]
                 } else {
-                    Style::default().fg(Color::Cyan)
+                    vec![
+                        Span::styled(kind_str, kind_style),
+                        Span::styled(entry.addr.clone(), Style::default().fg(Color::Cyan)),
+                    ]
                 };
-                let mut spans = vec![
-                    Span::styled(kind_str, kind_style),
-                    Span::styled(addr_str, addr_style),
-                ];
-                if editing {
-                    spans.push(Span::styled(
-                        "█",
-                        Style::default().add_modifier(Modifier::RAPID_BLINK),
-                    ));
-                }
                 items.push(ListItem::new(Line::from(spans)));
                 if focused {
                     highlight_idx = item_idx;
@@ -537,21 +535,23 @@ fn build_form_list_items(app: &App, rows: &[FormRow]) -> (Vec<ListItem<'static>>
                 } else {
                     Style::default()
                 };
-                let value_style = if editing {
-                    Style::default().add_modifier(Modifier::BOLD)
+                let spans = if editing {
+                    let col = app.input_cursor.min(value.len());
+                    let before = &value[..col];
+                    let cursor_ch = value[col..].chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+                    let after = if col < value.len() { &value[col + cursor_ch.len()..] } else { "" };
+                    vec![
+                        Span::styled(label_str, label_style),
+                        Span::styled(before.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                        Span::styled(cursor_ch, Style::default().bg(Color::Yellow).fg(Color::Black)),
+                        Span::styled(after.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                    ]
                 } else {
-                    Style::default().fg(Color::Cyan)
+                    vec![
+                        Span::styled(label_str, label_style),
+                        Span::styled(value, Style::default().fg(Color::Cyan)),
+                    ]
                 };
-                let mut spans = vec![
-                    Span::styled(label_str, label_style),
-                    Span::styled(value, value_style),
-                ];
-                if editing {
-                    spans.push(Span::styled(
-                        "█",
-                        Style::default().add_modifier(Modifier::RAPID_BLINK),
-                    ));
-                }
                 items.push(ListItem::new(Line::from(spans)));
                 if focused {
                     highlight_idx = item_idx;
@@ -974,7 +974,19 @@ fn draw_preview_building(frame: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  This may take a minute on first run.",
+            "  Once built, lading will pre-generate a block cache",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  before writing any log files. This initial cache",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  build may take a minute — log output will appear",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  once the cache is ready.",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
@@ -1112,7 +1124,23 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
     if app.preview_log_files.is_empty() {
-        let waiting = Paragraph::new("\n  Waiting for log files to appear...")
+        let waiting_lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Waiting for log files to appear...",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Lading is pre-generating its block cache.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  Log files will appear here once the cache is ready.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        let waiting = Paragraph::new(waiting_lines)
             .block(Block::default().borders(Borders::ALL).title(" Log Files "))
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(waiting, area);
@@ -1222,42 +1250,75 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let n_lines = content.lines().count();
     // rows[2] height minus top/bottom borders
     let visible = rows[2].height.saturating_sub(2);
-    let max_scroll = (n_lines as u16).saturating_sub(visible);
+    let max_scroll = n_lines.saturating_sub(visible as usize) as u32;
     app.preview_max_scroll.set(max_scroll);
     // Convert lines-from-bottom to lines-from-top
-    let scroll_top = max_scroll.saturating_sub(app.preview_content_scroll);
+    let scroll_top = max_scroll.saturating_sub(app.preview_content_scroll) as usize;
     // Pass 2: collect only the visible window (~40 lines, not the full file).
+    let num_width = if app.preview_pretty_mode {
+        n_lines.max(1).to_string().len()
+    } else {
+        0
+    };
     let content_lines: Vec<Line> = content
         .lines()
         .skip(scroll_top as usize)
         .take(visible as usize)
-        .map(|l| Line::from(format!("  {l}")))
+        .enumerate()
+        .map(|(i, l)| {
+            if app.preview_pretty_mode {
+                let abs_line = scroll_top as usize + i + 1;
+                let num_span = Span::styled(
+                    format!("{:>width$} ", abs_line, width = num_width),
+                    Style::default().fg(Color::DarkGray),
+                );
+                let bar_span = Span::styled("│ ", Style::default().fg(Color::DarkGray));
+                let text_style = if i % 2 == 0 {
+                    Style::default().fg(Color::Reset)
+                } else {
+                    Style::default().fg(Color::Reset).add_modifier(Modifier::DIM)
+                };
+                Line::from(vec![num_span, bar_span, Span::styled(l, text_style)])
+            } else {
+                Line::from(format!("  {l}"))
+            }
+        })
         .collect();
-    // total_lines/bytes for the header title (may differ from n_lines for the
-    // rolling buffer, where total_lines tracks accumulated lines beyond the buffer).
-    let total_lines = app.displayed_total_lines();
     let total_bytes = app.displayed_total_bytes();
     let bytes_str = format_bytes(total_bytes);
+    // For Running state use the accumulated total_lines counter (can exceed the 2000-line
+    // rolling buffer, informing the user how many lines were generated in total).
+    // For all other states use n_lines — the actual line count of the displayed content —
+    // so it always matches the pretty-mode line numbers.
+    let header_lines = if app.preview_state == PreviewState::Running {
+        app.displayed_total_lines()
+    } else {
+        n_lines
+    };
     let content_title = if app.preview_viewing_rotated {
         let rname = app
             .current_rotated_path()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .unwrap_or("rotated");
-        format!(" {rname}  {total_lines} lines  {bytes_str} ")
+        format!(" {rname}  {header_lines} lines  {bytes_str} ")
     } else if app.preview_content_scroll > 0 {
         format!(
-            " {total_lines} lines  {bytes_str}  [↑ scrolled {}] ",
+            " {header_lines} lines  {bytes_str}  [↑ scrolled {}] ",
             app.preview_content_scroll
         )
     } else if app.preview_state == PreviewState::Running {
-        format!(" {total_lines} lines  {bytes_str}  [live tail – last 2000 lines] ")
+        format!(" {header_lines} lines  {bytes_str}  [live tail – last 2000 lines] ")
     } else {
-        format!(" {total_lines} lines  {bytes_str} ")
+        format!(" {header_lines} lines  {bytes_str} ")
     };
     let content_para = Paragraph::new(content_lines)
         .block(Block::default().borders(Borders::ALL).title(content_title))
-        .style(Style::default().fg(Color::Cyan));
+        .style(if app.preview_pretty_mode {
+            Style::default() // per-line spans control color; don't force Cyan as base
+        } else {
+            Style::default().fg(Color::Cyan)
+        });
     // No .scroll() — viewport already applied via skip() above.
     frame.render_widget(content_para, rows[2]);
 
@@ -1370,7 +1431,11 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
-            "  c  toggle config",
+            "  c    toggle config",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            if app.preview_pretty_mode { "  p    pretty mode (on)" } else { "  p    pretty mode" },
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
@@ -1507,28 +1572,43 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let text = if app.template_editor_open {
-        " ↑↓←→ navigate   Enter newline   Backspace/Del edit   Tab indent   Ctrl+S save   Esc close"
+    // Build a list of spans: optional state pill + hint text
+    let (pill, pill_style, hint): (&str, Style, &str) = if app.template_editor_open {
+        ("", Style::default(), " ↑↓←→ navigate   Enter newline   Backspace/Del edit   Tab indent   Ctrl+S save   Esc close")
     } else if app.import_mode != ImportMode::Inactive {
-        " Enter confirm   Esc cancel"
+        ("", Style::default(), " Enter confirm   Esc cancel")
     } else if app.tab == 1 {
         match &app.preview_state {
-            PreviewState::Idle => {
-                " Type config path   r/Enter run (10 min)   i import into Build   Tab build tab   q quit"
-            }
-            PreviewState::Building => " q cancel build",
-            PreviewState::Running => {
-                " ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   q stop"
-            }
-            PreviewState::Stopped => {
-                " ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   r run again   q quit"
-            }
-            PreviewState::Failed(_) => " r retry   Tab build tab   q quit",
+            PreviewState::Idle => (
+                "",
+                Style::default(),
+                " Type config path   r/Enter run (10 min)   i import into Build   Tab build tab   q quit",
+            ),
+            PreviewState::Building => (
+                " ● BUILDING ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                "  q cancel build",
+            ),
+            PreviewState::Running => (
+                " ● RUNNING ",
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                "  ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   q stop",
+            ),
+            PreviewState::Stopped => (
+                " ● STOPPED ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                "  ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   p pretty   r run again   q quit",
+            ),
+            PreviewState::Failed(_) => (
+                " ● FAILED ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                "  r retry   Tab build tab   q quit",
+            ),
         }
     } else {
         let rows = app.form_rows();
         let current_row = rows.get(app.form_row).copied();
-        match (app.form_mode(), current_row) {
+        let hint = match (app.form_mode(), current_row) {
             (FormMode::Navigate, Some(FormRow::BlackholeEntry(_))) => {
                 " ← → kind   Enter edit addr   d delete   ↑↓ navigate   ^S save   q quit"
             }
@@ -1538,8 +1618,18 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             (FormMode::VariantSubMenu, _) => " ↑↓ select variant   Enter confirm   Esc cancel",
             (FormMode::LoadProfileSubMenu, _) => " ↑↓ select profile   Enter confirm   Esc cancel",
             (FormMode::Editing, _) => " Type to edit   Enter confirm   Esc cancel",
-        }
+        };
+        ("", Style::default(), hint)
     };
-    let para = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
+
+    let spans = if pill.is_empty() {
+        vec![Span::styled(hint, Style::default().fg(Color::DarkGray))]
+    } else {
+        vec![
+            Span::styled(pill, pill_style),
+            Span::styled(hint, Style::default().fg(Color::DarkGray)),
+        ]
+    };
+    let para = Paragraph::new(Line::from(spans));
     frame.render_widget(para, area);
 }
