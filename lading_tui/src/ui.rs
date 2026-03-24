@@ -9,6 +9,8 @@ use ratatui::{
     },
 };
 
+use std::path::PathBuf;
+
 use crate::app::{App, FormMode, FormRow, ImportMode, PreviewState};
 use crate::config::LoadProfileKind;
 use crate::variants::{ALL_VARIANTS, variant_meta};
@@ -1045,21 +1047,6 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "—".into());
 
-    let rotated_count = app.preview_rotated_files.len();
-    let rotated_arrow = if app.preview_rotated_expanded {
-        "▼"
-    } else {
-        "▶"
-    };
-    let rotated_label = if rotated_count == 0 {
-        format!("  {rotated_arrow} Rotated  none")
-    } else {
-        format!(
-            "  {rotated_arrow} Rotated  {rotated_count} file{}",
-            if rotated_count == 1 { "" } else { "s" }
-        )
-    };
-
     let mut left_lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -1094,45 +1081,16 @@ fn draw_preview_running(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  Path:   ", Style::default().fg(Color::DarkGray)),
             Span::styled(selected_path, Style::default().fg(Color::DarkGray)),
         ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            rotated_label,
-            if rotated_count > 0 {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            },
-        )),
     ];
-    if app.preview_rotated_expanded {
-        for (i, path) in app.preview_rotated_files.iter().enumerate() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            let is_cur = app.preview_viewing_rotated && i == app.preview_rotated_cursor;
-            left_lines.push(Line::from(Span::styled(
-                format!("    {} {name}", if is_cur { "▶" } else { " " }),
-                if is_cur {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                },
-            )));
-        }
-    }
     append_config_panel(&mut left_lines, app);
     left_lines.extend([
         Line::from(""),
         Line::from(Span::styled(
-            "  ← →  switch file",
+            "  ← →  switch file (or rotated when e)",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
-            "  e    toggle rotated",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::styled(
-            "  [/]  navigate rotated",
+            "  e    toggle rotated view",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
@@ -1161,26 +1119,50 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let cur_rotated: &[PathBuf] = app
+        .preview_rotated_files
+        .get(app.preview_file_tab)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let rotated_row_h = if app.preview_rotated_expanded && !cur_rotated.is_empty() {
+        1u16
+    } else {
+        0u16
+    };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(3),             // tab bar
+            Constraint::Length(rotated_row_h), // rotated file row (0 = hidden)
+            Constraint::Min(0),                // file content
         ])
         .split(area);
 
-    // Tab bar for log files
+    // Tab bar — show ▶/▼ indicator when rotated files exist for a tab.
     let tab_titles: Vec<Line> = app
         .preview_log_files
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
             let name = p
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("?")
                 .to_string();
-            Line::from(format!(" {name} "))
+            let rot_count = app
+                .preview_rotated_files
+                .get(i)
+                .map(Vec::len)
+                .unwrap_or(0);
+            let indicator = if rot_count == 0 {
+                String::new()
+            } else if i == app.preview_file_tab && app.preview_rotated_expanded {
+                format!(" ▼{rot_count}")
+            } else {
+                format!(" ▶{rot_count}")
+            };
+            Line::from(format!(" {name}{indicator} "))
         })
         .collect();
     let file_tabs = Tabs::new(tab_titles)
@@ -1194,66 +1176,102 @@ fn draw_file_tabs_panel(frame: &mut Frame, app: &App, area: Rect) {
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(file_tabs, rows[0]);
 
-    // File content — use snapshot when stopped, live otherwise
-    let content_lines: Vec<Line> = app
-        .displayed_content()
-        .lines()
-        .map(|l| Line::from(format!("  {l}")))
-        .collect();
-    let displayed_lines = content_lines.len() as u16;
-    let total_lines = app.displayed_total_lines();
-    // rows[1] height minus top/bottom borders
-    let visible = rows[1].height.saturating_sub(2);
-    let max_scroll = displayed_lines.saturating_sub(visible);
+    // Rotated file row (only when expanded and there are rotated files).
+    if rotated_row_h > 0 {
+        let rot_count = cur_rotated.len();
+        let mut spans: Vec<Span> = vec![
+            Span::styled(
+                format!("  {rot_count} rotated:  "),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ];
+        for (i, rpath) in cur_rotated.iter().enumerate() {
+            let suffix = rpath
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|name| {
+                    // Show only the .N suffix for brevity.
+                    name.rfind(".log.").map(|pos| &name[pos + 5..])
+                })
+                .unwrap_or("?");
+            let is_cur = i == app.preview_rotated_cursor;
+            let label = if is_cur {
+                format!("[.{suffix}]")
+            } else {
+                format!(" .{suffix} ")
+            };
+            spans.push(Span::styled(
+                label,
+                if is_cur {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ));
+        }
+        let rot_para =
+            Paragraph::new(Line::from(spans)).style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(rot_para, rows[1]);
+    }
+
+    // File content — virtual scrolling: only collect the visible viewport.
+    let content = app.displayed_content();
+    // Pass 1: count lines (O(n) scan, zero allocations) to compute scroll geometry.
+    let n_lines = content.lines().count();
+    // rows[2] height minus top/bottom borders
+    let visible = rows[2].height.saturating_sub(2);
+    let max_scroll = (n_lines as u16).saturating_sub(visible);
     app.preview_max_scroll.set(max_scroll);
     // Convert lines-from-bottom to lines-from-top
     let scroll_top = max_scroll.saturating_sub(app.preview_content_scroll);
+    // Pass 2: collect only the visible window (~40 lines, not the full file).
+    let content_lines: Vec<Line> = content
+        .lines()
+        .skip(scroll_top as usize)
+        .take(visible as usize)
+        .map(|l| Line::from(format!("  {l}")))
+        .collect();
+    // total_lines/bytes for the header title (may differ from n_lines for the
+    // rolling buffer, where total_lines tracks accumulated lines beyond the buffer).
+    let total_lines = app.displayed_total_lines();
     let total_bytes = app.displayed_total_bytes();
     let bytes_str = format_bytes(total_bytes);
-    let content_title = match app.preview_snapshot_idx {
-        Some(idx) => {
-            let age = app
-                .preview_snapshots
-                .get(idx)
-                .map(|(t, _, _, _)| format!("{}s ago", t.elapsed().as_secs()))
-                .unwrap_or_else(|| "?".into());
-            format!(
-                " Snapshot {}/{} — {} — {total_lines} lines  {bytes_str} ",
-                idx + 1,
-                app.preview_snapshots.len(),
-                age
-            )
-        }
-        None => {
-            if app.preview_content_scroll > 0 {
-                format!(
-                    " {total_lines} lines  {bytes_str}  [↑ scrolled {}] ",
-                    app.preview_content_scroll
-                )
-            } else {
-                format!(" {total_lines} lines  {bytes_str}  [tail] ")
-            }
-        }
+    let content_title = if app.preview_viewing_rotated {
+        let rname = app
+            .current_rotated_path()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("rotated");
+        format!(" {rname}  {total_lines} lines  {bytes_str} ")
+    } else if app.preview_content_scroll > 0 {
+        format!(
+            " {total_lines} lines  {bytes_str}  [↑ scrolled {}] ",
+            app.preview_content_scroll
+        )
+    } else if app.preview_state == PreviewState::Running {
+        format!(" {total_lines} lines  {bytes_str}  [live tail – last 2000 lines] ")
+    } else {
+        format!(" {total_lines} lines  {bytes_str} ")
     };
     let content_para = Paragraph::new(content_lines)
         .block(Block::default().borders(Borders::ALL).title(content_title))
-        .style(Style::default().fg(Color::Cyan))
-        .scroll((scroll_top, 0));
-    frame.render_widget(content_para, rows[1]);
+        .style(Style::default().fg(Color::Cyan));
+    // No .scroll() — viewport already applied via skip() above.
+    frame.render_widget(content_para, rows[2]);
 
-    // Scrollbar overlay on the right edge
-    let mut scrollbar_state = ScrollbarState::new(displayed_lines.saturating_sub(visible) as usize)
+    // Scrollbar overlay on the right edge of content
+    let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
         .position(scroll_top as usize);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓")),
-        rows[1],
+        rows[2],
         &mut scrollbar_state,
     );
 
-    // Timeline bar
-    draw_snapshot_timeline(frame, app, rows[2]);
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -1271,94 +1289,6 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
-const MAX_SNAPSHOTS: usize = 120;
-const BAR_WIDTH: usize = 30;
-
-fn draw_snapshot_timeline(frame: &mut Frame, app: &App, area: Rect) {
-    let line = if matches!(app.preview_state, PreviewState::Running) {
-        let n = app.preview_snapshots.len();
-        let next_in = 5u64.saturating_sub(app.preview_last_refresh.elapsed().as_secs());
-
-        // Progress bar: how many slots of MAX_SNAPSHOTS have been captured
-        let filled = (n * BAR_WIDTH) / MAX_SNAPSHOTS;
-        // Animate the leading edge based on countdown
-        let pending_char = match next_in {
-            0 | 1 => "▒",
-            _ => "░",
-        };
-        let bar: String =
-            "█".repeat(filled) + pending_char + &"░".repeat(BAR_WIDTH.saturating_sub(filled + 1));
-
-        let elapsed_secs = n as u64 * 5;
-        let elapsed_str = format_duration(elapsed_secs);
-
-        Line::from(vec![
-            Span::styled("  [", Style::default().fg(Color::DarkGray)),
-            Span::styled(bar, Style::default().fg(Color::Green)),
-            Span::styled(
-                format!("]  {n}/{MAX_SNAPSHOTS}  {elapsed_str} captured   next in {next_in}s"),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ])
-    } else if app.preview_snapshots.is_empty() {
-        Line::from(Span::styled(
-            "  (no snapshots — run lading to capture)",
-            Style::default().fg(Color::DarkGray),
-        ))
-    } else {
-        // Stopped/Failed: navigable bar with cursor
-        let n = app.preview_snapshots.len();
-        let active = app.preview_snapshot_idx.unwrap_or(n.saturating_sub(1));
-
-        // Cursor position within the bar
-        let cursor_pos = if n > 1 {
-            (active * BAR_WIDTH) / (n - 1)
-        } else {
-            BAR_WIDTH
-        };
-        let bar: String = (0..=BAR_WIDTH)
-            .map(|i| if i == cursor_pos { '█' } else { '░' })
-            .collect();
-
-        let age_str = app
-            .preview_snapshots
-            .get(active)
-            .map(|(t, _, _, _)| format!("{}s ago", t.elapsed().as_secs()))
-            .unwrap_or_default();
-
-        let mut spans = vec![
-            Span::styled("  [", Style::default().fg(Color::DarkGray)),
-            Span::styled(bar, Style::default().fg(Color::Yellow)),
-            Span::styled(
-                format!("]  {}/{n}  {age_str}", active + 1),
-                Style::default().fg(Color::Yellow),
-            ),
-        ];
-        if active > 0 {
-            spans.push(Span::styled(
-                "   [ back",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-        if active + 1 < n {
-            spans.push(Span::styled(
-                "   ] forward",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-        Line::from(spans)
-    };
-
-    frame.render_widget(Paragraph::new(line), area);
-}
-
-fn format_duration(secs: u64) -> String {
-    if secs >= 60 {
-        format!("{}m {:02}s", secs / 60, secs % 60)
-    } else {
-        format!("{secs}s")
-    }
-}
 
 fn draw_preview_failed(frame: &mut Frame, app: &App, area: Rect, msg: String) {
     let (left, right) = preview_cols(area);
@@ -1422,22 +1352,6 @@ fn draw_preview_failed(frame: &mut Frame, app: &App, area: Rect, msg: String) {
 fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
     let (left, right) = preview_cols(area);
 
-    let snapshot_count = app.preview_snapshots.len();
-    let rotated_count = app.preview_rotated_files.len();
-    let rotated_arrow = if app.preview_rotated_expanded {
-        "▼"
-    } else {
-        "▶"
-    };
-    let rotated_label = if rotated_count == 0 {
-        format!("  {rotated_arrow} Rotated  none")
-    } else {
-        format!(
-            "  {rotated_arrow} Rotated  {rotated_count} file{}",
-            if rotated_count == 1 { "" } else { "s" }
-        )
-    };
-
     let mut left_lines = vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -1447,48 +1361,12 @@ fn draw_preview_stopped(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            format!(
-                "  {snapshot_count} snapshot{} captured",
-                if snapshot_count == 1 { "" } else { "s" }
-            ),
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            rotated_label,
-            Style::default().fg(Color::DarkGray),
-        )),
     ];
-    if app.preview_rotated_expanded {
-        for (i, path) in app.preview_rotated_files.iter().enumerate() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            let is_cur = app.preview_viewing_rotated && i == app.preview_rotated_cursor;
-            left_lines.push(Line::from(Span::styled(
-                format!("    {} {name}", if is_cur { "▶" } else { " " }),
-                if is_cur {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                },
-            )));
-        }
-    }
     append_config_panel(&mut left_lines, app);
     left_lines.extend([
         Line::from(""),
         Line::from(Span::styled(
-            "  [  snapshots / rotated back",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::styled(
-            "  ]  snapshots / rotated fwd",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::styled(
-            "  e  toggle rotated files",
+            "  e    view rotated (← → to switch)",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
@@ -1640,10 +1518,10 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             }
             PreviewState::Building => " q cancel build",
             PreviewState::Running => {
-                " ↑↓ scroll   t/b top/bottom   ← → switch file   e rotated   [/] navigate rotated   q stop"
+                " ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   q stop"
             }
             PreviewState::Stopped => {
-                " ↑↓ scroll   t/b top/bottom   [/] snapshots or rotated   ←→ switch file/rotated   e rotated   r run again   q quit"
+                " ↑↓ scroll   t/b top/bottom   ← → switch file   e toggle rotated (← → navigates)   r run again   q quit"
             }
             PreviewState::Failed(_) => " r retry   Tab build tab   q quit",
         }

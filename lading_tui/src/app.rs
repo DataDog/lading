@@ -1,4 +1,5 @@
-use std::io::{BufRead, BufReader};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -95,6 +96,18 @@ pub enum ImportMode {
 }
 
 // ---------------------------------------------------------------------------
+// Per-file live state
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+pub struct LogFileState {
+    pub content: String,    // rolling 2000-line display buffer (live tail)
+    pub total_lines: usize, // actual line count (may exceed buffer)
+    pub total_bytes: usize, // actual byte count of the file
+    pub read_pos: u64,      // last byte offset read (incremental reads)
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -161,23 +174,21 @@ pub struct App {
     pub preview_lading_log_rx: Option<Receiver<String>>,
     pub preview_log_files: Vec<PathBuf>, // active .log files
     pub preview_file_tab: usize,
-    pub preview_file_content: String,
-    pub preview_rotated_files: Vec<PathBuf>, // .log.N rotated files
+    pub preview_log_states: HashMap<PathBuf, LogFileState>, // per-file live state + snapshots
+    pub preview_rotated_files: Vec<Vec<PathBuf>>,           // [tab_idx] -> sorted rotated files
+    pub preview_rotated_cache: HashMap<PathBuf, (String, usize, usize)>, // path -> (content, lines, bytes)
     pub preview_rotated_expanded: bool,
-    pub preview_rotated_cursor: usize,
+    pub preview_rotated_cursor: usize, // index within current tab's rotated list
     pub preview_viewing_rotated: bool, // if true, show rotated content instead
-    pub preview_rotated_content: String,
-    pub preview_last_refresh: Instant,
+    pub preview_full_file_content: HashMap<PathBuf, (String, usize, usize)>, // captured on stop: full file (content, lines, bytes)
+    pub preview_last_refresh: Instant,      // 1s lightweight tick (incremental reads)
+    pub preview_last_full_refresh: Instant, // 5s full refresh (dir walk + rotated cache)
     pub preview_mount_point: String,
     pub preview_run_config: String, // patched copy of config with remapped mount_point
     pub preview_config_yaml: String, // YAML content of the active run config
     pub preview_config_panel_expanded: bool, // whether config panel is expanded in left panel
     pub preview_content_scroll: u16, // lines scrolled up from bottom (0 = follow tail)
     pub preview_max_scroll: std::cell::Cell<u16>, // set by render each frame; max useful scroll value
-    pub preview_snapshots: std::collections::VecDeque<(Instant, String, usize, usize)>, // (time, content, total_lines, total_bytes), max 120
-    pub preview_snapshot_idx: Option<usize>, // None = live, Some(i) = viewing snapshot i
-    pub preview_file_total_lines: usize,     // actual line count before the 2000-line display cap
-    pub preview_file_total_bytes: usize,     // actual byte count of the file
 
     // --- template editor ---
     pub template_editor_open: bool,
@@ -245,23 +256,21 @@ impl App {
             preview_lading_log_rx: None,
             preview_log_files: Vec::new(),
             preview_file_tab: 0,
-            preview_file_content: String::new(),
+            preview_log_states: HashMap::new(),
             preview_rotated_files: Vec::new(),
+            preview_rotated_cache: HashMap::new(),
             preview_rotated_expanded: false,
             preview_rotated_cursor: 0,
             preview_viewing_rotated: false,
-            preview_rotated_content: String::new(),
+            preview_full_file_content: HashMap::new(),
             preview_last_refresh: Instant::now(),
+            preview_last_full_refresh: Instant::now(),
             preview_mount_point: String::new(),
             preview_run_config: String::new(),
             preview_config_yaml: String::new(),
             preview_config_panel_expanded: false,
             preview_content_scroll: 0,
             preview_max_scroll: std::cell::Cell::new(0),
-            preview_snapshots: std::collections::VecDeque::new(),
-            preview_snapshot_idx: None,
-            preview_file_total_lines: 0,
-            preview_file_total_bytes: 0,
             template_editor_open: false,
             template_lines: DEFAULT_TEMPLATE.lines().map(str::to_string).collect(),
             template_cursor_row: 0,
@@ -305,37 +314,79 @@ impl App {
         )
     }
 
-    /// Returns the content to display: rotated file > snapshot > live.
+    /// Returns the path of the currently selected rotated file, if any.
+    pub fn current_rotated_path(&self) -> Option<&PathBuf> {
+        self.preview_rotated_files
+            .get(self.preview_file_tab)
+            .and_then(|v| v.get(self.preview_rotated_cursor))
+    }
+
+    /// Returns the content to display: rotated file > full stopped > live rolling.
     pub fn displayed_content(&self) -> &str {
         if self.preview_viewing_rotated {
-            return &self.preview_rotated_content;
+            if let Some(path) = self.current_rotated_path() {
+                if let Some((content, _, _)) = self.preview_rotated_cache.get(path) {
+                    return content;
+                }
+            }
+            return "";
         }
-        if let Some(idx) = self.preview_snapshot_idx {
-            if let Some((_, content, _, _)) = self.preview_snapshots.get(idx) {
-                return content;
+        let path = self.preview_log_files.get(self.preview_file_tab);
+        if self.preview_state == PreviewState::Stopped {
+            if let Some(p) = path {
+                if let Some((content, _, _)) = self.preview_full_file_content.get(p) {
+                    return content;
+                }
             }
         }
-        &self.preview_file_content
+        let state = path.and_then(|p| self.preview_log_states.get(p));
+        state.map(|s| s.content.as_str()).unwrap_or("")
     }
 
-    /// Returns the actual total line count for the currently displayed content.
+    /// Returns the total line count for the currently displayed content.
     pub fn displayed_total_lines(&self) -> usize {
-        if let Some(idx) = self.preview_snapshot_idx {
-            if let Some((_, _, lines, _)) = self.preview_snapshots.get(idx) {
-                return *lines;
+        if self.preview_viewing_rotated {
+            if let Some(path) = self.current_rotated_path() {
+                if let Some((_, lines, _)) = self.preview_rotated_cache.get(path) {
+                    return *lines;
+                }
+            }
+            return 0;
+        }
+        let path = self.preview_log_files.get(self.preview_file_tab);
+        if self.preview_state == PreviewState::Stopped {
+            if let Some(p) = path {
+                if let Some((_, lines, _)) = self.preview_full_file_content.get(p) {
+                    return *lines;
+                }
             }
         }
-        self.preview_file_total_lines
+        path.and_then(|p| self.preview_log_states.get(p))
+            .map(|s| s.total_lines)
+            .unwrap_or(0)
     }
 
-    /// Returns the actual total byte count for the currently displayed content.
+    /// Returns the total byte count for the currently displayed content.
     pub fn displayed_total_bytes(&self) -> usize {
-        if let Some(idx) = self.preview_snapshot_idx {
-            if let Some((_, _, _, bytes)) = self.preview_snapshots.get(idx) {
-                return *bytes;
+        if self.preview_viewing_rotated {
+            if let Some(path) = self.current_rotated_path() {
+                if let Some((_, _, bytes)) = self.preview_rotated_cache.get(path) {
+                    return *bytes;
+                }
+            }
+            return 0;
+        }
+        let path = self.preview_log_files.get(self.preview_file_tab);
+        if self.preview_state == PreviewState::Stopped {
+            if let Some(p) = path {
+                if let Some((_, _, bytes)) = self.preview_full_file_content.get(p) {
+                    return *bytes;
+                }
             }
         }
-        self.preview_file_total_bytes
+        path.and_then(|p| self.preview_log_states.get(p))
+            .map(|s| s.total_bytes)
+            .unwrap_or(0)
     }
 
     // -----------------------------------------------------------------------
@@ -412,29 +463,54 @@ impl App {
             return;
         }
 
-        if self.preview_last_refresh.elapsed() >= Duration::from_secs(5) {
-            self.refresh_log_files();
+        if self.preview_last_refresh.elapsed() >= Duration::from_secs(1) {
+            self.refresh_log_files_lightweight();
+        }
+        if self.preview_last_full_refresh.elapsed() >= Duration::from_secs(5) {
+            self.refresh_log_files_full();
         }
     }
 
-    fn refresh_log_files(&mut self) {
+    // 1s tick: incremental reads of active files.
+    fn refresh_log_files_lightweight(&mut self) {
+        if self.preview_mount_point.is_empty() {
+            return;
+        }
+        let active_paths: Vec<PathBuf> = self.preview_log_files.clone();
+        for path in &active_paths {
+            self.read_file_incremental(path);
+        }
+        self.preview_last_refresh = Instant::now();
+    }
+
+    // 5s tick: dir walk, file grouping, rotated cache update.
+    fn refresh_log_files_full(&mut self) {
         if self.preview_mount_point.is_empty() {
             return;
         }
         let mount = std::path::Path::new(&self.preview_mount_point);
         let mut active: Vec<PathBuf> = Vec::new();
-        let mut rotated: Vec<PathBuf> = Vec::new();
+        let mut all_rotated: Vec<PathBuf> = Vec::new();
         if let Ok(entries) = self.walk_dir(mount) {
             for path in entries {
                 if path.extension().and_then(|e| e.to_str()) == Some("log") {
                     active.push(path);
                 } else if is_rotated_log(&path) {
-                    rotated.push(path);
+                    all_rotated.push(path);
                 }
             }
         }
         active.sort();
-        rotated.sort();
+        all_rotated.sort();
+
+        // Group rotated files by their active-file parent (foo.log.1 → foo.log).
+        let mut rotated: Vec<Vec<PathBuf>> = vec![vec![]; active.len()];
+        for rpath in all_rotated {
+            if let Some(idx) = active.iter().position(|a| is_rotated_of(a, &rpath)) {
+                rotated[idx].push(rpath);
+            }
+        }
+
         self.preview_log_files = active;
         self.preview_rotated_files = rotated;
 
@@ -444,57 +520,84 @@ impl App {
         } else {
             self.preview_file_tab = 0;
         }
-        // clamp rotated cursor
-        if !self.preview_rotated_files.is_empty() {
-            self.preview_rotated_cursor = self
-                .preview_rotated_cursor
-                .min(self.preview_rotated_files.len() - 1);
-        } else {
-            self.preview_rotated_cursor = 0;
-            self.preview_rotated_expanded = false;
-            self.preview_viewing_rotated = false;
-        }
-
-        // read selected file; keep a large buffer so scrolling has content to reveal
-        if let Some(path) = self.preview_log_files.get(self.preview_file_tab) {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                self.preview_file_total_bytes = content.len();
-                let lines: Vec<&str> = content.lines().collect();
-                self.preview_file_total_lines = lines.len();
-                let start = lines.len().saturating_sub(2000);
-                self.preview_file_content = lines[start..].join("\n");
-            }
-        }
-
-        // Save a snapshot only when there is new content (skip empty/unchanged periods
-        // like lading's prebuild cache warmup, so timeline slots aren't wasted).
-        let last_bytes = self
-            .preview_snapshots
-            .back()
-            .map(|(_, _, _, b)| *b)
+        // clamp rotated cursor to current tab's list
+        let cur_rot_len = self
+            .preview_rotated_files
+            .get(self.preview_file_tab)
+            .map(Vec::len)
             .unwrap_or(0);
-        if self.preview_file_total_bytes > last_bytes {
-            self.preview_snapshots.push_back((
-                Instant::now(),
-                self.preview_file_content.clone(),
-                self.preview_file_total_lines,
-                self.preview_file_total_bytes,
-            ));
-            if self.preview_snapshots.len() > 120 {
-                self.preview_snapshots.pop_front();
+        if cur_rot_len == 0 {
+            self.preview_rotated_cursor = 0;
+            if self.preview_viewing_rotated {
+                self.preview_viewing_rotated = false;
             }
+        } else {
+            self.preview_rotated_cursor = self.preview_rotated_cursor.min(cur_rot_len - 1);
         }
 
-        self.preview_last_refresh = Instant::now();
+        // Drop state for files that have been rotated out of the active list.
+        let active_paths = self.preview_log_files.clone();
+        self.preview_log_states
+            .retain(|p, _| active_paths.contains(p));
+
+        self.preview_last_full_refresh = Instant::now();
+    }
+
+    // Called by stop_preview to flush everything before the FUSE mount dies.
+    fn refresh_log_files(&mut self) {
+        self.refresh_log_files_full();
+        self.refresh_log_files_lightweight();
+    }
+
+    fn read_file_incremental(&mut self, path: &PathBuf) {
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return;
+        };
+        let Ok(meta) = file.metadata() else { return };
+        let new_size = meta.len();
+        let state = self.preview_log_states.entry(path.clone()).or_default();
+
+        if new_size == state.read_pos {
+            return; // nothing new
+        }
+
+        if new_size < state.read_pos {
+            // File was truncated/rotated — reset and re-read from the start.
+            state.read_pos = 0;
+            state.content.clear();
+            state.total_lines = 0;
+        } else {
+            file.seek(SeekFrom::Start(state.read_pos)).ok();
+        }
+
+        let mut new_bytes = Vec::new();
+        file.read_to_end(&mut new_bytes).ok();
+        state.total_bytes = new_size as usize;
+        state.read_pos = new_size;
+
+        let new_text = String::from_utf8_lossy(&new_bytes);
+        let new_line_count = new_text.lines().count();
+        let mut lines: Vec<&str> = state.content.lines().collect();
+        lines.extend(new_text.lines());
+        state.total_lines = state.total_lines.saturating_add(new_line_count);
+        let start = lines.len().saturating_sub(2000);
+        state.content = lines[start..].join("\n");
     }
 
     pub fn load_rotated_file(&mut self) {
-        if let Some(path) = self.preview_rotated_files.get(self.preview_rotated_cursor) {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                let lines: Vec<&str> = content.lines().collect();
-                let start = lines.len().saturating_sub(2000);
-                self.preview_rotated_content = lines[start..].join("\n");
-            }
+        let path = self
+            .preview_rotated_files
+            .get(self.preview_file_tab)
+            .and_then(|v| v.get(self.preview_rotated_cursor))
+            .cloned();
+        let Some(path) = path else { return };
+        // Attempt a read in case the eager cache missed this file (e.g. it appeared
+        // after the last refresh). After FUSE unmounts this will silently fail and
+        // we fall back to whatever is already in the cache.
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let lines = content.lines().count();
+            let bytes = content.len();
+            self.preview_rotated_cache.insert(path, (content, lines, bytes));
         }
         self.preview_viewing_rotated = true;
         self.preview_content_scroll = 0;
@@ -570,17 +673,17 @@ impl App {
         self.preview_build_log_rx = None;
         self.preview_lading_log = String::new();
         self.preview_lading_log_rx = None;
-        self.preview_snapshots.clear();
-        self.preview_snapshot_idx = None;
         self.preview_log_files = Vec::new();
-        self.preview_file_content = String::new();
+        self.preview_log_states.clear();
         self.preview_file_tab = 0;
         self.preview_rotated_files = Vec::new();
+        self.preview_rotated_cache.clear();
         self.preview_rotated_expanded = false;
         self.preview_rotated_cursor = 0;
         self.preview_viewing_rotated = false;
-        self.preview_rotated_content = String::new();
+        self.preview_full_file_content.clear();
         self.preview_last_refresh = Instant::now();
+        self.preview_last_full_refresh = Instant::now();
 
         match Command::new("cargo")
             .args(["build", "-p", "lading", "--features", "logrotate_fs"])
@@ -639,6 +742,38 @@ impl App {
     }
 
     pub fn stop_preview(&mut self) {
+        // Do a final refresh before killing lading so all rotated file content
+        // is cached while the FUSE mount is still live.
+        self.refresh_log_files();
+
+        // Capture full contents of all active log files while FUSE is still mounted.
+        // The rolling 2000-line buffer in LogFileState is a live-tail view; on stop
+        // we want the complete file so the user can scroll to the real first line.
+        let active_paths: Vec<PathBuf> = self.preview_log_files.clone();
+        for path in &active_paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let lines = content.lines().count();
+                let bytes = content.len();
+                self.preview_full_file_content.insert(path.clone(), (content, lines, bytes));
+            }
+        }
+
+        // Cache all rotated files now, while FUSE is still mounted.
+        // We do this at stop time rather than eagerly every 5s to avoid blocking
+        // the main thread with potentially GBs of I/O during the run.
+        let all_rotated: Vec<PathBuf> = self.preview_rotated_files
+            .iter()
+            .flatten()
+            .cloned()
+            .collect();
+        for path in all_rotated {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let lines = content.lines().count();
+                let bytes = content.len();
+                self.preview_rotated_cache.insert(path, (content, lines, bytes));
+            }
+        }
+
         if let Some(mut child) = self.preview_lading_child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -649,10 +784,6 @@ impl App {
         }
         self.preview_build_log_rx = None;
         self.preview_lading_log_rx = None;
-        // Point to the most recent snapshot so timeline is ready for navigation
-        if !self.preview_snapshots.is_empty() {
-            self.preview_snapshot_idx = Some(self.preview_snapshots.len() - 1);
-        }
         self.preview_state = PreviewState::Stopped;
     }
 
@@ -895,42 +1026,46 @@ impl App {
                     self.preview_content_scroll = self.preview_content_scroll.saturating_sub(3);
                 }
                 KeyCode::Left => {
-                    if self.preview_file_tab > 0 {
+                    if self.preview_rotated_expanded {
+                        // Navigate between rotated files for this tab
+                        if self.preview_rotated_cursor > 0 {
+                            self.preview_rotated_cursor -= 1;
+                            self.load_rotated_file();
+                        }
+                    } else if self.preview_file_tab > 0 {
                         self.preview_file_tab -= 1;
                         self.preview_content_scroll = 0;
                         self.preview_viewing_rotated = false;
-                        self.refresh_log_files();
+                        self.preview_rotated_cursor = 0;
                     }
                 }
                 KeyCode::Right => {
-                    if !self.preview_log_files.is_empty()
+                    if self.preview_rotated_expanded {
+                        let cur_rot_len = self
+                            .preview_rotated_files
+                            .get(self.preview_file_tab)
+                            .map(Vec::len)
+                            .unwrap_or(0);
+                        if self.preview_rotated_cursor + 1 < cur_rot_len {
+                            self.preview_rotated_cursor += 1;
+                            self.load_rotated_file();
+                        }
+                    } else if !self.preview_log_files.is_empty()
                         && self.preview_file_tab + 1 < self.preview_log_files.len()
                     {
                         self.preview_file_tab += 1;
                         self.preview_content_scroll = 0;
                         self.preview_viewing_rotated = false;
-                        self.refresh_log_files();
+                        self.preview_rotated_cursor = 0;
                     }
                 }
                 KeyCode::Char('e') => {
                     self.preview_rotated_expanded = !self.preview_rotated_expanded;
-                    if !self.preview_rotated_expanded {
+                    if self.preview_rotated_expanded {
+                        self.preview_rotated_cursor = 0;
+                        self.load_rotated_file();
+                    } else {
                         self.preview_viewing_rotated = false;
-                    }
-                }
-                KeyCode::Char('[') => {
-                    if self.preview_rotated_expanded && self.preview_rotated_cursor > 0 {
-                        self.preview_rotated_cursor -= 1;
-                        self.load_rotated_file();
-                    }
-                }
-                KeyCode::Char(']') => {
-                    if self.preview_rotated_expanded
-                        && !self.preview_rotated_files.is_empty()
-                        && self.preview_rotated_cursor + 1 < self.preview_rotated_files.len()
-                    {
-                        self.preview_rotated_cursor += 1;
-                        self.load_rotated_file();
                     }
                 }
                 KeyCode::Char('t') => {
@@ -946,37 +1081,8 @@ impl App {
                 _ => {}
             },
             PreviewState::Failed(_) | PreviewState::Stopped => match code {
-                KeyCode::Char('[') => {
-                    if self.preview_viewing_rotated {
-                        if self.preview_rotated_cursor > 0 {
-                            self.preview_rotated_cursor -= 1;
-                            self.load_rotated_file();
-                        }
-                    } else if let Some(idx) = self.preview_snapshot_idx {
-                        if idx > 0 {
-                            self.preview_snapshot_idx = Some(idx - 1);
-                            self.preview_content_scroll = 0;
-                        }
-                    }
-                }
-                KeyCode::Char(']') => {
-                    if self.preview_viewing_rotated {
-                        if !self.preview_rotated_files.is_empty()
-                            && self.preview_rotated_cursor + 1 < self.preview_rotated_files.len()
-                        {
-                            self.preview_rotated_cursor += 1;
-                            self.load_rotated_file();
-                        }
-                    } else if let Some(idx) = self.preview_snapshot_idx {
-                        let max = self.preview_snapshots.len().saturating_sub(1);
-                        if idx < max {
-                            self.preview_snapshot_idx = Some(idx + 1);
-                            self.preview_content_scroll = 0;
-                        }
-                    }
-                }
                 KeyCode::Left => {
-                    if self.preview_viewing_rotated {
+                    if self.preview_rotated_expanded {
                         if self.preview_rotated_cursor > 0 {
                             self.preview_rotated_cursor -= 1;
                             self.load_rotated_file();
@@ -984,13 +1090,18 @@ impl App {
                     } else if self.preview_file_tab > 0 {
                         self.preview_file_tab -= 1;
                         self.preview_content_scroll = 0;
+                        self.preview_viewing_rotated = false;
+                        self.preview_rotated_cursor = 0;
                     }
                 }
                 KeyCode::Right => {
-                    if self.preview_viewing_rotated {
-                        if !self.preview_rotated_files.is_empty()
-                            && self.preview_rotated_cursor + 1 < self.preview_rotated_files.len()
-                        {
+                    if self.preview_rotated_expanded {
+                        let cur_rot_len = self
+                            .preview_rotated_files
+                            .get(self.preview_file_tab)
+                            .map(Vec::len)
+                            .unwrap_or(0);
+                        if self.preview_rotated_cursor + 1 < cur_rot_len {
                             self.preview_rotated_cursor += 1;
                             self.load_rotated_file();
                         }
@@ -999,11 +1110,16 @@ impl App {
                     {
                         self.preview_file_tab += 1;
                         self.preview_content_scroll = 0;
+                        self.preview_viewing_rotated = false;
+                        self.preview_rotated_cursor = 0;
                     }
                 }
                 KeyCode::Char('e') => {
                     self.preview_rotated_expanded = !self.preview_rotated_expanded;
-                    if !self.preview_rotated_expanded {
+                    if self.preview_rotated_expanded {
+                        self.preview_rotated_cursor = 0;
+                        self.load_rotated_file();
+                    } else {
                         self.preview_viewing_rotated = false;
                     }
                 }
@@ -1693,6 +1809,24 @@ fn is_rotated_log(path: &std::path::Path) -> bool {
     // Find the last ".log." in the name
     if let Some(pos) = name.rfind(".log.") {
         let suffix = &name[pos + 5..]; // skip ".log."
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+    } else {
+        false
+    }
+}
+
+/// Return true if `rotated` is a rotated version of `active`.
+/// e.g. active=`foo.log`, rotated=`foo.log.1` → true.
+fn is_rotated_of(active: &std::path::Path, rotated: &std::path::Path) -> bool {
+    let Some(active_name) = active.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let Some(rot_name) = rotated.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    // rotated name must start with "{active_name}." and the suffix must be all digits.
+    let prefix = format!("{active_name}.");
+    if let Some(suffix) = rot_name.strip_prefix(prefix.as_str()) {
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
     } else {
         false
