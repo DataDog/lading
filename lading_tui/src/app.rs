@@ -654,6 +654,8 @@ impl App {
         let original_mount =
             extract_mount_point(&yaml).unwrap_or_else(|| "/tmp/logrotate".to_string());
         let effective_mount = remap_to_tmp(&original_mount);
+        // Remove any stale FUSE mount left by a previous unclean exit before creating fresh.
+        cleanup_mount(&effective_mount);
         if let Err(e) = std::fs::create_dir_all(&effective_mount) {
             self.preview_config_error =
                 Some(format!("Cannot create mount dir {effective_mount}: {e}"));
@@ -669,7 +671,9 @@ impl App {
             return;
         }
         self.preview_run_config = run_config;
-        self.preview_config_yaml = patched_yaml;
+        // Compact the seed from block-sequence to flow style for display only;
+        // the file written to disk above is left verbatim so lading can read it fine.
+        self.preview_config_yaml = crate::config::compact_seed_in_yaml(&patched_yaml);
         self.preview_config_panel_expanded = false;
 
         self.preview_config_error = None;
@@ -785,6 +789,12 @@ impl App {
         if let Some(mut child) = self.preview_build_child.take() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        // Unmount and remove the FUSE mount directory.  lading is killed with SIGKILL so
+        // it never runs its own FUSE teardown; the kernel marks the mount dead but leaves
+        // it in /proc/mounts.  cleanup_mount() clears that stale entry.
+        if !self.preview_mount_point.is_empty() {
+            cleanup_mount(&self.preview_mount_point);
         }
         self.preview_build_log_rx = None;
         self.preview_lading_log_rx = None;
@@ -1807,6 +1817,16 @@ impl App {
         self.auto_import_done = true;
         self.preview_config_input = path;
     }
+}
+
+/// Unmount a (possibly stale) FUSE mount and remove the directory.
+/// Called before creating the mount dir (startup) and after killing lading (stop).
+/// All errors are silently ignored — this is best-effort cleanup.
+fn cleanup_mount(path: &str) {
+    // Try both FUSE 2 and FUSE 3 tools; exactly one will be present on any given system.
+    let _ = std::process::Command::new("fusermount").args(["-u", path]).output();
+    let _ = std::process::Command::new("fusermount3").args(["-u", path]).output();
+    let _ = std::fs::remove_dir_all(path);
 }
 
 /// Map an arbitrary mount path into /tmp so no root or pre-created dirs are needed.

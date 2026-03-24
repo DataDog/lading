@@ -471,3 +471,42 @@ fn seed_to_flow_style(yaml: &str, seed: &[u8; 32]) -> String {
     }
     out
 }
+
+/// Rewrite a `seed:` block-sequence in arbitrary YAML to a single-line flow sequence,
+/// reading the values directly from the YAML rather than requiring the seed to be passed.
+/// Used when displaying a user-supplied config (where we may not have the seed in memory).
+/// A seed already on one line (flow style) is left unchanged.
+pub fn compact_seed_in_yaml(yaml: &str) -> String {
+    let mut out = String::with_capacity(yaml.len());
+    let mut iter = yaml.lines().peekable();
+
+    while let Some(line) = iter.next() {
+        let trimmed = line.trim_start();
+        if trimmed == "seed:" {
+            let next_is_item = iter
+                .peek()
+                .map(|l| l.trim_start().starts_with("- "))
+                .unwrap_or(false);
+            if next_is_item {
+                let indent = &line[..line.len() - trimmed.len()];
+                let mut items: Vec<String> = Vec::new();
+                while let Some(&peek) = iter.peek() {
+                    if let Some(val) = peek.trim_start().strip_prefix("- ") {
+                        items.push(val.to_string());
+                        iter.next();
+                    } else {
+                        break;
+                    }
+                }
+                out.push_str(indent);
+                out.push_str("seed: [");
+                out.push_str(&items.join(", "));
+                out.push_str("]\n");
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
