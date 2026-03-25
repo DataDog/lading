@@ -27,9 +27,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
         with:
           cache: true
-      - uses: taiki-e/install-action@650c5ca14212efbbf3e580844b04bdccf68dac31 # v2.67.18
+      - name: Install nextest
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          tool: nextest@0.9.72
+          install_args: "aqua:nextest-rs/nextest/cargo-nextest"
       - name: Install Protobuf
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
