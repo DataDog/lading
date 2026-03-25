@@ -13,7 +13,9 @@
 #   MISE_LOCKED=0 mise lock --platform linux-x64,macos-arm64,linux-arm64
 #
 # When those complete, run:
-#   ./ci/validate
+#   uv run ci/check_mise_checksums.py
+#   mise install
+#   ci/validate
 #
 
 [settings]
@@ -43,4 +45,4 @@ actionlint = "1.7.3"
 buf = "1.50.0"
 
 # Protocol buffer compiler
-protoc = "21.12"
+protoc = "33.2"
