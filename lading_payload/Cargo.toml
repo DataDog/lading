@@ -34,7 +34,7 @@ barkus-core = { workspace = true }
 barkus-ebnf = { workspace = true }
 barkus-peg = { workspace = true }
 barkus-antlr = { workspace = true }
-rand_0_8 = { package = "rand", version = "0.8", default-features = false, features = ["small_rng"] }
+rand_0_10 = { package = "rand", version = "0.10", default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }
