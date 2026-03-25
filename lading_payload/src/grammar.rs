@@ -10,14 +10,14 @@ use barkus_core::error::GenerateError;
 use barkus_core::generate;
 use barkus_core::profile::Profile;
 use rand::Rng;
-use rand_0_8::SeedableRng;
+use rand_0_10::SeedableRng;
 use serde::Deserialize;
 use tracing::warn;
 
 use crate::Error;
 
-/// Rand 0.8 `SmallRng`, bridging lading's rand 0.9 to barkus's rand 0.8.
-type BarkusRng = rand_0_8::rngs::SmallRng;
+/// Rand 0.10 `SmallRng`, bridging lading's rand 0.9 to barkus's rand 0.10.
+type BarkusRng = rand_0_10::rngs::SmallRng;
 
 /// Maximum number of consecutive generation failures (empty output or budget
 /// exhaustion) before we stop retrying and return what we have so far.
