@@ -3,6 +3,10 @@
 //! This module wraps barkus — a structure-aware grammar-based data generator —
 //! as a lading payload type. It accepts EBNF, PEG, or ANTLR v4 grammar files
 //! and generates conforming structured output.
+//!
+//! Unlike other lading payload types, the grammar generator does **not** inject
+//! delimiters (e.g. newlines) between samples. If you need newline-delimited
+//! output, include the newline in your grammar's start production.
 
 use std::{io::Write, path::PathBuf};
 
@@ -161,13 +165,11 @@ impl crate::Serialize for Grammar {
                         continue;
                     }
                     consecutive_failures = 0;
-                    // +1 for the trailing newline
-                    let needed = sample.len() + 1;
+                    let needed = sample.len();
                     let Some(remainder) = bytes_remaining.checked_sub(needed) else {
                         break;
                     };
                     writer.write_all(&sample)?;
-                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 Err(GenerateError::BudgetExhausted { .. }) => {
@@ -232,7 +234,8 @@ mod test {
 
     #[test]
     fn ebnf_generates_expected_output() {
-        let source = "greeting = \"hello\" | \"world\" ;";
+        // Grammar includes a trailing newline so each sample is its own line.
+        let source = "greeting = ( \"hello\" | \"world\" ) , \"\\n\" ;";
         let (_dir, config) = config_from_source(source, GrammarFormat::Ebnf, "ebnf");
 
         let mut grammar = Grammar::new(&config).unwrap();
@@ -256,7 +259,7 @@ mod test {
 
     #[test]
     fn peg_generates_expected_output() {
-        let source = "greeting <- \"hello\" / \"world\"";
+        let source = "greeting <- (\"hello\" / \"world\") \"\\n\"";
         let (_dir, config) = config_from_source(source, GrammarFormat::Peg, "peg");
 
         let mut grammar = Grammar::new(&config).unwrap();
@@ -278,7 +281,7 @@ mod test {
 
     #[test]
     fn antlr_generates_expected_output() {
-        let source = "grammar Test;\ngreeting : 'hello' | 'world' ;";
+        let source = "grammar Test;\ngreeting : ('hello' | 'world') '\\n' ;";
         let (_dir, config) = config_from_source(source, GrammarFormat::Antlr, "g4");
 
         let mut grammar = Grammar::new(&config).unwrap();

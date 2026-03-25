@@ -1,8 +1,9 @@
 # Grammar payload
 
 Generates structured data from EBNF, PEG, or ANTLR v4 grammar files using
-[barkus](https://github.com/DataDog/barkus). Each generated sample is a
-newline-delimited byte sequence conforming to the grammar.
+[barkus](https://github.com/DataDog/barkus). Samples are concatenated directly
+with no injected delimiters — if you need newline-delimited output, include a
+trailing `\n` in your grammar's start production.
 
 ## Using it in a lading config
 
@@ -69,6 +70,9 @@ generator:
 ## Example EBNF grammar (simplified JSON)
 
 ```ebnf
+(* Wrap the start production with a trailing newline for line-delimited output. *)
+start = value , "\n" ;
+
 value = object | array | string | number | "true" | "false" | "null" ;
 
 object = "{" [ pair { "," pair } ] "}" ;

@@ -1,3 +1,5 @@
+start = value , "\n" ;
+
 value = object | array | string | number | "true" | "false" | "null" ;
 
 object = "{" [ pair { "," pair } ] "}" ;
