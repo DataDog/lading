@@ -1,7 +1,7 @@
 //! Payload generation tool for lading configurations.
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
+#![expect(clippy::print_stdout)]
+#![expect(clippy::print_stderr)]
 
 /// Memory allocation tracking for payloadtool statistics.
 ///
@@ -139,7 +139,7 @@ mod alloc_tracker {
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -150,7 +150,7 @@ use tokio::runtime::Builder;
 use anyhow::{Context, Result, anyhow};
 use byte_unit::{Byte, Unit, UnitType};
 use clap::Parser;
-use lading::generator::{self, http::Method};
+use lading::generator::{self, file_gen, http::Method};
 use lading_payload::block;
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
@@ -276,6 +276,9 @@ struct Args {
     /// Report memory allocation statistics at completion
     #[clap(short = 'm', long)]
     memory_stats: bool,
+    /// Dump generated payload data to this file
+    #[clap(long)]
+    dump: Option<PathBuf>,
 }
 
 fn generate_and_check(
@@ -283,7 +286,7 @@ fn generate_and_check(
     seed: [u8; 32],
     total_bytes: NonZeroU32,
     max_block_size: Byte,
-    compute_fingerprint: bool,
+    args: &Args,
 ) -> Result<Option<Fingerprint>> {
     let mut rng = StdRng::from_seed(seed);
     let start = Instant::now();
@@ -306,8 +309,23 @@ fn generate_and_check(
     info!("Payload generation took {:?}", start.elapsed());
     trace!("Payload: {:#?}", blocks);
 
+    if let Some(dump_path) = args.dump.as_deref() {
+        let mut dump_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(dump_path)
+            .with_context(|| format!("Could not open dump file at: {}", dump_path.display()))?;
+        for block in &blocks {
+            dump_file.write_all(&block.bytes).with_context(|| {
+                format!("Failed to write to dump file: {}", dump_path.display())
+            })?;
+        }
+        info!("Dumped payload to {}", dump_path.display());
+    }
+
     // Compute fingerprint if requested: SHA256 hash and Shannon entropy.
-    let fingerprint = if compute_fingerprint {
+    let fingerprint = args.fingerprint.then(|| {
         let mut hasher = Sha256::new();
         let mut all_bytes = Vec::new();
         for block in &blocks {
@@ -317,10 +335,8 @@ fn generate_and_check(
         let result = hasher.finalize();
         let hash = format!("{result:x}");
         let entropy = shannon_entropy(&all_bytes);
-        Some(Fingerprint { hash, entropy })
-    } else {
-        None
-    };
+        Fingerprint { hash, entropy }
+    });
 
     let mut total_generated_bytes: u32 = 0;
     for block in &blocks {
@@ -347,56 +363,55 @@ fn generate_and_check(
     Ok(fingerprint)
 }
 
-#[allow(clippy::too_many_lines)]
-fn check_generator(
-    config: &generator::Config,
-    compute_fingerprint: bool,
-) -> Result<Option<Fingerprint>> {
+#[expect(clippy::too_many_lines)]
+fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fingerprint>> {
     match &config.inner {
-        generator::Inner::FileGen(_) => {
-            if compute_fingerprint {
-                warn!("FileGen not supported for fingerprinting");
-                return Ok(None);
-            }
-            unimplemented!("FileGen not supported")
+        generator::Inner::FileGen(g) => {
+            let (cache_size, variant, seed, max_block_size) = match g {
+                file_gen::Config::Traditional(c) => (
+                    c.maximum_prebuild_cache_size_bytes,
+                    &c.variant,
+                    c.seed,
+                    c.maximum_block_size,
+                ),
+                file_gen::Config::Logrotate(c) => (
+                    c.maximum_prebuild_cache_size_bytes,
+                    &c.variant,
+                    c.seed,
+                    c.maximum_block_size,
+                ),
+                #[cfg(feature = "logrotate_fs")]
+                file_gen::Config::LogrotateFs(c) => (
+                    c.maximum_prebuild_cache_size_bytes,
+                    &c.variant,
+                    c.seed,
+                    c.maximum_block_size,
+                ),
+            };
+            #[expect(clippy::cast_possible_truncation)]
+            let total_bytes = NonZeroU32::new(cache_size.as_u128() as u32)
+                .expect("Non-zero max prebuild cache size");
+            generate_and_check(variant, seed, total_bytes, max_block_size, args)
         }
         generator::Inner::UnixDatagram(g) => {
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                max_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, max_block_size, args)
         }
         generator::Inner::Tcp(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::Udp(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
             let max_block_size = UDP_PACKET_LIMIT_BYTES;
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                max_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, max_block_size, args)
         }
         generator::Inner::Http(g) => {
             let (variant, max_prebuild_cache_size_bytes) = match &g.method {
@@ -406,90 +421,66 @@ fn check_generator(
                     block_cache_method: _,
                 } => (variant, maximum_prebuild_cache_size_bytes),
             };
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(max_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                variant,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::SplunkHec(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("SplunkHec not supported for fingerprinting");
                 return Ok(None);
             }
             unimplemented!("SplunkHec not supported")
         }
         generator::Inner::FileTree(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("FileTree not supported for fingerprinting");
                 return Ok(None);
             }
             unimplemented!("FileTree not supported")
         }
         generator::Inner::Grpc(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::UnixStream(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::PassthruFile(g) => {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             let total_bytes = NonZeroU32::new(g.maximum_prebuild_cache_size_bytes.as_u128() as u32)
                 .expect("Non-zero max prebuild cache size");
-            generate_and_check(
-                &g.variant,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&g.variant, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::ProcessTree(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("ProcessTree not supported for fingerprinting");
                 return Ok(None);
             }
             unimplemented!("ProcessTree not supported")
         }
         generator::Inner::ProcFs(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("ProcFs not supported for fingerprinting");
                 return Ok(None);
             }
             unimplemented!("ProcFs not supported")
         }
         generator::Inner::Container(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("Container not supported for fingerprinting");
                 return Ok(None);
             }
             unimplemented!("Container not supported")
         }
         generator::Inner::Kubernetes(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("Kubernetes not supported for fingerprinting");
                 return Ok(None);
             }
@@ -500,18 +491,12 @@ fn check_generator(
                 generator::trace_agent::validate_cache_size(g.maximum_prebuild_cache_size_bytes)
                     .map_err(|e| anyhow::anyhow!("Cache size validation failed: {e}"))?;
             let conf = lading_payload::Config::TraceAgent(g.variant);
-            generate_and_check(
-                &conf,
-                g.seed,
-                total_bytes,
-                g.maximum_block_size,
-                compute_fingerprint,
-            )
+            generate_and_check(&conf, g.seed, total_bytes, g.maximum_block_size, args)
         }
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn inner_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
@@ -548,7 +533,7 @@ async fn inner_main() -> Result<()> {
         config.generator.len()
     );
 
-    if let Some(generator_id) = args.generator_id {
+    if let Some(ref generator_id) = args.generator_id {
         let generator = config
             .generator
             .iter()
@@ -556,16 +541,16 @@ async fn inner_main() -> Result<()> {
                 let Some(ref id) = g.general.id else {
                     return false;
                 };
-                *id == generator_id
+                id == generator_id
             })
             .ok_or_else(|| anyhow!("No generator found with id: {generator_id}"))?;
-        let fingerprint = check_generator(generator, args.fingerprint)?;
+        let fingerprint = check_generator(generator, &args)?;
         if args.fingerprint
             && let Some(fp) = fingerprint
         {
-            if let Some(verify_path) = args.verify {
+            if let Some(ref verify_path) = args.verify {
                 let expected_content =
-                    fs::read_to_string(&verify_path).await.with_context(|| {
+                    fs::read_to_string(verify_path).await.with_context(|| {
                         format!("Could not read verify file {}", verify_path.display())
                     })?;
 
@@ -597,19 +582,17 @@ async fn inner_main() -> Result<()> {
     } else {
         let mut all_fingerprints = Vec::new();
         for generator in config.generator {
-            let fingerprint = check_generator(&generator, args.fingerprint)?;
-            if args.fingerprint
-                && let Some(fp) = fingerprint
-            {
+            let fingerprint = check_generator(&generator, &args)?;
+            if let Some(fp) = fingerprint {
                 let gen_id = generator.general.id.as_deref().unwrap_or("<unnamed>");
                 all_fingerprints.push((gen_id.to_string(), fp));
             }
         }
         if args.fingerprint && !all_fingerprints.is_empty() {
-            if let Some(verify_path) = args.verify {
+            if let Some(ref verify_path) = args.verify {
                 // Read expected fingerprints from file
                 let expected_content =
-                    fs::read_to_string(&verify_path).await.with_context(|| {
+                    fs::read_to_string(verify_path).await.with_context(|| {
                         format!("Could not read verify file {}", verify_path.display())
                     })?;
 
@@ -665,6 +648,7 @@ fn main() -> Result<()> {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp)]
 mod tests {
     use super::shannon_entropy;
     use proptest::prelude::*;
@@ -765,7 +749,7 @@ mod tests {
             // only on frequency counts, not on the order bytes appear. Sorting the data
             // preserves frequencies, so entropy must be identical.
             let original = shannon_entropy(&data);
-            data.sort();
+            data.sort_unstable();
             let sorted_entropy = shannon_entropy(&data);
             prop_assert!(
                 (original - sorted_entropy).abs() < 1e-10,
@@ -793,8 +777,8 @@ mod tests {
             // This is the theoretical upper bound for any distribution over n symbols.
             // Testing the full byte range (2..=256) verifies we handle all byte values
             // correctly, including high bytes (128-255) that could expose indexing bugs.
-            let data: Vec<u8> = (0..n).map(|i| i as u8).cycle().take(n as usize * repetitions).collect();
-            let expected = (n as f64).log2();
+            let data: Vec<u8> = (0..n).map(|i| u8::try_from(i).unwrap()).cycle().take(n as usize * repetitions).collect();
+            let expected = f64::from(n).log2();
             let actual = shannon_entropy(&data);
             prop_assert!(
                 (actual - expected).abs() < 1e-10,
@@ -809,7 +793,7 @@ mod tests {
             // excessive CI runtime. The entropy calculation sums 256 terms; larger data
             // means smaller per-bucket probabilities, testing precision at small p values.
             let entropy = shannon_entropy(&data);
-            prop_assert!(entropy >= 0.0 && entropy <= 8.0, "Bounds violated for large data: {entropy}");
+            prop_assert!((0.0..=8.0).contains(&entropy), "Bounds violated for large data: {entropy}");
             prop_assert!(!entropy.is_nan(), "NaN for large data");
             prop_assert!(!entropy.is_infinite(), "Infinity for large data");
         }

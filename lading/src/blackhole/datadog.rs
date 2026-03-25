@@ -5,6 +5,12 @@
 //!
 //! All other endpoints return `202 Accepted` without processing.
 //!
+//! ## Metrics
+//!
+//! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
+//! `requests_received`: Total requests received
+//!
 //! # Payload
 //!
 //! The V2 protobuf format is defined in `proto/agent_payload.proto`.
@@ -212,7 +218,9 @@ async fn handle_request(
         }
     };
 
-    counter!("bytes_received", labels).increment(whole_body.len() as u64);
+    let body_len = whole_body.len() as u64;
+    counter!("bytes_received", labels).increment(body_len);
+    counter!("total_bytes_received").increment(body_len);
 
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -277,7 +285,7 @@ fn unix_to_instant(timestamp_secs: i64) -> Instant {
     let now_system = SystemTime::now();
     let now_instant = Instant::now();
 
-    #[allow(clippy::cast_sign_loss)]
+    #[expect(clippy::cast_sign_loss)]
     let point_time = UNIX_EPOCH + Duration::from_secs(timestamp_secs.max(0) as u64);
 
     match now_system.duration_since(point_time) {
@@ -338,7 +346,7 @@ async fn handle_v2_protobuf(
                     let metrics_res = match series.r#type {
                         1 => {
                             // COUNT
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let value = point.value.round() as u64;
                             counter_incr(&series.metric, &tag_pairs, value, timestamp).await
                         }
@@ -352,7 +360,7 @@ async fn handle_v2_protobuf(
                                 );
                                 continue;
                             }
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             let val = (point.value * interval as f64).round() as u64;
                             counter_incr(&series.metric, &tag_pairs, val, timestamp).await
                         }

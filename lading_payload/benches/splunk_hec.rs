@@ -1,6 +1,6 @@
 //! Benchmarks for Splunk HEC payload generation.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lading_payload::{Serialize, SplunkHec};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
@@ -11,30 +11,46 @@ fn splunk_hec_setup(c: &mut Criterion) {
     c.bench_function("splunk_hec_setup", |b| {
         b.iter(|| {
             let _hec = SplunkHec::default();
-        })
+        });
     });
 }
 
-fn splunk_hec_all(c: &mut Criterion) {
-    let mut group = c.benchmark_group("splunk_hec_all");
+fn splunk_hec_throughput(c: &mut Criterion) {
+    let mut group = c.benchmark_group("splunk_hec_throughput");
     for size in &[MIB, 10 * MIB, 100 * MIB, 1_000 * MIB] {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            b.iter(|| {
-                let rng = SmallRng::seed_from_u64(19690716);
-                let mut hec = SplunkHec::default();
-                let mut writer = Vec::with_capacity(size);
-
-                hec.to_bytes(rng, size, &mut writer)
-                    .expect("failed to convert to bytes");
-            });
+            b.iter_batched(
+                || {
+                    let rng = SmallRng::seed_from_u64(19_690_716);
+                    let hec = SplunkHec::default();
+                    (rng, hec, Vec::with_capacity(size))
+                },
+                |(rng, mut hec, mut writer)| {
+                    hec.to_bytes(rng, size, &mut writer)
+                        .expect("failed to convert to bytes");
+                },
+                BatchSize::PerIteration,
+            );
         });
     }
     group.finish();
 }
 
 criterion_group!(
-    name = benches;
-    config = Criterion::default().measurement_time(Duration::from_secs(90));
-    targets = splunk_hec_setup, splunk_hec_all
+    name = setup_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(5))
+        .warm_up_time(Duration::from_secs(1));
+    targets = splunk_hec_setup,
 );
+
+criterion_group!(
+    name = throughput_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(1));
+    targets = splunk_hec_throughput,
+);
+
+criterion_main!(setup_benches, throughput_benches);

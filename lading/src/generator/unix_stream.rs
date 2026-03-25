@@ -144,7 +144,7 @@ impl UnixStream {
     ///
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: &Config,
@@ -318,7 +318,8 @@ impl Child {
                             }
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

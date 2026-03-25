@@ -409,8 +409,8 @@ pub(crate) enum NodeType {
 impl State {
     /// Create a new instance of `State`.
     #[tracing::instrument(skip(rng, block_cache))]
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn new<R>(
         rng: &mut R,
         initial_tick: Tick,
@@ -652,7 +652,7 @@ impl State {
     }
 
     #[inline]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn advance_time_inner(&mut self, now: Tick) {
         assert!(now >= self.now);
 
@@ -1105,11 +1105,10 @@ impl State {
 }
 
 #[cfg(test)]
+#[expect(clippy::too_many_lines)]
 mod test {
-    use std::{
-        collections::{HashMap, HashSet},
-        num::NonZeroU32,
-    };
+    use rustc_hash::FxHashMap;
+    use std::{collections::HashSet, num::NonZeroU32};
 
     use super::{FileHandle, Inode, LoadProfile, Node, State, Tick};
     use lading_payload::block;
@@ -1283,31 +1282,32 @@ mod test {
         // unlinked and the ordinal of each peer should increase as we move down
         // the chain.
         for node in state.nodes.values() {
-            if let Node::File { file } = node {
-                if file.ordinal == 0 {
-                    // Start of a peer chain
-                    let mut current_file = file;
-                    let mut expected_ordinal = current_file.ordinal;
-                    let mut seen_inodes = HashSet::new();
+            if let Node::File { file } = node
+                && file.ordinal == 0
+            {
+                // Start of a peer chain
+                let mut current_file = file;
+                let mut expected_ordinal = current_file.ordinal;
+                let mut seen_inodes = HashSet::new();
 
-                    while let Some(peer_inode) = current_file.peer {
-                        if !seen_inodes.insert(peer_inode) {
-                            panic!("Cycle detected in peer chain at inode {peer_inode}",);
-                        }
+                while let Some(peer_inode) = current_file.peer {
+                    assert!(
+                        seen_inodes.insert(peer_inode),
+                        "Cycle detected in peer chain at inode {peer_inode}"
+                    );
 
-                        if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
-                            assert!(!peer_file.unlinked, "File was found in peer chain unlinked");
-                            expected_ordinal += 1;
-                            assert_eq!(
-                                peer_file.ordinal,
-                                expected_ordinal,
-                                "Expected ordinal {expected_ordinal}, got {peer_file_ordinal}",
-                                peer_file_ordinal = peer_file.ordinal
-                            );
-                            current_file = peer_file;
-                        } else {
-                            panic!("Peer inode {peer_inode} does not exist or is not a file");
-                        }
+                    if let Some(Node::File { file: peer_file }) = state.nodes.get(&peer_inode) {
+                        assert!(!peer_file.unlinked, "File was found in peer chain unlinked");
+                        expected_ordinal += 1;
+                        assert_eq!(
+                            peer_file.ordinal,
+                            expected_ordinal,
+                            "Expected ordinal {expected_ordinal}, got {peer_file_ordinal}",
+                            peer_file_ordinal = peer_file.ordinal
+                        );
+                        current_file = peer_file;
+                    } else {
+                        panic!("Peer inode {peer_inode} does not exist or is not a file");
                     }
                 }
             }
@@ -1339,13 +1339,11 @@ mod test {
         // file is orphaned only when it has no open file handles. A directory
         // holds linked and unlinked files.
         for (&inode, node) in &state.nodes {
-            if let Node::File { file } = node {
-                if file.unlinked && file.open_handles == 0 {
-                    panic!(
-                        "Found orphaned file inode {} (unlinked with zero open handles)",
-                        inode
-                    );
-                }
+            if let Node::File { file } = node
+                && file.unlinked
+                && file.open_handles == 0
+            {
+                panic!("Found orphaned file inode {inode} (unlinked with zero open handles)");
             }
         }
 
@@ -1436,39 +1434,40 @@ mod test {
         // when open_handles == 0. Reads should still be possible via valid open
         // file handles.
         for (&inode, node) in &state.nodes {
-            if let Node::File { file } = node {
-                if file.unlinked && file.read_only {
-                    if file.open_handles > 0 {
-                        // Should remain in state.nodes
-                        assert!(
-                            state.nodes.contains_key(&inode),
-                            "Unlinked, read-only file with open handles should remain in state.nodes"
-                        );
+            if let Node::File { file } = node
+                && file.unlinked
+                && file.read_only
+            {
+                if file.open_handles > 0 {
+                    // Should remain in state.nodes
+                    assert!(
+                        state.nodes.contains_key(&inode),
+                        "Unlinked, read-only file with open handles should remain in state.nodes"
+                    );
 
-                        // There should be valid file handles pointing to this inode
-                        let valid_handles: Vec<_> = state
-                            .valid_file_handles
-                            .iter()
-                            .filter_map(|(&handle_id, &fh_inode)| {
-                                if fh_inode == inode {
-                                    Some(handle_id)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
+                    // There should be valid file handles pointing to this inode
+                    let valid_handles: Vec<_> = state
+                        .valid_file_handles
+                        .iter()
+                        .filter_map(|(&handle_id, &fh_inode)| {
+                            if fh_inode == inode {
+                                Some(handle_id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                        assert!(
-                            !valid_handles.is_empty(),
-                            "Unlinked, read-only file with open handles should have valid file handles"
-                        );
-                    } else {
-                        // Should be removed from state.nodes after GC
-                        assert!(
-                            !state.nodes.contains_key(&inode),
-                            "Unlinked, read-only file with zero open handles should be removed from state.nodes"
-                        );
-                    }
+                    assert!(
+                        !valid_handles.is_empty(),
+                        "Unlinked, read-only file with open handles should have valid file handles"
+                    );
+                } else {
+                    // Should be removed from state.nodes after GC
+                    assert!(
+                        !state.nodes.contains_key(&inode),
+                        "Unlinked, read-only file with zero open handles should be removed from state.nodes"
+                    );
                 }
             }
         }
@@ -1497,10 +1496,9 @@ mod test {
                 let num_terms = b.saturating_sub(a).saturating_add(1);
                 let sum_of_terms = num_terms.saturating_mul(a + b) / 2;
 
-                let total_bytes = duration
+                duration
                     .saturating_mul(*start)
-                    .saturating_add(rate.saturating_mul(sum_of_terms));
-                total_bytes
+                    .saturating_add(rate.saturating_mul(sum_of_terms))
             }
             LoadProfile::Blocks { .. } | LoadProfile::BlocksLinear { .. } => 0,
         }
@@ -1511,7 +1509,7 @@ mod test {
         fn test_state_operations(seed in any::<u64>(),
                                  state in any::<State>(),
                                  operations in vec(any::<Operation>(), 1..100)) {
-            test_state_operations_inner(seed, state, operations)
+            test_state_operations_inner(seed, state, operations);
         }
     }
 
@@ -1522,7 +1520,7 @@ mod test {
         assert_state_properties(&state);
 
         let mut now = state.now;
-        let mut open_handles: HashMap<Inode, FileHandle> = HashMap::new();
+        let mut open_handles: FxHashMap<Inode, FileHandle> = FxHashMap::default();
 
         for op in operations {
             match op {

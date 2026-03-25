@@ -24,7 +24,7 @@ use once_cell::sync::OnceCell;
 use rand::{SeedableRng, prelude::StdRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use lading_payload::block;
 
@@ -140,7 +140,7 @@ impl Http {
     ///
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: Config,
@@ -284,7 +284,8 @@ impl Http {
 
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 },

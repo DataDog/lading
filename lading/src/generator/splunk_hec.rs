@@ -38,7 +38,7 @@ use tokio::{
     sync::{Semaphore, SemaphorePermit},
     time::timeout,
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::generator::splunk_hec::acknowledgements::Channel;
 use lading_payload::block;
@@ -191,7 +191,7 @@ impl SplunkHec {
     ///
     /// Function will panic if user has passed non-zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: Config,
@@ -318,7 +318,8 @@ impl SplunkHec {
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }
@@ -337,7 +338,7 @@ impl SplunkHec {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn send_hec_request<B>(
     permit: SemaphorePermit<'_>,
     block_length: usize,

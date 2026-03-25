@@ -38,7 +38,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const MAX_RETRY_MILLIS: u16 = 6_400;
 
@@ -58,7 +58,10 @@ pub fn validate_cache_size(cache_size_bytes: byte_unit::Byte) -> Result<NonZeroU
         return Err(Error::CacheSizeExceedsLimit { size: cache_size });
     }
     // Safe cast: we've validated cache_size <= u32::MAX and > 0
-    #[allow(clippy::cast_possible_truncation)] // Validated to be <= u32::MAX above
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "validated to be <= u32::MAX above"
+    )]
     NonZeroU32::new(cache_size as u32).ok_or(Error::Zero)
 }
 
@@ -377,7 +380,8 @@ impl TraceAgent {
                             });
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 },

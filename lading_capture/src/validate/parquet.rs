@@ -4,8 +4,10 @@
 //! Apache Arrow compute kernels. Unlike the row-based validation in `jsonl`,
 //! this leverages columnar operations for better performance and memory efficiency.
 
+use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
-use std::collections::{BTreeSet, HashMap};
+
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
@@ -59,8 +61,8 @@ pub enum Error {
 ///
 /// Returns an error if the file cannot be opened or read, or if the parquet
 /// schema doesn't match the expected capture format.
-#[allow(clippy::cast_sign_loss)]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::cast_sign_loss)]
+#[expect(clippy::too_many_lines)]
 pub fn validate_parquet<P: AsRef<Path>>(
     path: P,
     min_seconds: Option<u64>,
@@ -78,8 +80,8 @@ pub fn validate_parquet<P: AsRef<Path>>(
     //
     // We also collect (fetch_index, time) pairs for each series to validate
     // per-series invariants in Phase 2.
-    let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
-    let mut series_data: HashMap<u64, (Vec<(u64, u128)>, String)> = HashMap::new();
+    let mut fetch_index_to_time: FxHashMap<u64, u128> = FxHashMap::default();
+    let mut series_data: FxHashMap<u64, (Vec<(u64, u128)>, String)> = FxHashMap::default();
     let hash_builder = RandomState::new();
 
     let mut line_count = 0u128;
@@ -281,7 +283,7 @@ pub fn validate_parquet<P: AsRef<Path>>(
             fetch_index_to_time.values().max(),
         )
     {
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let time_span_seconds = ((max_time - min_time) / 1000) as u64;
 
         if time_span_seconds < min_secs {

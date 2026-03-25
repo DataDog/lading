@@ -6,6 +6,7 @@
 //! ## Metrics
 //!
 //! - `bytes_received`: Total bytes received
+//! - `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! - `streams_received`: Total streams received
 //! - `batches_received`: Total batches received
 //! - `data_items_received`: Total data items in batches
@@ -183,9 +184,10 @@ impl StatefulLogsService for StatefulLogsServiceImpl {
                 match result {
                     Ok(batch) => {
                         let batch_id = batch.batch_id;
-                        let size = batch.encoded_len();
+                        let size = batch.encoded_len() as u64;
 
-                        counter!("bytes_received", &labels).increment(size as u64);
+                        counter!("bytes_received", &labels).increment(size);
+                        counter!("total_bytes_received").increment(size);
                         counter!("batches_received", &labels).increment(1);
 
                         // Count data items in the batch

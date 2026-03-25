@@ -526,7 +526,8 @@ mod tests {
 
         fn now(&self) -> Instant {
             let time_ms = *self.time_ms.lock().unwrap();
-            self.start_instant + Duration::from_millis(time_ms as u64)
+            self.start_instant
+                + Duration::from_millis(u64::try_from(time_ms).expect("time_ms fits in u64"))
         }
 
         fn interval(&self, duration: Duration) -> Self::Interval {
@@ -535,7 +536,10 @@ mod tests {
 
         fn start(&self) -> Instant {
             let start_time_ms = *self.start_time_ms.lock().unwrap();
-            self.start_instant + Duration::from_millis(start_time_ms as u64)
+            self.start_instant
+                + Duration::from_millis(
+                    u64::try_from(start_time_ms).expect("start_time_ms fits in u64"),
+                )
         }
 
         fn mark_start(&mut self) {
@@ -917,9 +921,9 @@ mod tests {
             prop_assert!(
                 result.is_valid(),
                 "Invariant violation detected:\n  Line: {line}\n  Series: {series}\n  Message: {msg}",
-                line = result.first_error.as_ref().map(|(l, _, _)| l).unwrap_or(&0),
-                series = result.first_error.as_ref().map(|(_, s, _)| s.as_str()).unwrap_or(""),
-                msg = result.first_error.as_ref().map(|(_, _, m)| m.as_str()).unwrap_or("")
+                line = result.first_error.as_ref().map_or(&0, |(l, _, _)| l),
+                series = result.first_error.as_ref().map_or("", |(_, s, _)| s.as_str()),
+                msg = result.first_error.as_ref().map_or("", |(_, _, m)| m.as_str())
             );
 
             if flush_tick_count >= 60 && !written_metric_names.is_empty() {
@@ -937,7 +941,10 @@ mod tests {
                 // Verify histogram data integrity
                 for line in &lines {
                     if line.metric_kind == line::MetricKind::Histogram {
-                        if !line.value_histogram.is_empty() {
+                        if line.value_histogram.is_empty() {
+                            // Histogram line exists but has no data - this might be valid
+                            // for empty sketches that weren't filtered
+                        } else {
                             let sketch_bytes = &line.value_histogram;
                             let dogsketch = Dogsketch::parse_from_bytes(sketch_bytes)
                                 .expect("should parse protobuf");
@@ -975,9 +982,6 @@ mod tests {
                                 line.metric_name,
                                 median
                             );
-                        } else {
-                            // Histogram line exists but has no data - this might be valid
-                            // for empty sketches that weren't filtered
                         }
                     }
                 }
@@ -1312,27 +1316,27 @@ mod tests {
         for line in &lines[..lines_before_shutdown] {
             if line.metric_name == "monotonic_counter" {
                 let value = line.value.as_f64();
-                if let Some(last) = last_counter_value {
-                    if value <= last {
-                        println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
-                        println!("Counter line #{counter_line_number}");
-                        println!("Current value: {value}, Previous: {last}");
-                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
-                        panic!("Counter not strictly increasing during FLUSH: {value} <= {last}");
-                    }
+                if let Some(last) = last_counter_value
+                    && value <= last
+                {
+                    println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
+                    println!("Counter line #{counter_line_number}");
+                    println!("Current value: {value}, Previous: {last}");
+                    println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                    panic!("Counter not strictly increasing during FLUSH: {value} <= {last}");
                 }
                 last_counter_value = Some(value);
                 counter_line_number += 1;
             } else if line.metric_name == "monotonic_gauge" {
                 let value = line.value.as_f64();
-                if let Some(last) = last_gauge_value {
-                    if value <= last {
-                        println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
-                        println!("Gauge line #{gauge_line_number}");
-                        println!("Current value: {value}, Previous: {last}");
-                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
-                        panic!("Gauge not strictly increasing during FLUSH: {value} <= {last}");
-                    }
+                if let Some(last) = last_gauge_value
+                    && value <= last
+                {
+                    println!("\n=== MONOTONICITY VIOLATION IN FLUSH ===");
+                    println!("Gauge line #{gauge_line_number}");
+                    println!("Current value: {value}, Previous: {last}");
+                    println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                    panic!("Gauge not strictly increasing during FLUSH: {value} <= {last}");
                 }
                 last_gauge_value = Some(value);
                 gauge_line_number += 1;
@@ -1343,27 +1347,27 @@ mod tests {
         for line in &lines[lines_before_shutdown..] {
             if line.metric_name == "monotonic_counter" {
                 let value = line.value.as_f64();
-                if let Some(last) = last_counter_value {
-                    if value <= last {
-                        println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
-                        println!("Counter line #{counter_line_number}");
-                        println!("Current value: {value}, Previous: {last}");
-                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
-                        panic!("Counter not strictly increasing during DRAIN: {value} <= {last}");
-                    }
+                if let Some(last) = last_counter_value
+                    && value <= last
+                {
+                    println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
+                    println!("Counter line #{counter_line_number}");
+                    println!("Current value: {value}, Previous: {last}");
+                    println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                    panic!("Counter not strictly increasing during DRAIN: {value} <= {last}");
                 }
                 last_counter_value = Some(value);
                 counter_line_number += 1;
             } else if line.metric_name == "monotonic_gauge" {
                 let value = line.value.as_f64();
-                if let Some(last) = last_gauge_value {
-                    if value <= last {
-                        println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
-                        println!("Gauge line #{gauge_line_number}");
-                        println!("Current value: {value}, Previous: {last}");
-                        println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
-                        panic!("Gauge not strictly increasing during DRAIN: {value} <= {last}");
-                    }
+                if let Some(last) = last_gauge_value
+                    && value <= last
+                {
+                    println!("\n=== MONOTONICITY VIOLATION IN DRAIN ===");
+                    println!("Gauge line #{gauge_line_number}");
+                    println!("Current value: {value}, Previous: {last}");
+                    println!("Time: {} ms, Fetch index: {}", line.time, line.fetch_index);
+                    panic!("Gauge not strictly increasing during DRAIN: {value} <= {last}");
                 }
                 last_gauge_value = Some(value);
                 gauge_line_number += 1;
@@ -1379,6 +1383,7 @@ mod tests {
     // For runs shorter than INTERVALS (60 seconds), we drain all N ticks. For
     // runs >= INTERVALS, we drain the unflushed window (up to INTERVALS ticks).
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn drain_points_based_on_run_duration() {
         // Test case 1: Short run (30 seconds)
         {

@@ -338,7 +338,7 @@ mod tests {
         for i in 0..30 {
             lines.push(Line {
                 run_id,
-                time: (i * 1000) as u128,
+                time: u128::from(i * 1000),
                 fetch_index: i,
                 metric_name: "test".to_string(),
                 metric_kind: MetricKind::Counter,
@@ -375,7 +375,7 @@ mod tests {
         for i in 0..30 {
             lines.push(Line {
                 run_id,
-                time: (i * 1000) as u128,
+                time: u128::from(i * 1000),
                 fetch_index: i,
                 metric_name: "test".to_string(),
                 metric_kind: MetricKind::Counter,

@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{Level, debug, error, info, span, warn};
 
+use crate::templated_json::TemplatedJson;
+
 /// Error for block construction
 #[derive(Debug, thiserror::Error)]
 pub enum SpinError {
@@ -194,8 +196,8 @@ impl Cache {
     ///
     /// Function will return an error if `maximum_block_bytes` is greater than
     /// `u32::MAX` or if it is larger than `total_bytes`.
-    #[allow(clippy::too_many_lines)]
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn fixed_with_max_overhead<R>(
         mut rng: &mut R,
         total_bytes: NonZeroU32,
@@ -215,6 +217,17 @@ impl Cache {
         };
 
         let blocks = match payload {
+            crate::Config::TemplatedJson { template_path } => {
+                let mut serializer = TemplatedJson::from_path(template_path)?;
+                let span = span!(Level::INFO, "fixed", payload = "templated-json");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
             crate::Config::TraceAgent(config) => {
                 use crate::trace_agent::{self, v04};
 
@@ -355,7 +368,7 @@ impl Cache {
                 )?
             }
             crate::Config::OpentelemetryTraces(config) => {
-                let mut pyld = crate::OpentelemetryTraces::with_config(*config, &mut rng)?;
+                let mut pyld = crate::OpentelemetryTraces::with_config(config, &mut rng)?;
                 let span = span!(Level::INFO, "fixed", payload = "otel-traces");
                 let _guard = span.enter();
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
@@ -548,8 +561,8 @@ impl Cache {
 /// would like to propagate this error to the caller.
 #[inline]
 #[tracing::instrument(skip_all)]
-#[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::cast_sign_loss)]
+#[expect(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_sign_loss)]
 fn construct_block_cache_inner<R, S>(
     mut rng: &mut R,
     serializer: &mut S,

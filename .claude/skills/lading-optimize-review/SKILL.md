@@ -1,112 +1,90 @@
 ---
 name: lading-optimize-review
-description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
+description: Reviews optimization patches using a 5-persona peer review system. Requires unanimous approval backed by benchmarks.
+argument-hint: "[bench] [fingerprint] [file] [target] [technique]"
+allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Glob Grep
+context: fork
 ---
 
 # Optimization Patch Review
 
 A rigorous 5-persona peer review system for optimization patches in lading. Requires unanimous approval backed by concrete benchmark data. **Duplicate Hunter persona prevents redundant work.**
 
-## CRITICAL: Recording is MANDATORY
+## Role: Judge
 
-**EVERY review outcome MUST be recorded in db.yaml.**
+**Review is the decision-maker. It does NOT record results.**
 
-## Valuable Outcomes
+Review judges using benchmarks and 5-persona review, then returns a structured report.
 
-| Outcome | Value | Action |
+## Outcomes
+
+| Outcome | Votes | Action |
 |---------|-------|--------|
-| **Optimization APPROVED** | Improvement validated | Merge |
-| **Optimization REJECTED** | Learned where NOT to optimize | Record lesson |
-| **Bug DISCOVERED** | Found correctness issue | Invoke `/lading-optimize-validate` |
-
-**Finding bugs during optimization review is SUCCESS, not failure.**
+| **APPROVED** | 5/5 APPROVE | Return APPROVED report |
+| **REJECTED** | Any REJECT | Return REJECTED report |
 
 ---
 
-## Phase 0: Pre-flight
+## Arguments
 
-Run `/lading-preflight` first. Then check for duplicate work:
+This skill requires 5 positional arguments passed by the caller:
 
-```bash
-# Check previous reviews
-cat .claude/skills/lading-optimize-review/assets/db.yaml
+| Arg | Field | Example | Used for |
+|-----|-------|---------|----------|
+| `$ARGUMENTS[0]` | bench | `trace_agent` | `cargo criterion --bench` flag |
+| `$ARGUMENTS[1]` | fingerprint | `ci/fingerprints/trace_agent_v04/lading.yaml` | payloadtool config path |
+| `$ARGUMENTS[2]` | file | `lading_payload/src/trace_agent/v04.rs` | report + duplicate check |
+| `$ARGUMENTS[3]` | target | `V04::to_bytes` | report |
+| `$ARGUMENTS[4]` | technique | `buffer-reuse` | report + duplicate check |
 
-# Check previous hunts
-cat .claude/skills/lading-optimize-hunt/assets/db.yaml
-```
+**If any argument is missing -> REJECT. All 5 are required.**
 
-**Check for:**
-- Same branch name already reviewed -> REJECT as "DUPLICATE"
-- Same file + technique already approved -> REJECT as "DUPLICATE"
+### Generate Report ID
 
----
+Derive the `id` from the file and technique arguments:
+1. Take the filename stem from `$ARGUMENTS[2]` (e.g. `lading_payload/src/trace_agent/v04.rs` → `trace-agent-v04`)
+2. Append the technique `$ARGUMENTS[4]` (e.g. `buffer-reuse`)
+3. Join with `-` → `trace-agent-v04-buffer-reuse`
 
-## Phase 1: Validation Gate
-
-**MANDATORY: ci/validate must pass before any review proceeds.**
-
-```bash
-ci/validate
-```
-
-**If ci/validate fails -> REJECT immediately. No exceptions.**
+Use this `id` in the report.
 
 ---
 
-## Phase 2: Measurement
+## Phase 1: Benchmark Execution
 
-### CRITICAL: Use Separate Worktree for Baseline
+### Step 1: Read Baseline Data
 
-**NEVER use `git checkout` to switch between baseline and optimized.** This causes confusion and errors. Instead, use a separate git worktree:
+Read the baseline benchmark files captured:
+
+- `/tmp/criterion-baseline.log` — micro-benchmark baseline
+- `/tmp/baseline.json` — macro-benchmark timing baseline
+- `/tmp/baseline-mem.txt` — macro-benchmark memory baseline
+
+**If baseline data is missing -> REJECT. Baselines must be captured before any code change and before this gets invoked.**
+
+### Step 2: Run Post-Change Micro-benchmarks
 
 ```bash
-# One-time setup: create a baseline worktree (do this once per repo)
-git worktree add ../lading-baseline main
-
-# The baseline worktree is at ../lading-baseline
-# Your optimization work stays in the current directory
+cargo criterion --bench $ARGUMENTS[0] 2>&1 | tee /tmp/criterion-optimized.log
 ```
 
-### For payloadtool (end-to-end):
+Note: Criterion automatically compares against the last run and reports percentage changes.
+
+Compare results — look for "change:" lines showing improvement/regression.
+
+Example output: `time: [1.2345 ms 1.2456 ms 1.2567 ms] change: [-5.1234% -4.5678% -4.0123%]`
+
+### Step 3: Run Post-Change Macro-benchmarks
 
 ```bash
-# Choose a config file (e.g., ci/fingerprints/json/lading.yaml)
-CONFIG=ci/fingerprints/json/lading.yaml
-
-# In baseline worktree
-cd ../lading-baseline
 cargo build --release --bin payloadtool
-hyperfine --warmup 3 --runs 30 --export-json /tmp/old.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/old-mem.txt
-
-# In optimization worktree
-cd /path/to/your/optimization/branch
-cargo build --release --bin payloadtool
-hyperfine --warmup 3 --runs 30 --export-json /tmp/new.json \
-  "./target/release/payloadtool $CONFIG"
-./target/release/payloadtool "$CONFIG" --memory-stats 2>&1 | tee /tmp/new-mem.txt
+hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
+  "./target/release/payloadtool $ARGUMENTS[1]"
+./target/release/payloadtool "$ARGUMENTS[1]" --memory-stats 2>&1 | tee /tmp/optimized-mem.txt
 ```
-
-### For inner loops (criterion):
-
-Use `cargo criterion` for micro-benchmarks. Run in each worktree and compare output:
-
-```bash
-# In baseline worktree
-cd ../lading-baseline
-cargo criterion 2>&1 | tee /tmp/criterion-baseline.log
-
-# In optimization worktree
-cd /path/to/your/optimization/branch
-cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
-
-# Compare results manually - look for "change:" lines showing improvement/regression
-```
-
-**Note:** Criterion automatically compares against the last run in that worktree and reports percentage changes.
 
 ### Statistical Requirements
+
 - Minimum 30 runs for hyperfine (`--runs 30`)
 - Criterion handles statistical significance internally
 - Time improvement >= 5% for significance
@@ -115,35 +93,37 @@ cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 
 ### NO EXCEPTIONS
 
-**If benchmark data is missing -> REJECT. Period.**
-
-- "Test dependencies don't work" -> REJECT. Fix deps first.
+- "Test dependencies don't work" -> REJECT. Fix dependencies first.
 - "Theoretically better" -> REJECT. Prove it with numbers.
 - "Obviously an improvement" -> REJECT. Obvious is not measured.
 - "Will benchmark later" -> REJECT. Benchmark now.
 
 ---
 
-## Phase 3: Five-Persona Review
+## Phase 2: Five-Persona Review
 
 ### 1. Duplicate Hunter (Checks for Redundant Work)
-- [ ] Branch not already in reviews.yaml
+- [ ] Check `.claude/skills/lading-optimize-hunt/assets/db.yaml` for `$ARGUMENTS[2]` + `$ARGUMENTS[4]` combo
 - [ ] File + technique combo not already approved
 - [ ] No substantially similar optimization exists
-- [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing branch>"
+- [ ] If duplicate found -> REJECT with "DUPLICATE: see <existing entry>"
 
 ### 2. Skeptic (Demands Proof)
+- [ ] Baseline data verified present
+- [ ] Post-change benchmarks executed with identical methodology
 - [ ] Hot path verified via profiling (not just guessed)
-- [ ] Benchmark improvement meets thresholds (5% time, 10% mem, 20% allocs)
+- [ ] Micro threshold met (>=5% time)
+- [ ] Macro threshold met (>=5% time OR >=10% mem OR >=20% allocs)
 - [ ] Statistical significance confirmed (p<0.05 or criterion "faster")
 - [ ] Improvement is real, not measurement noise
+- [ ] Benchmark methodology sound (same config, same machine)
 
 ### 3. Conservative (Guards Correctness)
-- [ ] `ci/validate` passes completely
+- [ ] Run `ci/validate` and validate that it passes completely
 - [ ] No semantic changes to output
 - [ ] **Determinism preserved** (same seed -> same output)
 - [ ] No `.unwrap()` or `.expect()` added (lading MUST NOT panic)
-- [ ] **No bugs introduced** (if bug found -> `/lading-optimize-validate`)
+- [ ] **No bugs introduced** (if bug found -> REJECT with bug details)
 - [ ] Property tests exist for changed code
 
 ### 4. Rust Expert (Lading-Specific Patterns)
@@ -163,7 +143,7 @@ cargo criterion 2>&1 | tee /tmp/criterion-optimized.log
 
 ---
 
-## Phase 4: Kani/Property Test Check
+## Phase 3: Kani/Property Test Check
 
 If the optimization touches critical code:
 
@@ -189,112 +169,34 @@ ci/kani lading_payload
 
 ---
 
-## Phase 5: Decision
+## Phase 4: Decision
 
 | Outcome | Votes | Action |
 |---------|-------|--------|
-| **APPROVED** | 5/5 APPROVE | Merge, record success |
-| **REJECTED** | Any REJECT | Record lesson, delete branch |
-| **DUPLICATE** | Duplicate Hunter REJECT | Record as DUPLICATE, delete branch |
-| **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate` |
+| **APPROVED** | 5/5 APPROVE | Return APPROVED report |
+| **REJECTED** | Any REJECT | Return REJECTED report |
 
-### When Bug Is Found
-
-If review discovers a bug instead of an optimization:
-
-```
-/lading-optimize-validate
-```
-
-The validate skill will:
-1. Attempt Kani proof (if feasible)
-2. Create property test reproducing the bug
-3. Verify the fix works
-4. Record in its db.yaml
-
-Then return here to record the finding as BUG_FOUND in Phase 6.
+Duplicates, bugs, correctness issues, and missing benchmarks are all rejections. Describe the specific reason in the report's `reason` field.
 
 ---
 
-## Phase 6: MANDATORY Recording
+## Phase 5: Return Report
 
-### Update db.yaml
+**Review does NOT record results and does NOT create files. Return a structured YAML report to the caller.**
 
-1. Add entry to `assets/db.yaml` index
-2. Create detailed file in `assets/db/` directory
+Fill in the appropriate template and return the completed YAML:
 
-**assets/db.yaml entry:**
-```yaml
-entries:
-  - branch: <branch name>
-    verdict: <approved|rejected|duplicate|bug_found>
-    file: assets/db/<branch-name>.yaml
-```
+| Verdict   | Template                                                               |
+| --------- | ---------------------------------------------------------------------- |
+| approved  | `.claude/skills/lading-optimize-review/assets/approved.template.yaml`  |
+| rejected  | `.claude/skills/lading-optimize-review/assets/rejected.template.yaml`  |
 
-**assets/db/<branch-name>.yaml** for APPROVED:
-```yaml
-branch: <branch name>
-verdict: approved
-date: <YYYY-MM-DD>
-votes:
-  duplicate_hunter: approve
-  skeptic: approve
-  conservative: approve
-  rust_expert: approve
-  greybeard: approve
-measurements:
-  time: <-X%>
-  memory: <-X%>
-  allocations: <-X%>
-reason: |
-  <summary of why approved>
-lessons: |
-  <pattern learned>
-```
-
-**assets/db/<branch-name>.yaml** for REJECTED:
-```yaml
-branch: <branch name>
-verdict: rejected
-date: <YYYY-MM-DD>
-votes:
-  duplicate_hunter: <approve|reject>
-  skeptic: <approve|reject>
-  conservative: <approve|reject>
-  rust_expert: <approve|reject>
-  greybeard: <approve|reject>
-reason: |
-  <why rejected - which persona(s) and why>
-lessons: |
-  <what NOT to do next time>
-```
-
-**assets/db/<branch-name>.yaml** for DUPLICATE:
-```yaml
-branch: <branch name>
-verdict: duplicate
-date: <YYYY-MM-DD>
-duplicate_of: <existing branch or entry>
-reason: |
-  <explanation of duplication>
-```
-
-**assets/db/<branch-name>.yaml** for BUG_FOUND:
-```yaml
-branch: <branch name>
-verdict: bug_found
-date: <YYYY-MM-DD>
-validation_file: <path to validate db entry>
-reason: |
-  <what bug was found>
-lessons: |
-  <what was learned>
-```
+1. Read the appropriate template from the `.claude/skills/lading-optimize-review/assets/` directory
+2. Fill in placeholders using argument values:
+   - `id` → generated ID (see "Generate Report ID" above)
+   - `target` → `$ARGUMENTS[2]:$ARGUMENTS[3]` (e.g. `lading_payload/src/trace_agent/v04.rs:V04::to_bytes`)
+   - `technique` → `$ARGUMENTS[4]`
+3. Fill remaining fields with actual benchmark data from the review
+4. Return the filled-in report
 
 ---
-
-## Usage
-
-```
-/lading-optimize-review
-```

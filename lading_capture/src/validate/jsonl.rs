@@ -3,9 +3,11 @@
 //! This module provides validation for JSONL (JSON Lines) format capture files.
 //! It operates on already-deserialized `Line` objects.
 
+use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
-use std::collections::{BTreeSet, HashMap};
 use std::hash::{BuildHasher, Hasher};
+
+use rustc_hash::FxHashMap;
 
 use crate::line::{Line, MetricKind};
 use crate::validate::ValidationResult;
@@ -29,12 +31,12 @@ use crate::validate::ValidationResult;
 ///
 /// This is the canonical validation logic used by captool and tests.
 #[must_use]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationResult {
     // Phase 1: Streaming assertions
-    let mut fetch_index_to_time: HashMap<u64, u128> = HashMap::new();
+    let mut fetch_index_to_time: FxHashMap<u64, u128> = FxHashMap::default();
     // Collect (fetch_index, time) pairs for each series
-    let mut series_data: HashMap<u64, (Vec<(u64, u128)>, String)> = HashMap::new();
+    let mut series_data: FxHashMap<u64, (Vec<(u64, u128)>, String)> = FxHashMap::default();
     let hash_builder = RandomState::new();
     let mut fetch_index_errors = 0u128;
     let mut first_error: Option<(u128, String, String)> = None;
@@ -149,7 +151,7 @@ pub fn validate_lines(lines: &[Line], min_seconds: Option<u64>) -> ValidationRes
         )
     {
         // Convert milliseconds to seconds
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let time_span_seconds = ((max_time - min_time) / 1000) as u64;
 
         if time_span_seconds < min_secs {

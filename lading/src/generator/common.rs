@@ -248,7 +248,6 @@ pub(super) fn create_throttle(
 impl TryFrom<&ThrottleConfig> for lading_throttle::Config {
     type Error = ThrottleConversionError;
 
-    #[allow(clippy::cast_possible_truncation)]
     fn try_from(config: &ThrottleConfig) -> Result<Self, Self::Error> {
         match config {
             ThrottleConfig::AllOut => Ok(lading_throttle::Config::AllOut),
@@ -447,9 +446,9 @@ mod tests {
 
         #[test]
         fn parse_blocks_new_format() {
-            let yaml = r#"
+            let yaml = r"
                 blocks_per_second: 1000
-            "#;
+            ";
             let rate: RateSpec = serde_yaml::from_str(yaml).unwrap();
             assert!(matches!(rate, RateSpec::Blocks { .. }));
             if let RateSpec::Blocks { blocks_per_second } = rate {
@@ -469,7 +468,7 @@ mod tests {
 
         #[test]
         fn parse_legacy_direct_byte_value_no_quotes() {
-            let yaml = r#"5 MiB"#;
+            let yaml = r"5 MiB";
             let rate: RateSpec = serde_yaml::from_str(yaml).unwrap();
             assert!(matches!(rate, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = rate {
@@ -482,7 +481,7 @@ mod tests {
         use crate::generator::common::{RateSpec, ThrottleConfig};
         use serde_yaml::with::singleton_map_recursive;
 
-        /// Helper to deserialize ThrottleConfig using singleton_map_recursive
+        /// Helper to deserialize `ThrottleConfig` using `singleton_map_recursive`
         /// (matches how the main config deserializes it)
         fn parse_throttle_config(yaml: &str) -> ThrottleConfig {
             let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
@@ -491,7 +490,7 @@ mod tests {
 
         #[test]
         fn parse_all_out() {
-            let yaml = r#"all_out"#;
+            let yaml = r"all_out";
             let config = parse_throttle_config(yaml);
             assert!(matches!(config, ThrottleConfig::AllOut));
         }
@@ -520,11 +519,11 @@ mod tests {
 
         #[test]
         fn parse_stable_blocks_per_second() {
-            let yaml = r#"
+            let yaml = r"
                 stable:
                     blocks_per_second: 1000
                     timeout_millis: 0
-            "#;
+            ";
             let config = parse_throttle_config(yaml);
             assert!(matches!(config, ThrottleConfig::Stable { .. }));
             if let ThrottleConfig::Stable {
@@ -567,7 +566,7 @@ mod tests {
                     assert_eq!(bytes_per_second.as_u64(), 100 * 1024 * 1024);
                 }
                 if let RateSpec::Bytes { bytes_per_second } = rate_of_change {
-                    assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                    assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
                 }
             }
         }
@@ -596,7 +595,7 @@ mod tests {
                 assert!(matches!(rate_of_change, RateSpec::Bytes { .. }));
 
                 if let RateSpec::Bytes { bytes_per_second } = initial {
-                    assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                    assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
                 }
                 if let RateSpec::Bytes { bytes_per_second } = maximum {
                     assert_eq!(bytes_per_second.as_u64(), 50 * 1024 * 1024);
@@ -628,7 +627,7 @@ mod tests {
                 assert!(matches!(rate_of_change, RateSpec::Bytes { .. }));
 
                 if let RateSpec::Bytes { bytes_per_second } = initial {
-                    assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                    assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
                 }
                 if let RateSpec::Bytes { bytes_per_second } = maximum {
                     assert_eq!(bytes_per_second.as_u64(), 50 * 1024 * 1024);
@@ -641,7 +640,7 @@ mod tests {
 
         #[test]
         fn parse_linear_new_format_blocks() {
-            let yaml = r#"
+            let yaml = r"
             linear:
                 initial:
                     blocks_per_second: 100
@@ -649,7 +648,7 @@ mod tests {
                     blocks_per_second: 5000
                 rate_of_change:
                     blocks_per_second: 50
-                "#;
+                ";
             let config = parse_throttle_config(yaml);
             assert!(matches!(config, ThrottleConfig::Linear { .. }));
             if let ThrottleConfig::Linear {

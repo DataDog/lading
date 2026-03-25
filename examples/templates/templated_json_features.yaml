@@ -1,0 +1,157 @@
+# Benchmark template for `lading_payload/benches/templated_json.rs`
+#
+# Used as the input to `TemplatedJson::from_path` in the setup and throughput
+# benchmarks. Designed to exercise every ValueGenerator tag at least once so
+# that the benchmark reflects the realistic cost of a complex template, not
+# just the simplest possible case.
+#
+# Tag inventory:
+#   !const      - a fixed JSON literal (string, number, boolean, or null)
+#   !choose     - uniform random pick from a static list
+#   !reference  - reuse a named entry from the top-level definitions table
+#   !weighted   - probability-weighted random selection
+#   !range      - random integer sampled from the closed interval [min, max]
+#   !format     - format string; {} placeholders filled by sub-generators
+#   !array      - generate a JSON array with generator-valued elements
+#   !object     - generate a JSON object with generator-valued fields
+#   !with       - bind one or more generated values into a local scope
+#   !var        - read back a value that was bound by an enclosing !with
+#   !timestamp  - deterministic monotonically-advancing UTC timestamp (whole-second RFC-3339)
+#   !concat     - generate each listed element and merge same-typed results left-to-right
+
+definitions:
+  # !weighted: severity skewed toward INFO, with WARN and ERROR as tails
+  severity:
+    !weighted
+      - weight: 75
+        value: !const "INFO"
+      - weight: 20
+        value: !const "WARN"
+      - weight: 5
+        value: !const "ERROR"
+
+  # !choose: uniform random pick from a flat list of strings
+  service_name:
+    !choose ["auth-service", "api-gateway", "billing-service", "inventory-service", "notification-service"]
+
+  http_method:
+    !choose ["GET", "POST", "PUT", "DELETE", "PATCH"]
+
+  environment:
+    !choose ["production", "staging", "canary"]
+
+  # !choose with mixed numeric values
+  http_status:
+    !choose [200, 201, 204, 400, 401, 403, 404, 422, 429, 500, 502, 503]
+
+  # !range: random integer — used standalone and composed inside other generators
+  retry_count:
+    !range { min: 0, max: 5 }
+
+  # !format: compose a pod name from a random adjective and a numeric suffix
+  pod_name:
+    !format
+      template: "pod-{}-{}"
+      args:
+        - !choose ["alpha", "beta", "gamma", "delta", "epsilon"]
+        - !range { min: 1, max: 99 }
+
+  # !format: versioned API path
+  api_path:
+    !format
+      template: "/api/v{}/{}"
+      args:
+        - !range { min: 1, max: 3 }
+        - !choose ["users", "orders", "products", "events", "metrics"]
+
+  # !choose: geographic attributes bound separately to stay correlated via !with
+  geo_country: !choose ["US", "DE", "JP", "GB", "FR", "IN", "BR", "AU"]
+  geo_region:  !choose ["us-east-1", "us-west-2", "eu-west-1", "ap-northeast-1", "ap-south-1"]
+
+  request_id_suffix:
+    !range { min: 100000, max: 999999 }
+
+  flag_words:
+    !choose ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+
+generator:
+  !with
+    bind:
+      # Bind shared values once; they stay consistent across the whole record.
+      svc:     !reference service_name
+      sev:     !reference severity
+      method:  !reference http_method
+      path:    !reference api_path
+      country: !reference geo_country
+      region:  !reference geo_region
+      pod:     !reference pod_name
+    in: !object
+      timestamp: !timestamp
+
+      # !var: read back values bound by the enclosing !with
+      level:       !var sev
+      service:     !var svc
+      country:     !var country
+      region:      !var region
+
+      # !range used inline
+      duration_ms: !range { min: 1, max: 10000 }
+
+      # !reference used inline
+      status:      !reference http_status
+      retries:     !reference retry_count
+
+      # !const: fixed scalars — string, boolean, and null
+      version:     !const "1.0.0"
+      sampled:     !const true
+      debug_info:  !const null
+
+      # !format: human-readable log line composed from bound variables
+      message:
+        !format
+          template: "{} {} {} in {}ms"
+          args:
+            - !var svc
+            - !var method
+            - !var path
+            - !range { min: 1, max: 10000 }
+
+      # !format: build a composite request ID
+      request_id:
+        !format
+          template: "{}-{}"
+          args:
+            - !var svc
+            - !reference request_id_suffix
+
+      # !concat: merge a fixed marker into a variable-length array of flag words.
+      # The constant singleton ["info"] is always present; zero to three additional
+      # words drawn from flag_words are appended via array splicing.
+      flags:
+        !concat
+          - !const ["info"]
+          - !array
+              length: { min: 0, max: 3 }
+              element: !reference flag_words
+
+      bytes:
+        !array
+          length: { min: 1, max: 20 }
+          element: !range { min: 0, max: 255 }
+
+      # Nested !with: introduces a new binding (env) visible only inside its body
+      metadata:
+        !with
+          bind:
+            env: !reference environment
+          in: !object
+            environment: !var env
+            pod:         !var pod
+            # !format inside a nested !with can still reach the outer !var bindings
+            host:
+              !format
+                template: "{}.{}.svc.cluster.local"
+                args:
+                  - !var pod
+                  - !var env
+

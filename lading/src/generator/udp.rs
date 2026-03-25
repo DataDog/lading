@@ -26,7 +26,7 @@ use tokio::{
     net::UdpSocket,
     task::{JoinError, JoinSet},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 use lading_payload::block;
 
@@ -140,7 +140,7 @@ impl Udp {
     ///
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: &Config,
@@ -282,7 +282,8 @@ impl UdpWorker {
                             }
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

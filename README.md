@@ -140,6 +140,11 @@ For x86_64:
 docker build -f amd64.Dockerfile . --tag [TAG NAME] --platform linux/amd64
 ```
 
+## Documentation
+
+- [Architecture Decision Records](docs/adr/README.md) - Design decisions and rationale
+- [AGENTS.md](AGENTS.md) - Guidelines for AI agents and contributors
+
 ## Contributing
 
 See [Contributing][contributing].

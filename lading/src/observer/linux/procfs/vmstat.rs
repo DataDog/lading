@@ -78,9 +78,9 @@ mod test {
         let vmstat_content = "nr_free_pages 123456\nnr_alloc_batch 789\nnr_inactive_anon 456789\n";
         let vmstat_data = proc_vmstat_inner(vmstat_content).unwrap();
 
-        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&123456));
+        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&123_456));
         assert_eq!(vmstat_data.get("nr_alloc_batch"), Some(&789));
-        assert_eq!(vmstat_data.get("nr_inactive_anon"), Some(&456789));
+        assert_eq!(vmstat_data.get("nr_inactive_anon"), Some(&456_789));
     }
 
     #[test]
@@ -89,7 +89,7 @@ mod test {
         let vmstat_data = proc_vmstat_inner(vmstat_content).unwrap();
 
         assert_eq!(vmstat_data.len(), 2);
-        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&123456));
+        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&123_456));
         assert_eq!(vmstat_data.get("nr_alloc_batch"), Some(&789));
     }
 
@@ -113,7 +113,7 @@ mod test {
 
     #[test]
     fn parse_vmstat_real_sample() {
-        let vmstat_content = r#"nr_free_pages 1234567
+        let vmstat_content = r"nr_free_pages 1234567
 nr_alloc_batch 63
 nr_inactive_anon 456789
 nr_active_anon 123456
@@ -142,14 +142,14 @@ pgactivate 222222
 pgdeactivate 333333
 pgfault 44444444
 pgmajfault 55555
-"#;
+";
         let vmstat_data = proc_vmstat_inner(vmstat_content).unwrap();
 
         assert_eq!(vmstat_data.len(), 29);
-        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&1234567));
-        assert_eq!(vmstat_data.get("pgpgin"), Some(&12345678));
-        assert_eq!(vmstat_data.get("pgpgout"), Some(&9876543));
-        assert_eq!(vmstat_data.get("pgfault"), Some(&44444444));
+        assert_eq!(vmstat_data.get("nr_free_pages"), Some(&1_234_567));
+        assert_eq!(vmstat_data.get("pgpgin"), Some(&12_345_678));
+        assert_eq!(vmstat_data.get("pgpgout"), Some(&9_876_543));
+        assert_eq!(vmstat_data.get("pgfault"), Some(&44_444_444));
         assert_eq!(vmstat_data.get("pgmajfault"), Some(&55555));
     }
 }

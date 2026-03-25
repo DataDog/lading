@@ -18,12 +18,14 @@ byte-unit = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true, features = ["small_rng", "std", "std_rng"] }
+rustc-hash = { workspace = true }
 rmp-serde = { version = "1.3", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_tuple = { version = "1.1", default-features = false }
 thiserror = { workspace = true }
-time = { version = "0.3", features = ["formatting"] }
+serde_yaml = { workspace = true }
+time = { version = "0.3", features = ["formatting", "parsing", "std"] }
 tracing = { workspace = true }
 tokio = { workspace = true }
 arbitrary = { version = "1", optional = true, features = ["derive"] }
@@ -33,6 +35,7 @@ enum_dispatch = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 criterion = { version = "0.8", features = ["html_reports"] }
+rustc-hash = { workspace = true }
 
 [features]
 default = []
@@ -42,11 +45,59 @@ fuzz = ["arbitrary"]
 doctest = false
 
 [[bench]]
-name = "default"
+name = "apache_common"
+harness = false
+
+[[bench]]
+name = "ascii"
+harness = false
+
+[[bench]]
+name = "block"
+harness = false
+
+[[bench]]
+name = "datadog_logs"
+harness = false
+
+[[bench]]
+name = "dogstatsd"
+harness = false
+
+[[bench]]
+name = "fluent"
+harness = false
+
+[[bench]]
+name = "json"
+harness = false
+
+[[bench]]
+name = "opentelemetry_log"
 harness = false
 
 [[bench]]
 name = "opentelemetry_metric"
+harness = false
+
+[[bench]]
+name = "opentelemetry_traces"
+harness = false
+
+[[bench]]
+name = "splunk_hec"
+harness = false
+
+[[bench]]
+name = "syslog"
+harness = false
+
+[[bench]]
+name = "templated_json"
+harness = false
+
+[[bench]]
+name = "trace_agent"
 harness = false
 
 [lints]

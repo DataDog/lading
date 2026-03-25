@@ -85,7 +85,7 @@ struct CliKeyValues {
 impl CliKeyValues {
     #[cfg(test)]
     fn get(&self, key: &str) -> Option<&str> {
-        self.inner.get(key).map(|s| s.as_str())
+        self.inner.get(key).map(String::as_str)
     }
 }
 
@@ -102,16 +102,22 @@ impl FromStr for CliKeyValues {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        // A key always matches `[[:alpha:]_]+` and a value conforms to
-        // `[[:alpha:]_:,`. A key is always followed by a '=' and then a
-        // value. A key and value pair are delimited from other pairs by
-        // ','. But note that ',' is a valid character in a value, so it's
-        // ambiguous whether the last member of a value after a ',' is a key.
+        // A key matches `[[:alnum:]_-]+` (letters, digits, underscores,
+        // hyphens) and a value conforms to `[[:alpha:]_:,`. A key is always
+        // followed by a '=' and then a value. A key and value pair are
+        // delimited from other pairs by ','. But note that ',' is a valid
+        // character in a value, so it's ambiguous whether the last member of
+        // a value after a ',' is a key.
         //
         // The approach taken here is to use the key notion as delimiter and
         // then tidy up afterward to find values.
+        //
+        // NOTE: the key regex must include hyphens and digits so that keys
+        // like "example-tag" or "image_tag" are matched as a single token.
+        // Without this, "example-tag=val" would be misparsed as key="tag"
+        // and the "example-" fragment would pollute the preceding value.
         static RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"([[:alpha:]_]+)=").expect("Invalid regex pattern provided")
+            Regex::new(r"([[:alnum:]_-]+)=").expect("Invalid regex pattern provided")
         });
 
         let mut labels = FxHashMap::default();
@@ -157,7 +163,7 @@ struct CliFlatLegacy {
 
 // Shared arguments used by both modes
 #[derive(clap::Args)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 #[clap(group(
     ArgGroup::new("target")
         .required(true)
@@ -390,7 +396,7 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
     Ok(config)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
@@ -801,9 +807,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn inner_main_capture_has_data() {
-        let contents = r#"
+        let contents = r"
 generator: []
-"#;
+";
 
         let tmp_dir = tempfile::tempdir().expect("directory could not be created");
         let capture_path = tmp_dir.path().join("capture");
@@ -821,7 +827,7 @@ generator: []
         .await;
 
         if let Err(e) = exit_code {
-            panic!("inner_main failed: {:?}", e);
+            panic!("inner_main failed: {e:?}");
         }
 
         let contents = std::fs::read_to_string(capture_path)
@@ -895,6 +901,63 @@ generator: []
         );
     }
 
+    #[test]
+    fn cli_key_values_parses_hyphenated_keys() {
+        let val = "purpose=test,example-tag=example-value";
+        let deser =
+            CliKeyValues::from_str(val).expect("String cannot be converted into CliKeyValues");
+
+        assert_eq!(
+            deser.get("purpose").expect("purpose key missing"),
+            "test",
+            "purpose value should be exactly 'test', not polluted by adjacent keys"
+        );
+        assert_eq!(
+            deser.get("example-tag").expect("example-tag key missing"),
+            "example-value",
+            "hyphenated key 'example-tag' should be parsed as a single key"
+        );
+    }
+
+    #[test]
+    fn cli_key_values_parses_production_label_set() {
+        // Construct the comma-separated string the same way the harness does
+        let labels: Vec<(&str, &str)> = vec![
+            ("team_id", "11111111"),
+            ("experiment", "some_experiment"),
+            ("example-tag", "example-value"),
+            ("image_tag", "1.11.1"),
+            ("target", "datadog-agent"),
+            ("replicate", "3"),
+            ("purpose", "testing"),
+        ];
+
+        let mut input = String::new();
+        for (k, v) in &labels {
+            input.push_str(k);
+            input.push('=');
+            input.push_str(v);
+            input.push(',');
+        }
+        input.pop(); // remove trailing comma
+
+        let deser =
+            CliKeyValues::from_str(&input).expect("String cannot be converted into CliKeyValues");
+
+        for (k, v) in &labels {
+            let actual = deser.get(k).unwrap_or_else(|| {
+                panic!(
+                    "key '{k}' missing from parsed result; got keys: {:?}",
+                    deser.inner.keys().collect::<Vec<_>>()
+                )
+            });
+            assert_eq!(
+                actual, *v,
+                "key '{k}': expected '{v}', got '{actual}' — possible cross-label pollution"
+            );
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn yaml_only_telemetry_configuration_works() {
         // Test that telemetry can be configured in YAML without CLI flags
@@ -937,9 +1000,9 @@ telemetry:
     #[test]
     fn missing_telemetry_returns_error() {
         // Test that missing telemetry (no CLI flags, no YAML) returns an error
-        let contents = r#"
+        let contents = r"
 generator: []
-"#;
+";
 
         let args = vec!["lading", "--no-target"];
         let legacy_cli = CliFlatLegacy::parse_from(args);
@@ -951,7 +1014,7 @@ generator: []
         );
         match result.unwrap_err() {
             Error::MissingTelemetry => {} // Expected error
-            other => panic!("Expected MissingTelemetry error, got: {:?}", other),
+            other => panic!("Expected MissingTelemetry error, got: {other:?}"),
         }
     }
 }

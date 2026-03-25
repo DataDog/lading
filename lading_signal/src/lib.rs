@@ -31,6 +31,18 @@ use tokio::sync::{
 };
 use tracing::info;
 
+#[cfg(loom)]
+std::thread_local! {
+    /// Loom instrumentation: When enabled, `signal_and_wait` will yield in the race
+    /// window between `peers.load()` and `notified.await`. This allows loom to
+    /// explore the interleaving where a watcher's `notify_waiters()` fires in this
+    /// window, exposing a lost wakeup race condition that was fixed in PR#1740.
+    ///
+    /// This is only used in tests to prove the race exists. In production builds
+    /// (`#[cfg(not(loom))]`), this is compiled out entirely.
+    pub static LOOM_EXPLORE_RACE_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Construct a `Watcher` and `Broadcaster` pair.
 #[must_use]
 pub fn signal() -> (Watcher, Broadcaster) {
@@ -93,13 +105,27 @@ impl Broadcaster {
         // Wait for all peers to drop off. The opposite to
         // `decrease_peer_count`: loop will not consume CPU until a `Watcher`
         // has signaled that it has received the transmitted signal.
+        //
+        // To avoid a race condition, we must: (1) register for notification,
+        // (2) check the condition, (3) await. If we checked first and then
+        // registered, a peer could decrement and notify between our check and
+        // registration, causing us to miss the wakeup and hang forever.
         loop {
+            let notified = self.notify.notified();
+
             let peers = self.peers.load(Ordering::SeqCst);
+
+            #[cfg(loom)]
+            if LOOM_EXPLORE_RACE_WINDOW.get() {
+                loom::thread::yield_now(); // Force exploration here
+            }
+
             if peers == 0 {
                 break;
             }
             info!("Waiting for {peers} peers");
-            self.notify.notified().await;
+
+            notified.await;
         }
     }
 }
@@ -573,6 +599,29 @@ mod tests {
 
             block_on(broadcaster.signal_and_wait());
             watcher_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    // This tests the same flow as `watcher_drops_before_signal_and_wait` but with an explicit
+    // yield to clue loom into exploring interleavings that exposed a race condition fixed in
+    // PR#1740
+    fn signal_and_wait_race_proof_with_yield() {
+        use crate::LOOM_EXPLORE_RACE_WINDOW;
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            LOOM_EXPLORE_RACE_WINDOW.set(true); // Enable instrumentation
+
+            let (watcher, broadcaster) = signal();
+
+            let handle = thread::spawn(move || drop(watcher));
+
+            block_on(broadcaster.signal_and_wait()); // Calls REAL function
+
+            handle.join().unwrap();
         });
     }
 }

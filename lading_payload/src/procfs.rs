@@ -891,7 +891,7 @@ impl fmt::Display for Status {
     /// - The `Groups` field places a single space before its ending newline.
     ///   Notably, this field may be empty.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #![allow(clippy::too_many_lines)]
+        #![expect(clippy::too_many_lines)]
         write!(
             f,
             concat!(
@@ -1051,7 +1051,7 @@ impl<'a> Generator<'a> for StatusGenerator {
         R: rand::Rng + ?Sized,
     {
         #![allow(clippy::similar_names)]
-        #![allow(clippy::assertions_on_constants)]
+        #![expect(clippy::assertions_on_constants)]
         let pid = self.pid;
         let uid: Uid = rng.random();
         let gid = Gid(uid.0);

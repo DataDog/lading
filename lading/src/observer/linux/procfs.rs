@@ -83,16 +83,18 @@ struct ProcessInfo {
 pub(crate) struct Sampler {
     parent: Process,
     process_info: FxHashMap<i32, ProcessInfo>,
+    enable_smaps_rollup: bool,
 }
 
 impl Sampler {
-    pub(crate) fn new(parent_pid: i32) -> Result<Self, Error> {
+    pub(crate) fn new(parent_pid: i32, enable_smaps_rollup: bool) -> Result<Self, Error> {
         let parent = Process::new(parent_pid)?;
         let process_info = FxHashMap::default();
 
         Ok(Self {
             parent,
             process_info,
+            enable_smaps_rollup,
         })
     }
 
@@ -156,8 +158,10 @@ impl Sampler {
             }
         }
 
-        gauge!("total_rss_bytes").set(aggr.rss as f64);
-        gauge!("total_pss_bytes").set(aggr.pss as f64);
+        if self.enable_smaps_rollup {
+            gauge!("total_rss_bytes").set(aggr.rss as f64);
+            gauge!("total_pss_bytes").set(aggr.pss as f64);
+        }
         gauge!("processes_found").set(processes_found as f64);
 
         // Collect system-wide virtual memory statistics
@@ -311,7 +315,9 @@ impl Sampler {
         }
 
         // `/proc/{pid}/smaps_rollup`
-        if let Err(err) = smaps_rollup::poll(pid, &labels, aggr).await {
+        if self.enable_smaps_rollup
+            && let Err(err) = smaps_rollup::poll(pid, &labels, aggr).await
+        {
             // We don't want to bail out entirely if we can't read smap rollup
             // which will happen if we don't have permissions or, more
             // likely, the process has exited.
@@ -442,7 +448,7 @@ mod tests {
             exe in arb_exe_path(),
             cmdline in arb_cmdline(),
             comm in "[a-zA-Z0-9_-]+",
-            pid in 1..100000i32,
+            pid in 1..100_000_i32,
         ) -> ProcessInfo {
             ProcessInfo {
                 exe,
@@ -461,8 +467,8 @@ mod tests {
             cmdline in arb_cmdline(),
             comm1 in "[a-zA-Z0-9_-]+",
             comm2 in "[a-zA-Z0-9_-]+",
-            pid1 in 1..100000i32,
-            pid2 in 1..100000i32,
+            pid1 in 1..100_000_i32,
+            pid2 in 1..100_000_i32,
         ) {
             let parent = ProcessInfo {
                 exe: exe.clone(),
@@ -562,11 +568,11 @@ mod tests {
             };
 
             // If cmdlines differ (even by whitespace), should NOT be detected as forked-but-not-execed
-            if base_cmdline != modified_cmdline {
+            if base_cmdline == modified_cmdline {
+                assert!(forked_but_not_execd(&child, &parent));
+            } else {
                 assert!(!forked_but_not_execd(&child, &parent),
                     "Even whitespace differences should mean the process has exec'd");
-            } else {
-                assert!(forked_but_not_execd(&child, &parent));
             }
         }
     }

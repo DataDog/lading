@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total requests received
 //! `metrics_received`: Number of metric data points received
 //! `spans_received`: Number of spans received

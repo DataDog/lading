@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Check if a crate argument was provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <crate>"
+    echo "Valid crates: lading-signal"
+    exit 1
+fi
+
+CRATE="$1"
+
+# Validate the crate argument
+case "$CRATE" in
+    lading-signal)
+        # Valid crate
+        ;;
+    *)
+        echo "Error: Invalid crate '$CRATE'"
+        echo "Valid crates: lading-signal"
+        exit 1
+        ;;
+esac
+
+echo "Running loom tests for $CRATE..."
+
+# Run loom tests with the loom cfg flag
+RUSTFLAGS="--cfg loom" cargo test --release -p "$CRATE" --lib
+
+echo "Loom tests passed for $CRATE!"

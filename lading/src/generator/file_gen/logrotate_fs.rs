@@ -1,7 +1,10 @@
 //! A filesystem that mimics logs with rotation
 
-#![allow(clippy::cast_sign_loss)] // TODO remove these clippy allows
-#![allow(clippy::cast_possible_truncation)]
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "TODO: remove once all casts are made safe"
+)]
+#![expect(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 
 use crate::generator;
@@ -16,7 +19,6 @@ use nix::libc::{self, ENOENT};
 use rand::{SeedableRng, rngs::SmallRng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     fs,
     num::NonZeroU32,
@@ -26,6 +28,8 @@ use std::{
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
+
+use rustc_hash::FxHashMap;
 
 mod model;
 
@@ -47,13 +51,13 @@ pub struct Config {
     /// files will be present in the root path.
     max_depth: u8,
     /// Sets the [`crate::payload::Config`] of this template.
-    variant: lading_payload::Config,
+    pub variant: lading_payload::Config,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
-    maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
     #[serde(default = "lading_payload::block::default_maximum_block_size")]
-    maximum_block_size: byte_unit::Byte,
+    pub maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
     /// The load profile, controlling bytes or blocks per second as a function of time.
@@ -222,7 +226,7 @@ impl Server {
         // Initialize the FUSE filesystem
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
+            open_files: Arc::new(Mutex::new(FxHashMap::default())),
             start_time,
             start_time_system,
         };
@@ -263,7 +267,7 @@ impl Server {
 #[derive(Debug)]
 struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
-    open_files: Arc<Mutex<HashMap<u64, model::FileHandle>>>,
+    open_files: Arc<Mutex<FxHashMap<u64, model::FileHandle>>>,
 
     start_time: Instant,
     start_time_system: SystemTime,
@@ -277,7 +281,10 @@ impl LogrotateFS {
 }
 
 #[tracing::instrument(skip(state))]
-#[allow(clippy::similar_names)] // ctime and crtime are standard Unix file time names
+#[expect(
+    clippy::similar_names,
+    reason = "ctime and crtime are standard Unix file time names"
+)]
 fn getattr_helper(
     state: &mut MutexGuard<model::State>,
     start_time_system: SystemTime,
@@ -535,7 +542,7 @@ mod tests {
     struct Wrapper {
         load_profile: LoadProfile,
     }
-    /// Helper to deserialize Wrapper using singleton_map_recursive
+    /// Helper to deserialize Wrapper using `singleton_map_recursive`
     /// (matches how the main config deserializes nested enums)
     fn parse_wrapper(yaml: &str) -> Wrapper {
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
@@ -560,11 +567,11 @@ mod tests {
 
     #[test]
     fn load_profile_constant_blocks_per_second() {
-        let yaml = r#"
+        let yaml = r"
                 load_profile:
                     constant:
                         blocks_per_second: 100
-            "#;
+            ";
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Constant(_)));
         if let LoadProfile::Constant(rate) = w.load_profile {
@@ -593,7 +600,7 @@ mod tests {
             }
             assert!(matches!(rate, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = rate {
-                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
             }
         }
     }
@@ -611,7 +618,7 @@ mod tests {
         if let LoadProfile::Linear { initial, rate } = w.load_profile {
             assert!(matches!(initial, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = initial {
-                assert_eq!(bytes_per_second.as_u64(), 1 * 1024 * 1024);
+                assert_eq!(bytes_per_second.as_u64(), 1024 * 1024);
             }
             assert!(matches!(rate, RateSpec::Bytes { .. }));
             if let RateSpec::Bytes { bytes_per_second } = rate {
@@ -622,14 +629,14 @@ mod tests {
 
     #[test]
     fn load_profile_linear_blocks_per_second() {
-        let yaml = r#"
+        let yaml = r"
                 load_profile:
                     linear:
                         initial:
                             blocks_per_second: 100
                         rate:
                             blocks_per_second: 10
-            "#;
+            ";
         let w = parse_wrapper(yaml);
         assert!(matches!(w.load_profile, LoadProfile::Linear { .. }));
         if let LoadProfile::Linear { initial, rate } = w.load_profile {

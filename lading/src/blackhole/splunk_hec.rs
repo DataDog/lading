@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //! `requests_received`: Total requests received
 //!
 
@@ -102,7 +103,9 @@ async fn srv(
 
     let (parts, body) = req.into_parts();
     let bytes = body.boxed().collect().await?.to_bytes();
-    counter!("bytes_received", &*labels).increment(bytes.len() as u64);
+    let bytes_len = bytes.len() as u64;
+    counter!("bytes_received", &*labels).increment(bytes_len);
+    counter!("total_bytes_received").increment(bytes_len);
 
     match crate::codec::decode(parts.headers.get(hyper::header::CONTENT_ENCODING), bytes) {
         Err(response) => Ok(*response),

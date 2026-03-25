@@ -1,0 +1,27 @@
+optimization_goal: memory
+erratic: false
+
+target:
+  name: lading-target
+  # Setting experiment duration infinite here implies that lading will not go thru the shutdown process
+  # This is acceptable as we are less concerned about the shutdown performance
+  command: "/usr/bin/lading --no-target --experiment-duration-infinite --config-path /etc/lading-target/lading.yaml"
+  cpu_allotment: 2
+  memory_allotment: 150 MiB
+
+  environment:
+    DD_SERVICE: lading-target
+    RUST_LOG: info
+    RUST_BACKTRACE: 1
+
+checks:
+  - name: memory_usage
+    description: "Memory usage quality gate. Bounds total memory usage."
+    bounds:
+      series: total_pss_bytes
+      upper_bound: "132 MiB"
+  - name: cpu_usage
+    description: "CPU usage quality gate. Bounds total average millicore usage."
+    bounds:
+      series: avg(total_cpu_usage_millicores)
+      upper_bound: 14

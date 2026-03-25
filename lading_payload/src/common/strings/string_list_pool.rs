@@ -423,6 +423,7 @@ mod test {
         }
     }
 
+
     // Pattern parsing tests
     #[test]
     fn parse_range_char_lowercase() {

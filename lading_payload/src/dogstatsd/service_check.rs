@@ -93,12 +93,12 @@ impl fmt::Display for ServiceCheck<'_> {
             for tag in tags {
                 let key = self
                     .pools
-                    .randomstring
+                    .tag_name
                     .using_handle(tag.key)
                     .expect("invalid tag key handle");
                 let value = self
                     .pools
-                    .tag_name
+                    .tag_value
                     .using_handle(tag.value)
                     .expect("invalid tag value handle");
                 write!(f, "{key}:{value}")?;

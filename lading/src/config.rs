@@ -97,7 +97,7 @@ pub struct Config {
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
     /// The observer that watches the target
-    #[serde(skip_deserializing)]
+    #[serde(default)]
     pub observer: observer::Config,
     /// The period on which target observations -- if any -- are made.
     #[serde(default = "default_sample_period")]
@@ -130,6 +130,9 @@ pub struct PartialConfig {
     #[serde(default)]
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
+    /// The observer that watches the target.
+    #[serde(default)]
+    pub observer: observer::Config,
     /// The period on which target observations are made.
     pub sample_period_milliseconds: Option<u64>,
     /// The blackhole to supply for the target.
@@ -267,7 +270,7 @@ impl Config {
         Ok(Self {
             telemetry: partial.telemetry,
             generator: partial.generator,
-            observer: observer::Config::default(),
+            observer: partial.observer,
             sample_period_milliseconds: partial
                 .sample_period_milliseconds
                 .unwrap_or_else(default_sample_period),
@@ -476,6 +479,7 @@ fn load_directory_configs(dir: &Path) -> Result<Config, Error> {
 }
 
 #[cfg(test)]
+#[expect(clippy::cast_possible_truncation)]
 mod tests {
     use std::io::Write;
     use std::str::FromStr;
@@ -523,11 +527,12 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just generators
+    /// Create a minimal `PartialConfig` with just generators
     fn make_partial_with_generators(generators: Vec<generator::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
             generator: generators,
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: None,
@@ -535,11 +540,12 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just blackholes
+    /// Create a minimal `PartialConfig` with just blackholes
     fn make_partial_with_blackholes(blackholes: Vec<blackhole::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
             generator: vec![],
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: blackholes,
             target_metrics: None,
@@ -547,11 +553,12 @@ mod tests {
         }
     }
 
-    /// Create a minimal PartialConfig with just target_metrics
+    /// Create a minimal `PartialConfig` with just `target_metrics`
     fn make_partial_with_target_metrics(metrics: Vec<target_metrics::Config>) -> PartialConfig {
         PartialConfig {
             telemetry: None,
             generator: vec![],
+            observer: observer::Config::default(),
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: Some(metrics),
@@ -559,7 +566,7 @@ mod tests {
         }
     }
 
-    /// Create a prometheus target_metrics config
+    /// Create a prometheus `target_metrics` config
     fn make_prometheus_target_metrics(uri: &str) -> target_metrics::Config {
         target_metrics::Config::Prometheus(target_metrics::prometheus::Config {
             uri: uri.to_string(),

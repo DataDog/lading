@@ -117,8 +117,8 @@ impl TryFrom<f32> for ZeroToOne {
         } else if !(0.0..=1.0).contains(&value) {
             Err(ZeroToOneError::OutOfRange)
         } else {
-            #[allow(clippy::cast_sign_loss)]
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_possible_truncation)]
             Ok(Self::Frac((1.0 / value) as u32))
         }
     }

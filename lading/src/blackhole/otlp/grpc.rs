@@ -83,9 +83,10 @@ impl MetricsService for OtlpMetricsService {
         request: tonic::Request<ExportMetricsServiceRequest>,
     ) -> Result<tonic::Response<ExportMetricsServiceResponse>, Status> {
         let request = request.into_inner();
-        let size = request.encoded_len();
+        let size = request.encoded_len() as u64;
 
-        counter!("bytes_received", &self.labels).increment(size as u64);
+        counter!("bytes_received", &self.labels).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_points: u64 = 0;
@@ -132,9 +133,10 @@ impl TraceService for OtlpTracesService {
         request: tonic::Request<ExportTraceServiceRequest>,
     ) -> Result<tonic::Response<ExportTraceServiceResponse>, Status> {
         let request = request.into_inner();
-        let size = request.encoded_len();
+        let size = request.encoded_len() as u64;
 
-        counter!("bytes_received", &self.labels).increment(size as u64);
+        counter!("bytes_received", &self.labels).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_spans: u64 = 0;
@@ -171,9 +173,10 @@ impl LogsService for OtlpLogsService {
         request: tonic::Request<ExportLogsServiceRequest>,
     ) -> Result<tonic::Response<ExportLogsServiceResponse>, Status> {
         let request = request.into_inner();
-        let size = request.encoded_len();
+        let size = request.encoded_len() as u64;
 
-        counter!("bytes_received", &self.labels).increment(size as u64);
+        counter!("bytes_received", &self.labels).increment(size);
+        counter!("total_bytes_received").increment(size);
         counter!("requests_received", &self.labels).increment(1);
 
         let mut total_logs: u64 = 0;

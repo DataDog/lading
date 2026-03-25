@@ -18,7 +18,7 @@ ENV CARGO_INCREMENTAL=0
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
-    libssl-dev=3.0.17-1~deb12u3 \
+    libssl-dev=3.0.18-1~deb12u2 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
@@ -43,7 +43,7 @@ RUN --mount=type=secret,id=aws_access_key_id \
     export AWS_ACCESS_KEY_ID=$(cat /run/secrets/aws_access_key_id) && \
     export AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/aws_secret_access_key) && \
     export AWS_SESSION_TOKEN=$(cat /run/secrets/aws_session_token) && \
-    export RUSTC_WRAPPER=sccache && \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then export RUSTC_WRAPPER=sccache; fi && \
     cargo chef cook --release --locked --features logrotate_fs --recipe-path recipe.json
 
 # Stage 2: Builder - Build source code
@@ -56,7 +56,7 @@ ENV SCCACHE_REGION=${SCCACHE_REGION}
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config=1.8.1-1 \
-    libssl-dev=3.0.17-1~deb12u3 \
+    libssl-dev=3.0.18-1~deb12u2 \
     protobuf-compiler=3.21.12-3 \
     fuse3=3.14.0-4 \
     libfuse3-dev=3.14.0-4 \
@@ -74,7 +74,7 @@ RUN --mount=type=secret,id=aws_access_key_id \
     export AWS_ACCESS_KEY_ID=$(cat /run/secrets/aws_access_key_id) && \
     export AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/aws_secret_access_key) && \
     export AWS_SESSION_TOKEN=$(cat /run/secrets/aws_session_token) && \
-    export RUSTC_WRAPPER=sccache && \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then export RUSTC_WRAPPER=sccache; fi && \
     cargo build --release --locked --bin lading --features logrotate_fs
 
 # Stage 3: Runtime

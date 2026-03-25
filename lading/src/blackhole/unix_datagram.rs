@@ -3,6 +3,7 @@
 //! ## Metrics
 //!
 //! `bytes_received`: Total bytes received
+//! `total_bytes_received`: Aggregated bytes received across all blackhole types
 //!
 
 use std::{io, path::PathBuf};
@@ -108,6 +109,7 @@ impl UnixDatagram {
                         source: Box::new(source),
                     })?;
                     counter!("bytes_received", &self.metric_labels).increment(n as u64);
+                    counter!("total_bytes_received").increment(n as u64);
                 }
                 () = &mut shutdown_wait => {
                     info!("shutdown signal received");

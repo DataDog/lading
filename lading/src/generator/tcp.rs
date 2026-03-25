@@ -26,7 +26,7 @@ use tokio::{
     task::{JoinError, JoinSet},
     time::Duration,
 };
-use tracing::{error, info, trace};
+use tracing::{debug, info, trace};
 
 use lading_payload::block;
 
@@ -130,7 +130,7 @@ impl Tcp {
     ///
     /// Function will panic if user has passed zero values for any byte
     /// values. Sharp corners.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn new(
         general: General,
         config: &Config,
@@ -271,7 +271,8 @@ impl TcpWorker {
                             }
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

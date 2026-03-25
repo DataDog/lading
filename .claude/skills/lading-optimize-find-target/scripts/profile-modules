@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Profile all fingerprinted modules with payloadtool --memory-stats.
+# Outputs a TSV table: module, allocations, total_allocated_bytes, peak_live_bytes
+#
+# Usage: ./profile-modules [--verbose]
+#
+# Requires: ./target/release/payloadtool (build with cargo build --release --bin payloadtool)
+
+VERBOSE=false
+if [[ "${1:-}" == "--verbose" || "${1:-}" == "-v" ]]; then
+  VERBOSE=true
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PAYLOADTOOL="$REPO_ROOT/target/release/payloadtool"
+
+if [[ ! -x "$PAYLOADTOOL" ]]; then
+  echo "ERROR: payloadtool not found at $PAYLOADTOOL" >&2
+  echo "Run: cargo build --release --bin payloadtool" >&2
+  exit 1
+fi
+
+# Header
+printf "module\tallocations\ttotal_bytes\tpeak_live_bytes\n"
+
+for config in "$REPO_ROOT"/ci/fingerprints/*/lading.yaml; do
+  dir="$(basename "$(dirname "$config")")"
+
+  if $VERBOSE; then
+    echo "--- profiling $dir ---" >&2
+  fi
+
+  output=$("$PAYLOADTOOL" "$config" --memory-stats 2>&1) || {
+    if $VERBOSE; then echo "WARN: $dir failed" >&2; fi
+    continue
+  }
+
+  allocs=$(echo "$output" | grep "Allocations:" | head -1 | awk '{print $NF}')
+  total=$(echo "$output" | grep "Total allocated:" | awk '{print $3}')
+  peak=$(echo "$output" | grep "Peak live:" | awk '{print $3}')
+
+  # Default to 0 if parsing fails
+  allocs="${allocs:-0}"
+  total="${total:-0}"
+  peak="${peak:-0}"
+
+  printf "%s\t%s\t%s\t%s\n" "$dir" "$allocs" "$total" "$peak"
+done
