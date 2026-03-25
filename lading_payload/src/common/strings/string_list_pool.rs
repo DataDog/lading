@@ -53,12 +53,12 @@ struct Pattern {
 
 impl StringListPool {
     /// Create a new list of strings.
-    pub(crate) fn new(metric_names: Vec<String>) -> Self {
+    pub(crate) fn new(metric_names: &[String]) -> Self {
         assert!(
             !metric_names.is_empty(),
             "don't create a string list with an empty list"
         );
-        Self::new_with_patterns(&metric_names, 10_000).expect("valid patterns")
+        Self::new_with_patterns(metric_names, 10_000).expect("valid patterns")
     }
 
     /// Create a new list of strings with pattern expansion.
@@ -333,7 +333,7 @@ impl StringListPool {
                 let numdigits = std::cmp::max(start.to_string().len(), end.to_string().len());
 
                 (*start..=*end)
-                    .map(|n| format!("{:0numdigits$}", n, numdigits = numdigits))
+                    .map(|n| format!("{n:0numdigits$}"))
                     .collect()
             }
         }
@@ -409,7 +409,7 @@ mod test {
 
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = StringListPool::new(names.clone());
+            let pool = StringListPool::new(&names);
             if let Some((s1, h)) = pool.of_size_with_handle(&mut rng, 0) {
                 if let Some(s2) = pool.using_handle(h) {
                     assert_eq!(s1, s2);
@@ -422,7 +422,6 @@ mod test {
             }
         }
     }
-
 
     // Pattern parsing tests
     #[test]
