@@ -26,6 +26,9 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 1_000;
 /// Default max recursion depth for grammar generation.
 const DEFAULT_MAX_DEPTH: u32 = 30;
 
+/// Default max total AST nodes per generated sample.
+const DEFAULT_MAX_TOTAL_NODES: u32 = 20_000;
+
 /// Grammar format understood by the parser.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -98,15 +101,16 @@ impl Grammar {
 
         let mut builder = Profile::builder();
         builder = builder.max_depth(config.max_depth.unwrap_or(DEFAULT_MAX_DEPTH));
-        if let Some(nodes) = config.max_total_nodes {
-            builder = builder.max_total_nodes(nodes);
-        }
+        builder =
+            builder.max_total_nodes(config.max_total_nodes.unwrap_or(DEFAULT_MAX_TOTAL_NODES));
         let profile = builder.build();
 
         // Validate that the start production can be reached within the depth
         // budget. Without this check a grammar whose min_depth exceeds
         // max_depth would cause every generation attempt to fail with
         // BudgetExhausted, wasting time during block cache construction.
+        // Barkus guarantees that `start` is a valid index into `productions`
+        // (validated during grammar compilation). See barkus ADR-0010.
         let start_min_depth = grammar_ir.productions[grammar_ir.start].attrs.min_depth;
         if start_min_depth > profile.max_depth {
             return Err(Error::Grammar(format!(
@@ -133,7 +137,7 @@ impl crate::Serialize for Grammar {
             return Ok(());
         }
 
-        // Bridge rand 0.9 (lading) -> rand 0.8 (barkus) by seeding a local
+        // Bridge rand 0.9 (lading) -> rand 0.10 (barkus) by seeding a local
         // SmallRng from the lading RNG. Each call gets a unique seed,
         // preserving determinism when the outer RNG is seeded.
         // NOTE: retry seeds also come from `rng`, so the number of retries
