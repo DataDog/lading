@@ -376,9 +376,9 @@ impl MemberGenerator {
         metric_weights: MetricWeights,
         value_conf: ValueConf,
         unique_tag_ratio: f32,
-        metric_names: Vec<String>,
-        tag_names: Vec<String>,
-        tag_values: Vec<String>,
+        metric_names: &[String],
+        tag_names: &[String],
+        tag_values: &[String],
         mut rng: &mut R,
     ) -> Result<Self, crate::Error>
     where
@@ -569,7 +569,7 @@ impl DogStatsD {
         R: rand::Rng + ?Sized,
     {
         let config = Config::default();
-        let dogstatd = Self::new(config, rng)?;
+        let dogstatd = Self::new(&config, rng)?;
         Ok(dogstatd)
     }
 
@@ -593,7 +593,7 @@ impl DogStatsD {
     ///
     /// See documentation for [`Error`]
     #[allow(clippy::too_many_arguments)]
-    pub fn new<R>(config: Config, rng: &mut R) -> Result<Self, crate::Error>
+    pub fn new<R>(config: &Config, rng: &mut R) -> Result<Self, crate::Error>
     where
         R: rand::Rng + ?Sized,
     {
@@ -611,9 +611,9 @@ impl DogStatsD {
             config.metric_weights,
             config.value,
             config.unique_tag_ratio,
-            config.metric_names,
-            config.tag_names,
-            config.tag_values,
+            &config.metric_names,
+            &config.tag_names,
+            &config.tag_values,
             rng,
         )?;
 
@@ -779,7 +779,7 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config::default();
-            let mut dogstatsd = match DogStatsD::new(dogstatsd_config, &mut rng) {
+            let mut dogstatsd = match DogStatsD::new(&dogstatsd_config, &mut rng) {
                 Ok(d) => d,
                 Err(e) => {
                     eprintln!("Failed to create DogStatsD with error: {e:?}");
@@ -806,7 +806,7 @@ mod test {
             let mut rng = SmallRng::seed_from_u64(seed);
 
             let dogstatsd_config = Config { length_prefix_framed: true, ..Default::default() };
-            let mut dogstatsd = DogStatsD::new(dogstatsd_config, &mut rng).expect("failed to create DogStatsD");
+            let mut dogstatsd = DogStatsD::new(&dogstatsd_config, &mut rng).expect("failed to create DogStatsD");
 
             let mut bytes = Vec::with_capacity(max_bytes);
             dogstatsd.to_bytes(rng, max_bytes, &mut bytes).expect("failed to convert to bytes");
