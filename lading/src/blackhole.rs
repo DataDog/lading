@@ -11,6 +11,7 @@ mod common;
 pub mod datadog;
 pub mod datadog_stateful_logs;
 pub mod http;
+pub mod neper;
 pub mod otlp;
 pub mod splunk_hec;
 pub mod sqs;
@@ -18,7 +19,6 @@ pub mod tcp;
 pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
-pub mod neper;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`].
@@ -177,9 +177,7 @@ impl Server {
             Inner::Otlp(conf) => {
                 Self::Otlp(otlp::Otlp::new(&config.general, &conf, &shutdown).map_err(Error::Otlp)?)
             }
-            Inner::Neper(conf) => {
-                Self::Neper(neper::Neper::new(config.general, &conf, shutdown))
-            }
+            Inner::Neper(conf) => Self::Neper(neper::Neper::new(config.general, &conf, shutdown)),
         };
         Ok(server)
     }

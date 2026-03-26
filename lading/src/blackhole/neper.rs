@@ -133,35 +133,33 @@ impl Neper {
         // Always wait for the child. If shutdown arrives first, give the
         // server a short grace period to finish on its own before killing it.
         let mut shutdown_wait = std::pin::pin!(self.shutdown.recv());
-        let exited_cleanly = loop {
-            tokio::select! {
-                result = child.wait() => {
-                    let status = result?;
-                    if !status.success() {
+        let exited_cleanly = tokio::select! {
+            result = child.wait() => {
+                let status = result?;
+                if !status.success() {
+                    let stderr = read_child_stderr(&mut child).await;
+                    warn!(%status, "neper server exited unexpectedly");
+                    return Err(Error::NeperFailed { status, stderr });
+                }
+                true
+            }
+            () = &mut shutdown_wait => {
+                info!("shutdown signal received, waiting briefly for neper server to exit");
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    child.wait(),
+                ).await {
+                    Ok(Ok(status)) if status.success() => true,
+                    Ok(Ok(status)) => {
                         let stderr = read_child_stderr(&mut child).await;
-                        warn!(%status, "neper server exited unexpectedly");
+                        warn!(%status, "neper server exited with error during grace period");
                         return Err(Error::NeperFailed { status, stderr });
                     }
-                    break true;
-                }
-                () = &mut shutdown_wait => {
-                    info!("shutdown signal received, waiting briefly for neper server to exit");
-                    match tokio::time::timeout(
-                        tokio::time::Duration::from_secs(5),
-                        child.wait(),
-                    ).await {
-                        Ok(Ok(status)) if status.success() => break true,
-                        Ok(Ok(status)) => {
-                            let stderr = read_child_stderr(&mut child).await;
-                            warn!(%status, "neper server exited with error during grace period");
-                            return Err(Error::NeperFailed { status, stderr });
-                        }
-                        Ok(Err(e)) => return Err(Error::Io(e)),
-                        Err(_) => {
-                            warn!("grace period expired, killing neper server");
-                            let _ = child.kill().await;
-                            break false;
-                        }
+                    Ok(Err(e)) => return Err(Error::Io(e)),
+                    Err(_) => {
+                        warn!("grace period expired, killing neper server");
+                        let _ = child.kill().await;
+                        false
                     }
                 }
             }

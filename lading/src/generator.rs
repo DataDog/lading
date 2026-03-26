@@ -22,6 +22,7 @@ pub mod file_tree;
 pub mod grpc;
 pub mod http;
 pub mod kubernetes;
+pub mod neper;
 pub mod passthru_file;
 pub mod process_tree;
 pub mod procfs;
@@ -31,7 +32,6 @@ pub mod trace_agent;
 pub mod udp;
 pub mod unix_datagram;
 pub mod unix_stream;
-pub mod neper;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors produced by [`Server`].
@@ -253,9 +253,7 @@ impl Server {
                 &conf,
                 shutdown,
             )?),
-            Inner::Neper(conf) => {
-                Self::Neper(neper::Neper::new(config.general, &conf, shutdown)?)
-            }
+            Inner::Neper(conf) => Self::Neper(neper::Neper::new(config.general, &conf, shutdown)?),
         };
         Ok(srv)
     }
