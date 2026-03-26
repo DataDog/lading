@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - Added new `!concat` generator to the `templated_json` payload generator.
+- Use `mise` for tooling management
 
 ## [0.31.2]
 ## Changed
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
   This reflects preexisting terminology.
 - **Breaking Change**: Replace `opentelemetry_traces` payload with a brand-new
-  service topology-based configuration scheme. This allows for defining an 
+  service topology-based configuration scheme. This allows for defining an
   imaginary distributed system -- service type, operations, attributes, etc --
   which is then simulated to generate realistic-looking traces and spans.
 ## Added
