@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - Added new `!concat` generator to the `templated_json` payload generator.
 - Use `mise` for tooling management
+- Added new `StaticTimestamped` payload generator that parses timestamps from a
+  static log file and groups each second's worth of lines into a single block.
+  In conjunction with block-based throttling, this enables realistic load
+  patterns that replay the original log file's timing.
 
 ## [0.31.2]
 ## Changed

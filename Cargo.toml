@@ -22,6 +22,7 @@ byte-unit = { version = "5.2", default-features = false, features = [
   "byte",
   "serde",
 ] }
+chrono = "0.4.42"
 sha2 = { version = "0.10", default-features = false }
 metrics = { version = "0.24" }
 metrics-util = "0.20"
