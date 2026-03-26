@@ -22,7 +22,7 @@ use self::{
 
 use super::Generator;
 
-mod common;
+pub(crate) mod common;
 pub mod event;
 pub mod metric;
 pub mod service_check;
@@ -72,12 +72,12 @@ impl Default for KindWeights {
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MetricWeights {
-    count: u8,
-    gauge: u8,
-    timer: u8,
-    distribution: u8,
-    set: u8,
-    histogram: u8,
+    pub(crate) count: u8,
+    pub(crate) gauge: u8,
+    pub(crate) timer: u8,
+    pub(crate) distribution: u8,
+    pub(crate) set: u8,
+    pub(crate) histogram: u8,
 }
 
 impl MetricWeights {
@@ -354,10 +354,10 @@ struct MemberGenerator {
 /// Cheap to clone.
 #[derive(Clone, Debug)]
 pub(crate) struct StringPools {
-    tag_name: Rc<strings::PoolKind>,
-    tag_value: Rc<strings::PoolKind>,
-    name: Rc<strings::PoolKind>,
-    randomstring: Rc<strings::RandomStringPool>,
+    pub(crate) tag_name: Rc<strings::PoolKind>,
+    pub(crate) tag_value: Rc<strings::PoolKind>,
+    pub(crate) name: Rc<strings::PoolKind>,
+    pub(crate) randomstring: Rc<strings::RandomStringPool>,
 }
 
 impl MemberGenerator {
