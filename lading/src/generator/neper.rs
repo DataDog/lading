@@ -2,23 +2,17 @@
 //!
 //! This generator spawns a [neper](https://github.com/google/neper) client
 //! process to drive TCP workloads (request-response, connection-per-request,
-//! streaming) against a neper server and reports the resulting throughput as a
-//! metric.
-//!
-//! ## Metrics
-//!
-//! `neper_throughput`: Throughput value reported by neper at the end of the run
+//! streaming) against a neper server. Throughput metrics are emitted by the
+//! corresponding neper blackhole (server side).
 
 use std::{io, path::PathBuf, process::Stdio};
 
-use metrics::gauge;
 use nix::sys::resource::{Resource, getrlimit, setrlimit};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::info;
 
 use super::General;
-use crate::generator::common::MetricsBuilder;
 
 /// Directory where neper binaries are installed.
 const NEPER_BIN_DIR: &str = "/usr/local/bin";
@@ -51,7 +45,8 @@ impl Workload {
     }
 
     /// Return the key in neper's output that carries the throughput value.
-    fn throughput_key(self) -> &'static str {
+    #[must_use]
+    pub fn throughput_key(self) -> &'static str {
         match self {
             Workload::TcpRr | Workload::TcpCrr | Workload::TcpStream => "throughput",
         }
@@ -97,9 +92,6 @@ pub enum Error {
         /// Captured stderr
         stderr: String,
     },
-    /// Could not parse throughput from neper output.
-    #[error("failed to parse neper output: {0}")]
-    OutputParse(String),
 }
 
 #[derive(Debug)]
@@ -110,7 +102,6 @@ pub enum Error {
 pub struct Neper {
     config: Config,
     shutdown: lading_signal::Watcher,
-    metric_labels: Vec<(String, String)>,
 }
 
 impl Neper {
@@ -120,15 +111,13 @@ impl Neper {
     ///
     /// Returns an error if configuration is invalid.
     pub fn new(
-        general: General,
+        _general: General,
         config: &Config,
         shutdown: lading_signal::Watcher,
     ) -> Result<Self, Error> {
-        let metric_labels = MetricsBuilder::new("neper").with_id(general.id).build();
         Ok(Self {
             config: config.clone(),
             shutdown,
-            metric_labels,
         })
     }
 
@@ -136,8 +125,8 @@ impl Neper {
     ///
     /// # Errors
     ///
-    /// Returns an error if spawning neper fails, it exits with a non-zero
-    /// status, or the output cannot be parsed.
+    /// Returns an error if spawning neper fails or it exits with a non-zero
+    /// status.
     pub async fn spin(self) -> Result<(), Error> {
         // Raise the open file descriptor limit to the hard limit. Neper opens
         // many sockets and can easily exceed the default soft limit.
@@ -172,19 +161,20 @@ impl Neper {
             cmd.arg(arg);
         }
 
-        cmd.stdout(Stdio::piped());
+        cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
 
         info!(?binary, "spawning neper client");
         let mut child = cmd.spawn()?;
 
-        // Clone so we can wait for shutdown after the child finishes.
         let shutdown_post = self.shutdown.clone();
         let shutdown_wait = self.shutdown.recv();
         tokio::pin!(shutdown_wait);
 
         tokio::select! {
+            biased;
+
             result = child.wait() => {
                 let status = result?;
                 if !status.success() {
@@ -199,29 +189,10 @@ impl Neper {
                     };
                     return Err(Error::NeperFailed { status, stderr });
                 }
+                info!("neper client finished");
 
-                let stdout = match child.stdout.take() {
-                    Some(mut so) => {
-                        use tokio::io::AsyncReadExt;
-                        let mut buf = String::new();
-                        let _ = so.read_to_string(&mut buf).await;
-                        buf
-                    }
-                    None => String::new(),
-                };
-
-                match parse_throughput(&stdout, self.config.workload) {
-                    Ok(value) => {
-                        info!(throughput = value, "neper run complete");
-                        gauge!("neper_throughput", &self.metric_labels).set(value);
-                    }
-                    Err(e) => {
-                        warn!("could not parse neper throughput: {e}");
-                    }
-                }
-
-                // Wait for shutdown signal before returning so lading keeps
-                // running (e.g. to let the observer collect the metric).
+                // Wait for shutdown so lading keeps running while the
+                // blackhole collects and emits the throughput metric.
                 shutdown_post.recv().await;
             }
             () = &mut shutdown_wait => {
@@ -234,50 +205,9 @@ impl Neper {
     }
 }
 
-/// Parse the throughput value from neper's stdout output.
-///
-/// Neper prints key=value pairs, one per line. We look for the line matching
-/// the workload's throughput key.
-fn parse_throughput(output: &str, workload: Workload) -> Result<f64, Error> {
-    let key = workload.throughput_key();
-    for line in output.lines() {
-        let line = line.trim();
-        if let Some((k, v)) = line.split_once('=')
-            && k.trim() == key
-        {
-            return v.trim().parse::<f64>().map_err(|e| {
-                Error::OutputParse(format!("could not parse '{v}' as f64: {e}"))
-            });
-        }
-    }
-    Err(Error::OutputParse(format!(
-        "key '{key}' not found in neper output"
-    )))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_throughput_tcp_rr() {
-        let output = "num_flows=1\nnum_threads=1\nthroughput=12345.67\n";
-        let value = parse_throughput(output, Workload::TcpRr).unwrap();
-        assert!((value - 12345.67).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn parse_throughput_tcp_stream() {
-        let output = "throughput=98765.43\nlatency=0.5\n";
-        let value = parse_throughput(output, Workload::TcpStream).unwrap();
-        assert!((value - 98765.43).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn parse_throughput_missing_key() {
-        let output = "latency=0.5\n";
-        assert!(parse_throughput(output, Workload::TcpRr).is_err());
-    }
 
     #[test]
     fn workload_binary_names() {
