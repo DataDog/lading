@@ -857,6 +857,25 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
+source = "git+https://github.com/DataDog/saluki?rev=ae08e63e2bfc25d489105226e04e4f355c96736a#ae08e63e2bfc25d489105226e04e4f355c96736a"
+dependencies = [
+ "bytes",
+ "piecemeal",
+ "piecemeal-build",
+ "prost",
+ "prost-types",
+ "protobuf",
+ "protobuf-codegen",
+ "serde",
+ "serde_bytes",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
+name = "datadog-protos"
+version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki?rev=f47a7ef588c53aa1da35dcfd93808595ebeb1291#f47a7ef588c53aa1da35dcfd93808595ebeb1291"
 dependencies = [
  "bytes",
@@ -874,7 +893,7 @@ name = "ddsketch-agent"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki?rev=f47a7ef588c53aa1da35dcfd93808595ebeb1291#f47a7ef588c53aa1da35dcfd93808595ebeb1291"
 dependencies = [
- "datadog-protos",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki?rev=f47a7ef588c53aa1da35dcfd93808595ebeb1291)",
  "float-cmp",
  "ordered-float 5.1.0",
  "serde",
@@ -1937,7 +1956,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-schema",
  "bytes",
- "datadog-protos",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki?rev=ae08e63e2bfc25d489105226e04e4f355c96736a)",
  "ddsketch-agent",
  "lading-capture-schema",
  "lading-fuzz",
@@ -2219,6 +2238,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2293,6 +2318,16 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nom"
+version = "7.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
 ]
 
 [[package]]
@@ -2653,6 +2688,24 @@ checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset",
  "indexmap 2.12.1",
+]
+
+[[package]]
+name = "piecemeal"
+version = "0.1.0"
+source = "git+https://github.com/tobz/piecemeal#828e8632116ba7b323991796e6ae842fcabe6291"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "piecemeal-build"
+version = "0.1.0"
+source = "git+https://github.com/tobz/piecemeal#828e8632116ba7b323991796e6ae842fcabe6291"
+dependencies = [
+ "nom",
+ "piecemeal",
+ "tracing",
 ]
 
 [[package]]
@@ -3576,6 +3629,16 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.1",
  "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
