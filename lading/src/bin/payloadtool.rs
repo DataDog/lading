@@ -494,7 +494,7 @@ fn check_generator(config: &generator::Config, args: &Args) -> Result<Option<Fin
             generate_and_check(&conf, g.seed, total_bytes, g.maximum_block_size, args)
         }
         generator::Inner::Neper(_) => {
-            if compute_fingerprint {
+            if args.fingerprint {
                 warn!("Neper not supported for fingerprinting");
                 return Ok(None);
             }
