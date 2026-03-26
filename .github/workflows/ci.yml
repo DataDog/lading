@@ -81,6 +81,10 @@ jobs:
         uses: ./.github/actions/install-protobuf
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
+      - name: Install cargo-deny
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          install_args: "aqua:EmbarkStudios/cargo-deny"
       - run: ci/deny
 
   test:
@@ -113,9 +117,9 @@ jobs:
       - name: Install FUSE
         uses: ./.github/actions/install-fuse
       - name: Install nextest
-        uses: taiki-e/install-action@650c5ca14212efbbf3e580844b04bdccf68dac31 # v2.67.18
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          tool: nextest@0.9
+          install_args: "aqua:nextest-rs/nextest/cargo-nextest"
       - run: ci/test
 
   benchmark-check:
@@ -308,44 +312,24 @@ jobs:
       # Check our protobufs for lint cleanliness and for lack of breaking
       # changes
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.10
-      - name: Install Protobuf
-        uses: ./.github/actions/install-protobuf
-      - name: Install FUSE
-        uses: ./.github/actions/install-fuse
-      - name: buf-setup
-        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+      - name: Install buf
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          install_args: buf
       - run: ci/buf
 
   actionlint:
     runs-on: ubuntu-latest
     steps:
-      - name: set actionlint version & checksum
-        id: version
-        run: |
-          export ACTIONLINT="1.7.3"
-          export ACTIONLINT_CHECKSUM="37252b4d440b56374b0fc1726e05fd7452d30d6d774f6e9b52e65bb64475f9db"
-
-          echo "actionlint version: ${ACTIONLINT}"
-          echo "actionlint checksum: ${ACTIONLINT_CHECKSUM}"
-
-          echo "ACTIONLINT=${ACTIONLINT}" >> $GITHUB_OUTPUT
-          echo "ACTIONLINT_CHECKSUM=${ACTIONLINT_CHECKSUM}" >> $GITHUB_OUTPUT
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Download actionlint
-        shell: bash
-        run: |
-          wget https://github.com/rhysd/actionlint/releases/download/v${{ steps.version.outputs.ACTIONLINT }}/actionlint_${{ steps.version.outputs.ACTIONLINT }}_linux_amd64.tar.gz
-
-          echo "${{ steps.version.outputs.ACTIONLINT_CHECKSUM }}  actionlint_${{ steps.version.outputs.ACTIONLINT }}_linux_amd64.tar.gz" >> CHECKSUMS
-          sha256sum -c CHECKSUMS
-
-          tar -xvf actionlint_${{ steps.version.outputs.ACTIONLINT }}_linux_amd64.tar.gz
+      - name: Install actionlint
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          install_args: actionlint
       - name: Check workflow files
         shell: bash
         run: |
-          ./actionlint -color \
+          actionlint -color \
             -ignore 'Double quote to prevent globbing and word splitting' \
             -ignore 'Consider using { cmd1; cmd2; } >> file instead of individual redirects' \
             -ignore 'Declare and assign separately to avoid masking return values'
@@ -382,9 +366,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
         with:
           cache: false
-      - uses: taiki-e/install-action@650c5ca14212efbbf3e580844b04bdccf68dac31 # v2.67.18
+      - name: Install cargo-machete
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          tool: cargo-machete@0.9.1
+          install_args: "github:bnjbvr/cargo-machete"
       - run: cargo machete
 
   custom-lints:
@@ -393,15 +378,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install ast-grep
-        run: |
-          wget https://github.com/ast-grep/ast-grep/releases/download/0.39.5/app-x86_64-unknown-linux-gnu.zip
-          echo "9a1cab3e7916c98c6fe0079cc2c3b44d98832ba3bdb9db492d04a4e60e41fd0f  app-x86_64-unknown-linux-gnu.zip" | sha256sum -c
-          unzip app-x86_64-unknown-linux-gnu.zip
-          mv sg /usr/local/bin/sg
-          mv ast-grep /usr/local/bin/ast-grep
-          chmod +x /usr/local/bin/sg
-          chmod +x /usr/local/bin/ast-grep
-          sg --version
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          install_args: "aqua:ast-grep/ast-grep"
       - name: Test custom lints
         run: ci/test_custom_lints
       - name: Run custom lints
