@@ -54,12 +54,15 @@ backend = "aqua:nextest-rs/nextest/cargo-nextest"
 
 [tools."aqua:nextest-rs/nextest/cargo-nextest"."platforms.linux-arm64"]
 url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.72/cargo-nextest-0.9.72-aarch64-unknown-linux-gnu.tar.gz"
+checksum = "sha256:f49577c199fc95c4076d90fc3017c0689d8a4982176fdefb6faa8505681da10e"
 
 [tools."aqua:nextest-rs/nextest/cargo-nextest"."platforms.linux-x64"]
 url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.72/cargo-nextest-0.9.72-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:4f471fecc32ca4bf745a2c85c2fde7339640cb366f59cd36fbe5bb63d3fd0880"
 
 [tools."aqua:nextest-rs/nextest/cargo-nextest"."platforms.macos-arm64"]
 url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.72/cargo-nextest-0.9.72-universal-apple-darwin.tar.gz"
+checksum = "sha256:2816fd2b39fdba8dc16b7144b2c85a6ef62e38c8df87645a8c510e2e78c160c2"
 
 [[tools.buf]]
 version = "1.50.0"
