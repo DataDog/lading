@@ -18,12 +18,14 @@ byte-unit = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true, features = ["small_rng", "std", "std_rng"] }
+rustc-hash = { workspace = true }
 rmp-serde = { version = "1.3", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_tuple = { version = "1.1", default-features = false }
 thiserror = { workspace = true }
-time = { version = "0.3", features = ["formatting"] }
+serde_yaml = { workspace = true }
+time = { version = "0.3", features = ["formatting", "parsing", "std"] }
 tracing = { workspace = true }
 tokio = { workspace = true }
 arbitrary = { version = "1", optional = true, features = ["derive"] }
@@ -88,6 +90,10 @@ harness = false
 
 [[bench]]
 name = "syslog"
+harness = false
+
+[[bench]]
+name = "templated_json"
 harness = false
 
 [[bench]]

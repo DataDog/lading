@@ -1,8 +1,8 @@
 ---
 name: lading-optimize-review
-description: Reviews optimization patches for lading using a 5-persona peer review system. Requires unanimous approval backed by benchmarks. Bugs discovered during review are valuable - invoke /lading-optimize-validate to validate them.
+description: Reviews optimization patches using a 5-persona peer review system. Requires unanimous approval backed by benchmarks.
 argument-hint: "[bench] [fingerprint] [file] [target] [technique]"
-allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
+allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Glob Grep
 context: fork
 ---
 
@@ -16,15 +16,12 @@ A rigorous 5-persona peer review system for optimization patches in lading. Requ
 
 Review judges using benchmarks and 5-persona review, then returns a structured report.
 
-## Valuable Outcomes
+## Outcomes
 
-| Outcome | Value | Action |
+| Outcome | Votes | Action |
 |---------|-------|--------|
-| **Optimization APPROVED** | Improvement validated | Merge |
-| **Optimization REJECTED** | Learned where NOT to optimize | Record lesson |
-| **Bug DISCOVERED** | Found correctness issue | Invoke `/lading-optimize-validate` |
-
-**Finding bugs during optimization review is SUCCESS, not failure.**
+| **APPROVED** | 5/5 APPROVE | Return APPROVED report |
+| **REJECTED** | Any REJECT | Return REJECTED report |
 
 ---
 
@@ -126,7 +123,7 @@ hyperfine --warmup 3 --runs 30 --export-json /tmp/optimized.json \
 - [ ] No semantic changes to output
 - [ ] **Determinism preserved** (same seed -> same output)
 - [ ] No `.unwrap()` or `.expect()` added (lading MUST NOT panic)
-- [ ] **No bugs introduced** (if bug found -> `/lading-optimize-validate`)
+- [ ] **No bugs introduced** (if bug found -> REJECT with bug details)
 - [ ] Property tests exist for changed code
 
 ### 4. Rust Expert (Lading-Specific Patterns)
@@ -178,37 +175,8 @@ ci/kani lading_payload
 |---------|-------|--------|
 | **APPROVED** | 5/5 APPROVE | Return APPROVED report |
 | **REJECTED** | Any REJECT | Return REJECTED report |
-| **DUPLICATE** | Duplicate Hunter REJECT | Return DUPLICATE report |
-| **BUG FOUND** | Correctness issue | Invoke `/lading-optimize-validate`, return BUG_FOUND report |
 
-### Bug Triage
-
-When issues are discovered, determine the correct action:
-
-| Signal                                  | Is It a Bug? | Action                             |
-| --------------------------------------- | ------------ | ---------------------------------- |
-| ci/validate fails after optimization    | Possible bug | Invoke `/lading-optimize-validate` |
-| Determinism broken                      | Possible bug | Invoke `/lading-optimize-validate` |
-| Conservative finds correctness issue    | Possible bug | Invoke `/lading-optimize-validate` |
-| Benchmark regression but correct output | NOT a bug    | REJECT optimization                |
-| No improvement but correct output       | NOT a bug    | REJECT optimization                |
-
-### When Bug Is Found
-
-If review discovers a bug instead of an optimization:
-
-```
-/lading-optimize-validate
-```
-
-The validate skill will:
-1. Confirm this is actually a bug (not just a failed optimization)
-2. Attempt Kani proof (if feasible)
-3. Create property test reproducing the bug
-4. Verify the fix works
-5. Record in `.claude/skills/lading-optimize-hunt/assets/db.yaml`
-
-Then return here to return a BUG_FOUND report in Phase 6.
+Duplicates, bugs, correctness issues, and missing benchmarks are all rejections. Describe the specific reason in the report's `reason` field.
 
 ---
 
@@ -222,8 +190,6 @@ Fill in the appropriate template and return the completed YAML:
 | --------- | ---------------------------------------------------------------------- |
 | approved  | `.claude/skills/lading-optimize-review/assets/approved.template.yaml`  |
 | rejected  | `.claude/skills/lading-optimize-review/assets/rejected.template.yaml`  |
-| duplicate | `.claude/skills/lading-optimize-review/assets/duplicate.template.yaml` |
-| bug_found | `.claude/skills/lading-optimize-review/assets/bug-found.template.yaml` |
 
 1. Read the appropriate template from the `.claude/skills/lading-optimize-review/assets/` directory
 2. Fill in placeholders using argument values:

@@ -87,12 +87,14 @@ done
 # ── Check 3: Build ───────────────────────────────────────────────────
 section "Check 3 - Build"
 
+printf "  ... running ci/check (may take a moment)\r" >&2
 if ci/check >/dev/null 2>&1; then
   pass "ci/check passes"
 else
   fail "ci/check failed"
 fi
 
+printf "  ... building payloadtool (may take a moment)\r" >&2
 if cargo build --release --bin payloadtool >/dev/null 2>&1; then
   pass "payloadtool built"
 else
@@ -186,6 +188,39 @@ if [ "$DIRTY" -gt 0 ]; then
   note "Working tree dirty ($DIRTY files)"
 else
   pass "Working tree clean"
+fi
+
+# ── Check 8: GitHub CLI ─────────────────────────────────────────────
+section "Check 8 - GitHub CLI"
+
+if GH_VER=$(gh --version 2>/dev/null | head -1 | awk '{print $3}'); then
+  pass "gh $GH_VER"
+else
+  note "gh not found"
+fi
+
+# ── Check 9: AWS CLI ───────────────────────────────────────────────
+section "Check 9 - AWS CLI"
+
+if AWS_VER=$(aws --version 2>/dev/null | awk '{print $1}'); then
+  pass "$AWS_VER"
+else
+  note "aws CLI not found"
+fi
+
+# ── Check 10: SMP CLI ───────────────────────────────────────────────
+section "Check 10 - SMP CLI"
+
+if command -v smp >/dev/null 2>&1; then
+  # smp --version emits ANSI escape codes and INFO log lines; extract just the version tag
+  if SMP_RAW=$(smp --version 2>/dev/null); then
+    SMP_VER=$(echo "$SMP_RAW" | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1) || true
+    pass "smp ${SMP_VER:-unknown}"
+  else
+    warn "smp found on PATH but failed to run"
+  fi
+else
+  note "smp not found"
 fi
 
 # ── Report ────────────────────────────────────────────────────────────

@@ -1,12 +1,12 @@
 ---
 name: lading-optimize-hunt
-description: Systematic optimization hunter for lading. Finds memory optimizations AND bugs - both are valuable. Run /lading-optimize-validate when bugs are discovered.
-allowed-tools: Bash(cat:*) Bash(sample:*) Bash(samply:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill Task
+description: Coordinates optimization attempts. Captures baselines, implements changes, invokes review, and records outcomes.
+allowed-tools: Bash(cat:*) Bash(cargo:*) Bash(ci/*:*) Bash(hyperfine:*) Bash(*/payloadtool:*) Bash(tee:*) Read Write Edit Glob Grep Skill
 ---
 
 # Optimization Hunt
 
-Systematically explores the lading codebase, implements optimizations, validates with benchmarks. **Finding bugs is equally valuable as finding optimizations.**
+Coordinates optimization attempts: captures baselines, implements changes, invokes review, and records all outcomes.
 
 ## Role: Coordinator and Recorder
 
@@ -98,13 +98,7 @@ ci/validate
 
 **No exceptions. If ci/validate fails, fix the issue before continuing.**
 
-If `ci/validate` repeatedly fails on what appears to be a **pre-existing bug** (not caused by your change), invoke validation:
-
-```
-/lading-optimize-validate
-```
-
-After validation completes, return here and select the next target.
+If `ci/validate` repeatedly fails on a **pre-existing bug** (not caused by your change), document it and stop.
 
 ---
 

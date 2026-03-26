@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Install the SMP CLI binary from GitHub releases.
+# Resolves the latest stable version via gh, detects the platform,
+# downloads and verifies the binary, and installs to ~/.local/bin.
+
+SMP_INSTALL_DIR="${HOME}/.local/bin"
+
+if command -v smp >/dev/null 2>&1; then
+  if smp --version >/dev/null 2>&1; then
+    SMP_RAW=$(smp --version 2>/dev/null)
+    SMP_VER=$(echo "$SMP_RAW" | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1) || true
+    echo "smp is already installed: ${SMP_VER:-unknown}"
+    exit 0
+  else
+    echo "smp found on PATH but appears broken; reinstalling..."
+  fi
+fi
+
+# Resolve latest stable version via gh
+if ! command -v gh >/dev/null 2>&1; then
+  echo "ERROR: gh CLI not found (needed to download SMP). Install with: brew install gh"
+  exit 1
+fi
+
+SMP_CLI_VERSION=$(gh release list --repo DataDog/single-machine-performance --limit 1 --exclude-pre-releases --exclude-drafts 2>/dev/null | awk '{print $1}')
+if [ -z "$SMP_CLI_VERSION" ]; then
+  echo "ERROR: could not resolve latest SMP version from GitHub"
+  exit 1
+fi
+
+echo "Resolved SMP CLI version: ${SMP_CLI_VERSION}"
+
+# Determine target triple
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+case "${OS}-${ARCH}" in
+  Darwin-arm64)  TARGET="aarch64-apple-darwin" ;;
+  Darwin-x86_64) TARGET="x86_64-apple-darwin" ;;
+  Linux-aarch64) TARGET="aarch64-unknown-linux-musl" ;;
+  Linux-x86_64)  TARGET="x86_64-unknown-linux-musl" ;;
+  *)
+    echo "ERROR: unsupported platform ${OS}-${ARCH}"
+    exit 1
+    ;;
+esac
+
+# Download from GitHub releases
+ASSET_NAME="smp-${TARGET}.tar.gz"
+CHECKSUM_NAME="smp-${TARGET}.sha256"
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+echo "Downloading smp ${SMP_CLI_VERSION} for ${TARGET} from GitHub..."
+if ! gh release download "${SMP_CLI_VERSION}" \
+  --repo DataDog/single-machine-performance \
+  --pattern "${ASSET_NAME}" \
+  --pattern "${CHECKSUM_NAME}" \
+  --dir "$TMP_DIR"; then
+  echo "ERROR: failed to download SMP release assets from GitHub"
+  exit 1
+fi
+
+# Verify checksum
+echo "Verifying checksum..."
+if ! (cd "$TMP_DIR" && shasum -a 256 -c "${CHECKSUM_NAME}"); then
+  echo "ERROR: checksum verification failed"
+  exit 1
+fi
+
+# Extract and install
+mkdir -p "$SMP_INSTALL_DIR"
+tar -xzf "${TMP_DIR}/${ASSET_NAME}" -C "$SMP_INSTALL_DIR"
+chmod +x "${SMP_INSTALL_DIR}/smp"
+
+# smp --version emits ANSI escape codes and INFO log lines; extract just the version tag
+if SMP_RAW=$("${SMP_INSTALL_DIR}/smp" --version 2>/dev/null); then
+  SMP_VER=$(echo "$SMP_RAW" | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1) || true
+  echo "Installed smp ${SMP_VER:-unknown} to ${SMP_INSTALL_DIR}"
+else
+  echo "ERROR: downloaded binary failed version check"
+  exit 1
+fi
+
+# Warn if install dir is not on PATH
+if ! echo "$PATH" | tr ':' '\n' | grep -qx "$SMP_INSTALL_DIR"; then
+  echo ""
+  echo "WARNING: ${SMP_INSTALL_DIR} is not in your PATH."
+  echo "Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi

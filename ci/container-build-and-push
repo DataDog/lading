@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+ECR_REGISTRY="850406765696.dkr.ecr.us-west-2.amazonaws.com"
+ECR_REPO="${ECR_REGISTRY}/lading-dev"
+AWS_VAULT_PROFILE="smp"
+
+usage() {
+    cat <<EOF
+Usage: ci/container-build-and-push [OPTIONS]
+
+Build and push lading Docker images to ECR.
+
+Options:
+  --tag TAG          Image tag (default: git commit SHA)
+  --arch ARCH        Architecture(s): amd64, arm64, or amd64,arm64 (default: amd64,arm64)
+  --profile PROFILE  aws-vault profile (default: smp)
+  --random-tag       Use a random UUID as the image tag
+  --no-push          Build only, don't push to ECR
+  -h, --help         Show this help
+
+Examples:
+  ci/container-build-and-push                        # build both amd64+arm64, tag from git SHA
+  ci/container-build-and-push --tag v0.32.0          # explicit tag
+  ci/container-build-and-push --arch amd64,arm64     # multi-arch build
+  ci/container-build-and-push --no-push              # build only
+EOF
+}
+
+# Parse arguments
+TAG=""
+RANDOM_TAG=false
+ARCH=""
+PUSH=true
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tag) TAG="$2"; shift 2 ;;
+        --arch) ARCH="$2"; shift 2 ;;
+        --profile) AWS_VAULT_PROFILE="$2"; shift 2 ;;
+        --random-tag) RANDOM_TAG=true; shift ;;
+        --no-push) PUSH=false; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Error: Unknown option: $1" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+if [[ -n "$TAG" && "$RANDOM_TAG" == "true" ]]; then
+    echo "Error: --tag and --random-tag are mutually exclusive" >&2
+    exit 1
+fi
+
+if [[ "$RANDOM_TAG" == "true" ]]; then
+    TAG="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    echo "Generated random tag: ${TAG}"
+fi
+
+# Check prerequisites
+REQUIRED_CMDS=(docker)
+if [[ "$PUSH" == "true" ]]; then
+    REQUIRED_CMDS+=(aws aws-vault jq)
+fi
+for cmd in "${REQUIRED_CMDS[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Error: $cmd is not installed"
+        exit 1
+    fi
+done
+
+# Ensure Docker daemon is running
+if ! docker info &>/dev/null; then
+    echo "Error: Docker daemon is not running. Start Docker Desktop and try again."
+    exit 1
+fi
+
+# Ensure buildx is available
+if ! docker buildx version &>/dev/null; then
+    echo "Error: Docker Buildx is not available"
+    exit 1
+fi
+
+# Check Docker has enough memory for release builds with LTO
+MIN_MEMORY_GB=16
+DOCKER_MEM_BYTES=$(docker info --format '{{.MemTotal}}' 2>/dev/null)
+DOCKER_MEM_GB=$(( DOCKER_MEM_BYTES / 1073741824 ))
+if [[ "$DOCKER_MEM_GB" -lt "$MIN_MEMORY_GB" ]]; then
+    echo "Error: Docker has ${DOCKER_MEM_GB} GB of memory, but at least ${MIN_MEMORY_GB} GB is required"
+    echo "Increase memory in Docker Desktop -> Settings -> Resources"
+    exit 1
+fi
+echo "Docker memory: ${DOCKER_MEM_GB} GB"
+
+# Default to both architectures if not specified
+if [[ -z "$ARCH" ]]; then
+    ARCH="amd64,arm64"
+    echo "Defaulting to both architectures: ${ARCH}"
+fi
+
+# Determine tag
+if [[ -z "$TAG" ]]; then
+    TAG="sha-$(git rev-parse HEAD)"
+    echo "Using git SHA tag: ${TAG}"
+fi
+
+# Parse architectures
+IFS=',' read -ra ARCHS <<< "$ARCH"
+MULTI_ARCH=false
+if [[ ${#ARCHS[@]} -gt 1 ]]; then
+    MULTI_ARCH=true
+fi
+
+# Build platform string
+PLATFORMS=""
+for a in "${ARCHS[@]}"; do
+    if [[ -n "$PLATFORMS" ]]; then
+        PLATFORMS="${PLATFORMS},"
+    fi
+    PLATFORMS="${PLATFORMS}linux/${a}"
+done
+
+# Set up QEMU for cross-arch builds
+if [[ "$MULTI_ARCH" == "true" ]]; then
+    echo "Setting up QEMU for multi-arch builds..."
+    docker run --rm --privileged tonistiigi/binfmt --install all >/dev/null 2>&1 || true
+fi
+
+# Authenticate to ECR using a temporary docker config to avoid macOS credsStore issues.
+# We copy the real docker config (minus credsStore) and symlink cli-plugins so that
+# docker login can write credentials as plain JSON and buildx still works.
+DOCKER_CONFIG_DIR=""
+cleanup() {
+    if [[ -n "$DOCKER_CONFIG_DIR" ]]; then
+        rm -rf "$DOCKER_CONFIG_DIR"
+    fi
+}
+trap cleanup EXIT
+
+if [[ "$PUSH" == "true" ]]; then
+    echo "Authenticating to ECR..."
+    REAL_DOCKER_CONFIG="${DOCKER_CONFIG:-${HOME}/.docker}"
+    DOCKER_CONFIG_DIR="$(mktemp -d)"
+    # Copy config without credsStore/credHelpers so docker login writes auth as plain JSON
+    jq 'del(.credsStore, .credHelpers)' "${REAL_DOCKER_CONFIG}/config.json" \
+        > "${DOCKER_CONFIG_DIR}/config.json"
+    # Symlink subdirectories so buildx CLI plugin and Docker contexts are found
+    for subdir in cli-plugins contexts; do
+        if [[ -d "${REAL_DOCKER_CONFIG}/${subdir}" ]]; then
+            ln -s "${REAL_DOCKER_CONFIG}/${subdir}" "${DOCKER_CONFIG_DIR}/${subdir}"
+        fi
+    done
+    aws-vault exec "$AWS_VAULT_PROFILE" -- \
+        aws ecr get-login-password --region us-west-2 \
+        | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" docker login --username AWS --password-stdin "$ECR_REGISTRY"
+    export DOCKER_CONFIG="$DOCKER_CONFIG_DIR"
+fi
+
+# Create/use a buildx builder that supports multi-platform
+BUILDER_NAME="lading-builder"
+if ! docker buildx inspect "$BUILDER_NAME" &>/dev/null; then
+    echo "Creating buildx builder: ${BUILDER_NAME}"
+    docker buildx create --name "$BUILDER_NAME" --driver docker-container --use
+else
+    docker buildx use "$BUILDER_NAME"
+fi
+
+# Build image tags
+BUILD_TAGS=("--tag" "${ECR_REPO}:${TAG}")
+
+PUSH_FLAG=""
+if [[ "$PUSH" == "true" ]]; then
+    PUSH_FLAG="--push"
+elif [[ "$MULTI_ARCH" != "true" ]]; then
+    PUSH_FLAG="--load"
+else
+    echo "Warning: multi-arch --no-push builds remain in cache only (use --arch amd64 or --arch arm64 for a loadable image)"
+fi
+
+# Build (multi-arch builds both platforms in parallel within a single buildx invocation)
+echo "Building for platform(s): ${PLATFORMS}"
+echo "Tag: ${TAG}"
+
+docker buildx build \
+    --platform "$PLATFORMS" \
+    --build-arg SCCACHE_BUCKET="" \
+    --build-arg SCCACHE_REGION="" \
+    --build-arg AWS_ACCESS_KEY_ID="" \
+    --build-arg AWS_SECRET_ACCESS_KEY="" \
+    --build-arg AWS_SESSION_TOKEN="" \
+    --secret "id=aws_access_key_id,src=/dev/null" \
+    --secret "id=aws_secret_access_key,src=/dev/null" \
+    --secret "id=aws_session_token,src=/dev/null" \
+    "${BUILD_TAGS[@]}" \
+    ${PUSH_FLAG} \
+    -f Dockerfile \
+    .
+
+if [[ "$PUSH" == "true" ]]; then
+    echo "Pushed to ${ECR_REPO}:${TAG}"
+else
+    echo "Build complete (not pushed)"
+fi

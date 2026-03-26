@@ -1,6 +1,6 @@
 [package]
 name = "lading"
-version = "0.30.0"
+version = "0.31.2"
 authors = [
   "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
   "George Hahn <george.hahn@datadoghq.com>",
@@ -69,8 +69,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+humantime-serde = { version = "1.1" }
 serde_qs = { version = "0.15", default-features = false }
-serde_yaml = { version = "0.9" }
+serde_yaml = { workspace = true }
 sha2 = { workspace = true, features = ["std"] }
 sysinfo = { workspace = true, features = ["system"] }
 thiserror = { workspace = true }
@@ -117,6 +118,10 @@ doctest = false
 
 [[bin]]
 name = "lading"
+
+[package.metadata.cargo-machete]
+# False positive: used via `#[serde(with = "humantime_serde")]` field attributes.
+ignored = ["humantime-serde"]
 
 [lints]
 workspace = true

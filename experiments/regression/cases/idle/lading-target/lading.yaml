@@ -1,0 +1,8 @@
+generator: []
+
+blackhole:
+  - http:
+      binding_addr: "0.0.0.0:8080"
+
+telemetry:
+  addr: "0.0.0.0:9000"

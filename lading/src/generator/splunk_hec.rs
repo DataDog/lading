@@ -38,7 +38,7 @@ use tokio::{
     sync::{Semaphore, SemaphorePermit},
     time::timeout,
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::generator::splunk_hec::acknowledgements::Channel;
 use lading_payload::block;
@@ -318,7 +318,8 @@ impl SplunkHec {
                             tokio::spawn(send_hec_request(permit, block_length, labels, channel, client, request, request_shutdown.clone(), uri_clone));
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

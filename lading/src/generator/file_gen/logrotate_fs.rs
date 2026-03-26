@@ -51,13 +51,13 @@ pub struct Config {
     /// files will be present in the root path.
     max_depth: u8,
     /// Sets the [`crate::payload::Config`] of this template.
-    variant: lading_payload::Config,
+    pub variant: lading_payload::Config,
     /// Defines the maximum internal cache of this log target. `file_gen` will
     /// pre-build its outputs up to the byte capacity specified here.
-    maximum_prebuild_cache_size_bytes: byte_unit::Byte,
+    pub maximum_prebuild_cache_size_bytes: byte_unit::Byte,
     /// The maximum size in bytes of the largest block in the prebuild cache.
     #[serde(default = "lading_payload::block::default_maximum_block_size")]
-    maximum_block_size: byte_unit::Byte,
+    pub maximum_block_size: byte_unit::Byte,
     /// The mount-point for this filesystem
     mount_point: PathBuf,
     /// The load profile, controlling bytes or blocks per second as a function of time.

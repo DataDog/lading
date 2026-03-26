@@ -26,7 +26,7 @@ use tokio::{
     net::UdpSocket,
     task::{JoinError, JoinSet},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 use lading_payload::block;
 
@@ -282,7 +282,8 @@ impl UdpWorker {
                             }
                         }
                         Err(err) => {
-                            error!("Discarding block due to throttle error: {err}");
+                            debug!("Discarding block due to throttle error: {err}");
+                            self.block_cache.advance(&mut handle);
                         }
                     }
                 }

@@ -77,7 +77,7 @@ jobs:
   copy-to-ecr:
     name: Copy ${{ matrix.arch }} to ECR
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -137,7 +137,7 @@ jobs:
   manifest:
     name: Create ${{ matrix.registry }} manifest
     needs: [build, copy-to-ecr]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         registry: [ghcr, ecr]
