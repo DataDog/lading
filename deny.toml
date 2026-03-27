@@ -16,9 +16,36 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
+# barkus is a DataDog-internal project whose crates do not yet declare a
+# license field.  The repo itself is MIT-licensed (see its LICENSE file).
+[[licenses.clarify]]
+name = "barkus-core"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "barkus-ebnf"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "barkus-peg"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "barkus-antlr"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "barkus-parser-common"
+expression = "MIT"
+license-files = []
+
 [sources]
 unknown-git = "deny"
-allow-git = ["https://github.com/DataDog/saluki"]
+allow-git = ["https://github.com/DataDog/saluki", "https://github.com/DataDog/barkus"]
 
 [advisories]
 version = 2
