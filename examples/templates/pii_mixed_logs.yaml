@@ -1,0 +1,89 @@
+definitions:
+  random_ipv4:
+    !format
+      template: "{}.{}.{}.{}"
+      args:
+        - !range { min: 1, max: 255 }
+        - !range { min: 0, max: 255 }
+        - !range { min: 0, max: 255 }
+        - !range { min: 1, max: 254 }
+
+  email_address:
+    !format
+      template: "user{}@{}.{}"
+      args:
+        - !range { min: 1000, max: 9999 }
+        - !choose ["example", "mail", "inbox", "test", "demo"]
+        - !choose ["com", "net", "org", "io"]
+
+  credit_card:
+    !weighted
+      - weight: 50
+        value:
+          !format
+            template: "{}-{}-{}-{}"
+            args:
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+      - weight: 50
+        value:
+          !format
+            template: "{}{}{}{}"
+            args:
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+              - !range { min: 1000, max: 9999 }
+
+  tag_value:
+    !choose ["auth", "api", "database", "cache", "network",
+             "storage", "compute", "billing", "security", "monitoring"]
+
+generator:
+  !object
+    timestamp: !timestamp
+    level:
+      !weighted
+        - weight: 10
+          value: !const "ERROR"
+        - weight: 30
+          value: !const "INFO"
+        - weight: 60
+          value: !const "DEBUG"
+    # 70% plain, 15% credit card inline, 9% ip inline, 6% email inline
+    message:
+      !weighted
+        - weight: 70
+          value:
+            !choose ["request processed", "task completed", "health check passed",
+                     "connection established", "query executed", "cache hit",
+                     "cache miss", "retry attempt", "timeout occurred", "validation failed"]
+        - weight: 15
+          value:
+            !format
+              template: "{} card {}"
+              args:
+                - !choose ["charged to", "transaction processed with",
+                           "payment declined for", "refund issued to"]
+                - !reference credit_card
+        - weight: 9
+          value:
+            !format
+              template: "request from {} {}"
+              args:
+                - !reference random_ipv4
+                - !choose ["completed", "blocked", "throttled", "accepted"]
+        - weight: 6
+          value:
+            !format
+              template: "{} for {}"
+              args:
+                - !choose ["login attempt", "password reset",
+                           "account verification", "session created"]
+                - !reference email_address
+    tags:
+      !array
+        length: { min: 5, max: 15 }
+        element: !reference tag_value
