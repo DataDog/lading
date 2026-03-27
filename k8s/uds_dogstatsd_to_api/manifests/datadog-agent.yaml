@@ -22,9 +22,9 @@ spec:
       enabled: true
 
     dogstatsd:
-      unixDomainSocketConfig:
+      hostPortConfig:
         enabled: true
-        path: /var/run/datadog/dsd.socket
+        hostPort: 8125
 
     npm:
       enabled: true
@@ -50,6 +50,9 @@ spec:
     nodeAgent:
       image:
         name: gcr.io/datadoghq/agent:7.72.1
+      extraConfd:
+        configMap:
+          name: agent-logs-config
       containers:
         agent:
           env:
@@ -59,12 +62,27 @@ spec:
                   fieldPath: spec.nodeName
             - name: DD_TAGS
               value: "{{ DD_TAGS }}"
+            - name: DD_DOGSTATSD_NON_LOCAL_TRAFFIC
+              value: "true"
+            - name: DD_BIND_HOST
+              value: "0.0.0.0"
+            - name: DD_DOGSTATSD_PORT
+              value: "8125"
+            - name: DD_DOGSTATSD_TELEMETRY_ENABLED
+              value: "false"
+            - name: DD_LOGS_CONFIG_LOGS_DD_URL
+              value: "lading-intake:8080"
+            - name: DD_LOGS_CONFIG_USE_HTTP
+              value: "true"
+            - name: DD_LOGS_CONFIG_LOGS_NO_SSL
+              value: "true"
           resources:
             limits:
               memory: "{{ AGENT_MEMORY_MB }}Mi"
           volumeMounts:
-            - name: dsdsocket
-              mountPath: /var/run/datadog
+            - name: lading-logs
+              mountPath: /var/log/lading
+              readOnly: true
         trace-agent:
           resources:
             limits:
@@ -78,7 +96,21 @@ spec:
             limits:
               memory: "{{ PROCESS_MEMORY_MB }}Mi"
       volumes:
-        - name: dsdsocket
+        - name: lading-logs
           hostPath:
-            path: /var/run/datadog
+            path: /var/log/lading
             type: DirectoryOrCreate
+---
+# Log collection configuration for the agent
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-logs-config
+  namespace: default
+data:
+  lading.yaml: |
+    logs:
+      - type: file
+        path: /var/log/lading/*.log
+        service: lading-logrotate
+        source: lading
