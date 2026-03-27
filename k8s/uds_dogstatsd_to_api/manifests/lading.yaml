@@ -1,9 +1,8 @@
-# Lading load generator - sends 100 MiB/s of DogStatsD metrics to the Datadog agent
+# Lading load generator - sends DogStatsD metrics via UDP and generates log files
 #
-# This deployment generates synthetic load matching the uds_dogstatsd_to_api regression test:
-# - High cardinality: 1,000-10,000 unique metric contexts
-# - Heavy tagging: 2-50 tags per metric, 3-150 chars each
-# - Unix domain socket: connects to agent at /var/run/datadog/dsd.socket
+# This deployment generates synthetic load matching a low-throughput production workload:
+# - DogStatsD via UDP: ~3k bytes/s, ~200 unique contexts (170 counter, 30 gauge)
+# - Log files: ~300 log lines per 10s flush interval
 # - Deterministic: uses fixed seed for reproducible load patterns
 # - Infinite runtime: runs until manually stopped
 #
@@ -16,48 +15,108 @@ metadata:
   namespace: default
 data:
   lading.yaml: |
-    # From datadog-agent test/regression/cases/uds_dogstatsd_to_api
     generator:
-      - unix_datagram:
+      # Metrics-only generator: low throughput, small blocks
+      - udp:
           seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
                  59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
-          path: "/var/run/datadog/dsd.socket"
+          addr: "datadog-dogstatsd:8125"
+          bind_addr: "0.0.0.0:0"
           variant:
             dogstatsd:
               contexts:
-                inclusive:
-                  min: 1000
-                  max: 10000
+                constant: 200
+              service_check_names:
+                constant: 1
               name_length:
                 inclusive:
-                  min: 1
-                  max: 200
+                  min: 5
+                  max: 20
               tag_length:
                 inclusive:
                   min: 3
-                  max: 150
+                  max: 10
               tags_per_msg:
                 inclusive:
                   min: 2
-                  max: 50
+                  max: 3
               multivalue_count:
                 inclusive:
-                  min: 2
-                  max: 32
-              multivalue_pack_probability: 0.08
+                  min: 1
+                  max: 2
+              multivalue_pack_probability: 0.0
+              sampling_probability: 0.0
               kind_weights:
-                metric: 90
-                event: 5
-                service_check: 5
+                metric: 100
+                event: 0
+                service_check: 0
               metric_weights:
-                count: 100
-                gauge: 10
+                count: 85
+                gauge: 15
                 timer: 0
                 distribution: 0
                 set: 0
                 histogram: 0
-          bytes_per_second: "100 MiB"
-          maximum_prebuild_cache_size_bytes: "500 MiB"
+          bytes_per_second: "300 B"
+          maximum_block_size: "280 B"
+          maximum_prebuild_cache_size_bytes: "200 KiB"
+      # Events generator: high capacity (for large event blocks), low event rate
+      # 99% metric filler + 1% events ≈ 1 event per flush interval
+      - udp:
+          seed: [131, 127, 113, 109, 107, 103, 101, 97, 89, 83, 79, 73, 71, 67, 61, 59,
+                 53, 47, 43, 41, 37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3, 2]
+          addr: "datadog-dogstatsd:8125"
+          bind_addr: "0.0.0.0:0"
+          variant:
+            dogstatsd:
+              contexts:
+                constant: 1
+              service_check_names:
+                constant: 1
+              name_length:
+                inclusive:
+                  min: 5
+                  max: 10
+              tag_length:
+                inclusive:
+                  min: 3
+                  max: 8
+              tags_per_msg:
+                constant: 2
+              multivalue_count:
+                constant: 1
+              multivalue_pack_probability: 0.0
+              sampling_probability: 0.0
+              kind_weights:
+                metric: 96
+                event: 4
+                service_check: 0
+              metric_weights:
+                count: 1
+                gauge: 0
+                timer: 0
+                distribution: 0
+                set: 0
+                histogram: 0
+          bytes_per_second: "600 B"
+          maximum_block_size: "600 B"
+          maximum_prebuild_cache_size_bytes: "50 KiB"
+      - file_gen:
+          logrotate:
+            seed: [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59,
+                   61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137]
+            root: /var/log/lading
+            concurrent_logs: 1
+            maximum_bytes_per_log: 10MiB
+            total_rotations: 2
+            max_depth: 1
+            variant: "ascii"
+            maximum_block_size: "200 B"
+            maximum_prebuild_cache_size_bytes: 1MiB
+            throttle:
+              stable:
+                bytes_per_second: "1500 B"
+                timeout_millis: 0
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -78,7 +137,7 @@ spec:
     spec:
       containers:
       - name: lading
-        image: ghcr.io/datadog/lading:0.29.2
+        image: ghcr.io/datadog/lading:0.31.2
         command: ["lading"]
         args:
         - "--config-path"
@@ -98,15 +157,15 @@ spec:
         - name: config
           mountPath: /etc/lading
           readOnly: true
-        - name: dsdsocket
-          mountPath: /var/run/datadog
+        - name: logs
+          mountPath: /var/log/lading
       volumes:
       - name: config
         configMap:
           name: lading-config
-      - name: dsdsocket
+      - name: logs
         hostPath:
-          path: /var/run/datadog
+          path: /var/log/lading
           type: DirectoryOrCreate
 ---
 apiVersion: v1

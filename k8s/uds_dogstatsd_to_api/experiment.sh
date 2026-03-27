@@ -111,7 +111,7 @@ echo
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "[1/6] Checking prerequisites..."
+echo "[1/7] Checking prerequisites..."
 command -v kind >/dev/null 2>&1 || { echo "ERROR: kind not found"; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { echo "ERROR: kubectl not found"; exit 1; }
 command -v helm >/dev/null 2>&1 || { echo "ERROR: helm not found"; exit 1; }
@@ -120,7 +120,7 @@ command -v bc >/dev/null 2>&1 || { echo "ERROR: bc not found"; exit 1; }
 echo "      ✓ Prerequisites available"
 echo
 
-echo "[2/6] Creating fresh cluster..."
+echo "[2/7] Creating fresh cluster..."
 if kind get clusters 2>/dev/null | grep -q "^lading-test$"; then
     echo "      Deleting existing cluster..."
     kind delete cluster --name lading-test
@@ -129,7 +129,7 @@ kind create cluster --name lading-test
 echo "      ✓ Cluster ready"
 echo
 
-echo "[3/6] Installing Prometheus..."
+echo "[3/7] Installing Prometheus..."
 kubectl create namespace monitoring 2>/dev/null || true
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
 helm repo update >/dev/null 2>&1
@@ -142,7 +142,7 @@ helm install prometheus prometheus-community/prometheus \
 echo "      ✓ Prometheus installed"
 echo
 
-echo "[4/6] Installing Datadog Operator..."
+echo "[4/7] Installing Datadog Operator..."
 helm repo add datadog https://helm.datadoghq.com >/dev/null 2>&1 || true
 helm repo update >/dev/null 2>&1
 helm install datadog-operator datadog/datadog-operator --version 2.15.2 >/dev/null 2>&1
@@ -151,7 +151,7 @@ kubectl wait --for=condition=available --timeout=120s deployment/datadog-operato
 echo "      ✓ Operator ready"
 echo
 
-echo "[5/6] Applying manifests with ${TOTAL_MEMORY_MB} MB limit..."
+echo "[5/7] Deploying Datadog Agent with ${TOTAL_MEMORY_MB} MB limit..."
 kubectl apply -f "$SCRIPT_DIR/manifests/datadog-secret.yaml"
 kubectl apply -f "$SCRIPT_DIR/manifests/deny-egress.yaml"
 kubectl apply -f "$SCRIPT_DIR/manifests/lading-intake.yaml"
@@ -175,43 +175,50 @@ fi
 echo "$AGENT_MANIFEST" | kubectl apply -f -
 echo "      ✓ Agent deployed (egress blocked)"
 
-# We wait for agent pods to be ready and socket to be created before starting
-# the lading load generator instance.
-echo "      Waiting for agent and DogStatsD socket..."
-TIMEOUT=120
+# Wait for agent pod to be running
+echo "      Waiting for agent pod..."
+TIMEOUT=180
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
     AGENT_POD=$(kubectl get pods -l app.kubernetes.io/name=datadog-agent-deployment -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -n "$AGENT_POD" ]; then
-        SOCKET_EXISTS=$(kubectl exec "$AGENT_POD" -c agent -- test -S /var/run/datadog/dsd.socket 2>/dev/null && echo "yes" || echo "no")
-        if [ "$SOCKET_EXISTS" = "yes" ]; then
-            echo "      ✓ DogStatsD socket ready"
+        PHASE=$(kubectl get pod "$AGENT_POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [ "$PHASE" = "Running" ]; then
+            echo "      ✓ Agent pod running"
             break
         fi
     fi
-    sleep 2
-    ELAPSED=$((ELAPSED + 2))
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
 done
 
 if [ $ELAPSED -ge $TIMEOUT ]; then
-    echo "      ✗ Timeout waiting for DogStatsD socket"
+    echo "      ✗ Timeout waiting for agent pod"
+    kubectl get pods
     exit 1
 fi
 
-# Now deploy lading load generator instance.
-kubectl apply -f "$SCRIPT_DIR/manifests/lading.yaml"
-echo "      ✓ Manifests applied"
+# Wait for the agent to initialize DogStatsD UDP listener
+sleep 10
+echo "      ✓ Agent DogStatsD UDP ready"
 echo
 
-echo "      Waiting for lading health..."
+echo "[6/7] Deploying lading (generator)..."
+# Deploy DogStatsD service and lading after the agent so the UDP listener is
+# ready before lading starts sending. The agent discovers log files dynamically
+# via inotify -- no need to wait for pre-existing files.
+kubectl apply -f "$SCRIPT_DIR/manifests/dogstatsd-service.yaml"
+kubectl apply -f "$SCRIPT_DIR/manifests/lading.yaml"
+
+echo "      Waiting for lading pod..."
 TIMEOUT=60
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
     LADING_POD=$(kubectl get pods -l app=lading -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -n "$LADING_POD" ]; then
-        HTTP_CODE=$(kubectl exec "$LADING_POD" -- wget -q -O- --timeout=2 http://localhost:9000/metrics 2>/dev/null | head -1 && echo "ok" || echo "fail")
-        if [ "$HTTP_CODE" = "ok" ]; then
-            echo "      ✓ Lading Prometheus endpoint healthy"
+        PHASE=$(kubectl get pod "$LADING_POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [ "$PHASE" = "Running" ]; then
+            echo "      ✓ Lading running"
             break
         fi
     fi
@@ -220,24 +227,38 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 if [ $ELAPSED -ge $TIMEOUT ]; then
-    echo "      ✗ Timeout waiting for lading health"
-    kubectl logs -l app=lading --tail=20
+    echo "      ✗ Timeout waiting for lading pod"
+    kubectl get pods
     exit 1
 fi
 
-# Check for any failed pods. No failures are expected. Failure signals invalid
-# memory limits maybe but at this point more likely misconfiguration.
-FAILED_PODS=$(kubectl get pods -o json | jq -r '.items[] | select(.status.phase == "Failed" or .status.phase == "Unknown" or .status.phase == "CrashLoopBackOff") | .metadata.name')
+# Check for failed or crashlooping pods
+FAILED_PODS=$(kubectl get pods -o json | jq -r '
+    .items[] | select(
+        .status.phase == "Failed" or
+        .status.phase == "Unknown" or
+        (.status.containerStatuses[]? | .state.waiting.reason? == "CrashLoopBackOff")
+    ) | .metadata.name')
 if [ -n "$FAILED_PODS" ]; then
-    echo "      ✗ Found failed pods:"
+    echo "      ✗ Found failed/crashlooping pods:"
     kubectl get pods
     exit 1
 fi
 echo "      ✓ All systems healthy"
 echo
 
+# Cleanup handler for background processes
+BACKGROUND_PIDS=""
+cleanup() {
+    for pid in $BACKGROUND_PIDS; do
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+    done
+}
+trap cleanup EXIT
+
 # Monitor for restarts
-echo "[6/6] Monitoring for restarts (${DURATION}s)..."
+echo "[7/7] Monitoring for restarts (${DURATION}s)..."
 echo "      Started at: $(date)"
 MONITOR_START_TIME=$(date +%s)
 ELAPSED=0
@@ -277,9 +298,9 @@ while [ $ELAPSED -lt $DURATION ]; do
         echo
 
         if [ "$REASON" = "OOMKilled" ]; then
-            echo "💡 Container needs MORE memory"
+            echo "Container needs MORE memory"
         else
-            echo "⚠️  Non-OOM restart:"
+            echo "Non-OOM restart:"
             kubectl logs -l app.kubernetes.io/name=datadog-agent-deployment -c "${CONTAINER_NAME}" --previous --tail=20
         fi
         echo "========================================"
@@ -308,14 +329,23 @@ AGENT_POD=$(kubectl get pods -l app.kubernetes.io/name=datadog-agent-deployment 
 # Port-forward Prometheus to localhost
 kubectl port-forward -n monitoring svc/prometheus-server 9090:80 >/dev/null 2>&1 &
 PROM_PID=$!
+BACKGROUND_PIDS="$BACKGROUND_PIDS $PROM_PID"
 sleep 3
 
 # Run Python analysis script
 python3 "$SCRIPT_DIR/analyze_memory.py" "http://localhost:9090/api/v1/query" "${AGENT_POD}" "${DURATION}" "${AGENT_MEMORY_MB}" "${TRACE_MEMORY_MB}" "${SYSPROBE_MEMORY_MB}" "${PROCESS_MEMORY_MB}"
-
-# Kill port-forward quietly
-kill $PROM_PID >/dev/null 2>&1
-wait $PROM_PID 2>/dev/null
 echo
 
-echo "💡 Agent stable - cluster is still running for examination"
+# Extract and analyze agent telemetry from expvar endpoint
+echo "========================================"
+echo "Agent Telemetry Analysis (from expvar)"
+echo "========================================"
+AGENT_POD=$(kubectl get pods -l app.kubernetes.io/name=datadog-agent-deployment -o jsonpath='{.items[0].metadata.name}')
+if [ -n "$AGENT_POD" ]; then
+    python3 "$SCRIPT_DIR/analyze_telemetry.py" --expvar "$AGENT_POD" "$DURATION"
+else
+    echo "WARNING: Could not find agent pod"
+fi
+echo
+
+echo "Agent stable - cluster is still running for examination"

@@ -1,0 +1,14 @@
+# Service to expose the Datadog Agent's DogStatsD UDP port to the lading generator.
+# The lading UDP generator connects to datadog-dogstatsd:8125 to send metrics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: datadog-dogstatsd
+  namespace: default
+spec:
+  selector:
+    app.kubernetes.io/name: datadog-agent-deployment
+  ports:
+  - port: 8125
+    targetPort: 8125
+    protocol: UDP
