@@ -22,6 +22,7 @@ pub mod file_tree;
 pub mod grpc;
 pub mod http;
 pub mod kubernetes;
+pub mod neper;
 pub mod passthru_file;
 pub mod process_tree;
 pub mod procfs;
@@ -80,6 +81,9 @@ pub enum Error {
     /// See [`crate::generator::trace_agent::Error`] for details.
     #[error(transparent)]
     TraceAgent(#[from] trace_agent::Error),
+    /// See [`crate::generator::neper::Error`] for details.
+    #[error(transparent)]
+    Neper(#[from] neper::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -139,6 +143,8 @@ pub enum Inner {
     Kubernetes(kubernetes::Config),
     /// See [`crate::generator::trace_agent::Config`] for details.
     TraceAgent(trace_agent::Config),
+    /// See [`crate::generator::neper::Config`] for details.
+    Neper(neper::Config),
 }
 
 #[derive(Debug)]
@@ -178,6 +184,8 @@ pub enum Server {
     Kubernetes(kubernetes::Kubernetes),
     /// See [`crate::generator::trace_agent::TraceAgent`] for details.
     TraceAgent(trace_agent::TraceAgent),
+    /// See [`crate::generator::neper::Neper`] for details.
+    Neper(neper::Neper),
 }
 
 impl Server {
@@ -245,6 +253,7 @@ impl Server {
                 &conf,
                 shutdown,
             )?),
+            Inner::Neper(conf) => Self::Neper(neper::Neper::new(config.general, &conf, shutdown)?),
         };
         Ok(srv)
     }
@@ -281,6 +290,7 @@ impl Server {
             Server::Container(inner) => inner.spin().await?,
             Server::Kubernetes(inner) => inner.spin().await?,
             Server::TraceAgent(inner) => inner.spin().await?,
+            Server::Neper(inner) => inner.spin().await?,
         }
 
         Ok(())
