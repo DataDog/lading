@@ -597,6 +597,8 @@ async fn inner_main(
 
     let mut tsrv_joinset = task::JoinSet::new();
     let mut osrv_joinset = task::JoinSet::new();
+
+    let target_present = config.target.is_some();
     //
     // OBSERVER
     //
@@ -605,6 +607,7 @@ async fn inner_main(
         let obs_rcv = tgt_snd.subscribe();
         let observer_server = observer::Server::new(config.observer, shutdown_watcher.clone())?;
         let sample_period = Duration::from_millis(config.sample_period_milliseconds);
+        info!("starting observer {:#?}", sample_period);
         osrv_joinset.spawn(observer_server.run(obs_rcv, sample_period));
 
         //
@@ -625,7 +628,9 @@ async fn inner_main(
         async move {
             info!("waiting for target startup");
             target_running_watcher.recv().await;
-            info!("target is running, now sleeping for warmup");
+            if target_present {
+                info!("target is running, now sleeping for warmup");
+            }
             sleep(warmup_duration).await;
             experiment_started_broadcast.signal();
             info!("warmup completed, collecting samples");
