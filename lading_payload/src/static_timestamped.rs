@@ -32,7 +32,7 @@ pub enum Error {
     /// The timestamp format uses %Z, which chrono accepts but ignores
     #[error(
         "timestamp_format contains `%Z` (named timezone abbreviation), which chrono accepts \
-         syntactically but ignores the zone value — every timestamp would be treated as UTC \
+         syntactically but ignores the zone value - every timestamp would be treated as UTC \
          regardless of the abbreviation (e.g. PST, PDT). Use `%z` (e.g. -0800) or `%:z` \
          (e.g. -08:00) for a numeric UTC offset instead."
     )]
