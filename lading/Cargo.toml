@@ -62,7 +62,7 @@ opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true, features = ["small_rng", "thread_rng"] }
 regex = { version = "1.12" }
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
   "default-tls",
   "json",
 ] }
