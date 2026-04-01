@@ -44,6 +44,9 @@ pub enum Error {
     /// Error when inspector is defined in multiple config files
     #[error("Inspector cannot be defined in multiple config files")]
     ConflictingInspector,
+    /// Error when observer is defined in multiple config files
+    #[error("Observer cannot be defined in multiple config files")]
+    ConflictingObserver,
     /// Error getting metadata for config path
     #[error("Failed to get metadata for config path {path:?}: {source}")]
     Metadata {
@@ -131,8 +134,7 @@ pub struct PartialConfig {
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub generator: Vec<generator::Config>,
     /// The observer that watches the target.
-    #[serde(default)]
-    pub observer: observer::Config,
+    pub observer: Option<observer::Config>,
     /// The period on which target observations are made.
     pub sample_period_milliseconds: Option<u64>,
     /// The blackhole to supply for the target.
@@ -270,7 +272,7 @@ impl Config {
         Ok(Self {
             telemetry: partial.telemetry,
             generator: partial.generator,
-            observer: partial.observer,
+            observer: partial.observer.unwrap_or_default(),
             sample_period_milliseconds: partial
                 .sample_period_milliseconds
                 .unwrap_or_else(default_sample_period),
@@ -323,6 +325,13 @@ impl Config {
         }
         if overlay.inspector.is_some() {
             base.inspector = overlay.inspector;
+        }
+
+        if base.observer.is_some() && overlay.observer.is_some() {
+            return Err(Error::ConflictingObserver);
+        }
+        if overlay.observer.is_some() {
+            base.observer = overlay.observer;
         }
 
         // Merge generators
@@ -532,7 +541,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: generators,
-            observer: observer::Config::default(),
+            observer: None,
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: None,
@@ -545,7 +554,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: vec![],
-            observer: observer::Config::default(),
+            observer: None,
             sample_period_milliseconds: None,
             blackhole: blackholes,
             target_metrics: None,
@@ -558,7 +567,7 @@ mod tests {
         PartialConfig {
             telemetry: None,
             generator: vec![],
-            observer: observer::Config::default(),
+            observer: None,
             sample_period_milliseconds: None,
             blackhole: vec![],
             target_metrics: Some(metrics),
