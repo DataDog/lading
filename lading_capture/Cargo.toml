@@ -59,7 +59,7 @@ path = "../lading_fuzz"
 optional = true
 
 [dependencies.rand]
-version = "0.9"
+version = "0.10"
 default-features = false
 features = ["small_rng", "std"]
 optional = true
