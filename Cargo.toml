@@ -63,7 +63,7 @@ hyper = { version = "1.7", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 sysinfo = { version = "0.37", default-features = false }
 opentelemetry-proto = "0.31"
-ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291", features = [
+ddsketch-agent = { git = "https://github.com/DataDog/saluki", rev = "ae08e63e2bfc25d489105226e04e4f355c96736a", features = [
   "serde",
 ] }
 datadog-protos = { git = "https://github.com/DataDog/saluki", rev = "f47a7ef588c53aa1da35dcfd93808595ebeb1291" }
