@@ -27,8 +27,10 @@ use std::sync::atomic::Ordering;
 use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
-/// Duration of a single `Accumulator` tick in milliseconds
-pub(crate) const TICK_DURATION_MS: u128 = 1_000;
+/// Default duration of a single `Accumulator` tick in milliseconds.
+/// This constant is kept for backwards compatibility in tests.
+#[cfg(test)]
+pub(crate) const DEFAULT_TICK_DURATION_MS: u128 = 1_000;
 
 /// Reserved label names that collide with top-level JSON fields in `json::Line`.
 /// Labels with these names will be filtered out to prevent duplicate field errors
@@ -92,6 +94,8 @@ pub(crate) struct StateMachine<F: OutputFormat, C: Clock> {
     start: Instant,
     /// Start time in milliseconds for deriving metric timestamps from ticks
     start_ms: u128,
+    /// Duration of a single tick in milliseconds
+    tick_duration_ms: u64,
     /// How long metrics can age before being discarded
     expiration: Duration,
     /// Output format for writing metrics, optional only to accomodate
@@ -113,11 +117,16 @@ pub(crate) struct StateMachine<F: OutputFormat, C: Clock> {
 
 impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
     /// Create a new state machine
+    ///
+    /// # Arguments
+    ///
+    /// * `tick_duration_ms` - Duration of a single tick in milliseconds (e.g., 1000 for 1Hz)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         expiration: Duration,
         format: F,
         flush_interval: u64,
+        tick_duration_ms: u64,
         registry: Arc<Registry<Key, AtomicStorage>>,
         accumulator: Accumulator,
         mut global_labels: FxHashMap<String, String>,
@@ -159,6 +168,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
             run_id,
             start,
             start_ms,
+            tick_duration_ms,
             expiration,
             format: Some(format),
             flush_interval,
@@ -303,7 +313,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         let mut line_count = 0;
         for (key, value, tick) in self.accumulator.flush() {
             // Calculate time from tick to ensure strictly increasing time values
-            let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+            let time_ms = self.start_ms + (u128::from(tick) * u128::from(self.tick_duration_ms));
             self.write_metric_line(&key, &value, tick, time_ms)?;
             line_count += 1;
         }
@@ -333,7 +343,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
         for metrics in accumulator.drain() {
             for (key, value, tick) in metrics {
                 // Calculate time from tick to ensure strictly increasing time values
-                let time_ms = self.start_ms + (u128::from(tick) * TICK_DURATION_MS);
+                let time_ms = self.start_ms + (u128::from(tick) * u128::from(self.tick_duration_ms));
                 self.write_metric_line(&key, &value, tick, time_ms)?;
             }
         }
@@ -372,7 +382,7 @@ impl<F: OutputFormat, C: Clock> StateMachine<F, C> {
 
         // Calculate when this metric was actually recorded based on its tick.
         let tick_age = self.accumulator.current_tick.saturating_sub(tick);
-        let tick_age_ms = u128::from(tick_age) * TICK_DURATION_MS;
+        let tick_age_ms = u128::from(tick_age) * u128::from(self.tick_duration_ms);
         // Skip any line that has expired.
         if tick_age_ms > self.expiration.as_millis() {
             return Ok(());
@@ -789,6 +799,7 @@ mod tests {
                 Duration::from_secs(60),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1002,6 +1013,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
@@ -1032,6 +1044,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
@@ -1056,6 +1069,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
@@ -1085,6 +1099,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
@@ -1117,6 +1132,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             global_labels,
@@ -1234,6 +1250,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
@@ -1270,6 +1287,7 @@ mod tests {
             Duration::from_secs(3600),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry.clone(),
             accumulator,
             labels,
@@ -1289,7 +1307,7 @@ mod tests {
                 .get_or_create_gauge(&gauge_key, |g| metrics::Gauge::from_arc(g.clone()))
                 .increment(1.0);
 
-            clock.advance(TICK_DURATION_MS);
+            clock.advance(DEFAULT_TICK_DURATION_MS);
             machine.next(Event::FlushTick).unwrap();
         }
 
@@ -1402,6 +1420,7 @@ mod tests {
                 Duration::from_secs(3600),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1448,6 +1467,7 @@ mod tests {
                 Duration::from_secs(3600),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1501,6 +1521,7 @@ mod tests {
                 Duration::from_secs(3600),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1552,6 +1573,7 @@ mod tests {
                 Duration::from_secs(3600),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1603,6 +1625,7 @@ mod tests {
                 Duration::from_secs(3600),
                 format,
                 1,
+                DEFAULT_TICK_DURATION_MS as u64,
                 registry,
                 accumulator,
                 labels,
@@ -1646,6 +1669,7 @@ mod tests {
             Duration::from_secs(60),
             format,
             1,
+            DEFAULT_TICK_DURATION_MS as u64,
             registry,
             accumulator,
             labels,
