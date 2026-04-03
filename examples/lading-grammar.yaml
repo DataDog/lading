@@ -1,0 +1,17 @@
+generator:
+  - tcp:
+      seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+             59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+      addr: "127.0.0.1:8282"
+      bytes_per_second: "10 MiB"
+      maximum_prebuild_cache_size_bytes: "64 MiB"
+      variant:
+        grammar:
+          grammar_path: "examples/grammars/json.ebnf"
+          format: ebnf
+          max_depth: 20
+          max_total_nodes: 5000
+
+blackhole:
+  - tcp:
+      binding_addr: "0.0.0.0:8282"

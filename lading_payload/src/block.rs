@@ -425,6 +425,17 @@ impl Cache {
 
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
+            crate::Config::Grammar(config) => {
+                let mut serializer = crate::Grammar::new(config)?;
+                let span = span!(Level::INFO, "fixed", payload = "grammar");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
         };
 
         let total_cycle_size = blocks

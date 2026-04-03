@@ -31,6 +31,11 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 arbitrary = { version = "1", optional = true, features = ["derive"] }
 enum_dispatch = { workspace = true }
+barkus-core = { workspace = true }
+barkus-ebnf = { workspace = true }
+barkus-peg = { workspace = true }
+barkus-antlr = { workspace = true }
+rand_0_10 = { package = "rand", version = "0.10", default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }
