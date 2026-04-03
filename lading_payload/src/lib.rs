@@ -20,6 +20,7 @@ pub use apache_common::ApacheCommon;
 pub use ascii::Ascii;
 pub use datadog_logs::DatadogLog;
 pub use dogstatsd::DogStatsD;
+pub use dogstatsd_http::DogStatsDHttp;
 pub use fluent::Fluent;
 pub use json::Json;
 pub use opentelemetry::log::OpentelemetryLogs;
@@ -37,6 +38,7 @@ pub mod ascii;
 pub mod common;
 pub mod datadog_logs;
 pub mod dogstatsd;
+pub mod dogstatsd_http;
 pub mod fluent;
 pub mod json;
 pub mod opentelemetry;
@@ -181,6 +183,9 @@ pub enum Config {
     /// Generates `DogStatsD`
     #[serde(rename = "dogstatsd")]
     DogStatsD(crate::dogstatsd::Config),
+    /// Generates DogStatsD-over-HTTP protobuf payloads
+    #[serde(rename = "dogstatsd_http")]
+    DogStatsDHttp(crate::dogstatsd::Config),
     /// Generates `TraceAgent` payloads in `MsgPack` format
     #[serde(rename = "trace_agent")]
     TraceAgent(crate::trace_agent::Config),
@@ -224,6 +229,8 @@ pub enum Payload {
     OtelMetrics(OpentelemetryMetrics),
     /// `DogStatsD` metrics
     DogStatsdD(DogStatsD),
+    /// DogStatsD-over-HTTP protobuf
+    DogStatsDHttp(DogStatsDHttp),
     /// Datadog Trace Agent format
     TraceAgent(crate::trace_agent::v04::V04),
     /// JSON generated from a user-supplied template file
@@ -251,6 +258,7 @@ impl Serialize for Payload {
             Payload::OtelLogs(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::OtelMetrics(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::DogStatsdD(ser) => ser.to_bytes(rng, max_bytes, writer),
+            Payload::DogStatsDHttp(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TraceAgent(ser) => ser.to_bytes(rng, max_bytes, writer),
             Payload::TemplatedJson(ser) => ser.to_bytes(rng, max_bytes, writer),
         }

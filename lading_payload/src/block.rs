@@ -425,6 +425,27 @@ impl Cache {
 
                 construct_block_cache_inner(rng, &mut pyld, maximum_block_bytes, total_bytes.get())?
             }
+            crate::Config::DogStatsDHttp(conf) => {
+                match conf.valid() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        warn!("Invalid DogStatsDHttp configuration: {}", e);
+                        return Err(Error::InvalidConfig(e));
+                    }
+                }
+
+                let mut serializer = crate::DogStatsDHttp::new(conf, &mut rng)?;
+
+                let span = span!(Level::INFO, "fixed", payload = "dogstatsd-http");
+                let _guard = span.enter();
+
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
         };
 
         let total_cycle_size = blocks
