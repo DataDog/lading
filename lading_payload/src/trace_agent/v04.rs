@@ -488,6 +488,8 @@ impl crate::Serialize for V04 {
         }
 
         let mut traces: Vec<Vec<Span>> = vec![];
+        let mut buf = Vec::with_capacity(max_bytes);
+
         // Elide the cost of per-message serialization, batching in fixed size
         // chunks.
         let batch_size = 10;
@@ -496,7 +498,7 @@ impl crate::Serialize for V04 {
             traces.push(trace.spans);
         }
         loop {
-            let mut buf = Vec::with_capacity(max_bytes);
+            buf.clear();
             traces.serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
 
             if buf.len() > max_bytes {
@@ -516,7 +518,7 @@ impl crate::Serialize for V04 {
 
         while low < high {
             let mid = (low + high).div_ceil(2);
-            let mut buf = Vec::with_capacity(max_bytes);
+            buf.clear();
             traces[0..mid].serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
 
             if buf.len() <= max_bytes {
@@ -526,7 +528,7 @@ impl crate::Serialize for V04 {
             }
         }
 
-        let mut buf = Vec::with_capacity(max_bytes);
+        buf.clear();
         traces[0..low].serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
         writer.write_all(&buf)?;
 
