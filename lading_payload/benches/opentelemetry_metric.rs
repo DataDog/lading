@@ -20,6 +20,9 @@ fn opentelemetry_metric_setup(c: &mut Criterion) {
                     gauge: 50,
                     sum_delta: 25,
                     sum_cumulative: 25,
+                    histogram: 15,
+                    exponential_histogram: 3,
+                    summary: 2,
                 },
                 contexts: Contexts {
                     total_contexts: ConfRange::Constant(100),

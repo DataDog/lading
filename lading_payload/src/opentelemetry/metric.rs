@@ -109,14 +109,23 @@ pub struct MetricWeights {
     pub sum_delta: u8,
     /// The relative probability of generating a sum cumulative metric.
     pub sum_cumulative: u8,
+    /// The relative probability of generating a histogram metric.
+    pub histogram: u8,
+    /// The relative probability of generating an exponential histogram metric.
+    pub exponential_histogram: u8,
+    /// The relative probability of generating a summary metric.
+    pub summary: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50,          // 50%
-            sum_delta: 25,      // 25%
-            sum_cumulative: 25, // 25%
+            gauge: 40,                // 40%
+            sum_delta: 25,            // 20%
+            sum_cumulative: 25,       // 20%
+            histogram: 15,            //15%
+            exponential_histogram: 3, // 3%
+            summary: 2,               //2%
         }
     }
 }
@@ -143,7 +152,9 @@ impl Config {
         // we can generate a diverse set of metrics
         if self.metric_weights.gauge == 0
             || self.metric_weights.sum_delta == 0
-            || self.metric_weights.sum_cumulative == 0
+            || self.metric_weights.summary == 0
+            || self.metric_weights.histogram == 0
+            || self.metric_weights.exponential_histogram == 0
         {
             return Err("Metric weights cannot be 0".to_string());
         }
@@ -419,7 +430,24 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        Data::Histogram(histogram) => {
+                            data_points_count += histogram.data_points.len() as u64;
+                            for point in &mut histogram.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            }
+                        }
+                        Data::ExponentialHistogram(eh) => {
+                            data_points_count += eh.data_points.len() as u64;
+                            for point in &mut eh.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            }
+                        }
+                        Data::Summary(summary) => {
+                            data_points_count += summary.data_points.len() as u64;
+                            for point in &mut summary.data_points {
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                            }
+                        }
                     }
                 }
             }
@@ -1059,6 +1087,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1099,6 +1130,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1344,6 +1378,9 @@ mod test {
                 gauge: 0,
                 sum_delta: 25,
                 sum_cumulative: 25,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
@@ -1354,6 +1391,9 @@ mod test {
                 gauge: 50,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
@@ -1364,6 +1404,9 @@ mod test {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 0,
+                exponential_histogram: 0,
+                summary: 0,
             },
             ..valid_config
         };
