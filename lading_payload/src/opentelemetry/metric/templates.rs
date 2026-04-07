@@ -5,9 +5,9 @@ use opentelemetry_proto::tonic::{
     metrics::{
         self,
         v1::{
-            ExponentialHistogramDataPoint, HistogramDataPoint, Metric,
-            NumberDataPoint, ResourceMetrics, ScopeMetrics, SummaryDataPoint,
-            exponential_histogram_data_point, metric::Data, number_data_point, summary_data_point,
+            ExponentialHistogramDataPoint, HistogramDataPoint, Metric, NumberDataPoint,
+            ResourceMetrics, ScopeMetrics, SummaryDataPoint, exponential_histogram_data_point,
+            metric::Data, number_data_point, summary_data_point,
         },
     },
     resource,
@@ -184,7 +184,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                 aggregation_temporality: 2,
             },
             4 => Kind::ExponentialHistogram {
-                aggregation_temporality: 2,
+                aggregation_temporality: 1,
                 scale: rng.random_range(-3_i32..=10),
             },
             5 => Kind::Summary,
