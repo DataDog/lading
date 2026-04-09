@@ -1,0 +1,435 @@
+-- allium: 3
+-- logrotate_fs.allium
+--
+-- Scope: Log-rotation filesystem simulation
+-- Includes: LogFile, RotationGroup, Directory, FileHandle, rotation lifecycle,
+--           time-driven byte accumulation, garbage collection
+-- Excludes:
+--   - Block cache internals (payload generation mechanism)
+--   - FUSE protocol details (transport layer)
+--   - Inode allocation strategy (implementation bookkeeping)
+--   - Metrics emission (observability infrastructure)
+--   - RNG / determinism mechanics (implementation of reproducibility)
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- The data source is opaque to the rotation model. Files read from it
+-- but the spec does not govern how it is built or structured.
+external entity DataSource {
+    total_size: ByteCount
+}
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value ByteCount {
+    amount: Integer
+}
+
+value Timestamp {
+    tick: Integer
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- How bytes accumulate over time.
+enum LoadProfileKind { constant, linear }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity LoadProfile {
+    kind: LoadProfileKind
+    base_rate: ByteCount                           -- bytes per tick at t=0
+    growth_rate: ByteCount when kind = linear      -- additional bytes per tick per elapsed tick
+}
+
+entity Directory {
+    name: String
+    parent: Directory?
+    children: Set<Node>
+
+    -- Derived
+    subdirectory_count: children.count(c => c.kind = directory)
+}
+
+entity Node {
+    kind: file | directory
+}
+
+entity RotationGroup {
+    group_id: Integer
+    base_name: String
+    max_rotations: Integer
+    directory: Directory
+
+    -- Relationships
+    files: LogFile with group = this
+
+    -- Projections
+    active_file: files where ordinal = 0 and not unlinked
+    linked_files: files where not unlinked
+}
+
+entity LogFile {
+    group: RotationGroup
+    ordinal: Integer
+    peer: LogFile?
+
+    -- Accumulation
+    bytes_written: ByteCount
+    bytes_read: ByteCount
+    max_offset_observed: ByteCount
+
+    -- Temporal
+    created_at: Timestamp
+    last_accessed: Timestamp
+    last_modified: Timestamp
+    last_status_change: Timestamp
+
+    -- State
+    read_only: Boolean
+    read_only_since: Timestamp?
+    unlinked: Boolean
+    open_handles: Integer
+
+    -- Derived
+    is_active: ordinal = 0 and not read_only and not unlinked
+    is_rotated: read_only and not unlinked
+    is_garbage: unlinked and open_handles = 0
+    name: group.names_for_ordinal(ordinal)
+
+    transitions unlinked {
+        false -> true
+        terminal: true
+    }
+
+    transitions read_only {
+        false -> true
+        terminal: true
+    }
+}
+
+entity FileHandle {
+    file: LogFile
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    concurrent_logs: Integer
+    maximum_bytes_per_log: ByteCount
+    total_rotations: Integer
+    max_depth: Integer
+    load_profile: LoadProfile
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- Initialisation
+-- ~~~~~~~~~~~~~~
+
+rule InitialiseFilesystem {
+    when: FilesystemMounted(data_source)
+
+    ensures:
+        for group_id in 0..config.concurrent_logs:
+            let dir = Directory.created(
+                name: random_name,
+                parent: root_directory_at_depth(config.max_depth)
+            )
+            let group = RotationGroup.created(
+                group_id: group_id,
+                base_name: random_base_name,
+                max_rotations: config.total_rotations,
+                directory: dir
+            )
+            ensures: LogFile.created(
+                group: group,
+                ordinal: 0,
+                peer: null,
+                bytes_written: 0,
+                bytes_read: 0,
+                max_offset_observed: 0,
+                created_at: now,
+                last_accessed: now,
+                last_modified: now,
+                last_status_change: now,
+                read_only: false,
+                unlinked: false,
+                open_handles: 0
+            )
+}
+
+-- Time advancement
+-- ~~~~~~~~~~~~~~~~
+
+rule AccumulateBytes {
+    when: tick: Timestamp.advanced
+
+    for file in LogFile where not read_only and not unlinked:
+        let elapsed = tick - file.created_at
+        let rate = evaluate_load_profile(config.load_profile, elapsed)
+        ensures: file.bytes_written = file.bytes_written + rate
+        ensures: file.last_modified = tick
+        ensures: file.last_status_change = tick
+
+    @guidance
+        -- Every tick (one second), each active file accumulates bytes
+        -- according to the configured load profile. For constant profiles
+        -- the rate is fixed. For linear profiles the rate grows with
+        -- elapsed time since the filesystem was created.
+}
+
+-- Rotation
+-- ~~~~~~~~
+
+rule RotateLogFile {
+    when: file: LogFile.bytes_written >= config.maximum_bytes_per_log
+
+    requires: file.ordinal = 0
+    requires: not file.read_only
+    requires: not file.unlinked
+
+    -- The full file becomes read-only
+    ensures: file.read_only = true
+    ensures: file.read_only_since = now
+
+    -- A new active file replaces it in the group
+    ensures: LogFile.created(
+        group: file.group,
+        ordinal: 0,
+        peer: file,
+        bytes_written: 0,
+        bytes_read: 0,
+        max_offset_observed: 0,
+        created_at: now,
+        last_accessed: now,
+        last_modified: now,
+        last_status_change: now,
+        read_only: false,
+        unlinked: false,
+        open_handles: 0
+    )
+
+    -- All peers in the chain shift ordinals
+    ensures: ShiftPeerChain(file)
+}
+
+rule ShiftPeerChain {
+    when: ShiftPeerChain(rotated_file)
+
+    -- Walk the peer chain starting from the rotated file,
+    -- incrementing each file's ordinal.
+    for file in peer_chain(rotated_file):
+        let new_ordinal = file.ordinal + 1
+        if new_ordinal > file.group.max_rotations:
+            ensures: file.unlinked = true
+            ensures: file.group.directory.children = file.group.directory.children - {file}
+            -- Sever the peer link from the previous file
+            ensures: previous_peer(file).peer = null
+        else:
+            ensures: file.ordinal = new_ordinal
+
+    @guidance
+        -- The peer chain is a singly-linked list from ordinal 0 upward.
+        -- Only the file at the end of the chain (highest ordinal) can
+        -- be unlinked. Once unlinked, it is severed from the chain.
+}
+
+-- File access
+-- ~~~~~~~~~~~
+
+rule OpenFile {
+    when: OpenFile(file)
+
+    requires: not file.unlinked or file.open_handles > 0
+
+    ensures: FileHandle.created(file: file)
+    ensures: file.open_handles = file.open_handles + 1
+    ensures: file.last_accessed = now
+    ensures: file.last_status_change = now
+}
+
+rule ReadFile {
+    when: ReadFile(handle, offset, size)
+
+    let file = handle.file
+    let available = file.bytes_written - offset
+    let to_read = min(available, size)
+
+    requires: offset < file.bytes_written
+
+    ensures: file.bytes_read = file.bytes_read + to_read
+    ensures: file.max_offset_observed = max(file.max_offset_observed, offset + to_read)
+    ensures: file.last_accessed = now
+    ensures: file.last_status_change = now
+
+    @guidance
+        -- Data is served from the external data source at a
+        -- file-specific offset, ensuring different files (including
+        -- rotated copies) return different byte sequences. Reads
+        -- beyond bytes_written return empty.
+}
+
+rule CloseFile {
+    when: CloseFile(handle)
+
+    let file = handle.file
+
+    ensures: file.open_handles = file.open_handles - 1
+    ensures: not exists handle
+
+    @guidance
+        -- Closing the last handle on an unlinked file makes it
+        -- eligible for garbage collection.
+}
+
+-- Garbage collection
+-- ~~~~~~~~~~~~~~~~~~
+
+rule GarbageCollect {
+    when: _: LogFile.is_garbage
+
+    for file in LogFile where is_garbage:
+        let missed = file.bytes_written - file.max_offset_observed
+        ensures: not exists file
+        ensures: BytesMissed(group: file.group, amount: missed)
+
+    @guidance
+        -- Garbage collection runs after every time advancement.
+        -- An unlinked file with zero open handles is removed from
+        -- the filesystem. The difference between bytes_written and
+        -- max_offset_observed represents data that was generated
+        -- but never read by any consumer.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant ReadBound {
+    -- Cannot observe past what has been written
+    for file in LogFile:
+        file.bytes_written >= file.max_offset_observed
+}
+
+invariant StatusTickConsistency {
+    -- Status changes only on access or modification
+    for file in LogFile:
+        file.last_status_change = file.last_modified
+            or file.last_status_change = file.last_accessed
+}
+
+invariant ValidPeerChain {
+    -- Peer chains start at ordinal 0, increment monotonically,
+    -- contain no cycles, and include no unlinked files
+    for file in LogFile where ordinal = 0 and not unlinked:
+        let chain = peer_chain(file)
+        chain.all_unique
+            and chain.ordinals_monotonic
+            and chain.none(f => f.unlinked)
+}
+
+invariant OrdinalBounds {
+    -- Linked files have ordinals within the configured maximum
+    for file in LogFile where not unlinked:
+        file.ordinal <= file.group.max_rotations
+}
+
+invariant NoOrphanedFiles {
+    -- Unlinked files with no open handles must not exist
+    for file in LogFile:
+        not (file.unlinked and file.open_handles = 0)
+}
+
+invariant CorrectNaming {
+    -- Each linked file's name matches its group and ordinal
+    for file in LogFile where not unlinked:
+        file.name = file.group.names_for_ordinal(file.ordinal)
+}
+
+invariant RotatedFileSizeBounds {
+    -- Rotated files are within one tick's growth of the threshold
+    for file in LogFile where read_only:
+        file.bytes_written >= config.maximum_bytes_per_log
+            and file.bytes_written <= config.maximum_bytes_per_log + 2 * file.rate_at_rotation
+}
+
+invariant UnlinkedFilesRemainReadable {
+    -- Unlinked files with open handles remain in the filesystem
+    -- and have valid file handles pointing to them
+    for file in LogFile where unlinked and open_handles > 0:
+        exists handle in FileHandle: handle.file = file
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Consumer {
+    identified_by: external_identity
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface FileSystemView {
+    facing viewer: Consumer
+
+    exposes:
+        for group in RotationGroup:
+            group.linked_files
+            for file in group.linked_files:
+                file.name
+                file.bytes_written
+                file.last_accessed
+                file.last_modified
+                file.last_status_change
+                file.created_at
+                file.read_only
+
+    provides:
+        OpenFile(file)
+            when not file.unlinked
+        ReadFile(handle, offset, size)
+            when handle.file.bytes_written > 0
+        CloseFile(handle)
+
+    related:
+        DirectoryListing(directory)
+}
+
+surface DirectoryListing {
+    facing viewer: Consumer
+
+    context dir: Directory
+
+    exposes:
+        for child in dir.children:
+            child.name
+            child.kind
+
+    @guarantee StableOrdering
+        -- Directory listings return children in a stable, deterministic
+        -- order so long as time does not advance between calls.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should missed_bytes tracking be a first-class domain concept or remain observability infrastructure?"
+
+open question "Should the load profile support additional growth curves beyond constant and linear?"
