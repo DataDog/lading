@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Changed
+- Updated dependencies
+
 ## Added
 - Added new `!concat` generator to the `templated_json` payload generator.
 - Use `mise` for tooling management
