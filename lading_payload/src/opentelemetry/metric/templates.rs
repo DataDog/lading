@@ -114,9 +114,9 @@ impl MetricTemplateGenerator {
                 u16::from(config.metric_weights.gauge),
                 u16::from(config.metric_weights.sum_delta),
                 u16::from(config.metric_weights.sum_cumulative),
-                u16::from(config.metric_weights.summary),
-                u16::from(config.metric_weights.exponential_histogram),
                 u16::from(config.metric_weights.histogram),
+                u16::from(config.metric_weights.exponential_histogram),
+                u16::from(config.metric_weights.summary),
             ])?,
             unit_gen: UnitGenerator::new(),
             str_pool: Rc::clone(str_pool),
@@ -727,6 +727,9 @@ mod test {
             config.metric_weights.gauge = gauge;
             config.metric_weights.sum_delta = sum_delta;
             config.metric_weights.sum_cumulative = sum_cumulative;
+            config.metric_weights.histogram = 0;
+            config.metric_weights.exponential_histogram = 0;
+            config.metric_weights.summary = 0;
 
             let mut rng = SmallRng::seed_from_u64(seed);
 
@@ -752,7 +755,55 @@ mod test {
                             _ => panic!("invalid aggregation temporality"),
                         }
                     }
-                    Data::Histogram(_) | Data::ExponentialHistogram(_) | Data::Summary(_) => {}
+                    Data::Histogram(_) | Data::ExponentialHistogram(_) | Data::Summary(_) => {
+                        panic!("unexpected new metric type when weights are zero")
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn metric_template_generator_new_types_generate(
+            seed: u64,
+            histogram in 0..2_u8,
+            exponential_histogram in 0..2_u8,
+            summary in 0..2_u8,
+        ) {
+            if histogram == 0 && exponential_histogram == 0 && summary == 0 {
+                return Ok(());
+            }
+
+            let mut config = Config::default();
+            config.metric_weights.gauge = 0;
+            config.metric_weights.sum_delta = 0;
+            config.metric_weights.sum_cumulative = 0;
+            config.metric_weights.histogram = histogram;
+            config.metric_weights.exponential_histogram = exponential_histogram;
+            config.metric_weights.summary = summary;
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let generator_result = MetricTemplateGenerator::new(
+                &config,
+                &Rc::new(strings::RandomStringPool::with_size(&mut rng, 1024)),
+                &mut rng,
+            );
+            assert!(generator_result.is_ok());
+            let mut generator = generator_result.unwrap();
+
+            for _ in 0..100 {
+                let result = generator.generate(&mut rng, &mut 1024);
+                assert!(result.is_ok());
+                let metric = result.unwrap();
+                assert!(metric.data.is_some());
+                match metric.data.unwrap() {
+                    Data::Histogram(_) => assert!(histogram >= 1),
+                    Data::ExponentialHistogram(_) => assert!(exponential_histogram >= 1),
+                    Data::Summary(_) => assert!(summary >= 1),
+                    Data::Gauge(_) | Data::Sum(_) => {
+                        panic!("unexpected gauge/sum when weights are zero")
+                    }
                 }
             }
         }

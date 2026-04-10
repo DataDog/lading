@@ -921,8 +921,15 @@ mod test {
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
                         }
-                        // Add other metric types as needed
-                        _ => "unknown".hash(&mut hasher),
+                        Data::Histogram(h) => {
+                            "histogram".hash(&mut hasher);
+                            h.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::ExponentialHistogram(eh) => {
+                            "exponential_histogram".hash(&mut hasher);
+                            eh.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::Summary(_) => "summary".hash(&mut hasher),
                     }
                 }
             }
@@ -1034,7 +1041,30 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    _ => {},
+                                    Data::Histogram(histogram) => {
+                                        for point in &histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::ExponentialHistogram(eh) => {
+                                        for point in &eh.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::Summary(summary) => {
+                                        for point in &summary.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -1411,5 +1441,156 @@ mod test {
             ..valid_config
         };
         assert!(zero_weights.valid().is_err());
+    }
+
+    proptest! {
+        #[test]
+        fn histogram_data_points_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 100,
+                    exponential_histogram: 0,
+                    summary: 0,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::Histogram(h)) = &metric.data {
+                                for point in &h.data_points {
+                                    prop_assert_eq!(
+                                        point.bucket_counts.len(),
+                                        point.explicit_bounds.len() + 1,
+                                        "bucket_counts.len() must be explicit_bounds.len() + 1"
+                                    );
+                                    let total: u64 = point.bucket_counts.iter().sum();
+                                    prop_assert_eq!(
+                                        total,
+                                        point.count,
+                                        "sum of bucket_counts must equal count"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn exponential_histogram_data_points_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 0,
+                    exponential_histogram: 100,
+                    summary: 0,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::ExponentialHistogram(eh)) = &metric.data {
+                                for point in &eh.data_points {
+                                    let pos_count: u64 = point
+                                        .positive
+                                        .as_ref()
+                                        .map_or(0, |b| b.bucket_counts.iter().sum());
+                                    let neg_count: u64 = point
+                                        .negative
+                                        .as_ref()
+                                        .map_or(0, |b| b.bucket_counts.iter().sum());
+                                    prop_assert_eq!(
+                                        pos_count + neg_count + point.zero_count,
+                                        point.count,
+                                        "pos_count + neg_count + zero_count must equal count"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn summary_quantile_values_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 100,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::Summary(s)) = &metric.data {
+                                for point in &s.data_points {
+                                    let qvs = &point.quantile_values;
+                                    for i in 1..qvs.len() {
+                                        prop_assert!(
+                                            qvs[i].quantile >= qvs[i - 1].quantile,
+                                            "quantiles must be non-decreasing: {} < {}",
+                                            qvs[i].quantile, qvs[i - 1].quantile
+                                        );
+                                        prop_assert!(
+                                            qvs[i].value >= qvs[i - 1].value,
+                                            "quantile values must be non-decreasing: {} < {}",
+                                            qvs[i].value, qvs[i - 1].value
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
