@@ -405,7 +405,7 @@ impl MemberGenerator {
             Rc::clone(&pool)
         } else {
             Rc::new(strings::PoolKind::StringListPool(
-                strings::StringListPool::new(tag_names),
+                strings::StringListPool::new(tag_names, 15_000)?,
             ))
         };
 
@@ -413,7 +413,7 @@ impl MemberGenerator {
             Rc::clone(&pool)
         } else {
             Rc::new(strings::PoolKind::StringListPool(
-                strings::StringListPool::new(tag_values),
+                strings::StringListPool::new(tag_values, 15_000)?,
             ))
         };
 
@@ -421,7 +421,7 @@ impl MemberGenerator {
             Rc::clone(&pool)
         } else {
             Rc::new(strings::PoolKind::StringListPool(
-                strings::StringListPool::new(metric_names),
+                strings::StringListPool::new(metric_names, 15_000)?,
             ))
         };
 

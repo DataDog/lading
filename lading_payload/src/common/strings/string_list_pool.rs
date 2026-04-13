@@ -2,7 +2,7 @@ use super::{Handle, Pool};
 
 /// Error type for `StringListPool` pattern expansion
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub(crate) enum Error {
+pub enum Error {
     /// Invalid pattern found during expansion (mixed types like {{a-5}})
     #[error("Invalid pattern: {pattern}")]
     InvalidPattern {
@@ -52,15 +52,6 @@ struct Pattern {
 }
 
 impl StringListPool {
-    /// Create a new list of strings.
-    pub(crate) fn new(metric_names: &[String]) -> Self {
-        assert!(
-            !metric_names.is_empty(),
-            "don't create a string list with an empty list"
-        );
-        Self::new_with_patterns(metric_names, 10_000).expect("valid patterns")
-    }
-
     /// Create a new list of strings with pattern expansion.
     /// Patterns are defined as `{{X-Y}}` where X and Y can be:
     /// - Characters: `{{a-z}}`, `{{A-Z}}`
@@ -74,10 +65,7 @@ impl StringListPool {
     /// - `Error::InvalidPattern` if a pattern has mixed types (e.g., `{{a-5}}`)
     /// - `Error::MalformedPattern` if a pattern has invalid syntax (e.g., `{{abc}}`, `{{z-a}}`)
     /// - `Error::EmptyExpansion` if pattern expansion resulted in empty list
-    pub(crate) fn new_with_patterns(
-        patterns: &[String],
-        max_expansions: usize,
-    ) -> Result<Self, Error> {
+    pub(crate) fn new(patterns: &[String], max_expansions: usize) -> Result<Self, Error> {
         if patterns.is_empty() {
             return Err(Error::EmptyPatternList);
         }
@@ -85,54 +73,45 @@ impl StringListPool {
             return Err(Error::InvalidMaxExpansions);
         }
 
-        // Validate all patterns first
-        for pattern in patterns {
-            Self::validate_patterns(pattern)?;
-        }
-
-        let metric_names = Self::expand_patterns_breadth_first(patterns, max_expansions);
+        let metric_names = Self::expand_patterns_breadth_first(patterns, max_expansions)?;
         if metric_names.is_empty() {
             return Err(Error::EmptyExpansion);
         }
         Ok(Self { metric_names })
     }
 
-    /// Validate all patterns in a string for correctness
-    /// Returns an error if any pattern is invalid (mixed types like {{a-5}})
-    fn validate_patterns(input: &str) -> Result<(), Error> {
-        let bytes = input.as_bytes();
-        let mut i = 0;
+    /// Expand patterns breadth-first across all input strings, generating
+    /// expansions lazily to avoid materializing the full Cartesian product.
+    fn expand_patterns_breadth_first(
+        patterns: &[String],
+        max_expansions: usize,
+    ) -> Result<Vec<String>, Error> {
+        let expanders: Vec<LazyPatternExpander> = patterns
+            .iter()
+            .map(|p| LazyPatternExpander::new(p))
+            .collect::<Result<_, _>>()?;
 
-        while i < bytes.len() {
-            // Look for {{
-            if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-                let start = i;
-                i += 2;
+        let result: Vec<String> = BreadthFirst::new(expanders).take(max_expansions).collect();
 
-                // Find the matching }}
-                let mut pattern_end = None;
-                while i + 1 < bytes.len() {
-                    if bytes[i] == b'}' && bytes[i + 1] == b'}' {
-                        pattern_end = Some(i);
-                        break;
-                    }
-                    i += 1;
-                }
+        if result.is_empty() {
+            Ok(patterns.to_vec())
+        } else {
+            Ok(result)
+        }
+    }
 
-                if let Some(end_pos) = pattern_end {
-                    // Extract the pattern content between {{ and }}
-                    let pattern_str = &input[start + 2..end_pos];
-                    Self::validate_range(pattern_str)?;
-                    i = end_pos + 2;
-                } else {
-                    i += 1;
-                }
-            } else {
-                i += 1;
+    /// Parse a string to find all pattern ranges
+    fn parse_patterns(input: &str) -> Result<Vec<Pattern>, Error> {
+        let mut patterns = Vec::new();
+        for (pattern_str, start, end) in PatternIter::new(input) {
+            Self::validate_range(pattern_str)?;
+
+            if let Some(range) = Self::parse_range(pattern_str) {
+                patterns.push(Pattern { start, end, range });
             }
         }
 
-        Ok(())
+        Ok(patterns)
     }
 
     /// Validate a range string like "a-z" or "1-10"
@@ -210,50 +189,6 @@ impl StringListPool {
         Ok(())
     }
 
-    /// Parse a string to find all pattern ranges
-    fn parse_patterns(input: &str) -> Vec<Pattern> {
-        let mut patterns = Vec::new();
-        let bytes = input.as_bytes();
-        let mut i = 0;
-
-        while i < bytes.len() {
-            // Look for {{
-            if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-                let start = i;
-                i += 2;
-
-                // Find the matching }}
-                let mut pattern_end = None;
-                while i + 1 < bytes.len() {
-                    if bytes[i] == b'}' && bytes[i + 1] == b'}' {
-                        pattern_end = Some(i);
-                        break;
-                    }
-                    i += 1;
-                }
-
-                if let Some(end_pos) = pattern_end {
-                    // Extract the pattern content between {{ and }}
-                    let pattern_str = &input[start + 2..end_pos];
-                    if let Some(range) = Self::parse_range(pattern_str) {
-                        patterns.push(Pattern {
-                            start,
-                            end: end_pos + 2,
-                            range,
-                        });
-                    }
-                    i = end_pos + 2;
-                } else {
-                    i += 1;
-                }
-            } else {
-                i += 1;
-            }
-        }
-
-        patterns
-    }
-
     /// Parse a range string like "a-z" or "1-10"
     fn parse_range(range_str: &str) -> Option<PatternRange> {
         let parts: Vec<&str> = range_str.split('-').collect();
@@ -282,97 +217,160 @@ impl StringListPool {
 
         None
     }
+}
 
-    /// Expand a single string with all its patterns
-    fn expand_single_pattern(input: &str) -> Vec<String> {
-        let patterns = Self::parse_patterns(input);
-        if patterns.is_empty() {
-            return vec![input.to_string()];
+/// Return the number of values in a `PatternRange`.
+fn range_len(range: &PatternRange) -> usize {
+    match range {
+        PatternRange::Char(start, end) => (*end as u32 - *start as u32 + 1) as usize,
+        PatternRange::Number(start, end) => (*end - *start + 1) as usize,
+    }
+}
+
+/// Return the string value at position `idx` within a `PatternRange`.
+fn range_value_at(range: &PatternRange, idx: usize) -> String {
+    match range {
+        PatternRange::Char(start, _end) => char::from_u32(
+            *start as u32 + u32::try_from(idx).expect("pattern shouldn't be that big"),
+        )
+        .expect("idx is within range bounds")
+        .to_string(),
+        PatternRange::Number(start, end) => {
+            let numdigits = std::cmp::max(start.to_string().len(), end.to_string().len());
+            let n = start + u32::try_from(idx).expect("pattern shouldn't be that big");
+            format!("{n:0numdigits$}")
         }
+    }
+}
 
-        // Generate all combinations
-        let mut results = vec![String::new()];
+/// Lazily generates all expansions of a single pattern template string.
+///
+/// For a template like `"prefix_{{a-c}}_{{1-2}}"` this yields each combination
+/// on demand (`prefix_a_1`, `prefix_a_2`, `prefix_b_1`, …) without
+/// materialising the full Cartesian product up front.  This keeps memory usage
+/// bounded when patterns with large ranges are interleaved by
+/// `expand_patterns_breadth_first`.
+struct LazyPatternExpander {
+    template: String,
+    patterns: Vec<Pattern>,
+    /// Mixed-radix counter: one digit per placeholder, rightmost varies fastest.
+    counters: Vec<usize>,
+    exhausted: bool,
+}
+
+impl LazyPatternExpander {
+    fn new(template: &str) -> Result<Self, Error> {
+        let patterns = StringListPool::parse_patterns(template)?;
+        let n = patterns.len();
+        Ok(Self {
+            template: template.to_string(),
+            patterns,
+            counters: vec![0; n],
+            exhausted: false,
+        })
+    }
+
+    /// Build the current combination from `self.counters`.
+    fn current(&self) -> String {
+        let mut result = String::new();
         let mut last_end = 0;
-
-        for pattern in &patterns {
-            // Add the literal part before this pattern
-            let literal = &input[last_end..pattern.start];
-            for result in &mut results {
-                result.push_str(literal);
-            }
-
-            // Expand this pattern
-            let expansions = Self::expand_range(&pattern.range);
-            let mut new_results = Vec::new();
-            for result in &results {
-                for expansion in &expansions {
-                    let mut new_result = result.clone();
-                    new_result.push_str(expansion);
-                    new_results.push(new_result);
-                }
-            }
-            results = new_results;
-
+        for (i, pattern) in self.patterns.iter().enumerate() {
+            result.push_str(&self.template[last_end..pattern.start]);
+            result.push_str(&range_value_at(&pattern.range, self.counters[i]));
             last_end = pattern.end;
         }
-
-        // Add any remaining literal part
-        let remaining = &input[last_end..];
-        for result in &mut results {
-            result.push_str(remaining);
-        }
-
-        results
+        result.push_str(&self.template[last_end..]);
+        result
     }
 
-    /// Expand a single pattern range into all its values
-    fn expand_range(range: &PatternRange) -> Vec<String> {
-        match range {
-            PatternRange::Char(start, end) => (*start..=*end).map(|c| c.to_string()).collect(),
-            PatternRange::Number(start, end) => {
-                let numdigits = std::cmp::max(start.to_string().len(), end.to_string().len());
-
-                (*start..=*end)
-                    .map(|n| format!("{n:0numdigits$}"))
-                    .collect()
+    /// Advance to the next combination (rightmost counter increments first).
+    fn advance(&mut self) {
+        let n = self.counters.len();
+        if n == 0 {
+            self.exhausted = true;
+            return;
+        }
+        let mut i = n - 1;
+        loop {
+            self.counters[i] += 1;
+            if self.counters[i] < range_len(&self.patterns[i].range) {
+                return;
             }
+            self.counters[i] = 0;
+            if i == 0 {
+                self.exhausted = true;
+                return;
+            }
+            i -= 1;
         }
     }
+}
 
-    /// Expand patterns breadth-first across all input strings
-    fn expand_patterns_breadth_first(patterns: &[String], max_expansions: usize) -> Vec<String> {
-        // First, expand each pattern string to get all possible expansions
-        let expansions: Vec<Vec<String>> = patterns
-            .iter()
-            .map(|p| Self::expand_single_pattern(p))
-            .collect();
+impl Iterator for LazyPatternExpander {
+    type Item = String;
 
-        // Now interleave breadth-first
-        let mut result = Vec::new();
-        let mut indices = vec![0; expansions.len()];
-        let mut all_done = false;
+    fn next(&mut self) -> Option<String> {
+        if self.exhausted {
+            return None;
+        }
+        let s = self.current();
+        if self.patterns.is_empty() {
+            // Plain literal string — yield once then stop.
+            self.exhausted = true;
+        } else {
+            self.advance();
+        }
+        Some(s)
+    }
+}
 
-        while !all_done && result.len() < max_expansions {
-            all_done = true;
-            for (i, expansion_list) in expansions.iter().enumerate() {
-                if indices[i] < expansion_list.len() {
-                    result.push(expansion_list[indices[i]].clone());
-                    indices[i] += 1;
-                    all_done = false;
+/// Iterates over a collection of iterators in round-robin (breadth-first) order.
+///
+/// Given iterators `A = [a1, a2, a3]` and `B = [b1, b2]`, yields:
+/// `a1, b1, a2, b2, a3`.
+///
+/// Exhausted iterators are skipped; iteration ends when all are exhausted.
+struct BreadthFirst<I> {
+    iterators: Vec<Option<I>>,
+    index: usize,
+    active: usize,
+}
 
-                    if result.len() >= max_expansions {
-                        break;
-                    }
+impl<I: Iterator> BreadthFirst<I> {
+    fn new(iterators: Vec<I>) -> Self {
+        let active = iterators.len();
+        Self {
+            iterators: iterators.into_iter().map(Some).collect(),
+            index: 0,
+            active,
+        }
+    }
+}
+
+impl<I: Iterator> Iterator for BreadthFirst<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.active == 0 {
+            return None;
+        }
+        let n = self.iterators.len();
+        for _ in 0..n {
+            let i = self.index;
+            self.index = (self.index + 1) % n;
+            if let Some(iter) = &mut self.iterators[i] {
+                if let Some(item) = iter.next() {
+                    return Some(item);
+                }
+
+                self.iterators[i] = None;
+                self.active -= 1;
+                if self.active == 0 {
+                    return None;
                 }
             }
         }
-
-        // If no patterns were found and we didn't generate anything, return originals
-        if result.is_empty() {
-            patterns.to_vec()
-        } else {
-            result
-        }
+        None
     }
 }
 
@@ -393,11 +391,59 @@ impl Pool for StringListPool {
     }
 }
 
+/// An iterator through the patterns contained in the given string.
+struct PatternIter<'a> {
+    input: &'a str,
+    p: usize,
+}
+
+impl<'a> PatternIter<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input, p: 0 }
+    }
+}
+
+impl<'a> Iterator for PatternIter<'a> {
+    type Item = (&'a str, usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let bytes = self.input.as_bytes();
+
+        while self.p + 1 < bytes.len() {
+            if bytes[self.p] == b'{' && bytes[self.p + 1] == b'{' {
+                let start = self.p;
+                self.p += 2;
+
+                let mut pattern_end = None;
+                while self.p + 1 < bytes.len() {
+                    if bytes[self.p] == b'}' && bytes[self.p + 1] == b'}' {
+                        pattern_end = Some(self.p);
+                        break;
+                    }
+                    self.p += 1;
+                }
+
+                if let Some(end_pos) = pattern_end {
+                    // Extract the pattern content between {{ and }}
+                    let pattern_str = &self.input[start + 2..end_pos];
+                    self.p = end_pos + 2;
+
+                    return Some((pattern_str, start, self.p));
+                }
+            }
+
+            self.p += 1;
+        }
+
+        None
+    }
+}
+
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
 
-    use super::{Error, PatternRange, Pool, StringListPool};
+    use super::{Error, LazyPatternExpander, PatternRange, Pool, StringListPool};
     use rand::{SeedableRng, rngs::SmallRng};
 
     // Ensure that no returned string ever has a non-alphabet character.
@@ -409,7 +455,7 @@ mod test {
 
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = StringListPool::new(&names);
+            let pool = StringListPool::new(&names, 10_000).expect("valid patterns");
             if let Some((s1, h)) = pool.of_size_with_handle(&mut rng, 0) {
                 if let Some(s2) = pool.using_handle(h) {
                     assert_eq!(s1, s2);
@@ -468,7 +514,7 @@ mod test {
 
     #[test]
     fn parse_patterns_single() {
-        let patterns = StringListPool::parse_patterns("metric_{{a-c}}_value");
+        let patterns = StringListPool::parse_patterns("metric_{{a-c}}_value").unwrap();
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0].start, 7);
         assert_eq!(patterns[0].end, 14);
@@ -477,7 +523,7 @@ mod test {
 
     #[test]
     fn parse_patterns_multiple() {
-        let patterns = StringListPool::parse_patterns("{{a-c}}_{{1-3}}");
+        let patterns = StringListPool::parse_patterns("{{a-c}}_{{1-3}}").unwrap();
         assert_eq!(patterns.len(), 2);
         assert_eq!(patterns[0].range, PatternRange::Char('a', 'c'));
         assert_eq!(patterns[1].range, PatternRange::Number(1, 3));
@@ -485,38 +531,44 @@ mod test {
 
     #[test]
     fn parse_patterns_none() {
-        let patterns = StringListPool::parse_patterns("no_patterns_here");
+        let patterns = StringListPool::parse_patterns("no_patterns_here").unwrap();
         assert_eq!(patterns.len(), 0);
     }
 
     // Pattern expansion tests
     #[test]
     fn expand_single_pattern_char() {
-        let result = StringListPool::expand_single_pattern("metric_{{a-c}}");
+        let result: Vec<String> = LazyPatternExpander::new("metric_{{a-c}}")
+            .unwrap()
+            .collect();
         assert_eq!(result, vec!["metric_a", "metric_b", "metric_c"]);
     }
 
     #[test]
     fn expand_single_pattern_number() {
-        let result = StringListPool::expand_single_pattern("value_{{1-3}}");
+        let result: Vec<String> = LazyPatternExpander::new("value_{{1-3}}").unwrap().collect();
         assert_eq!(result, vec!["value_1", "value_2", "value_3"]);
     }
 
     #[test]
     fn expand_single_pattern_multiple() {
-        let result = StringListPool::expand_single_pattern("{{a-b}}_{{1-2}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{a-b}}_{{1-2}}")
+            .unwrap()
+            .collect();
         assert_eq!(result, vec!["a_1", "a_2", "b_1", "b_2"]);
     }
 
     #[test]
     fn expand_single_pattern_no_pattern() {
-        let result = StringListPool::expand_single_pattern("no_pattern");
+        let result: Vec<String> = LazyPatternExpander::new("no_pattern").unwrap().collect();
         assert_eq!(result, vec!["no_pattern"]);
     }
 
     #[test]
     fn expand_single_pattern_complex() {
-        let result = StringListPool::expand_single_pattern("prefix_{{x-y}}_middle_{{0-1}}_suffix");
+        let result: Vec<String> = LazyPatternExpander::new("prefix_{{x-y}}_middle_{{0-1}}_suffix")
+            .unwrap()
+            .collect();
         assert_eq!(
             result,
             vec![
@@ -532,14 +584,14 @@ mod test {
     #[test]
     fn breadth_first_single_string() {
         let patterns = vec!["metric_{{a-c}}".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100).unwrap();
         assert_eq!(result, vec!["metric_a", "metric_b", "metric_c"]);
     }
 
     #[test]
     fn breadth_first_multiple_strings() {
         let patterns = vec!["first_{{a-c}}".to_string(), "second_{{x-z}}".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100).unwrap();
         // Should interleave: first_a, second_x, first_b, second_y, first_c, second_z
         assert_eq!(
             result,
@@ -552,7 +604,7 @@ mod test {
     #[test]
     fn breadth_first_with_max_limit() {
         let patterns = vec!["first_{{a-z}}".to_string(), "second_{{0-9}}".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 5);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 5).unwrap();
         assert_eq!(result.len(), 5);
         // Should be: first_a, second_0, first_b, second_1, first_c
         assert_eq!(
@@ -564,7 +616,7 @@ mod test {
     #[test]
     fn breadth_first_uneven_expansions() {
         let patterns = vec!["short_{{a-b}}".to_string(), "long_{{0-5}}".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100).unwrap();
         // Should interleave, but short runs out first
         assert_eq!(
             result,
@@ -577,22 +629,22 @@ mod test {
     #[test]
     fn breadth_first_no_patterns() {
         let patterns = vec!["no_pattern_1".to_string(), "no_pattern_2".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 100).unwrap();
         assert_eq!(result, vec!["no_pattern_1", "no_pattern_2"]);
     }
 
     #[test]
     fn breadth_first_max_smaller_than_patterns() {
         let patterns = vec!["first_{{a-z}}".to_string(), "second_{{0-9}}".to_string()];
-        let result = StringListPool::expand_patterns_breadth_first(&patterns, 3);
+        let result = StringListPool::expand_patterns_breadth_first(&patterns, 3).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result, vec!["first_a", "second_0", "first_b"]);
     }
 
-    // Integration tests with new_with_patterns
+    // Integration tests with new
     #[test]
-    fn new_with_patterns_simple() {
-        let pool = StringListPool::new_with_patterns(&vec!["metric_{{a-c}}".to_string()], 100)
+    fn new_simple() {
+        let pool = StringListPool::new(&vec!["metric_{{a-c}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(pool.metric_names.len(), 3);
         assert!(pool.metric_names.contains(&"metric_a".to_string()));
@@ -601,8 +653,8 @@ mod test {
     }
 
     #[test]
-    fn new_with_patterns_multiple() {
-        let pool = StringListPool::new_with_patterns(
+    fn new_multiple() {
+        let pool = StringListPool::new(
             &vec!["first_{{a-b}}".to_string(), "second_{{1-2}}".to_string()],
             100,
         )
@@ -615,15 +667,15 @@ mod test {
     }
 
     #[test]
-    fn new_with_patterns_respects_max() {
-        let pool = StringListPool::new_with_patterns(&vec!["metric_{{a-z}}".to_string()], 5)
+    fn new_respects_max() {
+        let pool = StringListPool::new(&vec!["metric_{{a-z}}".to_string()], 5)
             .expect("should create pool");
         assert_eq!(pool.metric_names.len(), 5);
     }
 
     #[test]
-    fn new_with_patterns_number_range() {
-        let pool = StringListPool::new_with_patterns(&vec!["counter_{{0-3}}".to_string()], 100)
+    fn new_number_range() {
+        let pool = StringListPool::new(&vec!["counter_{{0-3}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(
             pool.metric_names,
@@ -632,15 +684,15 @@ mod test {
     }
 
     #[test]
-    fn new_with_patterns_multiple_in_string() {
-        let pool = StringListPool::new_with_patterns(&vec!["{{a-b}}_{{1-2}}".to_string()], 100)
+    fn new_multiple_in_string() {
+        let pool = StringListPool::new(&vec!["{{a-b}}_{{1-2}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(pool.metric_names, vec!["a_1", "a_2", "b_1", "b_2"]);
     }
 
     #[test]
-    fn new_with_patterns_mixed() {
-        let pool = StringListPool::new_with_patterns(
+    fn new_mixed() {
+        let pool = StringListPool::new(
             &vec!["no_pattern".to_string(), "with_{{a-b}}".to_string()],
             100,
         )
@@ -649,21 +701,21 @@ mod test {
     }
 
     #[test]
-    fn new_with_patterns_empty_errors() {
-        let result = StringListPool::new_with_patterns(&vec![], 100);
+    fn new_empty_errors() {
+        let result = StringListPool::new(&vec![], 100);
         assert!(matches!(result, Err(Error::EmptyPatternList)));
     }
 
     #[test]
-    fn new_with_patterns_zero_max_errors() {
-        let result = StringListPool::new_with_patterns(&vec!["test".to_string()], 0);
+    fn new_zero_max_errors() {
+        let result = StringListPool::new(&vec!["test".to_string()], 0);
         assert!(matches!(result, Err(Error::InvalidMaxExpansions)));
     }
 
     // Invalid pattern tests
     #[test]
     fn invalid_pattern_char_to_number() {
-        let result = StringListPool::new_with_patterns(&vec!["metric_{{a-5}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["metric_{{a-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
         if let Err(Error::InvalidPattern { pattern }) = result {
             assert_eq!(pattern, "{{a-5}}");
@@ -672,7 +724,7 @@ mod test {
 
     #[test]
     fn invalid_pattern_number_to_char() {
-        let result = StringListPool::new_with_patterns(&vec!["metric_{{1-z}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["metric_{{1-z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
         if let Err(Error::InvalidPattern { pattern }) = result {
             assert_eq!(pattern, "{{1-z}}");
@@ -681,7 +733,7 @@ mod test {
 
     #[test]
     fn invalid_pattern_mixed_in_multiple() {
-        let result = StringListPool::new_with_patterns(
+        let result = StringListPool::new(
             &vec!["valid_{{a-c}}".to_string(), "invalid_{{x-9}}".to_string()],
             100,
         );
@@ -690,7 +742,7 @@ mod test {
 
     #[test]
     fn valid_patterns_pass_validation() {
-        let result = StringListPool::new_with_patterns(
+        let result = StringListPool::new(
             &vec!["chars_{{a-z}}".to_string(), "nums_{{0-9}}".to_string()],
             100,
         );
@@ -699,82 +751,82 @@ mod test {
 
     #[test]
     fn invalid_pattern_uppercase_to_number() {
-        let result = StringListPool::new_with_patterns(&vec!["{{A-5}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{A-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn invalid_pattern_number_to_uppercase() {
-        let result = StringListPool::new_with_patterns(&vec!["{{0-Z}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{0-Z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn multiple_invalid_patterns() {
-        let result = StringListPool::new_with_patterns(&vec!["{{a-1}}_{{2-b}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{a-1}}_{{2-b}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn valid_single_char_patterns() {
         // Single digit that is treated as a char should not error if both sides are chars
-        let result = StringListPool::new_with_patterns(&vec!["{{a-c}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{a-c}}".to_string()], 100);
         assert!(result.is_ok());
     }
 
     #[test]
     fn malformed_pattern_no_dash() {
         // Patterns without proper dashes should error
-        let result = StringListPool::new_with_patterns(&vec!["{{abc}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{abc}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_empty_parts() {
-        let result = StringListPool::new_with_patterns(&vec!["{{}}-{{}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{}}-{{}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_backwards_char() {
-        let result = StringListPool::new_with_patterns(&vec!["{{z-a}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{z-a}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_backwards_number() {
-        let result = StringListPool::new_with_patterns(&vec!["{{10-5}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{10-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_multi_char_start() {
-        let result = StringListPool::new_with_patterns(&vec!["{{abc-z}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{abc-z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_multi_char_end() {
-        let result = StringListPool::new_with_patterns(&vec!["{{a-xyz}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{a-xyz}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_too_many_dashes() {
-        let result = StringListPool::new_with_patterns(&vec!["{{a-b-c}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{a-b-c}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_special_chars() {
-        let result = StringListPool::new_with_patterns(&vec!["{{@-#}}".to_string()], 100);
+        let result = StringListPool::new(&vec!["{{@-#}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     // Test that expanded patterns work with pool operations
     #[test]
     fn expanded_patterns_work_with_pool() {
-        let pool = StringListPool::new_with_patterns(&vec!["metric_{{a-c}}".to_string()], 100)
+        let pool = StringListPool::new(&vec!["metric_{{a-c}}".to_string()], 100)
             .expect("should create pool");
         let mut rng = SmallRng::seed_from_u64(42);
 
@@ -794,32 +846,31 @@ mod test {
     // Edge case tests
     #[test]
     fn pattern_with_single_value() {
-        let result = StringListPool::expand_single_pattern("{{a-a}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{a-a}}").unwrap().collect();
         assert_eq!(result, vec!["a"]);
     }
 
     #[test]
     fn pattern_uppercase_range() {
-        let result = StringListPool::expand_single_pattern("{{A-C}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{A-C}}").unwrap().collect();
         assert_eq!(result, vec!["A", "B", "C"]);
     }
 
     #[test]
     fn pattern_large_number_range() {
-        let result = StringListPool::expand_single_pattern("{{10-12}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{10-12}}").unwrap().collect();
         assert_eq!(result, vec!["10", "11", "12"]);
     }
 
     #[test]
     fn pattern_large_number_different_lengths_range() {
-        let result = StringListPool::expand_single_pattern("{{8-12}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{8-12}}").unwrap().collect();
         assert_eq!(result, vec!["08", "09", "10", "11", "12"]);
     }
 
     #[test]
     fn pattern_large_number_different_lengths_huge_range() {
-        let result = StringListPool::expand_single_pattern("{{8-120}}");
-
+        let result: Vec<String> = LazyPatternExpander::new("{{8-120}}").unwrap().collect();
         assert_eq!(
             result,
             (8..=120)
@@ -830,13 +881,17 @@ mod test {
 
     #[test]
     fn pattern_adjacent_patterns() {
-        let result = StringListPool::expand_single_pattern("{{a-b}}{{1-2}}");
+        let result: Vec<String> = LazyPatternExpander::new("{{a-b}}{{1-2}}")
+            .unwrap()
+            .collect();
         assert_eq!(result, vec!["a1", "a2", "b1", "b2"]);
     }
 
     #[test]
     fn pattern_with_special_chars() {
-        let result = StringListPool::expand_single_pattern("metric-{{a-b}}.value");
+        let result: Vec<String> = LazyPatternExpander::new("metric-{{a-b}}.value")
+            .unwrap()
+            .collect();
         assert_eq!(result, vec!["metric-a.value", "metric-b.value"]);
     }
 }

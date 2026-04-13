@@ -88,6 +88,9 @@ pub enum Error {
     /// Template generation error (invalid references, unbound variables, etc.)
     #[error("Template generation error: {0}")]
     TemplateError(String),
+    /// error generating patterns for a string list pool
+    #[error("String list pattern error: {0}")]
+    StringListPatternError(#[from] common::strings::Error),
 }
 
 /// To serialize into bytes
