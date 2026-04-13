@@ -63,6 +63,9 @@ pub enum Error {
     /// `StaticChunks` payload creation error
     #[error(transparent)]
     StaticChunks(#[from] crate::static_chunks::Error),
+    /// Static timestamp-grouped payload creation error
+    #[error(transparent)]
+    StaticTimestamped(#[from] crate::static_timestamped::Error),
     /// Error for crate deserialization
     #[error("Deserialization error: {0}")]
     Deserialize(#[from] crate::Error),
@@ -360,6 +363,27 @@ impl Cache {
                 let span = span!(Level::INFO, "fixed", payload = "static-chunks");
                 let _guard = span.enter();
                 let mut serializer = crate::StaticChunks::new(static_path)?;
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
+            crate::Config::StaticTimestamped {
+                static_path,
+                timestamp_format,
+                emit_placeholder,
+                start_line_index,
+            } => {
+                let span = span!(Level::INFO, "fixed", payload = "static-timestamped");
+                let _guard = span.enter();
+                let mut serializer = crate::StaticTimestamped::new(
+                    static_path,
+                    timestamp_format,
+                    *emit_placeholder,
+                    *start_line_index,
+                )?;
                 construct_block_cache_inner(
                     &mut rng,
                     &mut serializer,

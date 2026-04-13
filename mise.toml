@@ -1,0 +1,48 @@
+# mise.toml - Development tool configuration
+#
+# This file configures mise (https://mise.jdx.dev/) to provide consistent tool
+# versions for both local development and CI.
+#
+# # Setup
+#
+# Run `mise install`. This installs the locked versions of all required tools.
+#
+# # Updating tool versions
+#
+#   MISE_LOCKED=0 mise upgrade --bump
+#   MISE_LOCKED=0 mise lock --platform linux-x64,macos-arm64,linux-arm64
+#
+# When those complete, run:
+#   uv run ci/check_mise_checksums.py
+#   mise install
+#   ci/validate
+#
+
+[settings]
+# Require the use of a lockfile.
+locked = true
+
+# Lockfile support is experimental. Enable it.
+experimental = true
+
+[tools]
+# GitHub Actions workflow linter
+actionlint = "1.7.3"
+
+# Code pattern matching for custom lints
+"aqua:ast-grep/ast-grep" = "0.39.5"
+
+# Fast test runner
+"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.72"
+
+# License and security auditing
+"aqua:EmbarkStudios/cargo-deny" = "0.19.0"
+
+# Unused dependency detection
+"github:bnjbvr/cargo-machete" = "0.9.1"
+
+# Protocol buffer linter and breaking change detector
+buf = "1.50.0"
+
+# Protocol buffer compiler
+protoc = "33.2"

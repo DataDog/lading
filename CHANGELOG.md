@@ -6,8 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Changed
+- Updated dependencies
+
 ## Added
 - Added new `!concat` generator to the `templated_json` payload generator.
+- Use `mise` for tooling management
+- Added new `StaticTimestamped` payload generator that parses timestamps from a
+  static log file and groups each second's worth of lines into a single block.
+  In conjunction with block-based throttling, this enables realistic load
+  patterns that replay the original log file's timing.
 - `metric_names`, `tag_names`, and `tag_values` in the `dogstatsd` generator now
   support `{{X-Y}}` range patterns. Character ranges (`{{a-z}}`, `{{A-Z}}`) and
   numeric ranges (`{{0-9}}`, `{{0-100}}`) can be embedded in strings. Numeric values
@@ -35,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking Change**: Rename `lost_bytes` to `missed_bytes` in `logrotate_fs`.
   This reflects preexisting terminology.
 - **Breaking Change**: Replace `opentelemetry_traces` payload with a brand-new
-  service topology-based configuration scheme. This allows for defining an 
+  service topology-based configuration scheme. This allows for defining an
   imaginary distributed system -- service type, operations, attributes, etc --
   which is then simulated to generate realistic-looking traces and spans.
 ## Added
