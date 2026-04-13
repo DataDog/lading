@@ -25,7 +25,9 @@ pub enum Error {
     #[error("Pattern expansion resulted in empty list")]
     EmptyExpansion,
     /// Numeric range cardinality overflows usize (too large for this platform)
-    #[error("Numeric range {{0-{end}}} has {len} values, which exceeds usize::MAX on this platform")]
+    #[error(
+        "Numeric range {{0-{end}}} has {len} values, which exceeds usize::MAX on this platform"
+    )]
     RangeTooLarge {
         /// The end of the offending range
         end: u32,
@@ -99,7 +101,9 @@ impl StringListPool {
             .map(|p| LazyPatternExpander::new(p))
             .collect::<Result<_, _>>()?;
 
-        let result: Vec<String> = BreadthFirst::new(expanders).take(max_expansions).collect();
+        let result: Vec<String> = BreadthFirst::new(expanders)
+            .take(max_expansions.max(patterns.len()))
+            .collect();
 
         if result.is_empty() {
             Ok(patterns.to_vec())
