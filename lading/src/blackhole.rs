@@ -141,7 +141,7 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
-    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher, epoch: std::time::Instant) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
             Inner::Datadog(conf) => {
@@ -151,7 +151,7 @@ impl Server {
                 datadog_stateful_logs::DatadogStatefulLogs::new(config.general, conf, shutdown),
             ),
             Inner::Http(conf) => {
-                Self::Http(http::Http::new(config.general, &conf, shutdown).map_err(Error::Http)?)
+                Self::Http(http::Http::new(config.general, &conf, shutdown, epoch).map_err(Error::Http)?)
             }
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)),
             Inner::UnixStream(conf) => {

@@ -1,0 +1,22 @@
+[package]
+name = "lading_analysis"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+byte-unit = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+lading-payload = { path = "../lading_payload" }
+rand = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "lading-analysis"
+path = "src/main.rs"
+
+[lints]
+workspace = true

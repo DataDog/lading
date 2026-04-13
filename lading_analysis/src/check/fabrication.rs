@@ -1,0 +1,54 @@
+//! Fabrication check: output lines that don't match any input line.
+
+use super::{Check, CheckResult};
+use crate::context::AnalysisContext;
+
+/// Checks that at most `max_count` output lines have no matching input line.
+pub(crate) struct Fabrication {
+    pub(crate) max_count: u64,
+}
+
+impl Check for Fabrication {
+    fn name(&self) -> &str {
+        "fabrication"
+    }
+
+    fn check(&self, ctx: &AnalysisContext) -> CheckResult {
+        let mut fabricated_count: u64 = 0;
+        let mut examples: Vec<String> = Vec::new();
+
+        for ol in &ctx.output_lines {
+            if !ctx.input_lines.contains_key(&ol.hash) {
+                fabricated_count += 1;
+                if examples.len() < 5 {
+                    let preview: String = ol.message.chars().take(120).collect();
+                    examples.push(format!(
+                        "  at {ms}ms: \"{preview}...\"",
+                        ms = ol.relative_ms,
+                    ));
+                }
+            }
+        }
+
+        let passed = fabricated_count <= self.max_count;
+
+        let mut details = vec![format!(
+            "{fabricated_count} fabricated lines out of {} total output lines",
+            ctx.output_lines.len()
+        )];
+        if !examples.is_empty() {
+            details.push("examples:".into());
+            details.extend(examples);
+        }
+
+        CheckResult {
+            name: self.name().into(),
+            passed,
+            summary: format!(
+                "{fabricated_count} fabricated (max {})",
+                self.max_count
+            ),
+            details,
+        }
+    }
+}

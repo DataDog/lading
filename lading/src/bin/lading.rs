@@ -539,13 +539,15 @@ async fn inner_main(
 
     let (tgt_snd, _tgt_rcv) = broadcast::channel(1);
 
+    let epoch = std::time::Instant::now();
+
     let mut gsrv_joinset = task::JoinSet::new();
     //
     // GENERATOR
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone())?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone(), epoch)?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -564,7 +566,7 @@ async fn inner_main(
     // BLACKHOLE
     //
     for cfg in config.blackhole {
-        let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone())?;
+        let blackhole_server = blackhole::Server::new(cfg, shutdown_watcher.clone(), epoch)?;
         let _bsrv = tokio::spawn(async {
             match blackhole_server.run().await {
                 Ok(()) => debug!("blackhole shut down successfully"),

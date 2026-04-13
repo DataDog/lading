@@ -312,23 +312,6 @@ impl File {
         self.parent
     }
 
-    /// Return the bytes_written of this File
-    #[must_use]
-    pub(crate) fn bytes_written(&self) -> u64 {
-        self.bytes_written
-    }
-
-    /// Return the bytes_read of this File
-    #[must_use]
-    pub(crate) fn bytes_read(&self) -> u64 {
-        self.bytes_read
-    }
-
-    /// Return the max_offset_observed of this File
-    #[must_use]
-    pub(crate) fn max_offset_observed(&self) -> u64 {
-        self.max_offset_observed
-    }
 }
 
 /// Model representation of a `Directory`. Contains children are `Directory`
@@ -871,22 +854,31 @@ impl State {
             new_file.advance_time(now);
             self.next_inode = self.next_inode.saturating_add(1);
 
-            // Emit capture events for the rotation
-            self.emit_capture(CaptureRecord::FileCreated {
-                inode: new_file_inode,
-                group_id,
-                cache_offset: new_file_cache_offset,
-                created_tick: self.now.saturating_sub(1),
-                bytes_per_tick,
-                parent_inode,
-            });
-            self.emit_capture(CaptureRecord::FileRotated {
-                tick: now,
-                group_id,
-                old_inode: rotated_inode,
-                new_inode: new_file_inode,
-                new_cache_offset: new_file_cache_offset,
-            });
+            // Emit capture events for the rotation.
+            // Note: we inline the capture logic here instead of calling
+            // self.emit_capture() because self.inode_scratch.drain(..)
+            // holds a mutable borrow on self.
+            if let Some(ref tx) = self.capture_tx {
+                if let Err(TrySendError::Full(_)) = tx.try_send(CaptureRecord::FileCreated {
+                    inode: new_file_inode,
+                    group_id,
+                    cache_offset: new_file_cache_offset,
+                    created_tick: self.now.saturating_sub(1),
+                    bytes_per_tick,
+                    parent_inode,
+                }) {
+                    self.capture_dropped.fetch_add(1, Ordering::Relaxed);
+                }
+                if let Err(TrySendError::Full(_)) = tx.try_send(CaptureRecord::FileRotated {
+                    tick: now,
+                    group_id,
+                    old_inode: rotated_inode,
+                    new_inode: new_file_inode,
+                    new_cache_offset: new_file_cache_offset,
+                }) {
+                    self.capture_dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
 
             // Insert `new_file` into the node list and make it a member of
             // its directory's children.

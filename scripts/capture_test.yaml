@@ -1,0 +1,19 @@
+generator:
+  - file_gen:
+      logrotate_fs:
+        seed: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]
+        concurrent_logs: 2
+        maximum_bytes_per_log: "1 MiB"
+        total_rotations: 3
+        max_depth: 1
+        variant: ascii
+        maximum_prebuild_cache_size_bytes: "4 MiB"
+        mount_point: /tmp/lading_mount
+        load_profile:
+          constant: "100 KiB"
+        read_capture_path: scratch/captures/fuse_reads.jsonl
+
+blackhole:
+  - http:
+      binding_addr: "127.0.0.1:9091"
+      capture_path: scratch/captures/blackhole.jsonl

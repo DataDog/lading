@@ -29,7 +29,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc::{SyncSender, TrySendError},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
@@ -179,7 +179,7 @@ enum CaptureRecord {
     /// A FUSE read operation.
     #[serde(rename = "read")]
     Read {
-        ts_ns: u128,
+        relative_ms: u64,
         inode: usize,
         group_id: u16,
         offset: u64,
@@ -265,6 +265,7 @@ impl Server {
         _: generator::General,
         config: Config,
         shutdown: lading_signal::Watcher,
+        epoch: Instant,
     ) -> Result<Self, Error> {
         let mut rng = SmallRng::from_seed(config.seed);
 
@@ -288,8 +289,8 @@ impl Server {
         )?;
         let load_profile = config.load_profile.to_model()?;
 
-        let start_time = Instant::now();
-        let start_time_system = SystemTime::now();
+        let start_time = epoch;
+        let start_time_system = SystemTime::now() - epoch.elapsed();
 
         let block_cache_size = block_cache.total_size();
         let block_cache_len = block_cache.len();
@@ -299,7 +300,7 @@ impl Server {
             block_cache_size,
             block_cache_len
         );
-        let state = model::State::new(
+        let mut state = model::State::new(
             &mut rng,
             start_time.elapsed().as_secs(),
             config.total_rotations,
@@ -548,12 +549,9 @@ impl Filesystem for LogrotateFS {
                     let group_id = state
                         .file_group_id(file_handle.inode())
                         .unwrap_or(u16::MAX);
-                    let ts_ns = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos();
+                    let relative_ms = self.start_time.elapsed().as_millis() as u64;
                     let record = CaptureRecord::Read {
-                        ts_ns,
+                        relative_ms,
                         inode: ino as usize,
                         group_id,
                         offset: offset as u64,

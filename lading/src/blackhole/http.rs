@@ -20,7 +20,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tracing::{error, info};
 
@@ -140,7 +140,7 @@ pub struct Config {
 /// A record written to the blackhole capture log.
 #[derive(Serialize)]
 struct BlackholeCaptureRecord {
-    ts_ns: u128,
+    relative_ms: u64,
     compressed_bytes: u64,
     payload: String,
 }
@@ -202,6 +202,7 @@ async fn srv(
     response_delay: Duration,
     capture_tx: Option<tokio::sync::mpsc::Sender<BlackholeCaptureRecord>>,
     capture_dropped: Arc<AtomicU64>,
+    epoch: Instant,
 ) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
@@ -222,17 +223,15 @@ async fn srv(
 
             // Capture the decoded payload if capture is enabled
             if let Some(ref tx) = capture_tx {
-                let ts_ns = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
+                let relative_ms = epoch.elapsed().as_millis() as u64;
                 let record = BlackholeCaptureRecord {
-                    ts_ns,
+                    relative_ms,
                     compressed_bytes: body_len,
                     payload: String::from_utf8_lossy(&body).into_owned(),
                 };
                 if tx.try_send(record).is_err() {
                     capture_dropped.fetch_add(1, Ordering::Relaxed);
+                    counter!("blackhole_capture_dropped", &metric_labels).increment(1);
                 }
             }
 
@@ -260,6 +259,7 @@ pub struct Http {
     response_delay: Duration,
     capture_tx: Option<tokio::sync::mpsc::Sender<BlackholeCaptureRecord>>,
     capture_dropped: Arc<AtomicU64>,
+    epoch: Instant,
 }
 
 impl Http {
@@ -276,6 +276,7 @@ impl Http {
         general: General,
         config: &Config,
         shutdown: lading_signal::Watcher,
+        epoch: Instant,
     ) -> Result<Self, Error> {
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
@@ -330,6 +331,7 @@ impl Http {
             response_delay: Duration::from_millis(config.response_delay_millis),
             capture_tx,
             capture_dropped,
+            epoch,
         })
     }
 
@@ -356,6 +358,7 @@ impl Http {
                 let response_delay = self.response_delay;
                 let capture_tx = self.capture_tx.clone();
                 let capture_dropped = Arc::clone(&self.capture_dropped);
+                let epoch = self.epoch;
 
                 hyper::service::service_fn(move |req| {
                     srv(
@@ -367,6 +370,7 @@ impl Http {
                         response_delay,
                         capture_tx.clone(),
                         Arc::clone(&capture_dropped),
+                        epoch,
                     )
                 })
             },
