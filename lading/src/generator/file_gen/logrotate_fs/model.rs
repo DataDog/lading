@@ -6,7 +6,12 @@ use metrics::counter;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
+use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tracing::info;
+
+use super::CaptureRecord;
 
 /// Time representation of the model
 pub(crate) type Tick = u64;
@@ -276,6 +281,54 @@ impl File {
     pub(crate) fn incr_ordinal(&mut self) {
         self.ordinal = self.ordinal.saturating_add(1);
     }
+
+    /// Return the group_id of this File
+    #[must_use]
+    pub(crate) fn group_id(&self) -> u16 {
+        self.group_id
+    }
+
+    /// Return the cache_offset of this File
+    #[must_use]
+    pub(crate) fn cache_offset(&self) -> u64 {
+        self.cache_offset
+    }
+
+    /// Return the created_tick of this File
+    #[must_use]
+    pub(crate) fn created_tick(&self) -> u64 {
+        self.created_tick
+    }
+
+    /// Return the bytes_per_tick of this File
+    #[must_use]
+    pub(crate) fn bytes_per_tick(&self) -> u64 {
+        self.bytes_per_tick
+    }
+
+    /// Return the parent inode of this File
+    #[must_use]
+    pub(crate) fn parent(&self) -> usize {
+        self.parent
+    }
+
+    /// Return the bytes_written of this File
+    #[must_use]
+    pub(crate) fn bytes_written(&self) -> u64 {
+        self.bytes_written
+    }
+
+    /// Return the bytes_read of this File
+    #[must_use]
+    pub(crate) fn bytes_read(&self) -> u64 {
+        self.bytes_read
+    }
+
+    /// Return the max_offset_observed of this File
+    #[must_use]
+    pub(crate) fn max_offset_observed(&self) -> u64 {
+        self.max_offset_observed
+    }
 }
 
 /// Model representation of a `Directory`. Contains children are `Directory`
@@ -359,6 +412,11 @@ pub(crate) struct State {
     load_profile: LoadProfile,
     valid_file_handles: FxHashMap<u64, Inode>, // Track valid FileHandle IDs -> Inode
     total_cache_size: u64,
+
+    /// Optional sender for capture records (rotation/deletion events).
+    capture_tx: Option<SyncSender<CaptureRecord>>,
+    /// Shared counter for dropped capture records.
+    capture_dropped: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for State {
@@ -453,6 +511,8 @@ impl State {
             load_profile,
             valid_file_handles: FxHashMap::default(),
             total_cache_size,
+            capture_tx: None,
+            capture_dropped: Arc::new(AtomicU64::new(0)),
         };
 
         if concurrent_logs == 0 {
@@ -571,6 +631,25 @@ impl State {
         }
 
         state
+    }
+
+    /// Set the capture channel for emitting rotation/deletion events.
+    pub(crate) fn set_capture(
+        &mut self,
+        tx: SyncSender<CaptureRecord>,
+        dropped: Arc<AtomicU64>,
+    ) {
+        self.capture_tx = Some(tx);
+        self.capture_dropped = dropped;
+    }
+
+    /// Helper to send a capture record, incrementing the dropped counter on failure.
+    fn emit_capture(&self, record: CaptureRecord) {
+        if let Some(ref tx) = self.capture_tx {
+            if let Err(TrySendError::Full(_)) = tx.try_send(record) {
+                self.capture_dropped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Open a file and return a handle.
@@ -792,6 +871,23 @@ impl State {
             new_file.advance_time(now);
             self.next_inode = self.next_inode.saturating_add(1);
 
+            // Emit capture events for the rotation
+            self.emit_capture(CaptureRecord::FileCreated {
+                inode: new_file_inode,
+                group_id,
+                cache_offset: new_file_cache_offset,
+                created_tick: self.now.saturating_sub(1),
+                bytes_per_tick,
+                parent_inode,
+            });
+            self.emit_capture(CaptureRecord::FileRotated {
+                tick: now,
+                group_id,
+                old_inode: rotated_inode,
+                new_inode: new_file_inode,
+                new_cache_offset: new_file_cache_offset,
+            });
+
             // Insert `new_file` into the node list and make it a member of
             // its directory's children.
             self.nodes
@@ -896,6 +992,16 @@ impl State {
         for inode in to_remove {
             if let Some(Node::File { file }) = self.nodes.remove(&inode) {
                 let missed_bytes = file.bytes_written.saturating_sub(file.max_offset_observed);
+
+                self.emit_capture(CaptureRecord::FileDeleted {
+                    tick: self.now,
+                    inode,
+                    group_id: file.group_id,
+                    bytes_written: file.bytes_written,
+                    bytes_read: file.bytes_read,
+                    max_offset_observed: file.max_offset_observed,
+                });
+
                 info!(
                     "Log file deleted. Total bytes missed: {missed_bytes}. Total bytes written: {bytes_written}. Total bytes read: {bytes_read}. Group ID: {group_id}. Created: {created_tick}.",
                     group_id = file.group_id,
@@ -1083,6 +1189,23 @@ impl State {
     #[must_use]
     pub(crate) fn root_inode(&self) -> Inode {
         self.root_inode
+    }
+
+    /// Return the group_id for a file inode, or None if it doesn't exist or is a directory.
+    #[must_use]
+    pub(crate) fn file_group_id(&self, inode: Inode) -> Option<u16> {
+        match self.nodes.get(&inode) {
+            Some(Node::File { file }) => Some(file.group_id),
+            _ => None,
+        }
+    }
+
+    /// Iterate over all file nodes, yielding `(inode, &File)` pairs.
+    pub(crate) fn iter_files(&self) -> impl Iterator<Item = (&Inode, &File)> {
+        self.nodes.iter().filter_map(|(inode, node)| match node {
+            Node::File { file } => Some((inode, file)),
+            _ => None,
+        })
     }
 
     /// Return the number of links for the inode.

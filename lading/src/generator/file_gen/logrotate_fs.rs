@@ -21,10 +21,15 @@ use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
     fs,
+    io::{BufWriter, Write},
     num::NonZeroU32,
     path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, Instant, SystemTime},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{SyncSender, TrySendError},
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::task::{self, JoinError};
 use tracing::{debug, error, info, warn};
@@ -62,6 +67,10 @@ pub struct Config {
     mount_point: PathBuf,
     /// The load profile, controlling bytes or blocks per second as a function of time.
     load_profile: LoadProfile,
+    /// Optional path for FUSE read capture log (JSONL). When set, every FUSE
+    /// read is logged with metadata for offline correctness validation.
+    #[serde(default)]
+    read_capture_path: Option<PathBuf>,
 }
 
 /// Profile for load in this filesystem.
@@ -126,6 +135,88 @@ fn resolve_rate(rate: &RateSpec) -> Result<(ThrottleMode, NonZeroU32), ThrottleC
         }
         RateSpec::Blocks { blocks_per_second } => Ok((ThrottleMode::Blocks, *blocks_per_second)),
     }
+}
+
+/// A record written to the FUSE read capture log.
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum CaptureRecord {
+    /// Metadata about the block cache, written once at startup.
+    #[serde(rename = "block_cache_meta")]
+    BlockCacheMeta {
+        total_cache_size: u64,
+        num_blocks: usize,
+    },
+    /// Metadata about a file at creation time.
+    #[serde(rename = "file_created")]
+    FileCreated {
+        inode: usize,
+        group_id: u16,
+        cache_offset: u64,
+        created_tick: u64,
+        bytes_per_tick: u64,
+        parent_inode: usize,
+    },
+    /// A file rotation event.
+    #[serde(rename = "file_rotated")]
+    FileRotated {
+        tick: u64,
+        group_id: u16,
+        old_inode: usize,
+        new_inode: usize,
+        new_cache_offset: u64,
+    },
+    /// A file deletion (GC) event.
+    #[serde(rename = "file_deleted")]
+    FileDeleted {
+        tick: u64,
+        inode: usize,
+        group_id: u16,
+        bytes_written: u64,
+        bytes_read: u64,
+        max_offset_observed: u64,
+    },
+    /// A FUSE read operation.
+    #[serde(rename = "read")]
+    Read {
+        ts_ns: u128,
+        inode: usize,
+        group_id: u16,
+        offset: u64,
+        size: u64,
+    },
+}
+
+/// Channel capacity for the read capture log.
+const CAPTURE_CHANNEL_CAPACITY: usize = 10_000;
+
+/// Spawn a writer thread that drains `CaptureRecord`s from the channel and
+/// writes them as JSONL to the given path. Returns when the sender is dropped.
+fn spawn_capture_writer(
+    rx: std::sync::mpsc::Receiver<CaptureRecord>,
+    path: PathBuf,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("lading-fuse-capture".into())
+        .spawn(move || {
+            let file = match std::fs::File::create(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    error!("Failed to create FUSE capture file {}: {e}", path.display());
+                    return;
+                }
+            };
+            let mut writer = BufWriter::new(file);
+            for record in rx {
+                if let Ok(line) = serde_json::to_string(&record) {
+                    let _ = writer.write_all(line.as_bytes());
+                    let _ = writer.write_all(b"\n");
+                }
+            }
+            let _ = writer.flush();
+            info!("FUSE capture writer finished for {}", path.display());
+        })
+        .expect("failed to spawn capture writer thread")
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -201,11 +292,12 @@ impl Server {
         let start_time_system = SystemTime::now();
 
         let block_cache_size = block_cache.total_size();
+        let block_cache_len = block_cache.len();
         info!(
             "LogrotateFS block cache initialized: requested={}, actual={} bytes, blocks={}",
             config.maximum_prebuild_cache_size_bytes,
             block_cache_size,
-            block_cache.len()
+            block_cache_len
         );
         let state = model::State::new(
             &mut rng,
@@ -218,6 +310,45 @@ impl Server {
             load_profile,
         );
 
+        // Set up optional FUSE read capture
+        let capture_dropped = Arc::new(AtomicU64::new(0));
+        let capture_tx = if let Some(ref capture_path) = config.read_capture_path {
+            let (tx, rx) =
+                std::sync::mpsc::sync_channel::<CaptureRecord>(CAPTURE_CHANNEL_CAPACITY);
+
+            let _handle = spawn_capture_writer(rx, capture_path.clone());
+
+            // Emit block cache metadata
+            let _ = tx.try_send(CaptureRecord::BlockCacheMeta {
+                total_cache_size: block_cache_size,
+                num_blocks: block_cache_len,
+            });
+
+            // Emit initial file metadata
+            for (&inode, node) in state.iter_files() {
+                let _ = tx.try_send(CaptureRecord::FileCreated {
+                    inode,
+                    group_id: node.group_id(),
+                    cache_offset: node.cache_offset(),
+                    created_tick: node.created_tick(),
+                    bytes_per_tick: node.bytes_per_tick(),
+                    parent_inode: node.parent(),
+                });
+            }
+
+            // Wire the capture channel into the model state so it can
+            // emit rotation and deletion events.
+            state.set_capture(tx.clone(), Arc::clone(&capture_dropped));
+
+            info!(
+                "FUSE read capture enabled, writing to {}",
+                capture_path.display()
+            );
+            Some(tx)
+        } else {
+            None
+        };
+
         info!(
             "Creating logrotate filesystem with mount point {mount}",
             mount = config.mount_point.display(),
@@ -229,6 +360,8 @@ impl Server {
             open_files: Arc::new(Mutex::new(FxHashMap::default())),
             start_time,
             start_time_system,
+            capture_tx,
+            capture_dropped,
         };
 
         let options = vec![
@@ -264,13 +397,17 @@ impl Server {
     }
 }
 
-#[derive(Debug)]
 struct LogrotateFS {
     state: Arc<Mutex<model::State>>,
     open_files: Arc<Mutex<FxHashMap<u64, model::FileHandle>>>,
 
     start_time: Instant,
     start_time_system: SystemTime,
+
+    /// Optional sender for FUSE read capture records.
+    capture_tx: Option<SyncSender<CaptureRecord>>,
+    /// Count of capture records dropped due to a full channel.
+    capture_dropped: Arc<AtomicU64>,
 }
 
 impl LogrotateFS {
@@ -406,6 +543,26 @@ impl Filesystem for LogrotateFS {
                 "file handle inode and passed ino do not match"
             );
             if let Some(data) = state.read(file_handle, offset as usize, size as usize, tick) {
+                // Capture the read event if capture is enabled
+                if let Some(ref tx) = self.capture_tx {
+                    let group_id = state
+                        .file_group_id(file_handle.inode())
+                        .unwrap_or(u16::MAX);
+                    let ts_ns = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    let record = CaptureRecord::Read {
+                        ts_ns,
+                        inode: ino as usize,
+                        group_id,
+                        offset: offset as u64,
+                        size: data.len() as u64,
+                    };
+                    if let Err(TrySendError::Full(_)) = tx.try_send(record) {
+                        self.capture_dropped.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 reply.data(&data);
             } else {
                 reply.error(ENOENT);
