@@ -24,6 +24,14 @@ pub enum Error {
     /// Pattern expansion resulted in empty list
     #[error("Pattern expansion resulted in empty list")]
     EmptyExpansion,
+    /// Numeric range cardinality overflows usize (too large for this platform)
+    #[error("Numeric range {{0-{end}}} has {len} values, which exceeds usize::MAX on this platform")]
+    RangeTooLarge {
+        /// The end of the offending range
+        end: u32,
+        /// The computed 64-bit cardinality
+        len: u64,
+    },
 }
 
 /// A list of strings
@@ -220,13 +228,14 @@ impl StringListPool {
     }
 }
 
-/// Return the number of values in a `PatternRange`.
-fn range_len(range: &PatternRange) -> usize {
+/// Return the number of values in a `PatternRange`, or `Err` if the
+/// cardinality exceeds `usize::MAX` on this platform.
+fn range_len(range: &PatternRange) -> Result<usize, Error> {
     match range {
-        PatternRange::Char(start, end) => (*end as u32 - *start as u32 + 1) as usize,
+        PatternRange::Char(start, end) => Ok((*end as u32 - *start as u32 + 1) as usize),
         PatternRange::Number(start, end) => {
-            usize::try_from(u64::from(*end) - u64::from(*start) + 1)
-                .expect("range length fits in usize")
+            let len: u64 = u64::from(*end) - u64::from(*start) + 1;
+            usize::try_from(len).map_err(|_| Error::RangeTooLarge { end: *end, len })
         }
     }
 }
@@ -259,17 +268,24 @@ struct LazyPatternExpander {
     patterns: Vec<Pattern>,
     /// Mixed-radix counter: one digit per placeholder, rightmost varies fastest.
     counters: Vec<usize>,
+    /// Cardinality of each placeholder range, computed once at construction.
+    range_lens: Vec<usize>,
     exhausted: bool,
 }
 
 impl LazyPatternExpander {
     fn new(template: &str) -> Result<Self, Error> {
         let patterns = StringListPool::parse_patterns(template)?;
+        let range_lens = patterns
+            .iter()
+            .map(|p| range_len(&p.range))
+            .collect::<Result<Vec<_>, _>>()?;
         let n = patterns.len();
         Ok(Self {
             template: template.to_string(),
             patterns,
             counters: vec![0; n],
+            range_lens,
             exhausted: false,
         })
     }
@@ -297,7 +313,7 @@ impl LazyPatternExpander {
         let mut i = n - 1;
         loop {
             self.counters[i] += 1;
-            if self.counters[i] < range_len(&self.patterns[i].range) {
+            if self.counters[i] < self.range_lens[i] {
                 return;
             }
             self.counters[i] = 0;
@@ -916,5 +932,21 @@ mod test {
             .unwrap()
             .collect();
         assert_eq!(result, vec!["metric-a.value", "metric-b.value"]);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn numeric_range_too_large_for_32bit_fails_at_construction() {
+        // 0..=u32::MAX has 2^32 values, which overflows usize on 32-bit.
+        let err = LazyPatternExpander::new("{{0-4294967295}}").unwrap_err();
+        assert!(matches!(err, Error::RangeTooLarge { .. }));
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn numeric_range_full_u32_succeeds_on_64bit() {
+        // On 64-bit, 2^32 fits in usize, so construction must not panic or err.
+        // We don't collect (4 billion strings), just check new() succeeds.
+        assert!(LazyPatternExpander::new("{{0-4294967295}}").is_ok());
     }
 }
