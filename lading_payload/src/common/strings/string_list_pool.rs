@@ -647,8 +647,8 @@ mod test {
     // Integration tests with new
     #[test]
     fn new_simple() {
-        let pool = StringListPool::new(&["metric_{{a-c}}".to_string()], 100)
-            .expect("should create pool");
+        let pool =
+            StringListPool::new(&["metric_{{a-c}}".to_string()], 100).expect("should create pool");
         assert_eq!(pool.metric_names.len(), 3);
         assert!(pool.metric_names.contains(&"metric_a".to_string()));
         assert!(pool.metric_names.contains(&"metric_b".to_string()));
@@ -671,15 +671,15 @@ mod test {
 
     #[test]
     fn new_respects_max() {
-        let pool = StringListPool::new(&["metric_{{a-z}}".to_string()], 5)
-            .expect("should create pool");
+        let pool =
+            StringListPool::new(&["metric_{{a-z}}".to_string()], 5).expect("should create pool");
         assert_eq!(pool.metric_names.len(), 5);
     }
 
     #[test]
     fn new_number_range() {
-        let pool = StringListPool::new(&["counter_{{0-3}}".to_string()], 100)
-            .expect("should create pool");
+        let pool =
+            StringListPool::new(&["counter_{{0-3}}".to_string()], 100).expect("should create pool");
         assert_eq!(
             pool.metric_names,
             vec!["counter_0", "counter_1", "counter_2", "counter_3"]
@@ -688,18 +688,16 @@ mod test {
 
     #[test]
     fn new_multiple_in_string() {
-        let pool = StringListPool::new(&["{{a-b}}_{{1-2}}".to_string()], 100)
-            .expect("should create pool");
+        let pool =
+            StringListPool::new(&["{{a-b}}_{{1-2}}".to_string()], 100).expect("should create pool");
         assert_eq!(pool.metric_names, vec!["a_1", "a_2", "b_1", "b_2"]);
     }
 
     #[test]
     fn new_mixed() {
-        let pool = StringListPool::new(
-            &["no_pattern".to_string(), "with_{{a-b}}".to_string()],
-            100,
-        )
-        .expect("should create pool");
+        let pool =
+            StringListPool::new(&["no_pattern".to_string(), "with_{{a-b}}".to_string()], 100)
+                .expect("should create pool");
         assert_eq!(pool.metric_names, vec!["no_pattern", "with_a", "with_b"]);
     }
 
@@ -829,8 +827,8 @@ mod test {
     // Test that expanded patterns work with pool operations
     #[test]
     fn expanded_patterns_work_with_pool() {
-        let pool = StringListPool::new(&["metric_{{a-c}}".to_string()], 100)
-            .expect("should create pool");
+        let pool =
+            StringListPool::new(&["metric_{{a-c}}".to_string()], 100).expect("should create pool");
         let mut rng = SmallRng::seed_from_u64(42);
 
         // Get a string from the pool
@@ -876,9 +874,7 @@ mod test {
         let result: Vec<String> = LazyPatternExpander::new("{{8-120}}").unwrap().collect();
         assert_eq!(
             result,
-            (8..=120)
-                .map(|num| format!("{num:03}"))
-                .collect::<Vec<_>>()
+            (8..=120).map(|num| format!("{num:03}")).collect::<Vec<_>>()
         );
     }
 
