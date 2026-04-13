@@ -361,6 +361,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
+        let budget_before_fetch = *budget;
         let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
@@ -440,6 +441,35 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             data_points_count += eh.data_points.len() as u64;
                             for point in &mut eh.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+
+                                // Re-randomize count and partition it across the
+                                // existing positive/negative/zero buckets so that
+                                // successive payloads don't repeat the same data.
+                                let n_pos =
+                                    point.positive.as_ref().map_or(0, |b| b.bucket_counts.len());
+                                let n_neg =
+                                    point.negative.as_ref().map_or(0, |b| b.bucket_counts.len());
+
+                                let new_count: u64 = rng.random_range(1..=1000);
+                                let pos_count =
+                                    if n_pos > 0 { rng.random_range(0..=new_count) } else { 0 };
+                                let remaining = new_count - pos_count;
+                                let neg_count =
+                                    if n_neg > 0 { rng.random_range(0..=remaining) } else { 0 };
+                                let zero_count = remaining - neg_count;
+
+                                point.count = new_count;
+                                point.zero_count = zero_count;
+                                point.sum = Some(rng.random_range(0.0_f64..=10_000.0));
+
+                                if let Some(pos) = &mut point.positive {
+                                    pos.bucket_counts =
+                                        templates::random_partition(pos_count, n_pos, rng);
+                                }
+                                if let Some(neg) = &mut point.negative {
+                                    neg.bucket_counts =
+                                        templates::random_partition(neg_count, n_neg, rng);
+                                }
                             }
                         }
                         Data::Summary(summary) => {
@@ -454,6 +484,12 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         }
 
         self.data_points_per_resource = data_points_count;
+
+        // The pool deducted the template's stored encoded size from budget, but
+        // mutations (timestamp, values, bucket counts) may change varint sizes.
+        // Correct the budget so it reflects the actual bytes the caller will
+        // consume.
+        *budget = budget_before_fetch.saturating_sub(tpl.encoded_len());
 
         Ok(tpl)
     }

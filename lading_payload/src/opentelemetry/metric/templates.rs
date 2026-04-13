@@ -358,7 +358,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     }
 }
 
-fn random_partition<R: Rng + ?Sized>(count: u64, n_buckets: usize, rng: &mut R) -> Vec<u64> {
+pub(super) fn random_partition<R: Rng + ?Sized>(count: u64, n_buckets: usize, rng: &mut R) -> Vec<u64> {
     let mut remaining = count;
     let mut result = Vec::with_capacity(n_buckets);
     let mut buckets_left = n_buckets;
