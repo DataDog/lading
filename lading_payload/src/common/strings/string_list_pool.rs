@@ -468,10 +468,10 @@ mod test {
             // Arbitrary strings may contain malformed patterns (e.g. unclosed
             // `{{`); skip those cases — this test checks the handle round-trip
             // invariant, not error handling.
-            let pool = match StringListPool::new(&names, 10_000) {
-                Ok(p) => p,
-                Err(_) => return Ok(()),
+            let Ok(pool) = StringListPool::new(&names, 10_000) else {
+                return Ok(())
             };
+
             if let Some((s1, h)) = pool.of_size_with_handle(&mut rng, 0) {
                 if let Some(s2) = pool.using_handle(h) {
                     prop_assert_eq!(s1, s2);
