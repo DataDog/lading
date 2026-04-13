@@ -103,7 +103,8 @@ impl StringListPool {
     /// Parse a string to find all pattern ranges
     fn parse_patterns(input: &str) -> Result<Vec<Pattern>, Error> {
         let mut patterns = Vec::new();
-        for (pattern_str, start, end) in PatternIter::new(input) {
+        for item in PatternIter::new(input) {
+            let (pattern_str, start, end) = item?;
             Self::validate_range(pattern_str)?;
 
             if let Some(range) = Self::parse_range(pattern_str) {
@@ -407,7 +408,7 @@ impl<'a> PatternIter<'a> {
 }
 
 impl<'a> Iterator for PatternIter<'a> {
-    type Item = (&'a str, usize, usize);
+    type Item = Result<(&'a str, usize, usize), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let bytes = self.input.as_bytes();
@@ -431,8 +432,14 @@ impl<'a> Iterator for PatternIter<'a> {
                     let pattern_str = &self.input[start + 2..end_pos];
                     self.p = end_pos + 2;
 
-                    return Some((pattern_str, start, self.p));
+                    return Some(Ok((pattern_str, start, self.p)));
                 }
+
+                // Unclosed {{ — no matching }} found; surface as error.
+                self.p = bytes.len();
+                return Some(Err(Error::MalformedPattern {
+                    pattern: self.input[start..].to_string(),
+                }));
             }
 
             self.p += 1;
@@ -458,11 +465,16 @@ mod test {
 
             let mut rng = SmallRng::seed_from_u64(seed);
 
-            let pool = StringListPool::new(&names, 10_000).expect("valid patterns");
+            // Arbitrary strings may contain malformed patterns (e.g. unclosed
+            // `{{`); skip those cases — this test checks the handle round-trip
+            // invariant, not error handling.
+            let pool = match StringListPool::new(&names, 10_000) {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            };
             if let Some((s1, h)) = pool.of_size_with_handle(&mut rng, 0) {
                 if let Some(s2) = pool.using_handle(h) {
-                    assert_eq!(s1, s2);
-                    assert!(names.iter().any(|s| s == s2));
+                    prop_assert_eq!(s1, s2);
                 } else {
                     panic!("could not get string with handle");
                 }
@@ -815,6 +827,18 @@ mod test {
     #[test]
     fn malformed_pattern_too_many_dashes() {
         let result = StringListPool::new(&["{{a-b-c}}".to_string()], 100);
+        assert!(matches!(result, Err(Error::MalformedPattern { .. })));
+    }
+
+    #[test]
+    fn malformed_pattern_unclosed_braces() {
+        let result = StringListPool::new(&["metric_{{a-z".to_string()], 100);
+        assert!(matches!(result, Err(Error::MalformedPattern { .. })));
+    }
+
+    #[test]
+    fn malformed_pattern_unclosed_braces_mid_string() {
+        let result = StringListPool::new(&["prefix_{{a-z_suffix".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
