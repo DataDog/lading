@@ -223,7 +223,10 @@ impl StringListPool {
 fn range_len(range: &PatternRange) -> usize {
     match range {
         PatternRange::Char(start, end) => (*end as u32 - *start as u32 + 1) as usize,
-        PatternRange::Number(start, end) => (*end - *start + 1) as usize,
+        PatternRange::Number(start, end) => {
+            usize::try_from(u64::from(*end) - u64::from(*start) + 1)
+                .expect("range length fits in usize")
+        }
     }
 }
 
@@ -644,7 +647,7 @@ mod test {
     // Integration tests with new
     #[test]
     fn new_simple() {
-        let pool = StringListPool::new(&vec!["metric_{{a-c}}".to_string()], 100)
+        let pool = StringListPool::new(&["metric_{{a-c}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(pool.metric_names.len(), 3);
         assert!(pool.metric_names.contains(&"metric_a".to_string()));
@@ -655,7 +658,7 @@ mod test {
     #[test]
     fn new_multiple() {
         let pool = StringListPool::new(
-            &vec!["first_{{a-b}}".to_string(), "second_{{1-2}}".to_string()],
+            &["first_{{a-b}}".to_string(), "second_{{1-2}}".to_string()],
             100,
         )
         .expect("should create pool");
@@ -668,14 +671,14 @@ mod test {
 
     #[test]
     fn new_respects_max() {
-        let pool = StringListPool::new(&vec!["metric_{{a-z}}".to_string()], 5)
+        let pool = StringListPool::new(&["metric_{{a-z}}".to_string()], 5)
             .expect("should create pool");
         assert_eq!(pool.metric_names.len(), 5);
     }
 
     #[test]
     fn new_number_range() {
-        let pool = StringListPool::new(&vec!["counter_{{0-3}}".to_string()], 100)
+        let pool = StringListPool::new(&["counter_{{0-3}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(
             pool.metric_names,
@@ -685,7 +688,7 @@ mod test {
 
     #[test]
     fn new_multiple_in_string() {
-        let pool = StringListPool::new(&vec!["{{a-b}}_{{1-2}}".to_string()], 100)
+        let pool = StringListPool::new(&["{{a-b}}_{{1-2}}".to_string()], 100)
             .expect("should create pool");
         assert_eq!(pool.metric_names, vec!["a_1", "a_2", "b_1", "b_2"]);
     }
@@ -693,7 +696,7 @@ mod test {
     #[test]
     fn new_mixed() {
         let pool = StringListPool::new(
-            &vec!["no_pattern".to_string(), "with_{{a-b}}".to_string()],
+            &["no_pattern".to_string(), "with_{{a-b}}".to_string()],
             100,
         )
         .expect("should create pool");
@@ -702,20 +705,20 @@ mod test {
 
     #[test]
     fn new_empty_errors() {
-        let result = StringListPool::new(&vec![], 100);
+        let result = StringListPool::new(&[], 100);
         assert!(matches!(result, Err(Error::EmptyPatternList)));
     }
 
     #[test]
     fn new_zero_max_errors() {
-        let result = StringListPool::new(&vec!["test".to_string()], 0);
+        let result = StringListPool::new(&["test".to_string()], 0);
         assert!(matches!(result, Err(Error::InvalidMaxExpansions)));
     }
 
     // Invalid pattern tests
     #[test]
     fn invalid_pattern_char_to_number() {
-        let result = StringListPool::new(&vec!["metric_{{a-5}}".to_string()], 100);
+        let result = StringListPool::new(&["metric_{{a-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
         if let Err(Error::InvalidPattern { pattern }) = result {
             assert_eq!(pattern, "{{a-5}}");
@@ -724,7 +727,7 @@ mod test {
 
     #[test]
     fn invalid_pattern_number_to_char() {
-        let result = StringListPool::new(&vec!["metric_{{1-z}}".to_string()], 100);
+        let result = StringListPool::new(&["metric_{{1-z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
         if let Err(Error::InvalidPattern { pattern }) = result {
             assert_eq!(pattern, "{{1-z}}");
@@ -734,7 +737,7 @@ mod test {
     #[test]
     fn invalid_pattern_mixed_in_multiple() {
         let result = StringListPool::new(
-            &vec!["valid_{{a-c}}".to_string(), "invalid_{{x-9}}".to_string()],
+            &["valid_{{a-c}}".to_string(), "invalid_{{x-9}}".to_string()],
             100,
         );
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
@@ -743,7 +746,7 @@ mod test {
     #[test]
     fn valid_patterns_pass_validation() {
         let result = StringListPool::new(
-            &vec!["chars_{{a-z}}".to_string(), "nums_{{0-9}}".to_string()],
+            &["chars_{{a-z}}".to_string(), "nums_{{0-9}}".to_string()],
             100,
         );
         assert!(result.is_ok());
@@ -751,82 +754,82 @@ mod test {
 
     #[test]
     fn invalid_pattern_uppercase_to_number() {
-        let result = StringListPool::new(&vec!["{{A-5}}".to_string()], 100);
+        let result = StringListPool::new(&["{{A-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn invalid_pattern_number_to_uppercase() {
-        let result = StringListPool::new(&vec!["{{0-Z}}".to_string()], 100);
+        let result = StringListPool::new(&["{{0-Z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn multiple_invalid_patterns() {
-        let result = StringListPool::new(&vec!["{{a-1}}_{{2-b}}".to_string()], 100);
+        let result = StringListPool::new(&["{{a-1}}_{{2-b}}".to_string()], 100);
         assert!(matches!(result, Err(Error::InvalidPattern { .. })));
     }
 
     #[test]
     fn valid_single_char_patterns() {
         // Single digit that is treated as a char should not error if both sides are chars
-        let result = StringListPool::new(&vec!["{{a-c}}".to_string()], 100);
+        let result = StringListPool::new(&["{{a-c}}".to_string()], 100);
         assert!(result.is_ok());
     }
 
     #[test]
     fn malformed_pattern_no_dash() {
         // Patterns without proper dashes should error
-        let result = StringListPool::new(&vec!["{{abc}}".to_string()], 100);
+        let result = StringListPool::new(&["{{abc}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_empty_parts() {
-        let result = StringListPool::new(&vec!["{{}}-{{}}".to_string()], 100);
+        let result = StringListPool::new(&["{{}}-{{}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_backwards_char() {
-        let result = StringListPool::new(&vec!["{{z-a}}".to_string()], 100);
+        let result = StringListPool::new(&["{{z-a}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_backwards_number() {
-        let result = StringListPool::new(&vec!["{{10-5}}".to_string()], 100);
+        let result = StringListPool::new(&["{{10-5}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_multi_char_start() {
-        let result = StringListPool::new(&vec!["{{abc-z}}".to_string()], 100);
+        let result = StringListPool::new(&["{{abc-z}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_multi_char_end() {
-        let result = StringListPool::new(&vec!["{{a-xyz}}".to_string()], 100);
+        let result = StringListPool::new(&["{{a-xyz}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_too_many_dashes() {
-        let result = StringListPool::new(&vec!["{{a-b-c}}".to_string()], 100);
+        let result = StringListPool::new(&["{{a-b-c}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     #[test]
     fn malformed_pattern_special_chars() {
-        let result = StringListPool::new(&vec!["{{@-#}}".to_string()], 100);
+        let result = StringListPool::new(&["{{@-#}}".to_string()], 100);
         assert!(matches!(result, Err(Error::MalformedPattern { .. })));
     }
 
     // Test that expanded patterns work with pool operations
     #[test]
     fn expanded_patterns_work_with_pool() {
-        let pool = StringListPool::new(&vec!["metric_{{a-c}}".to_string()], 100)
+        let pool = StringListPool::new(&["metric_{{a-c}}".to_string()], 100)
             .expect("should create pool");
         let mut rng = SmallRng::seed_from_u64(42);
 
@@ -874,7 +877,7 @@ mod test {
         assert_eq!(
             result,
             (8..=120)
-                .map(|num| format!("{:03}", num))
+                .map(|num| format!("{num:03}"))
                 .collect::<Vec<_>>()
         );
     }
