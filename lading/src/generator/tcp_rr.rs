@@ -1,4 +1,5 @@
 //! TCP request/response (`tcp_rr`) generator — the client side.
+//! Based on https://github.com/google/neper
 //!
 //! Implements neper's `tcp_rr` protocol: each flow sends a fixed-size request,
 //! waits for a fixed-size response, and repeats. Flows are distributed across
