@@ -71,6 +71,11 @@ pub struct Config {
     /// read is logged with metadata for offline correctness validation.
     #[serde(default)]
     read_capture_path: Option<PathBuf>,
+    /// When true, disables kernel page caching for opened files. Every agent
+    /// read() hits FUSE directly. Useful for correctness testing (accurate
+    /// read timestamps) but reduces I/O performance. Default false.
+    #[serde(default)]
+    direct_io: bool,
 }
 
 /// Profile for load in this filesystem.
@@ -248,6 +253,9 @@ pub enum Error {
 /// during operation.
 pub struct Server {
     shutdown: lading_signal::Watcher,
+    gen_shutdown: lading_signal::Watcher,
+    frozen_at_tick: Arc<AtomicU64>,
+    start_time: Instant,
     background_session: BackgroundSession,
 }
 
@@ -265,6 +273,7 @@ impl Server {
         _: generator::General,
         config: Config,
         shutdown: lading_signal::Watcher,
+        gen_shutdown: lading_signal::Watcher,
         epoch: Instant,
     ) -> Result<Self, Error> {
         let mut rng = SmallRng::from_seed(config.seed);
@@ -356,6 +365,7 @@ impl Server {
         );
         fs::create_dir_all(&config.mount_point)?;
         // Initialize the FUSE filesystem
+        let frozen_at_tick = Arc::new(AtomicU64::new(0));
         let fs = LogrotateFS {
             state: Arc::new(Mutex::new(state)),
             open_files: Arc::new(Mutex::new(FxHashMap::default())),
@@ -363,6 +373,8 @@ impl Server {
             start_time_system,
             capture_tx,
             capture_dropped,
+            direct_io: config.direct_io,
+            frozen_at_tick: Arc::clone(&frozen_at_tick),
         };
 
         let options = vec![
@@ -377,6 +389,9 @@ impl Server {
 
         Ok(Self {
             shutdown,
+            gen_shutdown,
+            frozen_at_tick,
+            start_time,
             background_session,
         })
     }
@@ -389,7 +404,23 @@ impl Server {
     ///
     /// Function will error if it cannot join on filesystem thread.
     pub async fn spin(self) -> Result<(), Error> {
-        self.shutdown.recv().await;
+        let gen_shutdown_wait = self.gen_shutdown.recv();
+        let shutdown_wait = self.shutdown.recv();
+        tokio::pin!(gen_shutdown_wait);
+        tokio::pin!(shutdown_wait);
+
+        tokio::select! {
+            () = &mut gen_shutdown_wait => {
+                let tick = self.start_time.elapsed().as_secs();
+                info!("freeze signal received at tick {tick}, model frozen — files stop growing");
+                self.frozen_at_tick.store(tick, Ordering::SeqCst);
+                // Wait for main shutdown — mount stays alive for target to drain
+                shutdown_wait.await;
+            }
+            () = &mut shutdown_wait => {
+                // Direct shutdown (no freeze phase)
+            }
+        }
 
         let handle = task::spawn_blocking(|| self.background_session.join());
         let () = handle.await?;
@@ -409,12 +440,22 @@ struct LogrotateFS {
     capture_tx: Option<SyncSender<CaptureRecord>>,
     /// Count of capture records dropped due to a full channel.
     capture_dropped: Arc<AtomicU64>,
+    /// Whether to set FOPEN_DIRECT_IO on opened files.
+    direct_io: bool,
+    /// When non-zero, the model is frozen at this tick — advance_time stops.
+    frozen_at_tick: Arc<AtomicU64>,
 }
 
 impl LogrotateFS {
     #[tracing::instrument(skip(self))]
     fn get_current_tick(&self) -> model::Tick {
-        self.start_time.elapsed().as_secs()
+        let tick = self.start_time.elapsed().as_secs();
+        let frozen = self.frozen_at_tick.load(Ordering::SeqCst);
+        if frozen > 0 {
+            tick.min(frozen)
+        } else {
+            tick
+        }
     }
 }
 
@@ -678,7 +719,11 @@ impl Filesystem for LogrotateFS {
                 let mut open_files = self.open_files.lock().expect("lock poisoned");
                 open_files.insert(fh, file_handle);
             }
-            reply.opened(fh, flags as u32);
+            let mut open_flags = flags as u32;
+            if self.direct_io {
+                open_flags |= 1; // FOPEN_DIRECT_IO
+            }
+            reply.opened(fh, open_flags);
         } else {
             reply.error(ENOENT);
         }

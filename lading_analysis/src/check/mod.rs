@@ -1,16 +1,17 @@
 //! Invariant check framework.
 //!
 //! Each check implements the [`Check`] trait and is constructed from its YAML
-//! config parameters. The [`from_config`] function maps config entries to check
-//! instances.
+//! config parameters.
 
 mod completeness;
 mod duplication;
 mod fabrication;
 
+use rustc_hash::FxHashSet;
+
 use crate::Error;
 use crate::config::CheckConfig;
-use crate::context::AnalysisContext;
+use crate::context::{AnalysisContext, ContentHash, ReconstructedInput};
 
 /// Result of running a single check.
 #[derive(Debug)]
@@ -21,7 +22,7 @@ pub struct CheckResult {
     pub passed: bool,
     /// One-line summary.
     pub summary: String,
-    /// Detailed breakdown (per-group stats, example failures, etc.).
+    /// Detailed breakdown.
     pub details: Vec<String>,
 }
 
@@ -31,6 +32,19 @@ pub trait Check {
     fn name(&self) -> &str;
     /// Run the check against the analysis context.
     fn check(&self, ctx: &AnalysisContext) -> CheckResult;
+}
+
+/// Extract the set of content hashes from the input representation.
+/// Only `NewlineDelimited` mode produces line-level hashes suitable for
+/// comparison against output messages. `Raw` mode returns an empty set
+/// (raw read hashes don't correspond to individual log lines).
+pub(crate) fn input_line_hashes(input: &ReconstructedInput) -> FxHashSet<ContentHash> {
+    match input {
+        ReconstructedInput::NewlineDelimited(lines) => {
+            lines.iter().map(|l| l.hash).collect()
+        }
+        ReconstructedInput::Raw(_) => FxHashSet::default(),
+    }
 }
 
 /// Build check instances from the config entries.

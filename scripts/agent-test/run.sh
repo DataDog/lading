@@ -22,6 +22,8 @@ cleanup() {
     if mountpoint -q "$MOUNT" 2>/dev/null; then
         fusermount -u "$MOUNT" 2>/dev/null || umount "$MOUNT" 2>/dev/null || true
     fi
+    # Clean up the bind mount
+    sudo umount "$MOUNT" 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -36,35 +38,33 @@ echo ""
 # Build lading and analysis tool
 cargo build --bin lading --features logrotate_fs --bin lading-analysis
 
-# Start lading in the background
+# Clear stale capture files from previous runs
+rm -f scratch/captures/fuse_reads.jsonl scratch/captures/blackhole.jsonl scratch/captures/metrics.jsonl
+
+# Set up shared mount point with rshared propagation.
+# When lading FUSE-mounts inside $MOUNT, the agent container sees it
+# via mount propagation — regardless of start order.
+echo "Setting up rshared mount at $MOUNT..."
+sudo mkdir -p "$MOUNT"
+sudo mount --bind "$MOUNT" "$MOUNT"
+sudo mount --make-rshared "$MOUNT"
+
+# Start lading in background. It will poll for the agent container via
+# --target-container and start the experiment timer once it detects it.
 echo "Starting lading..."
-cargo run --bin lading --features logrotate_fs -- \
+RUST_LOG=info cargo run --bin lading --features logrotate_fs -- \
   --config-path scripts/agent-test/lading.yaml \
-  --no-target \
+  --target-container "$AGENT_NAME" \
   --capture-path scratch/captures/metrics.jsonl \
-  --experiment-duration-seconds "$DURATION" &
+  --experiment-duration-seconds "$DURATION" \
+  --cooldown-duration-seconds 30 &
 LADING_PID=$!
 
-# Wait for the FUSE mount
-echo "Waiting for FUSE mount at $MOUNT..."
-for i in $(seq 1 30); do
-    if mountpoint -q "$MOUNT" 2>/dev/null; then
-        break
-    fi
-    sleep 1
-done
+# Give lading a moment to start and create the FUSE mount
+sleep 3
 
-if ! mountpoint -q "$MOUNT" 2>/dev/null; then
-    echo "ERROR: FUSE mount never appeared"
-    kill $LADING_PID 2>/dev/null
-    exit 1
-fi
-echo "Mount ready."
-
-# Start the DD agent container
-# - --network host: agent can reach lading's blackhole on 127.0.0.1
-# - Mount the FUSE directory at /tmp/smp-shared (matching the agent's log config)
-# - Mount the agent config
+# Start the DD agent container. Lading detects it via Docker API polling
+# and begins the experiment.
 echo "Starting DD agent container..."
 docker run -d \
   --name "$AGENT_NAME" \
@@ -72,19 +72,16 @@ docker run -d \
   --privileged \
   -e DD_API_KEY=a0000001 \
   -e DD_HOSTNAME=lading-capture-test \
-  -v "$MOUNT:/tmp/smp-shared:ro" \
+  -v "$MOUNT:/tmp/smp-shared:rshared" \
   -v "$SCRIPT_DIR/datadog-agent/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro" \
   -v "$SCRIPT_DIR/datadog-agent/conf.d:/etc/datadog-agent/conf.d:ro" \
   "$AGENT_IMAGE"
 
-echo "Agent container started. Waiting for experiment to complete..."
+echo "Agent container started. Waiting for lading to complete..."
 
-# Wait for lading to finish
+# Wait for lading to finish (warmup + experiment + cooldown)
 wait $LADING_PID 2>/dev/null || true
-
-echo ""
-echo "Lading finished. Giving agent 10s to flush..."
-sleep 10
+echo "Lading finished."
 
 # Stop the agent gracefully
 echo "Stopping agent..."

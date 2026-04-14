@@ -4,15 +4,15 @@
 //! agent JSON array, and extracts the `message` field from each entry.
 
 use std::{
-    hash::{Hash, Hasher},
     io::{BufRead, BufReader},
     path::Path,
 };
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::Error;
-use crate::context::OutputLine;
+use crate::context::{ContentHash, OutputLine};
 
 /// A parsed blackhole capture record.
 #[derive(Debug, Deserialize)]
@@ -29,15 +29,13 @@ pub struct BlackholeEvent {
 #[derive(Debug, Deserialize)]
 struct LogEntry {
     message: String,
-    // Other fields exist (status, timestamp, hostname, service, ddsource,
-    // ddtags) but are not needed for matching.
 }
 
-/// Hash a message string for matching against input lines.
-fn hash_message(msg: &str) -> u64 {
-    let mut hasher = rustc_hash::FxHasher::default();
-    msg.as_bytes().hash(&mut hasher);
-    hasher.finish()
+/// SHA-256 hash of a string's bytes.
+fn sha256(data: &[u8]) -> ContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
 }
 
 /// Parse the blackhole capture JSONL and extract output lines.
@@ -63,11 +61,9 @@ pub fn parse(
         }
         let event: BlackholeEvent = serde_json::from_str(&line)?;
 
-        // Parse the payload as a JSON array of log entries.
-        // The agent may send a single object or an array; handle both.
         if let Ok(entries) = serde_json::from_str::<Vec<LogEntry>>(&event.payload) {
             for entry in entries {
-                let h = hash_message(&entry.message);
+                let h = sha256(entry.message.as_bytes());
                 output_lines.push(OutputLine {
                     hash: h,
                     message: entry.message,
@@ -75,8 +71,6 @@ pub fn parse(
                 });
             }
         }
-        // If the payload doesn't parse as a log array, skip it silently.
-        // This handles non-log payloads (e.g., from the exerciser scripts).
 
         events.push(event);
     }

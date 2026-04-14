@@ -1,8 +1,9 @@
-//! FUSE capture parsing and input line reconstruction.
+//! FUSE capture parsing and input reconstruction.
 //!
-//! Reads the FUSE capture JSONL, reconstructs an identical block cache from the
-//! lading config, and replays each read to extract the actual lines that were
-//! served to the reader.
+//! Supports two modes:
+//! - **Raw**: one entry per FUSE read with SHA-256 hash and exact timestamp
+//! - **Newline-delimited**: lines reconstructed across read boundaries, each
+//!   annotated with the reads that contributed bytes
 
 use std::{
     io::{BufRead, BufReader},
@@ -12,11 +13,13 @@ use std::{
 
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::Error;
-use crate::context::InputLine;
+use crate::config::ReconstructionMode;
+use crate::context::{ContentHash, RawRead, ReadContribution, ReconstructedInput, ReconstructedLine};
 
-/// A parsed FUSE capture record (mirrors the enum in logrotate_fs.rs).
+/// A parsed FUSE capture record.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(tag = "type")]
 pub enum FuseEvent {
@@ -96,6 +99,16 @@ struct FileInfo {
     cache_offset: u64,
 }
 
+/// A read event with its file context, used for per-file sorting.
+#[derive(Debug, Clone, Copy)]
+struct ReadRecord {
+    offset: u64,
+    size: u64,
+    relative_ms: u64,
+    group_id: u16,
+    cache_offset: u64,
+}
+
 /// Minimal subset of the lading config needed for block cache reconstruction.
 #[derive(Debug, Deserialize)]
 struct LadingConfig {
@@ -132,12 +145,11 @@ fn default_max_block_size() -> byte_unit::Byte {
     lading_payload::block::default_maximum_block_size()
 }
 
-/// Simple hash function for line content.
-fn hash_line(line: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = rustc_hash::FxHasher::default();
-    line.hash(&mut hasher);
-    hasher.finish()
+/// SHA-256 hash of a byte slice.
+fn sha256(data: &[u8]) -> ContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
 }
 
 /// Extract the logrotate_fs config from the lading config file.
@@ -157,9 +169,7 @@ fn extract_logrotate_config(lading_config_path: &Path) -> Result<LogrotateFsConf
     ))
 }
 
-/// Reconstruct the block cache and replay FUSE reads to extract input lines.
-///
-/// Returns `(input_lines_by_hash, all_fuse_events)`.
+/// Reconstruct inputs from FUSE capture and lading config.
 ///
 /// # Errors
 ///
@@ -168,8 +178,8 @@ fn extract_logrotate_config(lading_config_path: &Path) -> Result<LogrotateFsConf
 pub fn reconstruct(
     fuse_capture_path: &Path,
     lading_config_path: &Path,
-) -> Result<(FxHashMap<u64, InputLine>, Vec<FuseEvent>), Error> {
-    // 1. Reconstruct the block cache from the lading config
+    mode: ReconstructionMode,
+) -> Result<(ReconstructedInput, Vec<FuseEvent>), Error> {
     let lr_config = extract_logrotate_config(lading_config_path)?;
 
     let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::from_seed(lr_config.seed);
@@ -184,15 +194,16 @@ pub fn reconstruct(
         total_bytes.get() as usize,
     )?;
 
-    // 2. Parse FUSE capture JSONL — first pass collects metadata and reads
+    // Parse FUSE capture JSONL
     let file = std::fs::File::open(fuse_capture_path)?;
     let reader = BufReader::new(file);
 
     let mut files: FxHashMap<usize, FileInfo> = FxHashMap::default();
     let mut events: Vec<FuseEvent> = Vec::new();
-
-    // Per-file accumulator: (max_offset_seen, group_id, first_read_ms)
-    let mut file_reads: FxHashMap<usize, (u64, u16, u64)> = FxHashMap::default();
+    // Per-inode read records for newline_delimited mode
+    let mut reads_by_inode: FxHashMap<usize, Vec<ReadRecord>> = FxHashMap::default();
+    // Raw reads for raw mode
+    let mut raw_reads: Vec<RawRead> = Vec::new();
 
     for line in reader.lines() {
         let line = line?;
@@ -234,14 +245,39 @@ pub fn reconstruct(
                 group_id,
                 ..
             } => {
-                let end = offset + size;
-                file_reads
-                    .entry(*inode)
-                    .and_modify(|(max_end, _, first_ms)| {
-                        *max_end = (*max_end).max(end);
-                        *first_ms = (*first_ms).min(*relative_ms);
-                    })
-                    .or_insert((end, *group_id, *relative_ms));
+                let Some(file_info) = files.get(inode) else {
+                    events.push(event);
+                    continue;
+                };
+
+                match mode {
+                    ReconstructionMode::Raw => {
+                        let data = block_cache.read_at(
+                            file_info.cache_offset + offset,
+                            *size as usize,
+                        );
+                        raw_reads.push(RawRead {
+                            inode: *inode,
+                            group_id: *group_id,
+                            offset: *offset,
+                            size: *size,
+                            relative_ms: *relative_ms,
+                            hash: sha256(&data),
+                        });
+                    }
+                    ReconstructionMode::NewlineDelimited => {
+                        reads_by_inode
+                            .entry(*inode)
+                            .or_default()
+                            .push(ReadRecord {
+                                offset: *offset,
+                                size: *size,
+                                relative_ms: *relative_ms,
+                                group_id: *group_id,
+                                cache_offset: file_info.cache_offset,
+                            });
+                    }
+                }
             }
             FuseEvent::BlockCacheMeta { .. } | FuseEvent::FileDeleted { .. } => {}
         }
@@ -249,34 +285,77 @@ pub fn reconstruct(
         events.push(event);
     }
 
-    // 3. Reconstruct full content per file and split into lines
-    let mut input_lines: FxHashMap<u64, InputLine> = FxHashMap::default();
-
-    for (inode, (total_bytes_read, group_id, first_ms)) in &file_reads {
-        let Some(file_info) = files.get(inode) else {
-            continue;
-        };
-
-        // Read the entire range that was read from this file
-        let data = block_cache.read_at(file_info.cache_offset, *total_bytes_read as usize);
-
-        for line_bytes in data.split(|&b| b == b'\n') {
-            if line_bytes.is_empty() {
-                continue;
-            }
-            let h = hash_line(line_bytes);
-            input_lines
-                .entry(h)
-                .and_modify(|il| il.count += 1)
-                .or_insert_with(|| InputLine {
-                    hash: h,
-                    text: String::from_utf8_lossy(line_bytes).into_owned(),
-                    count: 1,
-                    group_id: *group_id,
-                    first_seen_ms: *first_ms,
-                });
+    let input = match mode {
+        ReconstructionMode::Raw => ReconstructedInput::Raw(raw_reads),
+        ReconstructionMode::NewlineDelimited => {
+            let lines = reconstruct_lines(&block_cache, reads_by_inode);
+            ReconstructedInput::NewlineDelimited(lines)
         }
+    };
+
+    Ok((input, events))
+}
+
+/// Reconstruct newline-delimited lines from per-file reads.
+fn reconstruct_lines(
+    block_cache: &lading_payload::block::Cache,
+    reads_by_inode: FxHashMap<usize, Vec<ReadRecord>>,
+) -> Vec<ReconstructedLine> {
+    let mut all_lines: Vec<ReconstructedLine> = Vec::new();
+
+    for (_inode, mut reads) in reads_by_inode {
+        // Sort reads by offset for sequential replay
+        reads.sort_by_key(|r| r.offset);
+
+        let group_id = reads.first().map_or(0, |r| r.group_id);
+        let mut line_buffer: Vec<u8> = Vec::new();
+        let mut contributions: Vec<ReadContribution> = Vec::new();
+
+        for read in &reads {
+            let data = block_cache.read_at(
+                read.cache_offset + read.offset,
+                read.size as usize,
+            );
+
+            // Process byte by byte looking for newlines
+            let mut start = 0;
+            for (i, &byte) in data.iter().enumerate() {
+                if byte == b'\n' {
+                    // Complete line found
+                    line_buffer.extend_from_slice(&data[start..i]);
+                    contributions.push(ReadContribution {
+                        offset: read.offset + start as u64,
+                        size: (i - start) as u64,
+                        relative_ms: read.relative_ms,
+                    });
+
+                    if !line_buffer.is_empty() {
+                        all_lines.push(ReconstructedLine {
+                            hash: sha256(&line_buffer),
+                            text: String::from_utf8_lossy(&line_buffer).into_owned(),
+                            group_id,
+                            contributions: std::mem::take(&mut contributions),
+                        });
+                    }
+                    line_buffer.clear();
+                    start = i + 1;
+                }
+            }
+
+            // Remaining bytes after last newline — carry forward
+            if start < data.len() {
+                line_buffer.extend_from_slice(&data[start..]);
+                contributions.push(ReadContribution {
+                    offset: read.offset + start as u64,
+                    size: (data.len() - start) as u64,
+                    relative_ms: read.relative_ms,
+                });
+            }
+        }
+
+        // Final partial line — discard (agent framer won't emit it)
+        // line_buffer and contributions are dropped
     }
 
-    Ok((input_lines, events))
+    all_lines
 }

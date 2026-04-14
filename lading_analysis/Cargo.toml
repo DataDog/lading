@@ -9,6 +9,7 @@ clap = { version = "4.5", features = ["derive"] }
 lading-payload = { path = "../lading_payload" }
 rand = { workspace = true }
 rustc-hash = { workspace = true }
+sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

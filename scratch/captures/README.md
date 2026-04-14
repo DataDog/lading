@@ -42,15 +42,22 @@ offsets.
 ## Running a Capture Test
 
 ```bash
-# Build and run with the exerciser (cat mode, 60 seconds)
+# Build and run with exerciser scripts (cat, tail, or agent mode)
 ./scripts/run_capture_test.sh cat 60
-
-# Or tail mode (tracks offsets, reads only new bytes)
 ./scripts/run_capture_test.sh tail 60
+./scripts/run_capture_test.sh agent 60                          # minimal agent emulator
+./scripts/run_capture_test.sh agent 60 scripts/capture_test_happy.yaml  # custom config
+
+# Run with the real DD agent
+./scripts/agent-test/run.sh 60
 
 # Output lands in this directory
 cat scratch/captures/fuse_reads.jsonl
 cat scratch/captures/blackhole.jsonl
+
+# Run offline analysis
+cargo run --bin lading-analysis -- --config scripts/agent-test/analysis.yaml
+# Reconstructed data written to scratch/captures/analysis/
 ```
 
 ## Known Limitations
@@ -127,18 +134,85 @@ same time even though the file was read over many seconds.
 Fix: after splitting lines from the full content, walk the individual read
 records to assign each line the timestamp of the read whose byte range covers it.
 
+### Hash collision risk in analysis tool (resolved)
+
+The analysis tool originally used `FxHasher` (`u64`) for line matching — a
+non-cryptographic hash prone to collisions. This was replaced with SHA-256
+(`[u8; 32]`) using the `sha2` crate, which is collision-resistant.
+
+### Agent line-splitting at read boundaries (resolved)
+
+Previously, without `direct_io`, the kernel page cache coalesced reads and the
+analysis tool split individual reads into lines, producing partial-line
+fragments that didn't match output messages (~65 fabricated lines in early
+testing). This was resolved by:
+1. `direct_io: true` — every agent read hits FUSE directly (no kernel coalescing)
+2. `newline_delimited` reconstruction mode — stitches lines across read
+   boundaries, discards final partial lines
+With both enabled, fabrication dropped to 0 in real agent testing.
+
 ### FUSE capture BufWriter sizing
 
 The FUSE writer thread uses `BufWriter::new()` (8 KB default buffer). This is
 fine for the small `read` records but could be tuned with
 `BufWriter::with_capacity()` if write syscall overhead becomes measurable.
 
+## Architecture Decisions
+
+### ADR-1: `direct_io` for correctness testing
+
+**Problem:** The Linux kernel page cache sits between the target's `read()`
+syscalls and the FUSE handler. The kernel coalesces, reorders, and caches reads.
+FUSE capture records don't represent what the target actually read — they
+represent what the kernel requested from FUSE to fill its page cache.
+
+**Decision:** Added an opt-in `direct_io: bool` config field on `logrotate_fs`.
+When enabled, every file opened by the target gets `FOPEN_DIRECT_IO`, bypassing
+the page cache entirely. Every target `read()` syscall becomes a 1:1 FUSE
+request with an accurate timestamp.
+
+**Tradeoff:** Less realistic I/O performance (no readahead, no page cache), but
+perfect input observability. Use `direct_io: true` for correctness experiments,
+`false` (default) for performance benchmarks.
+
+### ADR-2: Freeze model during cooldown (not unmount)
+
+**Problem:** The cooldown feature was designed to shut down generators before
+blackholes so the target can flush its pipeline. But for FUSE-based generators,
+"shutting down" triggers `fusermount -u`, which blocks while the target has open
+file descriptors on the mount. The target keeps reading, the unmount hangs, and
+the FUSE handler continues serving reads for the entire cooldown + shutdown.
+
+**Decision:** On the generator shutdown signal, freeze the model (`advance_time`
+is skipped, files stop growing) but keep the FUSE mount alive. The target
+naturally reaches EOF, its pipeline drains, and it sends remaining data to the
+blackhole. On the main shutdown signal (after cooldown), the mount is unmounted
+and the target is killed.
+
+**Key insight:** The kernel won't complete a FUSE unmount while any process has
+open FDs on the mount. You cannot use unmounting to "stop" a FUSE generator
+while the target is still reading.
+
+### ADR-3: Cooldown period between generator freeze and full shutdown
+
+**Problem:** When lading shuts down, all components receive the shutdown signal
+simultaneously. The target has buffered data that hasn't been sent to the
+blackhole yet. The FUSE mount and blackhole die before the target can flush.
+
+**Decision:** Added `--cooldown-duration-seconds` CLI flag (default 0). Two
+separate signal pairs: `gen_shutdown` (freeze generators) and `shutdown`
+(everything else). After the experiment duration, generators freeze, then after
+the cooldown period, everything else shuts down.
+
+**Default behavior preserved:** With cooldown=0 (default), both signals fire
+back-to-back — identical to the previous single-signal shutdown.
+
 ## Future Work
 
-- **Offline validator** — separate tool that reads both JSONL files, reconstructs
-  content from block cache params, and computes completeness / fabrication /
-  duplication metrics.
 - **Performance validation** — run with and without capture to confirm overhead
   is negligible at target throughput.
 - **Per-line unique IDs** — add unique line identifiers to the payload to
   eliminate content-hash ambiguity from block cache wrapping.
+- **User-defined invariant checks** — YAML-driven framework for custom
+  assertions (timing, ordering, aggregation). The `Check` trait in
+  `lading_analysis` is designed for this.

@@ -10,9 +10,11 @@ pub struct AnalysisConfig {
     /// Paths to input files.
     pub inputs: Inputs,
     /// Optional directory to write reconstructed data for human inspection.
-    /// Writes `reconstructed_inputs.txt` and `extracted_outputs.txt`.
     #[serde(default)]
     pub output_dir: Option<PathBuf>,
+    /// Input reconstruction mode. Default: raw.
+    #[serde(default)]
+    pub reconstruction: Option<ReconstructionMode>,
     /// Checks to run.
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub checks: Vec<CheckConfig>,
@@ -30,8 +32,17 @@ pub struct Inputs {
     pub lading_config: PathBuf,
 }
 
-/// A single check configuration entry. The key is the check name, the value
-/// holds check-specific parameters.
+/// How to reconstruct inputs from FUSE read captures.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconstructionMode {
+    /// One entry per FUSE read with raw byte hash and exact timestamp.
+    Raw,
+    /// Split into newline-delimited lines, each annotated with contributing reads.
+    NewlineDelimited,
+}
+
+/// A single check configuration entry.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckConfig {

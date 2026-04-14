@@ -5,6 +5,8 @@ inputs:
 
 output_dir: scratch/captures/analysis
 
+reconstruction: newline_delimited
+
 checks:
   - completeness:
       min_ratio: 1.0

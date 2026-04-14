@@ -11,7 +11,7 @@ pub mod input;
 pub mod output;
 
 use config::AnalysisConfig;
-use context::AnalysisContext;
+use context::{AnalysisContext, ReconstructedInput};
 
 /// Errors from the analysis pipeline.
 #[derive(thiserror::Error, Debug)]
@@ -45,7 +45,6 @@ pub enum Error {
 pub fn run(config: &AnalysisConfig) -> Result<Vec<check::CheckResult>, Error> {
     let ctx = AnalysisContext::build(config)?;
 
-    // Write reconstructed data for human inspection if output_dir is set
     if let Some(ref dir) = config.output_dir {
         std::fs::create_dir_all(dir)?;
         dump_reconstructed(&ctx, dir)?;
@@ -65,25 +64,68 @@ fn dump_reconstructed(
 ) -> Result<(), Error> {
     use std::io::Write;
 
-    // Sort input lines by first_seen_ms for readable ordering
-    let mut inputs: Vec<_> = ctx.input_lines.values().collect();
-    inputs.sort_by_key(|il| il.first_seen_ms);
-
-    let mut f = std::io::BufWriter::new(std::fs::File::create(dir.join("reconstructed_inputs.txt"))?);
-    for il in &inputs {
-        writeln!(
-            f,
-            "[{ms}ms group={g} count={c}] {text}",
-            ms = il.first_seen_ms,
-            g = il.group_id,
-            c = il.count,
-            text = il.text,
-        )?;
+    match &ctx.input {
+        ReconstructedInput::Raw(reads) => {
+            let mut f = std::io::BufWriter::new(
+                std::fs::File::create(dir.join("reconstructed_inputs_raw.txt"))?,
+            );
+            for r in reads {
+                let short_hash: String = r.hash.iter().take(8).map(|b| format!("{b:02x}")).collect();
+                writeln!(
+                    f,
+                    "[{ms}ms inode={ino} group={g} offset={o} size={s}] sha256={h}...",
+                    ms = r.relative_ms,
+                    ino = r.inode,
+                    g = r.group_id,
+                    o = r.offset,
+                    s = r.size,
+                    h = short_hash,
+                )?;
+            }
+            f.flush()?;
+            eprintln!(
+                "Wrote {} raw reads to {}/reconstructed_inputs_raw.txt",
+                reads.len(),
+                dir.display()
+            );
+        }
+        ReconstructedInput::NewlineDelimited(lines) => {
+            let mut f = std::io::BufWriter::new(
+                std::fs::File::create(dir.join("reconstructed_inputs.txt"))?,
+            );
+            for line in lines {
+                let first_ms = line.contributions.first().map_or(0, |c| c.relative_ms);
+                let last_ms = line.contributions.last().map_or(0, |c| c.relative_ms);
+                let reads = line.contributions.len();
+                if first_ms == last_ms {
+                    writeln!(
+                        f,
+                        "[{first_ms}ms group={g} reads={reads}] {text}",
+                        g = line.group_id,
+                        text = line.text,
+                    )?;
+                } else {
+                    writeln!(
+                        f,
+                        "[{first_ms}ms..{last_ms}ms group={g} reads={reads}] {text}",
+                        g = line.group_id,
+                        text = line.text,
+                    )?;
+                }
+            }
+            f.flush()?;
+            eprintln!(
+                "Wrote {} lines to {}/reconstructed_inputs.txt",
+                lines.len(),
+                dir.display()
+            );
+        }
     }
-    f.flush()?;
 
-    // Write extracted output messages in order of receipt
-    let mut f = std::io::BufWriter::new(std::fs::File::create(dir.join("extracted_outputs.txt"))?);
+    // Write extracted output messages
+    let mut f = std::io::BufWriter::new(
+        std::fs::File::create(dir.join("extracted_outputs.txt"))?,
+    );
     for ol in &ctx.output_lines {
         writeln!(
             f,
@@ -93,12 +135,6 @@ fn dump_reconstructed(
         )?;
     }
     f.flush()?;
-
-    eprintln!(
-        "Wrote {} input lines to {}/reconstructed_inputs.txt",
-        inputs.len(),
-        dir.display()
-    );
     eprintln!(
         "Wrote {} output lines to {}/extracted_outputs.txt",
         ctx.output_lines.len(),

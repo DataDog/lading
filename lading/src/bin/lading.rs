@@ -254,6 +254,10 @@ struct LadingArgs {
     /// whether to ignore inspector configuration, if present, and not run the inspector
     #[clap(long)]
     disable_inspector: bool,
+    /// the time, in seconds, between shutting down generators and shutting down
+    /// blackholes. Allows the target to flush buffered data. Default 0 (no cooldown).
+    #[clap(long, default_value_t = 0)]
+    cooldown_duration_seconds: u32,
 }
 
 #[derive(Subcommand)]
@@ -400,10 +404,12 @@ fn get_config(args: &LadingArgs, config: Option<String>) -> Result<Config, Error
 async fn inner_main(
     experiment_duration: Duration,
     warmup_duration: Duration,
+    cooldown_duration: Duration,
     disable_inspector: bool,
     config: Config,
 ) -> Result<(), Error> {
     let (shutdown_watcher, shutdown_broadcast) = lading_signal::signal();
+    let (gen_shutdown_watcher, gen_shutdown_broadcast) = lading_signal::signal();
     let (experiment_started_watcher, experiment_started_broadcast) = lading_signal::signal();
     let (target_running_watcher, target_running_broadcast) = lading_signal::signal();
 
@@ -547,7 +553,7 @@ async fn inner_main(
     //
     for cfg in config.generator {
         let tgt_rcv = tgt_snd.subscribe();
-        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone(), epoch)?;
+        let generator_server = generator::Server::new(cfg, shutdown_watcher.clone(), gen_shutdown_watcher.clone(), epoch)?;
         gsrv_joinset.spawn(generator_server.run(tgt_rcv));
     }
 
@@ -641,6 +647,7 @@ async fn inner_main(
     // We must be sure to drop any unused watcher at this point. Below in
     // `signal_and_wait` if a watcher remains derived from `shutdown_watcher` the run will not shut down.
     drop(shutdown_watcher);
+    drop(gen_shutdown_watcher);
     drop(experiment_started_watcher);
     let timer_watcher_wait = timer_watcher.recv();
     tokio::pin!(timer_watcher_wait);
@@ -702,6 +709,16 @@ async fn inner_main(
         }
     };
 
+    // Shut down generators first (FUSE unmount, stop writing)
+    gen_shutdown_broadcast.signal();
+    if cooldown_duration > Duration::ZERO {
+        info!(
+            "generators stopped, cooldown for {}s before full shutdown",
+            cooldown_duration.as_secs()
+        );
+        sleep(cooldown_duration).await;
+    }
+    // Now shut down everything else (blackholes, target, capture manager)
     shutdown_broadcast.signal_and_wait().await;
 
     // Await the capture manager task, if it exists, to ensure all data is
@@ -774,6 +791,7 @@ fn main() -> Result<(), Error> {
     };
 
     let warmup_duration = Duration::from_secs(args.warmup_duration_seconds.into());
+    let cooldown_duration = Duration::from_secs(args.cooldown_duration_seconds.into());
     // The maximum shutdown delay is shared between `inner_main` and this
     // function, hence the divide by two.
     let max_shutdown_delay = Duration::from_secs(args.max_shutdown_delay.into());
@@ -786,6 +804,7 @@ fn main() -> Result<(), Error> {
     let res = runtime.block_on(inner_main(
         experiment_duration,
         warmup_duration,
+        cooldown_duration,
         disable_inspector,
         config?,
     ));
@@ -823,6 +842,7 @@ generator: []
         let exit_code = inner_main(
             Duration::from_millis(2500),
             Duration::from_millis(5000),
+            Duration::ZERO,
             false,
             config.expect("Could not convert to valid Config"),
         )
