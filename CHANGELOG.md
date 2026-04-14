@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static log file and groups each second's worth of lines into a single block.
   In conjunction with block-based throttling, this enables realistic load
   patterns that replay the original log file's timing.
+- `metric_names`, `tag_names`, and `tag_values` in the `dogstatsd` generator now
+  support `{{X-Y}}` range patterns. Character ranges (`{{a-z}}`, `{{A-Z}}`) and
+  numeric ranges (`{{0-9}}`, `{{0-100}}`) can be embedded in strings. Numeric values
+  are left padded with `0` to ensure patterns are always the same length. Patterns are
+  expanded lazily in breadth-first order across all configured templates, capped
+  at 15,000 entries. This avoids enumerating large value sets in config while
+  preventing memory exhaustion from combinatorial explosions.
 
 ## [0.31.2]
 ## Changed

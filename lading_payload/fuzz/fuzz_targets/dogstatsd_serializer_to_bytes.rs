@@ -76,7 +76,7 @@ fuzz_target!(|input: Input| {
     let mut rng = SmallRng::from_seed(input.seed);
     let mut bytes = Vec::with_capacity(budget);
 
-    let mut serializer = match lading_payload::DogStatsD::new(input.config, &mut rng) {
+    let mut serializer = match lading_payload::DogStatsD::new(&input.config, &mut rng) {
         Ok(s) => s,
         Err(_) => return,
     };

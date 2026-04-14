@@ -215,14 +215,14 @@ mod test {
             let string_list: Vec<String> = (0..1_000)
                 .map(|i| format!("string_{i}"))
                 .collect();
-            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&string_list, 10_000).expect("valid patterns")));
             let tags_per_msg_range = ConfRange::Inclusive { min: 0, max: 25 };
             let tag_size_range = ConfRange::Inclusive { min: 3, max: 128 };
 
             let tag_list: Vec<String> = (0..1_000)
                 .map(|i| format!("string_{i}"))
                 .collect();
-            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&tag_list, 10_000).expect("valid patterns")));
             let generator =
                 tags::Generator::new(seed, tags_per_msg_range, tag_size_range, num_tagsets, str_pool, tag_pool, 1.0)
                     .expect("Tag generator to be valid");
@@ -341,12 +341,12 @@ mod test {
             let string_list: Vec<String> = (0..10_000)
                 .map(|i| format!("key_{i}"))
                 .collect();
-            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&string_list, 10_000).expect("valid patterns")));
 
             let tag_list: Vec<String> = (0..10_000)
                 .map(|i| format!("value_{i}"))
                 .collect();
-            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&tag_list, 10_000).expect("valid patterns")));
 
             let generator = tags::Generator::new(
                 seed,
@@ -390,12 +390,12 @@ mod test {
             let string_list: Vec<String> = (0..10_000)
                 .map(|i| format!("key_{i}"))
                 .collect();
-            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(string_list)));
+            let str_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&string_list, 10_000).expect("valid patterns")));
 
             let tag_list: Vec<String> = (0..10_000)
                 .map(|i| format!("value_{i}"))
                 .collect();
-            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(tag_list)));
+            let tag_pool = Rc::new(PoolKind::StringListPool(StringListPool::new(&tag_list, 10_000).expect("valid patterns")));
 
             let generator = tags::Generator::new(
                 seed,
