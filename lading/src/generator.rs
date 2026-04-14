@@ -205,9 +205,12 @@ impl Server {
     ) -> Result<Self, Error> {
         let srv = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
-            Inner::TcpRr(conf) => {
-                Self::TcpRr(tcp_rr::TcpRr::new(config.general, &conf, shutdown, sample_period))
-            }
+            Inner::TcpRr(conf) => Self::TcpRr(tcp_rr::TcpRr::new(
+                config.general,
+                &conf,
+                shutdown,
+                sample_period,
+            )),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
             Inner::Http(conf) => Self::Http(http::Http::new(config.general, conf, shutdown)?),
             Inner::SplunkHec(conf) => {

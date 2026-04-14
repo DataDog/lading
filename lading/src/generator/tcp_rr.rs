@@ -14,8 +14,8 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use mio::net::TcpStream;
@@ -98,9 +98,7 @@ impl TcpRr {
         shutdown: lading_signal::Watcher,
         sample_period: Duration,
     ) -> Self {
-        let metric_labels = MetricsBuilder::new("tcp_rr")
-            .with_id(general.id)
-            .build();
+        let metric_labels = MetricsBuilder::new("tcp_rr").with_id(general.id).build();
         Self {
             config: config.clone(),
             metric_labels,
@@ -155,7 +153,15 @@ impl TcpRr {
             let response_size = self.config.response_size;
             let no_delay = self.config.no_delay;
             let handle = thread::spawn_named(&format!("tcp_rr-client-{i}"), move || {
-                client_thread_main(addr, num_flows, request_size, response_size, no_delay, &flag, &tm[i as usize]);
+                client_thread_main(
+                    addr,
+                    num_flows,
+                    request_size,
+                    response_size,
+                    no_delay,
+                    &flag,
+                    &tm[i as usize],
+                );
             });
             worker_handles.push(handle);
         }
@@ -194,8 +200,7 @@ fn client_thread_main(
                 std_stream
                     .set_nonblocking(true)
                     .expect("failed to set nonblocking");
-                let mut stream =
-                    TcpStream::from_std(std_stream);
+                let mut stream = TcpStream::from_std(std_stream);
                 let token = Token(next_token);
                 next_token += 1;
                 poll.registry()
@@ -225,8 +230,7 @@ fn client_thread_main(
             let Some(fl) = flows.get_mut(token) else {
                 continue;
             };
-            let action =
-                handle_client_event(fl, &request_buf, &mut response_buf, metrics);
+            let action = handle_client_event(fl, &request_buf, &mut response_buf, metrics);
             flow::apply_action(action, token, &mut flows, poll.registry());
         }
     }

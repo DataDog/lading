@@ -2,7 +2,7 @@
 //!
 //! Each OS thread owns a [`ThreadMetrics`] struct containing plain `u64`
 //! counters behind [`UnsafeCell`]. Workers increment via [`ThreadCounter::add`].
-//! A dedicated metrics thread periodically snapshots all counters, computes deltas, 
+//! A dedicated metrics thread periodically snapshots all counters, computes deltas,
 //! and submits aggregated values to the `metrics` crate via `counter!()`.
 //!
 //! ## Safety

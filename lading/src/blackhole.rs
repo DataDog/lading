@@ -156,9 +156,12 @@ impl Server {
     ) -> Result<Self, Error> {
         let server = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)),
-            Inner::TcpRr(conf) => {
-                Self::TcpRr(tcp_rr::TcpRr::new(config.general, &conf, shutdown, sample_period))
-            }
+            Inner::TcpRr(conf) => Self::TcpRr(tcp_rr::TcpRr::new(
+                config.general,
+                &conf,
+                shutdown,
+                sample_period,
+            )),
             Inner::Datadog(conf) => {
                 Self::Datadog(datadog::Datadog::new(config.general, conf, shutdown))
             }

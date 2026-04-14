@@ -231,13 +231,7 @@ fn create_listener(
     }
 
     let (sockaddr, socklen) = socket_addr_to_raw(&binding_addr);
-    let ret = unsafe {
-        libc::bind(
-            fd,
-            (&raw const sockaddr).cast::<libc::sockaddr>(),
-            socklen,
-        )
-    };
+    let ret = unsafe { libc::bind(fd, (&raw const sockaddr).cast::<libc::sockaddr>(), socklen) };
     assert!(
         ret == 0,
         "failed to bind to {binding_addr}: {}",
@@ -383,7 +377,12 @@ fn server_thread_main(
 /// Set `TCP_NODELAY` on a mio [`TcpStream`] using the raw fd.
 fn set_nodelay_mio(stream: &TcpStream, no_delay: bool) {
     let fd = stream.as_raw_fd();
-    set_sock_opt(fd, libc::IPPROTO_TCP, libc::TCP_NODELAY, i32::from(no_delay));
+    set_sock_opt(
+        fd,
+        libc::IPPROTO_TCP,
+        libc::TCP_NODELAY,
+        i32::from(no_delay),
+    );
 }
 
 fn handle_server_event(

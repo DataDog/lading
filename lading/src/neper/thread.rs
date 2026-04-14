@@ -3,8 +3,8 @@
 //! Provides shutdown flag management, flow distribution, and thread
 //! spawning/joining utilities.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::thread::{self, JoinHandle};
 
 /// Shared shutdown flag. Set by the async side when `lading_signal` fires.
@@ -41,11 +41,7 @@ pub(crate) fn join_all<T>(handles: Vec<JoinHandle<T>>) -> Result<Vec<T>, ()> {
             Err(_) => had_panic = true,
         }
     }
-    if had_panic {
-        Err(())
-    } else {
-        Ok(results)
-    }
+    if had_panic { Err(()) } else { Ok(results) }
 }
 
 /// Spawn a named OS thread running `f`.
