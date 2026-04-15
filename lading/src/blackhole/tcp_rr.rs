@@ -117,8 +117,6 @@ enum ServerState {
 
 const LISTENER_TOKEN: Token = Token(0);
 
-
-
 impl TcpRr {
     /// Create a new [`TcpRr`] blackhole instance.
     #[must_use]
@@ -215,26 +213,63 @@ impl TcpRr {
         // Wait for all data threads to finish binding.
         // Use spawn_blocking so we don't block the tokio runtime.
         let rb = Arc::clone(&ready_barrier);
-        tokio::task::spawn_blocking(move || rb.wait()).await.expect("ready barrier join failed");
+        tokio::task::spawn_blocking(move || rb.wait())
+            .await
+            .expect("ready barrier join failed");
 
         // All data listeners are up. Open control port so the generator
         // can connect and know we're ready.
         let control_addr = SocketAddr::new(self.config.addr, self.config.control_port);
-        let control_listener = std::net::TcpListener::bind(control_addr)
-            .map_err(|source| Error::Bind { addr: control_addr, source: Box::new(source) })?;
+        let control_listener =
+            std::net::TcpListener::bind(control_addr).map_err(|source| Error::Bind {
+                addr: control_addr,
+                source: Box::new(source),
+            })?;
+        control_listener
+            .set_nonblocking(true)
+            .expect("failed to set control listener nonblocking");
         info!("control port listening on {control_addr}, waiting for generator");
-        let control_listener_clone = control_listener;
-        let (_conn, peer) = tokio::task::spawn_blocking(move || control_listener_clone.accept())
-            .await
-            .expect("control accept join failed")
-            .map_err(|source| Error::Bind { addr: control_addr, source: Box::new(source) })?;
-        info!("generator connected from {peer}, data threads running");
-
-        self.shutdown.recv().await;
-        info!("shutdown signal received");
-        shutdown_flag.store(true, Relaxed);
 
         handles.push(metrics_handle);
+
+        // Accept with shutdown awareness: poll accept in a loop.
+        let flag = Arc::clone(&shutdown_flag);
+        let shutdown_clone = self.shutdown.clone();
+        tokio::spawn(async move {
+            shutdown_clone.recv().await;
+            flag.store(true, Relaxed);
+        });
+        let mut generator_connected = false;
+        loop {
+            if shutdown_flag.load(Relaxed) {
+                info!("shutdown before generator connected");
+                break;
+            }
+            match control_listener.accept() {
+                Ok((_conn, peer)) => {
+                    info!("generator connected from {peer}, data threads running");
+                    generator_connected = true;
+                    break;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    return Err(Error::Bind {
+                        addr: control_addr,
+                        source: Box::new(e),
+                    });
+                }
+            }
+        }
+        drop(control_listener);
+
+        if generator_connected {
+            self.shutdown.recv().await;
+            info!("shutdown signal received");
+        }
+        shutdown_flag.store(true, Relaxed);
+
         thread::join_all(handles).map_err(|()| Error::ThreadPanicked)?;
 
         Ok(())

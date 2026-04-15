@@ -107,8 +107,6 @@ enum ClientState {
     RecvResponse,
 }
 
-
-
 impl TcpRr {
     /// Create a new [`TcpRr`] generator instance.
     #[must_use]
@@ -159,7 +157,9 @@ impl TcpRr {
             if shutdown_flag.load(Relaxed) {
                 return Err(Error::Io(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    format!("shutdown before blackhole control port {control_addr} became reachable"),
+                    format!(
+                        "shutdown before blackhole control port {control_addr} became reachable"
+                    ),
                 )));
             }
             match std::net::TcpStream::connect(control_addr) {
@@ -171,7 +171,9 @@ impl TcpRr {
                     if std::time::Instant::now() >= deadline {
                         return Err(Error::Io(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
-                            format!("blackhole control port {control_addr} not reachable after 5 minutes: {e}"),
+                            format!(
+                                "blackhole control port {control_addr} not reachable after 5 minutes: {e}"
+                            ),
                         )));
                     }
                     std::thread::sleep(Duration::from_millis(100));
