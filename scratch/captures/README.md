@@ -1,7 +1,7 @@
-# Capture System
+# Capture & Analysis System
 
 Offline correctness testing for the logs agent by capturing inputs (FUSE reads)
-and outputs (blackhole payloads), then running assertions offline.
+and outputs (blackhole payloads), then running configurable invariant checks.
 
 ## How It Works
 
@@ -27,9 +27,13 @@ block cache, then call `block_cache.read_at(cache_offset + offset, size)`.
 
 When `capture_path` is set in the `http` blackhole config, every decoded HTTP
 payload is logged as JSONL. A bounded `tokio::sync::mpsc::channel` (10K slots)
-connects the request handler to a tokio writer task.
+connects the request handler to a tokio writer task. The blackhole decompresses
+payloads (gzip, deflate, zstd) before capturing.
 
 Record fields: `relative_ms`, `compressed_bytes`, `payload` (decoded UTF-8).
+
+A `blackhole_capture_dropped` metric counter is incremented when the channel is
+full and a record is dropped.
 
 ### Timestamps
 
@@ -39,123 +43,104 @@ epoch. This is zero-aligned with the tick index (`relative_ms / 1000 ~ tick`),
 so captures from different runs are directly comparable without wall-clock
 offsets.
 
-## Running a Capture Test
+## Offline Analysis Tool (`lading-analysis`)
 
-```bash
-# Build and run with exerciser scripts (cat, tail, or agent mode)
-./scripts/run_capture_test.sh cat 60
-./scripts/run_capture_test.sh tail 60
-./scripts/run_capture_test.sh agent 60                          # minimal agent emulator
-./scripts/run_capture_test.sh agent 60 scripts/capture_test_happy.yaml  # custom config
+A separate binary (`lading-analysis`) reads both capture files, reconstructs
+inputs from the block cache, parses outputs, and runs configurable checks.
 
-# Run with the real DD agent
-./scripts/agent-test/run.sh 60
+### Analysis Config
 
-# Output lands in this directory
-cat scratch/captures/fuse_reads.jsonl
-cat scratch/captures/blackhole.jsonl
+```yaml
+inputs:
+  fuse_capture: scratch/captures/fuse_reads.jsonl
+  blackhole_capture: scratch/captures/blackhole.jsonl
+  lading_config: scripts/agent-test/lading_ascii.yaml
 
-# Run offline analysis
-cargo run --bin lading-analysis -- --config scripts/agent-test/analysis.yaml
-# Reconstructed data written to scratch/captures/analysis/
+output_dir: scratch/captures/analysis  # optional: dump reconstructed data
+
+checks:
+  - completeness:
+      min_ratio: 0.95
+  - fabrication:
+      max_count: 0
+  - duplication:
+      max_ratio: 0.01
+  - latency:
+      max_p99_ms: 10000  # optional: omit for informational only
 ```
 
-## Known Limitations
+### Input Reconstruction
 
-### Blackhole capture throughput at high load
+The tool always produces two representations:
 
-Each channel slot holds one `BlackholeCaptureRecord` including the full decoded
-payload as a `String`. At 5 MiB max payload size and 10K channel capacity, a
-full channel would consume ~50 GiB of memory. At high throughput (e.g., 500
-MiB/s input to the logs agent = ~100 payloads/s at 5 MiB each), the writer task
-must serialize and write ~500 MiB/s to disk. If it falls behind, memory grows
-fast.
+- **Raw reads** (`reconstructed_inputs_raw.txt`) — one entry per FUSE read with
+  exact timestamp, offset, size, and the actual bytes content. Shows exactly what
+  the agent received and when.
+- **Newline-delimited lines** (`reconstructed_inputs.txt`) — lines stitched
+  across read boundaries, each annotated with contributing reads and their
+  timestamps. Final partial lines are discarded (the agent's framer won't emit
+  them). Used by all correctness checks.
 
-For initial low-throughput correctness testing this is fine. For high-throughput
-use, options include:
+### Checks
 
-1. **Size the channel by memory, not count** — cap at e.g. 100 MiB total,
-   track cumulative payload size, drop when budget is exceeded.
-2. **Small channel** — reduce to ~20-50 slots (100-250 MiB worst case) and rely
-   on the writer keeping up.
-3. **Capture compressed payloads** — store the raw compressed HTTP body instead
-   of the decoded text. Much smaller per slot, eliminates the
-   `String::from_utf8_lossy().into_owned()` allocation, and the offline
-   validator can decompress later. Likely the best tradeoff.
+**Completeness** — fraction of unique input line hashes that appear in the output.
+Reports per-group breakdown. Fails if ratio < `min_ratio`.
 
-### Line uniqueness and cross-file overlap
+**Fabrication** — output lines whose hash doesn't match any input line. Shows up
+to 5 example fabricated lines. Fails if count > `max_count`.
 
-The block cache is cyclic — `read_at()` wraps offsets via modulo. Each file gets
-a random `cache_offset`, so different files read from different starting
-positions. However:
+**Duplication** — output lines that match the same input hash more than once.
+Only counts lines that matched an input (fabricated lines excluded). Fails if
+ratio > `max_ratio`.
 
-- **Single-file wrapping**: if `max_bytes_per_file < total_cache_size`, a single
-  file never wraps. This is the weaker (and sufficient) condition. The stronger
-  condition `total_cache_size > load_rate × experiment_duration` also works but
-  is more than needed since files rotate at `max_bytes_per_file`.
-- **Cross-file overlap**: two files with different random cache_offsets can read
-  from overlapping cache regions, producing identical lines. This means
-  content-hash matching can over-count completeness (a line from File A matches
-  output that came from File B).
-- **Mitigation for now**: use a cache much larger than
-  `concurrent_logs × max_bytes_per_file` to make overlap unlikely.
-- **Long-term fix**: prepend per-line unique IDs in the generator (see Future
-  Work).
+**Latency** — per-line latency from the last FUSE read contributing to the line
+to the blackhole receipt. Reports min, p50, p95, p99, max and a 1-second bucket
+histogram. Optionally fails if p99 > `max_p99_ms`. Informational if threshold
+omitted.
 
-### Shutdown ordering and flush behavior
+### CLI
 
-When lading shuts down, the FUSE mount, blackhole, and target all receive the
-shutdown signal simultaneously. The target (e.g., DD logs agent) may have
-buffered data in its pipeline — already read from FUSE but not yet POSTed to the
-blackhole. If the FUSE mount and blackhole tear down before the target finishes
-flushing, those in-flight lines appear as missed in the analysis.
+```bash
+# Human-readable output (exit code 0 if all pass, 1 if any fail)
+cargo run --bin lading-analysis -- --config analysis.yaml
 
-Observed behavior: the FUSE mount unmounts before the target's graceful shutdown
-completes, so any final flush attempt finds nothing to read.
+# JSON output for CI integration
+cargo run --bin lading-analysis -- --config analysis.yaml --json
+```
 
-Options to investigate:
-- **Shutdown reordering**: SIGTERM the target first, wait for it to exit, then
-  tear down generators and blackholes. Lading already SIGTERMs the target and
-  waits, but generators/blackholes shut down concurrently.
-- **Drain period**: stop the generator (freeze the model, no new bytes) but keep
-  the FUSE mount and blackhole alive for a configurable cooldown, then shut down.
-- **Analysis-side margin**: exclude input lines from the last N seconds of the
-  experiment when computing completeness, since they may be in-flight.
+### Adding Custom Checks
 
-### Reconstructed input timestamps are collapsed
+The `Check` trait in `lading_analysis::check` is public and extensible. To add a
+new check:
+1. Implement `Check` (name + check method taking `&AnalysisContext`)
+2. Add a config variant to `CheckConfig` enum
+3. Register in `from_config()` match
 
-The input reconstruction accumulates all FUSE reads per file into one contiguous
-range and splits into lines once (to avoid partial-line artifacts at read
-boundaries). A side effect is that all lines from a file get the timestamp of the
-earliest read, not the read that actually contained them. This means
-`first_seen_ms` in `reconstructed_inputs.txt` is inaccurate — all lines show the
-same time even though the file was read over many seconds.
+The `AnalysisContext` provides raw reads, reconstructed lines, output lines, and
+raw FUSE/blackhole events for timing or ordering checks.
 
-Fix: after splitting lines from the full content, walk the individual read
-records to assign each line the timestamp of the read whose byte range covers it.
+## Running Tests
 
-### Hash collision risk in analysis tool (resolved)
+```bash
+# Exerciser scripts (no real agent needed)
+./scripts/run_capture_test.sh cat 60
+./scripts/run_capture_test.sh tail 60
+./scripts/run_capture_test.sh agent 60
 
-The analysis tool originally used `FxHasher` (`u64`) for line matching — a
-non-cryptographic hash prone to collisions. This was replaced with SHA-256
-(`[u8; 32]`) using the `sha2` crate, which is collision-resistant.
+# Real DD agent test (requires Docker)
+./scripts/agent-test/run.sh 60                                          # ascii variant
+./scripts/agent-test/run.sh 60 scripts/agent-test/lading_templated_json.yaml  # templated JSON
 
-### Agent line-splitting at read boundaries (resolved)
+# Standalone analysis on existing captures
+cargo run --bin lading-analysis -- --config scripts/agent-test/analysis.yaml
+```
 
-Previously, without `direct_io`, the kernel page cache coalesced reads and the
-analysis tool split individual reads into lines, producing partial-line
-fragments that didn't match output messages (~65 fabricated lines in early
-testing). This was resolved by:
-1. `direct_io: true` — every agent read hits FUSE directly (no kernel coalescing)
-2. `newline_delimited` reconstruction mode — stitches lines across read
-   boundaries, discards final partial lines
-With both enabled, fabrication dropped to 0 in real agent testing.
-
-### FUSE capture BufWriter sizing
-
-The FUSE writer thread uses `BufWriter::new()` (8 KB default buffer). This is
-fine for the small `read` records but could be tuned with
-`BufWriter::with_capacity()` if write syscall overhead becomes measurable.
+Output files land in `scratch/captures/`:
+- `fuse_reads.jsonl` — FUSE read capture
+- `blackhole.jsonl` — blackhole payload capture
+- `analysis/reconstructed_inputs_raw.txt` — per-read content with timestamps
+- `analysis/reconstructed_inputs.txt` — per-line content with read annotations
+- `analysis/extracted_outputs.txt` — output messages with timestamps
 
 ## Architecture Decisions
 
@@ -184,10 +169,10 @@ file descriptors on the mount. The target keeps reading, the unmount hangs, and
 the FUSE handler continues serving reads for the entire cooldown + shutdown.
 
 **Decision:** On the generator shutdown signal, freeze the model (`advance_time`
-is skipped, files stop growing) but keep the FUSE mount alive. The target
-naturally reaches EOF, its pipeline drains, and it sends remaining data to the
-blackhole. On the main shutdown signal (after cooldown), the mount is unmounted
-and the target is killed.
+is skipped via a frozen tick cap, files stop growing) but keep the FUSE mount
+alive. The target naturally reaches EOF, its pipeline drains, and it sends
+remaining data to the blackhole. On the main shutdown signal (after cooldown),
+the mount is unmounted and the target is killed.
 
 **Key insight:** The kernel won't complete a FUSE unmount while any process has
 open FDs on the mount. You cannot use unmounting to "stop" a FUSE generator
@@ -204,8 +189,72 @@ separate signal pairs: `gen_shutdown` (freeze generators) and `shutdown`
 (everything else). After the experiment duration, generators freeze, then after
 the cooldown period, everything else shuts down.
 
+**Why the cooldown is still needed after freeze:** The DD logs agent batches logs
+on a ~5-second timer and does not flush early when it reaches EOF. After freeze,
+the agent has up to one batch interval of buffered data. Without cooldown, the
+blackhole dies before the agent sends its last batch. A cooldown of ~10s (two
+batch cycles) is the minimum safe value.
+
 **Default behavior preserved:** With cooldown=0 (default), both signals fire
 back-to-back — identical to the previous single-signal shutdown.
+
+## Known Limitations
+
+### Blackhole capture throughput at high load
+
+Each channel slot holds one `BlackholeCaptureRecord` including the full decoded
+payload as a `String`. At 5 MiB max payload size and 10K channel capacity, a
+full channel would consume ~50 GiB of memory. At high throughput (e.g., 500
+MiB/s input = ~100 payloads/s at 5 MiB each), the writer task must serialize
+and write ~500 MiB/s to disk.
+
+Options for high-throughput use:
+1. **Size the channel by memory, not count** — cap at e.g. 100 MiB total.
+2. **Small channel** — reduce to ~20-50 slots (100-250 MiB worst case).
+3. **Capture compressed payloads** — store the raw compressed HTTP body instead
+   of decoded text. Much smaller per slot, and the offline validator can
+   decompress later. Likely the best tradeoff.
+
+### Line uniqueness and cross-file overlap
+
+The block cache is cyclic — `read_at()` wraps offsets via modulo. Each file gets
+a random `cache_offset`. Two files can read from overlapping cache regions,
+producing identical lines. This means content-hash matching can over-count
+completeness (a line from File A matches output that came from File B).
+
+**Mitigation:** use a cache much larger than `concurrent_logs × max_bytes_per_file`.
+
+**Long-term fix:** prepend per-line unique IDs in the generator (see Future Work).
+
+### Block cache determinism across builds
+
+The block cache is rebuilt from the same seed for offline analysis. `SmallRng`
+is not portable across `rand` crate versions. If the analysis tool links a
+different `rand` version than lading, the reconstructed cache diverges silently.
+Pin `rand` versions to avoid this.
+
+### Output parser only supports JSON intake format
+
+The blackhole capture stores the raw decoded HTTP payload. The output parser
+assumes DD logs agent JSON format (`[{"message": "..."}]`). Agents using
+protobuf encoding will produce payloads the parser cannot read.
+
+### FUSE capture BufWriter sizing
+
+The FUSE writer thread uses `BufWriter::new()` (8 KB default buffer). This is
+fine for the small `read` records but could be tuned with
+`BufWriter::with_capacity()` if write syscall overhead becomes measurable.
+
+## Resolved Issues
+
+- **Hash collision risk** — originally used `FxHasher` (`u64`); replaced with
+  SHA-256 (`[u8; 32]`) for collision-resistant content matching.
+- **Agent line-splitting at read boundaries** — resolved by `direct_io: true`
+  (1:1 FUSE reads) + newline-delimited reconstruction (stitches lines across
+  read boundaries, discards partial lines). Fabrication dropped to 0.
+- **Shutdown flush behavior** — resolved by ADR-2 (freeze model, keep mount
+  alive) + ADR-3 (cooldown period keeps blackhole alive for agent flush).
+  Completeness reached 100% with 30s cooldown.
 
 ## Future Work
 
@@ -213,6 +262,10 @@ back-to-back — identical to the previous single-signal shutdown.
   is negligible at target throughput.
 - **Per-line unique IDs** — add unique line identifiers to the payload to
   eliminate content-hash ambiguity from block cache wrapping.
-- **User-defined invariant checks** — YAML-driven framework for custom
-  assertions (timing, ordering, aggregation). The `Check` trait in
-  `lading_analysis` is designed for this.
+- **Protobuf intake format** — extend the output parser to decode protobuf
+  payloads in addition to JSON, for agents that use proto encoding.
+- **YAML-driven check discovery** — the `Check` trait and framework are
+  production-ready; what's missing is dynamic registration so users can add
+  checks via config without modifying Rust code.
+- **Unit tests for checks** — check logic is pure functions operating on
+  `AnalysisContext`; add tests with synthetic data for edge cases.

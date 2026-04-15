@@ -16,8 +16,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::Error;
-use crate::config::ReconstructionMode;
-use crate::context::{ContentHash, RawRead, ReadContribution, ReconstructedInput, ReconstructedLine};
+use crate::context::{ContentHash, RawRead, ReadContribution, ReconstructedLine};
 
 /// A parsed FUSE capture record.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -169,7 +168,9 @@ fn extract_logrotate_config(lading_config_path: &Path) -> Result<LogrotateFsConf
     ))
 }
 
-/// Reconstruct inputs from FUSE capture and lading config.
+/// Reconstruct inputs from FUSE capture and lading config. Always produces
+/// both raw reads (per-FUSE-read with hash and timestamp) and newline-delimited
+/// lines (stitched across read boundaries).
 ///
 /// # Errors
 ///
@@ -178,8 +179,7 @@ fn extract_logrotate_config(lading_config_path: &Path) -> Result<LogrotateFsConf
 pub fn reconstruct(
     fuse_capture_path: &Path,
     lading_config_path: &Path,
-    mode: ReconstructionMode,
-) -> Result<(ReconstructedInput, Vec<FuseEvent>), Error> {
+) -> Result<(Vec<RawRead>, Vec<ReconstructedLine>, Vec<FuseEvent>), Error> {
     let lr_config = extract_logrotate_config(lading_config_path)?;
 
     let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::from_seed(lr_config.seed);
@@ -200,9 +200,7 @@ pub fn reconstruct(
 
     let mut files: FxHashMap<usize, FileInfo> = FxHashMap::default();
     let mut events: Vec<FuseEvent> = Vec::new();
-    // Per-inode read records for newline_delimited mode
     let mut reads_by_inode: FxHashMap<usize, Vec<ReadRecord>> = FxHashMap::default();
-    // Raw reads for raw mode
     let mut raw_reads: Vec<RawRead> = Vec::new();
 
     for line in reader.lines() {
@@ -250,34 +248,31 @@ pub fn reconstruct(
                     continue;
                 };
 
-                match mode {
-                    ReconstructionMode::Raw => {
-                        let data = block_cache.read_at(
-                            file_info.cache_offset + offset,
-                            *size as usize,
-                        );
-                        raw_reads.push(RawRead {
-                            inode: *inode,
-                            group_id: *group_id,
-                            offset: *offset,
-                            size: *size,
-                            relative_ms: *relative_ms,
-                            hash: sha256(&data),
-                        });
-                    }
-                    ReconstructionMode::NewlineDelimited => {
-                        reads_by_inode
-                            .entry(*inode)
-                            .or_default()
-                            .push(ReadRecord {
-                                offset: *offset,
-                                size: *size,
-                                relative_ms: *relative_ms,
-                                group_id: *group_id,
-                                cache_offset: file_info.cache_offset,
-                            });
-                    }
-                }
+                // Always collect raw reads
+                let data = block_cache.read_at(
+                    file_info.cache_offset + offset,
+                    *size as usize,
+                );
+                raw_reads.push(RawRead {
+                    inode: *inode,
+                    group_id: *group_id,
+                    offset: *offset,
+                    size: *size,
+                    relative_ms: *relative_ms,
+                    content: String::from_utf8_lossy(&data).into_owned(),
+                });
+
+                // Always collect per-inode reads for line reconstruction
+                reads_by_inode
+                    .entry(*inode)
+                    .or_default()
+                    .push(ReadRecord {
+                        offset: *offset,
+                        size: *size,
+                        relative_ms: *relative_ms,
+                        group_id: *group_id,
+                        cache_offset: file_info.cache_offset,
+                    });
             }
             FuseEvent::BlockCacheMeta { .. } | FuseEvent::FileDeleted { .. } => {}
         }
@@ -285,15 +280,9 @@ pub fn reconstruct(
         events.push(event);
     }
 
-    let input = match mode {
-        ReconstructionMode::Raw => ReconstructedInput::Raw(raw_reads),
-        ReconstructionMode::NewlineDelimited => {
-            let lines = reconstruct_lines(&block_cache, reads_by_inode);
-            ReconstructedInput::NewlineDelimited(lines)
-        }
-    };
+    let lines = reconstruct_lines(&block_cache, reads_by_inode);
 
-    Ok((input, events))
+    Ok((raw_reads, lines, events))
 }
 
 /// Reconstruct newline-delimited lines from per-file reads.

@@ -1,7 +1,7 @@
 //! The analysis context: parsed and reconstructed data from both capture files.
 
 use crate::Error;
-use crate::config::{AnalysisConfig, ReconstructionMode};
+use crate::config::AnalysisConfig;
 use crate::input::{self, FuseEvent};
 use crate::output::{self, BlackholeEvent};
 
@@ -20,7 +20,7 @@ pub struct ReadContribution {
 }
 
 /// A single FUSE read with its raw bytes hash and timestamp (raw mode).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RawRead {
     /// Inode of the file.
     pub inode: usize,
@@ -32,8 +32,8 @@ pub struct RawRead {
     pub size: u64,
     /// Milliseconds since lading epoch.
     pub relative_ms: u64,
-    /// SHA-256 hash of the raw bytes.
-    pub hash: ContentHash,
+    /// The actual bytes returned by this read.
+    pub content: String,
 }
 
 /// A line reconstructed from one or more reads (newline_delimited mode).
@@ -49,15 +49,6 @@ pub struct ReconstructedLine {
     pub contributions: Vec<ReadContribution>,
 }
 
-/// Input representation — depends on reconstruction mode.
-#[derive(Debug)]
-pub enum ReconstructedInput {
-    /// One entry per FUSE read, with raw byte hash and exact timestamp.
-    Raw(Vec<RawRead>),
-    /// One entry per line, annotated with contributing reads.
-    NewlineDelimited(Vec<ReconstructedLine>),
-}
-
 /// A line extracted from a blackhole payload.
 #[derive(Debug, Clone)]
 pub struct OutputLine {
@@ -69,11 +60,14 @@ pub struct OutputLine {
     pub relative_ms: u64,
 }
 
-/// All data needed by checks.
+/// All data needed by checks. Always contains both raw reads and reconstructed
+/// lines — raw for human inspection, lines for correctness checks.
 #[derive(Debug)]
 pub struct AnalysisContext {
-    /// Reconstructed inputs.
-    pub input: ReconstructedInput,
+    /// One entry per FUSE read, with raw byte hash and exact timestamp.
+    pub raw_reads: Vec<RawRead>,
+    /// Lines reconstructed across read boundaries, for correctness checks.
+    pub lines: Vec<ReconstructedLine>,
     /// All output lines in order of receipt.
     pub output_lines: Vec<OutputLine>,
     /// Raw FUSE events (for future checks).
@@ -90,19 +84,17 @@ impl AnalysisContext {
     /// Returns an error if files cannot be read or parsed, or if the block
     /// cache cannot be reconstructed.
     pub fn build(config: &AnalysisConfig) -> Result<Self, Error> {
-        let mode = config.reconstruction.unwrap_or(ReconstructionMode::Raw);
-
-        let (input, fuse_events) = input::reconstruct(
+        let (raw_reads, lines, fuse_events) = input::reconstruct(
             &config.inputs.fuse_capture,
             &config.inputs.lading_config,
-            mode,
         )?;
 
         let (output_lines, blackhole_events) =
             output::parse(&config.inputs.blackhole_capture)?;
 
         Ok(Self {
-            input,
+            raw_reads,
+            lines,
             output_lines,
             fuse_events,
             blackhole_events,

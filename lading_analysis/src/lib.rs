@@ -2,7 +2,7 @@
 //!
 //! Reconstructs input lines from FUSE read captures, parses output lines from
 //! blackhole captures, and runs configurable invariant checks (completeness,
-//! fabrication, duplication).
+//! fabrication, duplication, latency).
 
 pub mod check;
 pub mod config;
@@ -11,7 +11,7 @@ pub mod input;
 pub mod output;
 
 use config::AnalysisConfig;
-use context::{AnalysisContext, ReconstructedInput};
+use context::AnalysisContext;
 
 /// Errors from the analysis pipeline.
 #[derive(thiserror::Error, Debug)]
@@ -64,63 +64,59 @@ fn dump_reconstructed(
 ) -> Result<(), Error> {
     use std::io::Write;
 
-    match &ctx.input {
-        ReconstructedInput::Raw(reads) => {
-            let mut f = std::io::BufWriter::new(
-                std::fs::File::create(dir.join("reconstructed_inputs_raw.txt"))?,
-            );
-            for r in reads {
-                let short_hash: String = r.hash.iter().take(8).map(|b| format!("{b:02x}")).collect();
-                writeln!(
-                    f,
-                    "[{ms}ms inode={ino} group={g} offset={o} size={s}] sha256={h}...",
-                    ms = r.relative_ms,
-                    ino = r.inode,
-                    g = r.group_id,
-                    o = r.offset,
-                    s = r.size,
-                    h = short_hash,
-                )?;
-            }
-            f.flush()?;
-            eprintln!(
-                "Wrote {} raw reads to {}/reconstructed_inputs_raw.txt",
-                reads.len(),
-                dir.display()
-            );
-        }
-        ReconstructedInput::NewlineDelimited(lines) => {
-            let mut f = std::io::BufWriter::new(
-                std::fs::File::create(dir.join("reconstructed_inputs.txt"))?,
-            );
-            for line in lines {
-                let first_ms = line.contributions.first().map_or(0, |c| c.relative_ms);
-                let last_ms = line.contributions.last().map_or(0, |c| c.relative_ms);
-                let reads = line.contributions.len();
-                if first_ms == last_ms {
-                    writeln!(
-                        f,
-                        "[{first_ms}ms group={g} reads={reads}] {text}",
-                        g = line.group_id,
-                        text = line.text,
-                    )?;
-                } else {
-                    writeln!(
-                        f,
-                        "[{first_ms}ms..{last_ms}ms group={g} reads={reads}] {text}",
-                        g = line.group_id,
-                        text = line.text,
-                    )?;
-                }
-            }
-            f.flush()?;
-            eprintln!(
-                "Wrote {} lines to {}/reconstructed_inputs.txt",
-                lines.len(),
-                dir.display()
-            );
+    // Always write raw reads
+    let mut f = std::io::BufWriter::new(
+        std::fs::File::create(dir.join("reconstructed_inputs_raw.txt"))?,
+    );
+    for r in &ctx.raw_reads {
+        writeln!(
+            f,
+            "[{ms}ms inode={ino} group={g} offset={o} size={s}] {content}",
+            ms = r.relative_ms,
+            ino = r.inode,
+            g = r.group_id,
+            o = r.offset,
+            s = r.size,
+            content = r.content,
+        )?;
+    }
+    f.flush()?;
+    eprintln!(
+        "Wrote {} raw reads to {}/reconstructed_inputs_raw.txt",
+        ctx.raw_reads.len(),
+        dir.display()
+    );
+
+    // Always write reconstructed lines
+    let mut f = std::io::BufWriter::new(
+        std::fs::File::create(dir.join("reconstructed_inputs.txt"))?,
+    );
+    for line in &ctx.lines {
+        let first_ms = line.contributions.first().map_or(0, |c| c.relative_ms);
+        let last_ms = line.contributions.last().map_or(0, |c| c.relative_ms);
+        let reads = line.contributions.len();
+        if first_ms == last_ms {
+            writeln!(
+                f,
+                "[{first_ms}ms group={g} reads={reads}] {text}",
+                g = line.group_id,
+                text = line.text,
+            )?;
+        } else {
+            writeln!(
+                f,
+                "[{first_ms}ms..{last_ms}ms group={g} reads={reads}] {text}",
+                g = line.group_id,
+                text = line.text,
+            )?;
         }
     }
+    f.flush()?;
+    eprintln!(
+        "Wrote {} lines to {}/reconstructed_inputs.txt",
+        ctx.lines.len(),
+        dir.display()
+    );
 
     // Write extracted output messages
     let mut f = std::io::BufWriter::new(

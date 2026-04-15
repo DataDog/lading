@@ -3,7 +3,7 @@
 use rustc_hash::FxHashMap;
 
 use super::{Check, CheckResult, input_line_hashes};
-use crate::context::{AnalysisContext, ContentHash, ReconstructedInput};
+use crate::context::{AnalysisContext, ContentHash};
 
 /// Checks that duplicated output lines stay below `max_ratio` of total output.
 pub(crate) struct Duplication {
@@ -16,15 +16,6 @@ impl Check for Duplication {
     }
 
     fn check(&self, ctx: &AnalysisContext) -> CheckResult {
-        if matches!(&ctx.input, ReconstructedInput::Raw(_)) {
-            return CheckResult {
-                name: self.name().into(),
-                passed: false,
-                summary: "raw mode: line-level checks require newline_delimited reconstruction".into(),
-                details: vec![],
-            };
-        }
-
         if ctx.output_lines.is_empty() {
             return CheckResult {
                 name: self.name().into(),
@@ -34,7 +25,7 @@ impl Check for Duplication {
             };
         }
 
-        let input_hashes = input_line_hashes(&ctx.input);
+        let input_hashes = input_line_hashes(ctx);
 
         let mut output_counts: FxHashMap<ContentHash, u64> = FxHashMap::default();
         for ol in &ctx.output_lines {

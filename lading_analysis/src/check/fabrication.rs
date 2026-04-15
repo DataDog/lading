@@ -1,7 +1,7 @@
 //! Fabrication check: output lines that don't match any input line.
 
 use super::{Check, CheckResult, input_line_hashes};
-use crate::context::{AnalysisContext, ReconstructedInput};
+use crate::context::AnalysisContext;
 
 /// Checks that at most `max_count` output lines have no matching input line.
 pub(crate) struct Fabrication {
@@ -14,16 +14,7 @@ impl Check for Fabrication {
     }
 
     fn check(&self, ctx: &AnalysisContext) -> CheckResult {
-        let input_hashes = input_line_hashes(&ctx.input);
-
-        if matches!(&ctx.input, ReconstructedInput::Raw(_)) {
-            return CheckResult {
-                name: self.name().into(),
-                passed: false,
-                summary: "raw mode: line-level checks require newline_delimited reconstruction".into(),
-                details: vec![],
-            };
-        }
+        let input_hashes = input_line_hashes(ctx);
 
         let mut fabricated_count: u64 = 0;
         let mut examples: Vec<String> = Vec::new();

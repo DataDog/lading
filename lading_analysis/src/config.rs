@@ -12,9 +12,6 @@ pub struct AnalysisConfig {
     /// Optional directory to write reconstructed data for human inspection.
     #[serde(default)]
     pub output_dir: Option<PathBuf>,
-    /// Input reconstruction mode. Default: raw.
-    #[serde(default)]
-    pub reconstruction: Option<ReconstructionMode>,
     /// Checks to run.
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub checks: Vec<CheckConfig>,
@@ -32,16 +29,6 @@ pub struct Inputs {
     pub lading_config: PathBuf,
 }
 
-/// How to reconstruct inputs from FUSE read captures.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReconstructionMode {
-    /// One entry per FUSE read with raw byte hash and exact timestamp.
-    Raw,
-    /// Split into newline-delimited lines, each annotated with contributing reads.
-    NewlineDelimited,
-}
-
 /// A single check configuration entry.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +39,8 @@ pub enum CheckConfig {
     Fabrication(FabricationParams),
     /// Duplication check: output lines matching the same input more than once.
     Duplication(DuplicationParams),
+    /// Latency distribution check: measures per-line latency from FUSE read to blackhole receipt.
+    Latency(LatencyParams),
 }
 
 /// Parameters for the completeness check.
@@ -76,4 +65,14 @@ pub struct FabricationParams {
 pub struct DuplicationParams {
     /// Maximum fraction of output lines that are duplicates (0.0 to 1.0).
     pub max_ratio: f64,
+}
+
+/// Parameters for the latency distribution check.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LatencyParams {
+    /// If set, fail when the p99 latency exceeds this threshold (milliseconds).
+    /// If omitted, the check is informational (always passes).
+    #[serde(default)]
+    pub max_p99_ms: Option<u64>,
 }

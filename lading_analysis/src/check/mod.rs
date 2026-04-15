@@ -1,17 +1,15 @@
 //! Invariant check framework.
-//!
-//! Each check implements the [`Check`] trait and is constructed from its YAML
-//! config parameters.
 
 mod completeness;
 mod duplication;
 mod fabrication;
+mod latency;
 
 use rustc_hash::FxHashSet;
 
 use crate::Error;
 use crate::config::CheckConfig;
-use crate::context::{AnalysisContext, ContentHash, ReconstructedInput};
+use crate::context::{AnalysisContext, ContentHash};
 
 /// Result of running a single check.
 #[derive(Debug)]
@@ -34,17 +32,9 @@ pub trait Check {
     fn check(&self, ctx: &AnalysisContext) -> CheckResult;
 }
 
-/// Extract the set of content hashes from the input representation.
-/// Only `NewlineDelimited` mode produces line-level hashes suitable for
-/// comparison against output messages. `Raw` mode returns an empty set
-/// (raw read hashes don't correspond to individual log lines).
-pub(crate) fn input_line_hashes(input: &ReconstructedInput) -> FxHashSet<ContentHash> {
-    match input {
-        ReconstructedInput::NewlineDelimited(lines) => {
-            lines.iter().map(|l| l.hash).collect()
-        }
-        ReconstructedInput::Raw(_) => FxHashSet::default(),
-    }
+/// Extract the set of content hashes from reconstructed input lines.
+pub(crate) fn input_line_hashes(ctx: &AnalysisContext) -> FxHashSet<ContentHash> {
+    ctx.lines.iter().map(|l| l.hash).collect()
 }
 
 /// Build check instances from the config entries.
@@ -69,6 +59,11 @@ pub fn from_config(configs: &[CheckConfig]) -> Result<Vec<Box<dyn Check>>, Error
             CheckConfig::Duplication(params) => {
                 checks.push(Box::new(duplication::Duplication {
                     max_ratio: params.max_ratio,
+                }));
+            }
+            CheckConfig::Latency(params) => {
+                checks.push(Box::new(latency::Latency {
+                    max_p99_ms: params.max_p99_ms,
                 }));
             }
         }
