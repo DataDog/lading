@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated dependencies
 
 ## Added
+- Added support for `Histogram`, `ExponentialHistogram`, and `Summary` metric
+  types to the OpenTelemetry metrics payload generator. Each type is generated
+  with valid structure (bucket invariants, quantile ordering, three-way count
+  partitioning) and re-randomized per tick so successive payloads carry varied
+  data. Histogram supports optional `min`/`max` fields; `ExponentialHistogram`
+  varies `zero_threshold`; `Summary` randomises across five common quantile
+  configurations.
 - Added new `!concat` generator to the `templated_json` payload generator.
 - Use `mise` for tooling management
 - Added new `StaticTimestamped` payload generator that parses timestamps from a
