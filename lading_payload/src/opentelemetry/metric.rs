@@ -353,6 +353,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     /// * Timestamps advance monotonically based on internal tick counter
     ///   starting at epoch
     /// * Each call advances the tick counter by a random amount (1-60)
+    #[allow(clippy::too_many_lines)]
     fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,

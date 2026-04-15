@@ -129,6 +129,7 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     type Output = Metric;
     type Error = GeneratorError;
 
+    #[allow(clippy::too_many_lines)]
     fn generate<R>(
         &'a mut self,
         rng: &mut R,
