@@ -14,7 +14,7 @@
 //! `connections_failed`: Failed connection attempts
 
 use std::io::{Read, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -49,12 +49,19 @@ fn default_control_port() -> u16 {
     12866
 }
 
+fn default_data_port() -> u16 {
+    12867
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_rr` generator.
 pub struct Config {
-    /// The address of the `tcp_rr` server to connect to.
+    /// The IP address of the `tcp_rr` server.
     pub addr: String,
+    /// Data port for flow connections. Default 12867.
+    #[serde(default = "default_data_port")]
+    pub data_port: u16,
     /// Control port for startup synchronization with the blackhole. Default 12866.
     #[serde(default = "default_control_port")]
     pub control_port: u16,
@@ -130,18 +137,13 @@ impl TcpRr {
     ///
     /// Panics if `addr` cannot be resolved to a socket address.
     pub async fn spin(self) -> Result<(), Error> {
-        let addr = self
-            .config
-            .addr
-            .to_socket_addrs()
-            .expect("invalid addr")
-            .next()
-            .expect("no socket addr resolved");
+        let ip: std::net::IpAddr = self.config.addr.parse().expect("invalid addr");
+        let data_addr = SocketAddr::new(ip, self.config.data_port);
+        let control_addr = SocketAddr::new(ip, self.config.control_port);
 
         let shutdown_flag = thread::new_shutdown_flag();
 
         // Wait for the blackhole to be ready by connecting to its control port.
-        let control_addr = SocketAddr::new(addr.ip(), self.config.control_port);
         info!("waiting for blackhole control port at {control_addr}");
         let deadline = std::time::Instant::now() + Duration::from_secs(300);
         {
@@ -207,7 +209,7 @@ impl TcpRr {
             let no_delay = self.config.no_delay;
             let handle = thread::spawn_named(&format!("tcp_rr-client-{i}"), move || {
                 client_thread_main(
-                    addr,
+                    data_addr,
                     thread_flows,
                     request_size,
                     response_size,

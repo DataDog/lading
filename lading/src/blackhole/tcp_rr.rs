@@ -46,6 +46,10 @@ fn default_control_port() -> u16 {
     12866
 }
 
+fn default_data_port() -> u16 {
+    12867
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -54,8 +58,11 @@ const fn default_true() -> bool {
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_rr` blackhole.
 pub struct Config {
-    /// Address to bind the listener on.
-    pub binding_addr: SocketAddr,
+    /// IP address to bind on.
+    pub addr: std::net::IpAddr,
+    /// Data port for flow connections. Default 12867.
+    #[serde(default = "default_data_port")]
+    pub data_port: u16,
     /// Control port for startup synchronization with the generator. Default 12866.
     #[serde(default = "default_control_port")]
     pub control_port: u16,
@@ -180,7 +187,7 @@ impl TcpRr {
 
         let mut handles = Vec::with_capacity(num_threads as usize);
         for i in 0..num_threads {
-            let binding_addr = self.config.binding_addr;
+            let binding_addr = SocketAddr::new(self.config.addr, self.config.data_port);
             let request_size = self.config.request_size.get();
             let response_size = self.config.response_size.get();
             let no_delay = self.config.no_delay;
@@ -212,7 +219,7 @@ impl TcpRr {
 
         // All data listeners are up. Open control port so the generator
         // can connect and know we're ready.
-        let control_addr = SocketAddr::new(self.config.binding_addr.ip(), self.config.control_port);
+        let control_addr = SocketAddr::new(self.config.addr, self.config.control_port);
         let control_listener = std::net::TcpListener::bind(control_addr)
             .map_err(|source| Error::Bind { addr: control_addr, source: Box::new(source) })?;
         info!("control port listening on {control_addr}, waiting for generator");
