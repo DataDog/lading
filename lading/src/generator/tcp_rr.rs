@@ -42,12 +42,19 @@ const fn default_true() -> bool {
     true
 }
 
+fn default_control_port() -> u16 {
+    12866
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 /// Configuration for the `tcp_rr` generator.
 pub struct Config {
     /// The address of the `tcp_rr` server to connect to.
     pub addr: String,
+    /// Control port for startup synchronization with the blackhole. Default 12866.
+    #[serde(default = "default_control_port")]
+    pub control_port: u16,
     /// Number of OS threads (neper -T). Default 1.
     #[serde(default = "default_one")]
     pub threads: u16,
@@ -90,6 +97,8 @@ enum ClientState {
     RecvResponse,
 }
 
+
+
 impl TcpRr {
     /// Create a new [`TcpRr`] generator instance.
     #[must_use]
@@ -127,6 +136,43 @@ impl TcpRr {
             .expect("no socket addr resolved");
 
         let shutdown_flag = thread::new_shutdown_flag();
+
+        // Wait for the blackhole to be ready by connecting to its control port.
+        let control_addr = SocketAddr::new(addr.ip(), self.config.control_port);
+        info!("waiting for blackhole control port at {control_addr}");
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        {
+            let flag = Arc::clone(&shutdown_flag);
+            let shutdown = self.shutdown.clone();
+            // Bridge lading shutdown signal to the flag so the retry loop can check it.
+            tokio::spawn(async move {
+                shutdown.recv().await;
+                flag.store(true, Relaxed);
+            });
+        }
+        loop {
+            if shutdown_flag.load(Relaxed) {
+                return Err(Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("shutdown before blackhole control port {control_addr} became reachable"),
+                )));
+            }
+            match std::net::TcpStream::connect(control_addr) {
+                Ok(_conn) => {
+                    info!("blackhole ready, starting flows");
+                    break;
+                }
+                Err(e) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(Error::Io(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!("blackhole control port {control_addr} not reachable after 5 minutes: {e}"),
+                        )));
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
         let flow_dist = thread::distribute_flows(self.config.flows, self.config.threads);
 
         let thread_metrics = Arc::new(

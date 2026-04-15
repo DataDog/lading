@@ -39,6 +39,10 @@ fn default_one_usize() -> usize {
     1
 }
 
+fn default_control_port() -> u16 {
+    12866
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -49,6 +53,9 @@ const fn default_true() -> bool {
 pub struct Config {
     /// Address to bind the listener on.
     pub binding_addr: SocketAddr,
+    /// Control port for startup synchronization with the generator. Default 12866.
+    #[serde(default = "default_control_port")]
+    pub control_port: u16,
     /// Number of OS server threads. Default 1. When > 1, uses `SO_REUSEPORT`
     /// with an eBPF program for load balancing
     #[serde(default = "default_one")]
@@ -100,6 +107,8 @@ enum ServerState {
 
 const LISTENER_TOKEN: Token = Token(0);
 
+
+
 impl TcpRr {
     /// Create a new [`TcpRr`] blackhole instance.
     #[must_use]
@@ -129,6 +138,10 @@ impl TcpRr {
     /// # Errors
     ///
     /// Returns an error if binding fails or a worker thread panics.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the ready-barrier tokio task is cancelled.
     pub async fn run(self) -> Result<(), Error> {
         let shutdown_flag = thread::new_shutdown_flag();
         let num_threads = self.config.threads;
@@ -149,15 +162,18 @@ impl TcpRr {
             })
         };
 
-        // When threads > 1, thread 0 must bind first to attach BPF before
-        // other threads join the SO_REUSEPORT group. The barrier ensures
-        // ordering: thread 0 binds + attaches, then signals the barrier,
-        // then all other threads proceed to bind.
-        let barrier = if num_threads > 1 {
+        // BPF barrier: thread 0 must bind first to attach BPF before other
+        // threads join the SO_REUSEPORT group.
+        let bpf_barrier = if num_threads > 1 {
             Some(Arc::new(Barrier::new(num_threads as usize)))
         } else {
             None
         };
+
+        // Ready barrier: all data threads + this async task wait here.
+        // Once all threads have bound their listeners, the async task
+        // opens the control port to signal readiness to the generator.
+        let ready_barrier = Arc::new(Barrier::new(num_threads as usize + 1));
 
         let mut handles = Vec::with_capacity(num_threads as usize);
         for i in 0..num_threads {
@@ -167,7 +183,8 @@ impl TcpRr {
             let no_delay = self.config.no_delay;
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
-            let barrier = barrier.clone();
+            let bpf_barrier = bpf_barrier.clone();
+            let ready_barrier = Arc::clone(&ready_barrier);
             let handle = thread::spawn_named(&format!("tcp_rr-server-{i}"), move || {
                 server_thread_main(
                     i,
@@ -178,11 +195,30 @@ impl TcpRr {
                     no_delay,
                     &flag,
                     &tm[i as usize],
-                    barrier.as_deref(),
+                    bpf_barrier.as_deref(),
+                    &ready_barrier,
                 );
             });
             handles.push(handle);
         }
+
+        // Wait for all data threads to finish binding.
+        // Use spawn_blocking so we don't block the tokio runtime.
+        let rb = Arc::clone(&ready_barrier);
+        tokio::task::spawn_blocking(move || rb.wait()).await.expect("ready barrier join failed");
+
+        // All data listeners are up. Open control port so the generator
+        // can connect and know we're ready.
+        let control_addr = SocketAddr::new(self.config.binding_addr.ip(), self.config.control_port);
+        let control_listener = std::net::TcpListener::bind(control_addr)
+            .map_err(|source| Error::Bind { addr: control_addr, source: Box::new(source) })?;
+        info!("control port listening on {control_addr}, waiting for generator");
+        let control_listener_clone = control_listener;
+        let (_conn, peer) = tokio::task::spawn_blocking(move || control_listener_clone.accept())
+            .await
+            .expect("control accept join failed")
+            .map_err(|source| Error::Bind { addr: control_addr, source: Box::new(source) })?;
+        info!("generator connected from {peer}, data threads running");
 
         self.shutdown.recv().await;
         info!("shutdown signal received");
@@ -212,9 +248,12 @@ fn create_listener(
     let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM, 0) };
     assert!(fd >= 0, "failed to create socket");
 
-    // Set nonblocking portably (SOCK_NONBLOCK is Linux-only).
+    // Set nonblocking (SOCK_NONBLOCK is Linux-only).
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+
+    // Close-on-exec to prevent fd leaks to child processes.
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
 
     set_sock_opt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1);
 
@@ -304,11 +343,12 @@ fn server_thread_main(
     no_delay: bool,
     shutdown_flag: &std::sync::atomic::AtomicBool,
     metrics: &ThreadMetrics,
-    barrier: Option<&Barrier>,
+    bpf_barrier: Option<&Barrier>,
+    ready_barrier: &Barrier,
 ) {
     // Thread 0 must bind first (to attach BPF before others join the
-    // reuseport group). Non-zero threads wait at the barrier first.
-    if let Some(barrier) = barrier
+    // reuseport group). Non-zero threads wait at the BPF barrier first.
+    if let Some(barrier) = bpf_barrier
         && thread_index != 0
     {
         barrier.wait();
@@ -316,12 +356,15 @@ fn server_thread_main(
 
     let std_listener = create_listener(thread_index, num_threads, binding_addr);
 
-    // Thread 0 signals the barrier after binding so others can proceed.
-    if let Some(barrier) = barrier
+    // Thread 0 signals the BPF barrier after binding so others can proceed.
+    if let Some(barrier) = bpf_barrier
         && thread_index == 0
     {
         barrier.wait();
     }
+
+    // Signal that this thread's listener is bound and ready.
+    ready_barrier.wait();
 
     let mut listener = mio::net::TcpListener::from_std(std_listener);
     let mut poll = Poll::new().expect("failed to create mio::Poll");
