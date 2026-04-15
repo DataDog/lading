@@ -435,6 +435,12 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             data_points_count += histogram.data_points.len() as u64;
                             for point in &mut histogram.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                let n_buckets = point.bucket_counts.len();
+                                let new_count: u64 = rng.random_range(1..=1000);
+                                point.count = new_count;
+                                point.bucket_counts =
+                                    templates::random_partition(new_count, n_buckets, rng);
+                                point.sum = Some(rng.random_range(0.0_f64..=10_000.0));
                             }
                         }
                         Data::ExponentialHistogram(eh) => {
@@ -451,12 +457,18 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                     point.negative.as_ref().map_or(0, |b| b.bucket_counts.len());
 
                                 let new_count: u64 = rng.random_range(1..=1000);
-                                let pos_count =
-                                    if n_pos > 0 { rng.random_range(0..=new_count) } else { 0 };
+                                let pos_count = if n_pos > 0 {
+                                    rng.random_range(0..=new_count)
+                                } else {
+                                    0
+                                };
                                 let remaining = new_count - pos_count;
-                                let neg_count =
-                                    if n_neg > 0 { rng.random_range(0..=remaining) } else { 0 };
-                                let zero_count = remaining - neg_count;
+                                let negative_count = if n_neg > 0 {
+                                    rng.random_range(0..=remaining)
+                                } else {
+                                    0
+                                };
+                                let zero_count = remaining - negative_count;
 
                                 point.count = new_count;
                                 point.zero_count = zero_count;
@@ -468,7 +480,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 }
                                 if let Some(neg) = &mut point.negative {
                                     neg.bucket_counts =
-                                        templates::random_partition(neg_count, n_neg, rng);
+                                        templates::random_partition(negative_count, n_neg, rng);
                                 }
                             }
                         }
@@ -476,6 +488,13 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             data_points_count += summary.data_points.len() as u64;
                             for point in &mut summary.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                point.count = rng.random_range(1..=100);
+                                point.sum = rng.random_range(0.0_f64..=10_000.0);
+                                let mut val = 0.0_f64;
+                                for qv in &mut point.quantile_values {
+                                    val += rng.random_range(0.0_f64..=10.0);
+                                    qv.value = val;
+                                }
                             }
                         }
                     }
@@ -1519,6 +1538,12 @@ mod test {
                                         point.count,
                                         "sum of bucket_counts must equal count"
                                     );
+                                    if let (Some(min), Some(max)) = (point.min, point.max) {
+                                        prop_assert!(
+                                            min <= max,
+                                            "min ({min}) must be <= max ({max})"
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1561,14 +1586,19 @@ mod test {
                                         .positive
                                         .as_ref()
                                         .map_or(0, |b| b.bucket_counts.iter().sum());
-                                    let neg_count: u64 = point
+                                    let negative_count: u64 = point
                                         .negative
                                         .as_ref()
                                         .map_or(0, |b| b.bucket_counts.iter().sum());
                                     prop_assert_eq!(
-                                        pos_count + neg_count + point.zero_count,
+                                        pos_count + negative_count + point.zero_count,
                                         point.count,
-                                        "pos_count + neg_count + zero_count must equal count"
+                                        "pos_count + negative_count + zero_count must equal count"
+                                    );
+                                    prop_assert!(
+                                        point.zero_threshold >= 0.0,
+                                        "zero_threshold must be non-negative: {}",
+                                        point.zero_threshold
                                     );
                                 }
                             }

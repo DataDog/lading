@@ -209,8 +209,15 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             Kind::Summary => {
                 let data_points = (0..total_data_points)
                     .map(|_| {
+                        let quantile_config: &[f64] = match rng.random_range(0..5_u8) {
+                            0 => &[],
+                            1 => &[0.5],
+                            2 => &[0.5, 0.9, 0.99],
+                            3 => &[0.5, 0.95, 0.99, 0.999],
+                            _ => &[0.0, 0.25, 0.5, 0.75, 1.0],
+                        };
                         let mut val = 0.0_f64;
-                        let quantile_values = [0.0_f64, 0.25, 0.5, 0.75, 1.0]
+                        let quantile_values = quantile_config
                             .iter()
                             .map(|&q| {
                                 val += rng.random_range(0.0_f64..=10.0);
@@ -249,6 +256,13 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                         let n_buckets = bounds.len() + 1;
                         let count: u64 = rng.random_range(1..=1000);
                         let bucket_counts = random_partition(count, n_buckets, rng);
+                        let (min, max) = if rng.random_bool(0.3) {
+                            let min_val = rng.random_range(0.0_f64..=100.0);
+                            let max_val = min_val + rng.random_range(0.0_f64..=10_000.0);
+                            (Some(min_val), Some(max_val))
+                        } else {
+                            (None, None)
+                        };
 
                         HistogramDataPoint {
                             attributes: Vec::new(),
@@ -260,8 +274,8 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                             bucket_counts,
                             exemplars: Vec::new(),
                             flags: 0,
-                            min: None,
-                            max: None,
+                            min,
+                            max,
                         }
                     })
                     .collect();
@@ -318,7 +332,11 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
                             flags: 0,
                             min: None,
                             max: None,
-                            zero_threshold: 0.0,
+                            zero_threshold: if rng.random_bool(0.3) {
+                                rng.random_range(0.0_f64..=1e-2)
+                            } else {
+                                0.0
+                            },
                         }
                     })
                     .collect();
@@ -358,7 +376,11 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
     }
 }
 
-pub(super) fn random_partition<R: Rng + ?Sized>(count: u64, n_buckets: usize, rng: &mut R) -> Vec<u64> {
+pub(super) fn random_partition<R: Rng + ?Sized>(
+    count: u64,
+    n_buckets: usize,
+    rng: &mut R,
+) -> Vec<u64> {
     let mut remaining = count;
     let mut result = Vec::with_capacity(n_buckets);
     let mut buckets_left = n_buckets;
