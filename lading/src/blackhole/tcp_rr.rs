@@ -15,6 +15,7 @@
 
 use std::io::{Read, Write};
 use std::net::SocketAddr;
+use std::num::{NonZeroU16, NonZeroUsize};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Barrier};
@@ -31,12 +32,14 @@ use crate::neper::flow::{self, Action, Flow, FlowMap};
 use crate::neper::metrics::{self, ThreadMetrics};
 use crate::neper::thread;
 
-fn default_one() -> u16 {
-    1
+const fn default_nonzero_u16() -> NonZeroU16 {
+    // Safety: 1 != 0
+    unsafe { NonZeroU16::new_unchecked(1) }
 }
 
-fn default_one_usize() -> usize {
-    1
+const fn default_nonzero_usize() -> NonZeroUsize {
+    // Safety: 1 != 0
+    unsafe { NonZeroUsize::new_unchecked(1) }
 }
 
 fn default_control_port() -> u16 {
@@ -58,14 +61,14 @@ pub struct Config {
     pub control_port: u16,
     /// Number of OS server threads. Default 1. When > 1, uses `SO_REUSEPORT`
     /// with an eBPF program for load balancing
-    #[serde(default = "default_one")]
-    pub threads: u16,
+    #[serde(default = "default_nonzero_u16")]
+    pub threads: NonZeroU16,
     /// Bytes to read per request. Default 1.
-    #[serde(default = "default_one_usize")]
-    pub request_size: usize,
+    #[serde(default = "default_nonzero_usize")]
+    pub request_size: NonZeroUsize,
     /// Bytes to send per response. Default 1.
-    #[serde(default = "default_one_usize")]
-    pub response_size: usize,
+    #[serde(default = "default_nonzero_usize")]
+    pub response_size: NonZeroUsize,
     /// Whether to set `TCP_NODELAY` on accepted connections. Default true.
     #[serde(default = "default_true")]
     pub no_delay: bool,
@@ -144,7 +147,7 @@ impl TcpRr {
     /// Panics if the ready-barrier tokio task is cancelled.
     pub async fn run(self) -> Result<(), Error> {
         let shutdown_flag = thread::new_shutdown_flag();
-        let num_threads = self.config.threads;
+        let num_threads = self.config.threads.get();
 
         let thread_metrics = Arc::new(
             (0..num_threads)
@@ -178,8 +181,8 @@ impl TcpRr {
         let mut handles = Vec::with_capacity(num_threads as usize);
         for i in 0..num_threads {
             let binding_addr = self.config.binding_addr;
-            let request_size = self.config.request_size;
-            let response_size = self.config.response_size;
+            let request_size = self.config.request_size.get();
+            let response_size = self.config.response_size.get();
             let no_delay = self.config.no_delay;
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);

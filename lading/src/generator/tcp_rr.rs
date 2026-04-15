@@ -15,6 +15,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::num::{NonZeroU16, NonZeroUsize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
@@ -30,12 +31,14 @@ use crate::neper::flow::{self, Action, Flow, FlowMap};
 use crate::neper::metrics::{self, ThreadMetrics};
 use crate::neper::thread;
 
-fn default_one() -> u16 {
-    1
+const fn default_nonzero_u16() -> NonZeroU16 {
+    // Safety: 1 != 0
+    unsafe { NonZeroU16::new_unchecked(1) }
 }
 
-fn default_one_usize() -> usize {
-    1
+const fn default_nonzero_usize() -> NonZeroUsize {
+    // Safety: 1 != 0
+    unsafe { NonZeroUsize::new_unchecked(1) }
 }
 
 const fn default_true() -> bool {
@@ -56,17 +59,17 @@ pub struct Config {
     #[serde(default = "default_control_port")]
     pub control_port: u16,
     /// Number of OS threads (neper -T). Default 1.
-    #[serde(default = "default_one")]
-    pub threads: u16,
+    #[serde(default = "default_nonzero_u16")]
+    pub threads: NonZeroU16,
     /// Total number of TCP flows/connections (neper -F). Default 1.
-    #[serde(default = "default_one")]
-    pub flows: u16,
+    #[serde(default = "default_nonzero_u16")]
+    pub flows: NonZeroU16,
     /// Bytes per request. Default 1.
-    #[serde(default = "default_one_usize")]
-    pub request_size: usize,
+    #[serde(default = "default_nonzero_usize")]
+    pub request_size: NonZeroUsize,
     /// Bytes per response to read back. Default 1.
-    #[serde(default = "default_one_usize")]
-    pub response_size: usize,
+    #[serde(default = "default_nonzero_usize")]
+    pub response_size: NonZeroUsize,
     /// Whether to set `TCP_NODELAY` on connections. Default true.
     #[serde(default = "default_true")]
     pub no_delay: bool,
@@ -173,10 +176,15 @@ impl TcpRr {
                 }
             }
         }
-        let flow_dist = thread::distribute_flows(self.config.flows, self.config.threads);
+        let num_threads = self.config.threads.get();
+        let num_flows = self.config.flows.get();
+        let request_size = self.config.request_size.get();
+        let response_size = self.config.response_size.get();
+
+        let flow_dist = thread::distribute_flows(num_flows, num_threads);
 
         let thread_metrics = Arc::new(
-            (0..self.config.threads)
+            (0..num_threads)
                 .map(|_| ThreadMetrics::new())
                 .collect::<Vec<_>>(),
         );
@@ -191,18 +199,16 @@ impl TcpRr {
             })
         };
 
-        let mut worker_handles = Vec::with_capacity(self.config.threads as usize);
-        for i in 0..self.config.threads {
-            let num_flows = flow_dist[i as usize];
+        let mut worker_handles = Vec::with_capacity(num_threads as usize);
+        for i in 0..num_threads {
+            let thread_flows = flow_dist[i as usize];
             let flag = Arc::clone(&shutdown_flag);
             let tm = Arc::clone(&thread_metrics);
-            let request_size = self.config.request_size;
-            let response_size = self.config.response_size;
             let no_delay = self.config.no_delay;
             let handle = thread::spawn_named(&format!("tcp_rr-client-{i}"), move || {
                 client_thread_main(
                     addr,
-                    num_flows,
+                    thread_flows,
                     request_size,
                     response_size,
                     no_delay,
