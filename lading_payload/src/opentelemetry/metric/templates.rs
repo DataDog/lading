@@ -1,7 +1,7 @@
 use std::{cmp, rc::Rc};
 
 use opentelemetry_proto::tonic::{
-    common::v1::InstrumentationScope,
+    common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
     metrics::{
         self,
         v1::{
@@ -51,6 +51,62 @@ fn exponential_weighted_range<R: Rng + ?Sized>(rng: &mut R, min: u32, max: u32) 
     }
 
     max
+}
+
+pub(super) fn random_histogram_bounds<R: Rng + ?Sized>(n_bounds: usize, rng: &mut R) -> Vec<f64> {
+    let mut next = rng.random_range(0.0_f64..=1_000.0);
+    let mut bounds = Vec::with_capacity(n_bounds);
+    for _ in 0..n_bounds {
+        next += rng.random_range(0.25_f64..=10_000.0);
+        bounds.push(next);
+    }
+    bounds
+}
+
+pub(super) fn random_non_negative_min_max<R: Rng + ?Sized>(
+    rng: &mut R,
+) -> (Option<f64>, Option<f64>) {
+    let min = rng.random_range(0.0_f64..=100_000.0);
+    let max = min + rng.random_range(0.0_f64..=1_000_000.0);
+    (Some(min), Some(max))
+}
+
+pub(super) fn random_signed_min_max<R: Rng + ?Sized>(rng: &mut R) -> (Option<f64>, Option<f64>) {
+    let min = rng.random_range(-100_000.0_f64..=100_000.0);
+    let max = min + rng.random_range(0.0_f64..=1_000_000.0);
+    (Some(min), Some(max))
+}
+
+pub(super) fn random_summary_quantiles<R: Rng + ?Sized>(
+    quantile_count: usize,
+    rng: &mut R,
+) -> Vec<f64> {
+    let mut quantiles: Vec<f64> = (0..quantile_count).map(|_| rng.random()).collect();
+    quantiles.sort_by(f64::total_cmp);
+    quantiles
+}
+
+fn point_attributes(metadata: &[KeyValue]) -> Vec<KeyValue> {
+    let mut attributes: Vec<KeyValue> = metadata.iter().take(2).cloned().collect();
+    attributes.push(KeyValue {
+        key: "sample".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes.push(KeyValue {
+        key: "spread".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes.push(KeyValue {
+        key: "jitter".to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::DoubleValue(0.0)),
+        }),
+    });
+    attributes
 }
 
 struct Ndp(NumberDataPoint);
@@ -210,30 +266,26 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             Kind::Summary => {
                 let data_points = (0..total_data_points)
                     .map(|_| {
-                        let quantile_config: &[f64] = match rng.random_range(0..5_u8) {
-                            0 => &[],
-                            1 => &[0.5],
-                            2 => &[0.5, 0.9, 0.99],
-                            3 => &[0.5, 0.95, 0.99, 0.999],
-                            _ => &[0.0, 0.25, 0.5, 0.75, 1.0],
-                        };
-                        let mut val = 0.0_f64;
-                        let quantile_values = quantile_config
-                            .iter()
-                            .map(|&q| {
-                                val += rng.random_range(0.0_f64..=10.0);
+                        let quantiles =
+                            random_summary_quantiles(rng.random_range(2_usize..=8), rng);
+                        let mut val = rng.random_range(0.0_f64..=10_000.0);
+                        let quantile_values = quantiles
+                            .into_iter()
+                            .map(|quantile| {
+                                val += rng.random_range(0.25_f64..=25_000.0);
                                 summary_data_point::ValueAtQuantile {
-                                    quantile: q,
+                                    quantile,
                                     value: val,
                                 }
                             })
-                            .collect();
+                            .collect::<Vec<_>>();
                         SummaryDataPoint {
-                            attributes: Vec::new(),
+                            attributes: point_attributes(&metadata),
                             start_time_unix_nano: 0,
                             time_unix_nano: rng.random(),
-                            count: rng.random_range(1..=100),
-                            sum: rng.random_range(0.0_f64..=10_000.0),
+                            count: rng
+                                .random_range(quantile_values.len().max(1) as u64..=100_000_u64),
+                            sum: val * rng.random_range(1.0_f64..=4.0),
                             quantile_values,
                             flags: 0,
                         }
@@ -246,31 +298,19 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             } => {
                 let data_points = (0..total_data_points as usize)
                     .map(|_| {
-                        //Strictly increasing bounds
-                        let n_bounds = rng.random_range(1_usize..=10);
-                        let mut bounds: Vec<f64> = (0..n_bounds)
-                            .map(|_| rng.random_range(0.0_f64..1000.0))
-                            .collect();
-                        bounds.sort_by(f64::total_cmp);
-                        bounds.dedup();
-
+                        let n_bounds = rng.random_range(4_usize..=16);
+                        let bounds = random_histogram_bounds(n_bounds, rng);
                         let n_buckets = bounds.len() + 1;
-                        let count: u64 = rng.random_range(1..=1000);
+                        let count: u64 = rng.random_range(n_buckets as u64..=250_000_u64);
                         let bucket_counts = random_partition(count, n_buckets, rng);
-                        let (min, max) = if rng.random_bool(0.3) {
-                            let min_val = rng.random_range(0.0_f64..=100.0);
-                            let max_val = min_val + rng.random_range(0.0_f64..=10_000.0);
-                            (Some(min_val), Some(max_val))
-                        } else {
-                            (None, None)
-                        };
+                        let (min, max) = random_non_negative_min_max(rng);
 
                         HistogramDataPoint {
-                            attributes: Vec::new(),
+                            attributes: point_attributes(&metadata),
                             start_time_unix_nano: 0,
                             time_unix_nano: rng.random(),
                             count,
-                            sum: Some(rng.random_range(0.0_f64..=10_000.0)),
+                            sum: Some(rng.random_range(0.0_f64..=1_000_000.0)),
                             explicit_bounds: bounds,
                             bucket_counts,
                             exemplars: Vec::new(),
@@ -291,53 +331,40 @@ impl<'a> crate::SizedGenerator<'a> for MetricTemplateGenerator {
             } => {
                 let data_points = (0..total_data_points as usize)
                     .map(|_| {
-                        let n_buckets = rng.random_range(1_usize..=16);
-                        let count: u64 = rng.random_range(1..=1000);
+                        let n_buckets = rng.random_range(4_usize..=32);
+                        let count: u64 = rng.random_range((n_buckets as u64) * 2..=250_000_u64);
+                        let partition = random_partition(count, 3, rng);
+                        let pos_count = partition[0];
+                        let neg_count = partition[1];
+                        let zero_count = partition[2];
 
-                        //Three-way partition
+                        let positive = Some(exponential_histogram_data_point::Buckets {
+                            offset: rng.random_range(-256_i32..=256),
+                            bucket_counts: random_partition(pos_count, n_buckets, rng),
+                        });
 
-                        let pos_count = rng.random_range(0..=count);
-                        let remaining = count - pos_count;
-                        let neg_count = rng.random_range(0..=remaining);
-                        let zero_count = remaining - neg_count;
+                        let negative = Some(exponential_histogram_data_point::Buckets {
+                            offset: rng.random_range(-256_i32..=256),
+                            bucket_counts: random_partition(neg_count, n_buckets, rng),
+                        });
 
-                        let positive = if pos_count > 0 {
-                            Some(exponential_histogram_data_point::Buckets {
-                                offset: rng.random_range(-10_i32..=10),
-                                bucket_counts: random_partition(pos_count, n_buckets, rng),
-                            })
-                        } else {
-                            None
-                        };
-
-                        let negative = if neg_count > 0 {
-                            Some(exponential_histogram_data_point::Buckets {
-                                offset: rng.random_range(-10_i32..=10),
-                                bucket_counts: random_partition(neg_count, n_buckets, rng),
-                            })
-                        } else {
-                            None
-                        };
+                        let (min, max) = random_signed_min_max(rng);
 
                         ExponentialHistogramDataPoint {
-                            attributes: Vec::new(),
+                            attributes: point_attributes(&metadata),
                             start_time_unix_nano: 0,
                             time_unix_nano: rng.random(),
                             count,
-                            sum: Some(rng.random_range(0.0_f64..=10_000.0)),
+                            sum: Some(rng.random_range(-1_000_000.0_f64..=1_000_000.0)),
                             scale,
                             zero_count,
                             positive,
                             negative,
                             exemplars: Vec::new(),
                             flags: 0,
-                            min: None,
-                            max: None,
-                            zero_threshold: if rng.random_bool(0.3) {
-                                rng.random_range(0.0_f64..=1e-2)
-                            } else {
-                                0.0
-                            },
+                            min,
+                            max,
+                            zero_threshold: rng.random_range(0.0_f64..=10_000.0),
                         }
                     })
                     .collect();
@@ -382,16 +409,37 @@ pub(super) fn random_partition<R: Rng + ?Sized>(
     n_buckets: usize,
     rng: &mut R,
 ) -> Vec<u64> {
-    let mut remaining = count;
-    let mut result = Vec::with_capacity(n_buckets);
-    let mut buckets_left = n_buckets;
-    while buckets_left > 1 {
-        let consumed = rng.random_range(0..=remaining);
-        result.push(consumed);
-        remaining -= consumed;
-        buckets_left -= 1;
+    if n_buckets == 0 {
+        return Vec::new();
     }
-    result.push(remaining);
+
+    let mut result = vec![0; n_buckets];
+    if count == 0 {
+        return result;
+    }
+
+    let guaranteed_non_zero = n_buckets.min(usize::try_from(count).unwrap_or(usize::MAX));
+    for value in result.iter_mut().take(guaranteed_non_zero) {
+        *value = 1;
+    }
+
+    let mut remaining = count.saturating_sub(guaranteed_non_zero as u64);
+    while remaining > 0 {
+        let bucket_idx = rng.random_range(0..guaranteed_non_zero.max(1));
+        let chunk = if remaining == 1 {
+            1
+        } else {
+            rng.random_range(1..=remaining)
+        };
+        result[bucket_idx] += chunk;
+        remaining -= chunk;
+    }
+
+    for idx in (1..result.len()).rev() {
+        let swap_idx = rng.random_range(0..=idx);
+        result.swap(idx, swap_idx);
+    }
+
     result
 }
 
@@ -828,6 +876,47 @@ mod test {
                         panic!("unexpected gauge/sum when weights are zero")
                     }
                 }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn random_partition_preserves_count_and_density(
+            seed: u64,
+            count in 0_u64..10_000,
+            n_buckets in 1_usize..128,
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let partition = random_partition(count, n_buckets, &mut rng);
+
+            prop_assert_eq!(partition.len(), n_buckets);
+            prop_assert_eq!(partition.iter().sum::<u64>(), count);
+
+            if count >= n_buckets as u64 {
+                prop_assert!(
+                    partition.iter().all(|value| *value > 0),
+                    "count {count} should populate every bucket",
+                );
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn random_summary_quantiles_are_sorted_and_bounded(
+            seed: u64,
+            quantile_count in 0_usize..32,
+        ) {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let quantiles = random_summary_quantiles(quantile_count, &mut rng);
+
+            prop_assert_eq!(quantiles.len(), quantile_count);
+            for quantile in &quantiles {
+                prop_assert!((0.0..=1.0).contains(quantile));
+            }
+            for pair in quantiles.windows(2) {
+                prop_assert!(pair[0] <= pair[1]);
             }
         }
     }
