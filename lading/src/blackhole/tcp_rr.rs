@@ -150,6 +150,7 @@ impl TcpRr {
     /// # Panics
     ///
     /// Panics if the ready-barrier tokio task is cancelled.
+    #[allow(clippy::too_many_lines)]
     pub async fn run(self) -> Result<(), Error> {
         let shutdown_flag = thread::new_shutdown_flag();
         let num_threads = self.config.threads.get();

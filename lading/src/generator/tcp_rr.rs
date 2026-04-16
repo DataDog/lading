@@ -143,6 +143,7 @@ impl TcpRr {
 
         // Wait for the blackhole to be ready by connecting to its control port.
         info!("waiting for blackhole control port at {control_addr}");
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
         {
             let flag = Arc::clone(&shutdown_flag);
             let shutdown = self.shutdown.clone();
@@ -165,7 +166,15 @@ impl TcpRr {
                     info!("blackhole ready, starting flows");
                     break;
                 }
-                Err(_) => {
+                Err(e) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(Error::Io(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!(
+                                "blackhole control port {control_addr} not reachable after 5 minutes: {e}"
+                            ),
+                        )));
+                    }
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
