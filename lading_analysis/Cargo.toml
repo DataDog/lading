@@ -19,5 +19,9 @@ thiserror = { workspace = true }
 name = "lading-analysis"
 path = "src/main.rs"
 
+[dev-dependencies]
+lading-payload = { path = "../lading_payload" }
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

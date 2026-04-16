@@ -13,7 +13,7 @@ generator:
         maximum_prebuild_cache_size_bytes: "20 MiB"
         mount_point: /tmp/smp-shared
         load_profile:
-          constant: "10 KiB"
+          constant: "20 KiB"
         read_capture_path: scratch/captures/fuse_reads.jsonl
         direct_io: true
 
