@@ -23,7 +23,7 @@ use std::time::Duration;
 use mio::net::TcpStream;
 use mio::{Events, Interest, Poll, Token};
 use serde::{Deserialize, Serialize};
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 use super::General;
 use crate::generator::common::MetricsBuilder;
@@ -143,7 +143,8 @@ impl TcpRr {
 
         // Wait for the blackhole to be ready by connecting to its control port.
         info!("waiting for blackhole control port at {control_addr}");
-        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        let start = std::time::Instant::now();
+        let mut next_log = start + Duration::from_secs(60);
         {
             let flag = Arc::clone(&shutdown_flag);
             let shutdown = self.shutdown.clone();
@@ -161,23 +162,17 @@ impl TcpRr {
                     ),
                 )));
             }
-            match std::net::TcpStream::connect(control_addr) {
-                Ok(_conn) => {
-                    info!("blackhole ready, starting flows");
-                    break;
-                }
-                Err(e) => {
-                    if std::time::Instant::now() >= deadline {
-                        return Err(Error::Io(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            format!(
-                                "blackhole control port {control_addr} not reachable after 5 minutes: {e}"
-                            ),
-                        )));
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+            if std::net::TcpStream::connect(control_addr).is_ok() {
+                info!("blackhole ready, starting flows");
+                break;
             }
+            let now = std::time::Instant::now();
+            if now >= next_log {
+                let elapsed = now.duration_since(start).as_secs();
+                warn!("still waiting for blackhole control port at {control_addr} ({elapsed}s elapsed)");
+                next_log = now + Duration::from_secs(60);
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
         let num_threads = self.config.threads.get();
         let num_flows = self.config.flows.get();
