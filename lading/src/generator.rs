@@ -190,7 +190,7 @@ impl Server {
     ///
     /// Function will return an error if the underlying sub-server creation
     /// signals error.
-    pub fn new(config: Config, shutdown: lading_signal::Watcher) -> Result<Self, Error> {
+    pub fn new(config: Config, shutdown: lading_signal::Watcher, gen_shutdown: lading_signal::Watcher, epoch: std::time::Instant) -> Result<Self, Error> {
         let srv = match config.inner {
             Inner::Tcp(conf) => Self::Tcp(tcp::Tcp::new(config.general, &conf, shutdown)?),
             Inner::Udp(conf) => Self::Udp(udp::Udp::new(config.general, &conf, shutdown)?),
@@ -199,7 +199,7 @@ impl Server {
                 Self::SplunkHec(splunk_hec::SplunkHec::new(config.general, conf, shutdown)?)
             }
             Inner::FileGen(conf) => {
-                Self::FileGen(file_gen::FileGen::new(config.general, conf, shutdown)?)
+                Self::FileGen(file_gen::FileGen::new(config.general, conf, shutdown, gen_shutdown, epoch)?)
             }
             Inner::FileTree(conf) => Self::FileTree(file_tree::FileTree::new(&conf, shutdown)?),
             Inner::Grpc(conf) => Self::Grpc(grpc::Grpc::new(config.general, conf, shutdown)?),

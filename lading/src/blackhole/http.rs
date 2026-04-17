@@ -14,8 +14,15 @@ use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Request, Response, StatusCode, header};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
-use tracing::error;
+use std::{
+    io::Write,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
+};
+use tracing::{error, info};
 
 use super::General;
 use crate::blackhole::common;
@@ -124,6 +131,49 @@ pub struct Config {
     /// delay to add before making a response
     #[serde(default = "default_response_delay_millis")]
     pub response_delay_millis: u64,
+    /// Optional path for blackhole payload capture log (JSONL). When set,
+    /// decoded payloads are written to disk for offline correctness validation.
+    #[serde(default)]
+    pub capture_path: Option<PathBuf>,
+}
+
+/// A record written to the blackhole capture log.
+#[derive(Serialize)]
+struct BlackholeCaptureRecord {
+    relative_ms: u64,
+    compressed_bytes: u64,
+    payload: String,
+}
+
+/// Channel capacity for the blackhole capture log.
+const CAPTURE_CHANNEL_CAPACITY: usize = 10_000;
+
+/// Spawn a tokio task that drains `BlackholeCaptureRecord`s and writes JSONL to disk.
+fn spawn_capture_writer_task(
+    mut rx: tokio::sync::mpsc::Receiver<BlackholeCaptureRecord>,
+    path: PathBuf,
+) {
+    tokio::spawn(async move {
+        let file = match std::fs::File::create(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                error!(
+                    "Failed to create blackhole capture file {}: {e}",
+                    path.display()
+                );
+                return;
+            }
+        };
+        let mut writer = std::io::BufWriter::new(file);
+        while let Some(record) = rx.recv().await {
+            if let Ok(line) = serde_json::to_string(&record) {
+                let _ = writer.write_all(line.as_bytes());
+                let _ = writer.write_all(b"\n");
+            }
+        }
+        let _ = writer.flush();
+        info!("Blackhole capture writer finished for {}", path.display());
+    });
 }
 
 #[derive(Serialize)]
@@ -150,6 +200,9 @@ async fn srv(
     req: Request<hyper::body::Incoming>,
     headers: HeaderMap,
     response_delay: Duration,
+    capture_tx: Option<tokio::sync::mpsc::Sender<BlackholeCaptureRecord>>,
+    capture_dropped: Arc<AtomicU64>,
+    epoch: Instant,
 ) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     counter!("requests_received", &metric_labels).increment(1);
 
@@ -167,6 +220,20 @@ async fn srv(
         Err(response) => Ok(*response),
         Ok(body) => {
             counter!("decoded_bytes_received", &metric_labels).increment(body.len() as u64);
+
+            // Capture the decoded payload if capture is enabled
+            if let Some(ref tx) = capture_tx {
+                let relative_ms = epoch.elapsed().as_millis() as u64;
+                let record = BlackholeCaptureRecord {
+                    relative_ms,
+                    compressed_bytes: body_len,
+                    payload: String::from_utf8_lossy(&body).into_owned(),
+                };
+                if tx.try_send(record).is_err() {
+                    capture_dropped.fetch_add(1, Ordering::Relaxed);
+                    counter!("blackhole_capture_dropped", &metric_labels).increment(1);
+                }
+            }
 
             tokio::time::sleep(response_delay).await;
 
@@ -190,6 +257,9 @@ pub struct Http {
     status: StatusCode,
     metric_labels: Vec<(String, String)>,
     response_delay: Duration,
+    capture_tx: Option<tokio::sync::mpsc::Sender<BlackholeCaptureRecord>>,
+    capture_dropped: Arc<AtomicU64>,
+    epoch: Instant,
 }
 
 impl Http {
@@ -206,6 +276,7 @@ impl Http {
         general: General,
         config: &Config,
         shutdown: lading_signal::Watcher,
+        epoch: Instant,
     ) -> Result<Self, Error> {
         let status = StatusCode::from_u16(config.status).map_err(Error::InvalidStatusCode)?;
 
@@ -235,6 +306,20 @@ impl Http {
             BodyVariant::Static(val) => val.as_bytes().to_vec(),
         };
 
+        let capture_dropped = Arc::new(AtomicU64::new(0));
+        let capture_tx = if let Some(ref capture_path) = config.capture_path {
+            let (tx, rx) =
+                tokio::sync::mpsc::channel::<BlackholeCaptureRecord>(CAPTURE_CHANNEL_CAPACITY);
+            spawn_capture_writer_task(rx, capture_path.clone());
+            info!(
+                "Blackhole HTTP capture enabled, writing to {}",
+                capture_path.display()
+            );
+            Some(tx)
+        } else {
+            None
+        };
+
         Ok(Self {
             httpd_addr: config.binding_addr,
             body_bytes,
@@ -244,6 +329,9 @@ impl Http {
             shutdown,
             metric_labels,
             response_delay: Duration::from_millis(config.response_delay_millis),
+            capture_tx,
+            capture_dropped,
+            epoch,
         })
     }
 
@@ -268,6 +356,9 @@ impl Http {
                 let headers = self.headers.clone();
                 let status = self.status;
                 let response_delay = self.response_delay;
+                let capture_tx = self.capture_tx.clone();
+                let capture_dropped = Arc::clone(&self.capture_dropped);
+                let epoch = self.epoch;
 
                 hyper::service::service_fn(move |req| {
                     srv(
@@ -277,6 +368,9 @@ impl Http {
                         req,
                         headers.clone(),
                         response_delay,
+                        capture_tx.clone(),
+                        Arc::clone(&capture_dropped),
+                        epoch,
                     )
                 })
             },
@@ -312,6 +406,7 @@ body_variant: "nothing"
                 headers: default_headers(),
                 status: default_status_code(),
                 raw_bytes: vec![],
+                capture_path: None,
             },
         );
     }
@@ -336,6 +431,7 @@ raw_bytes: [0x01, 0x02, 0x10]
                 headers: default_headers(),
                 status: default_status_code(),
                 raw_bytes: vec![0x01, 0x02, 0x10],
+                capture_path: None,
             },
         );
     }

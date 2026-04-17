@@ -231,6 +231,18 @@ impl Cache {
                     total_bytes.get(),
                 )?
             }
+            crate::Config::TruncationTest(config) => {
+                let mut serializer = crate::TruncationTest::new(config.clone())
+                    .map_err(|e| Error::InvalidConfig(format!("truncation_test: {e}")))?;
+                let span = span!(Level::INFO, "fixed", payload = "truncation-test");
+                let _guard = span.enter();
+                construct_block_cache_inner(
+                    &mut rng,
+                    &mut serializer,
+                    maximum_block_bytes,
+                    total_bytes.get(),
+                )?
+            }
             crate::Config::TraceAgent(config) => {
                 use crate::trace_agent::{self, v04};
 

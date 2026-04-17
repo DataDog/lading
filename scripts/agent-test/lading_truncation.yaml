@@ -1,0 +1,54 @@
+generator:
+  - file_gen:
+      logrotate_fs:
+        seed: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+               59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131]
+        concurrent_logs: 1
+        # Constraints (see scratch/captures/README.md):
+        # - No rotation: max_bytes_per_log > load × (warmup + experiment + cooldown)
+        #   = 1 MiB/s × 120s = 120 MiB. We set 256 MiB for margin.
+        # - No cache wrapping within a single file: same constraint applies to
+        #   maximum_prebuild_cache_size_bytes.
+        maximum_bytes_per_log: "256 MiB"
+        total_rotations: 3
+        max_depth: 0
+        variant:
+          truncation_test:
+            format: simple
+            categories:
+              # Most lines are small and fit well within the 900KB limit
+              - name: normal
+                weight: 85
+                size_range: [100, 500]
+              # Lines right at the 900KB boundary (both just under and just over)
+              - name: at_boundary
+                weight: 5
+                size_range: [899990, 900010]
+              # Lines that trigger a 2-piece truncation (900KB < size <= 1.8MB)
+              - name: oversized
+                weight: 8
+                size_range: [900001, 1800000]
+              # Lines that trigger a 3-piece truncation (1.8MB < size <= 2.7MB)
+              - name: multi_oversized
+                weight: 2
+                size_range: [1800001, 2700000]
+        # Block size must be >= largest size_range value (2.7 MB → 3 MiB)
+        maximum_block_size: "3 MiB"
+        # Cache must be larger than total bytes read during the experiment
+        # to prevent wrapping within a single file. 256 MiB > 120 MiB load.
+        maximum_prebuild_cache_size_bytes: "256 MiB"
+        mount_point: /tmp/smp-shared
+        # 1 MiB/s lets the agent traverse most of the cache within 120s,
+        # hitting all size categories in proportion to their weights.
+        load_profile:
+          constant: "1 MiB"
+        read_capture_path: scratch/captures/fuse_reads.jsonl
+
+blackhole:
+  # Core agent check-in
+  - http:
+      binding_addr: "127.0.0.1:9091"
+  # Logs intake — this is where the agent sends log payloads
+  - http:
+      binding_addr: "127.0.0.1:9092"
+      capture_path: scratch/captures/blackhole.jsonl

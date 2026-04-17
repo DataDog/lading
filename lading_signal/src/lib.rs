@@ -604,6 +604,109 @@ mod tests {
 
     #[cfg(loom)]
     #[test]
+    // Two independent signal pairs (simulating generator shutdown + main
+    // shutdown). Generator uses cloned (unregistered) watchers — matching real
+    // usage. The generator signal fires first via signal() (not
+    // signal_and_wait), then the main signal fires. No deadlock.
+    fn phased_shutdown_with_cooldown() {
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            let (gen_watcher_orig, gen_broadcaster) = signal();
+            // Real code uses clone() for generators (unregistered)
+            let gen_watcher = gen_watcher_orig.clone();
+            // Drop the original registered watcher — matches real code dropping
+            // gen_shutdown_watcher after setup
+            drop(gen_watcher_orig);
+
+            let (main_watcher, main_broadcaster) = signal();
+
+            let gen_handle = thread::spawn(move || {
+                block_on(gen_watcher.recv());
+            });
+
+            let main_handle = thread::spawn(move || {
+                block_on(main_watcher.recv());
+            });
+
+            // Phase 1: signal generators (non-blocking)
+            gen_broadcaster.signal();
+
+            // Phase 2: signal main (blocking wait on registered watchers)
+            block_on(main_broadcaster.signal_and_wait());
+
+            gen_handle.join().unwrap();
+            main_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    // Same as phased_shutdown_with_cooldown but both signals fire back-to-back
+    // with no gap, equivalent to cooldown=0. Must not deadlock.
+    fn phased_shutdown_zero_cooldown() {
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            let (gen_watcher_orig, gen_broadcaster) = signal();
+            let gen_watcher = gen_watcher_orig.clone();
+            drop(gen_watcher_orig);
+
+            let (main_watcher, main_broadcaster) = signal();
+
+            let gen_handle = thread::spawn(move || {
+                block_on(gen_watcher.recv());
+            });
+
+            let main_handle = thread::spawn(move || {
+                block_on(main_watcher.recv());
+            });
+
+            // Both signals fire immediately (zero cooldown)
+            gen_broadcaster.signal();
+            block_on(main_broadcaster.signal_and_wait());
+
+            gen_handle.join().unwrap();
+            main_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
+    // A generator watcher is dropped before its signal fires. The main
+    // shutdown must still complete without deadlock.
+    fn phased_shutdown_gen_watcher_dropped_before_signal() {
+        use crate::signal;
+        use loom::{future::block_on, thread};
+
+        loom::model(|| {
+            let (gen_watcher_orig, gen_broadcaster) = signal();
+            let gen_watcher = gen_watcher_orig.clone();
+            drop(gen_watcher_orig);
+
+            let (main_watcher, main_broadcaster) = signal();
+
+            // Generator watcher is dropped without receiving
+            let gen_handle = thread::spawn(move || {
+                drop(gen_watcher);
+            });
+
+            let main_handle = thread::spawn(move || {
+                block_on(main_watcher.recv());
+            });
+
+            gen_broadcaster.signal();
+            block_on(main_broadcaster.signal_and_wait());
+
+            gen_handle.join().unwrap();
+            main_handle.join().unwrap();
+        });
+    }
+
+    #[cfg(loom)]
+    #[test]
     // This tests the same flow as `watcher_drops_before_signal_and_wait` but with an explicit
     // yield to clue loom into exploring interleavings that exposed a race condition fixed in
     // PR#1740

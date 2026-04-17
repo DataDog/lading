@@ -83,6 +83,8 @@ impl FileGen {
         general: General,
         config: Config,
         shutdown: lading_signal::Watcher,
+        gen_shutdown: lading_signal::Watcher,
+        epoch: std::time::Instant,
     ) -> Result<Self, Error> {
         let srv = match config {
             Config::Traditional(c) => {
@@ -91,7 +93,7 @@ impl FileGen {
             Config::Logrotate(c) => Self::Logrotate(logrotate::Server::new(general, c, shutdown)?),
             #[cfg(feature = "logrotate_fs")]
             Config::LogrotateFs(c) => {
-                Self::LogrotateFs(logrotate_fs::Server::new(general, c, shutdown)?)
+                Self::LogrotateFs(logrotate_fs::Server::new(general, c, shutdown, gen_shutdown, epoch)?)
             }
         };
         Ok(srv)
