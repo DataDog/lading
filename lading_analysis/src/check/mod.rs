@@ -4,6 +4,7 @@ mod completeness;
 mod duplication;
 mod fabrication;
 mod latency;
+mod truncation;
 
 use rustc_hash::FxHashSet;
 
@@ -64,6 +65,11 @@ pub fn from_config(configs: &[CheckConfig]) -> Result<Vec<Box<dyn Check>>, Error
             CheckConfig::Latency(params) => {
                 checks.push(Box::new(latency::Latency {
                     max_p99_ms: params.max_p99_ms,
+                }));
+            }
+            CheckConfig::Truncation(params) => {
+                checks.push(Box::new(truncation::Truncation {
+                    max_message_size: params.max_message_size,
                 }));
             }
         }

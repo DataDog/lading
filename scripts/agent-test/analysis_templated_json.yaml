@@ -1,7 +1,7 @@
 inputs:
   fuse_capture: scratch/captures/fuse_reads.jsonl
   blackhole_capture: scratch/captures/blackhole.jsonl
-  lading_config: scripts/agent-test/lading.yaml
+  lading_config: scripts/agent-test/lading_templated_json.yaml
 
 output_dir: scratch/captures/analysis
 

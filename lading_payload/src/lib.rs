@@ -31,6 +31,7 @@ pub use static_timestamped::StaticTimestamped;
 pub use statik::Static;
 pub use syslog::Syslog5424;
 pub use templated_json::TemplatedJson;
+pub use truncation_test::TruncationTest;
 
 pub mod apache_common;
 pub mod ascii;
@@ -48,6 +49,7 @@ pub mod statik;
 pub mod syslog;
 pub mod templated_json;
 pub mod trace_agent;
+pub mod truncation_test;
 
 /// Errors related to serialization
 #[derive(thiserror::Error, Debug)]
@@ -190,6 +192,11 @@ pub enum Config {
         /// startup and can be shared across multiple lading configs.
         template_path: PathBuf,
     },
+    /// Generates log lines for truncation testing with configurable size
+    /// categories. Each line embeds metadata (category, id, size) in a
+    /// structured header so the offline analysis tool can verify that the
+    /// downstream system's truncation behavior is correct.
+    TruncationTest(truncation_test::Config),
 }
 
 /// Unified payload type for all serializers

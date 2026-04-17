@@ -1,0 +1,14 @@
+inputs:
+  fuse_capture: scratch/captures/fuse_reads.jsonl
+  blackhole_capture: scratch/captures/blackhole.jsonl
+  lading_config: scripts/agent-test/lading_truncation.yaml
+
+output_dir: scratch/captures/analysis
+
+checks:
+  # Completeness/fabrication/duplication don't make sense here: the agent
+  # transforms oversized lines (splits them with markers), so output messages
+  # don't hash-match input lines. The truncation check is the one that
+  # validates correct behavior for this scenario.
+  - truncation:
+      max_message_size: 900000

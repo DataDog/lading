@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Run a real DD agent against lading's FUSE mount and capture the results.
 #
-# Usage: ./scripts/agent-test/run.sh [duration_seconds] [lading_config]
+# Usage: ./scripts/agent-test/run.sh [duration_seconds] [lading_config] [analysis_config]
 #
 # Examples:
-#   ./scripts/agent-test/run.sh 60                                    # ascii (default)
-#   ./scripts/agent-test/run.sh 60 scripts/agent-test/lading_templated_json.yaml
+#   ./scripts/agent-test/run.sh 60                                          # ascii (default)
+#   ./scripts/agent-test/run.sh 60 scripts/agent-test/lading_templated_json.yaml scripts/agent-test/analysis_templated_json.yaml
+#   ./scripts/agent-test/run.sh 60 scripts/agent-test/lading_truncation.yaml scripts/agent-test/analysis_truncation.yaml
 #
 # Prerequisites:
 #   docker pull datadog/agent-dev:nightly-full-main-5940559f-jmx
@@ -14,6 +15,7 @@ set -euo pipefail
 
 DURATION="${1:-120}"
 LADING_CONFIG="${2:-scripts/agent-test/lading_ascii.yaml}"
+ANALYSIS_CONFIG="${3:-scripts/agent-test/analysis_ascii.yaml}"
 MOUNT="/tmp/smp-shared"
 AGENT_IMAGE="datadog/agent-dev:nightly-full-main-5940559f-jmx"
 AGENT_NAME="lading-test-agent"
@@ -37,7 +39,8 @@ trap cleanup EXIT
 cleanup 2>/dev/null
 
 echo "Duration: ${DURATION}s"
-echo "Config:   $LADING_CONFIG"
+echo "Lading:   $LADING_CONFIG"
+echo "Analysis: $ANALYSIS_CONFIG"
 echo "Agent:    $AGENT_IMAGE"
 echo ""
 
@@ -100,26 +103,7 @@ echo "Blackhole:   $(wc -l < scratch/captures/blackhole.jsonl) records"
 
 echo ""
 echo "=== Running analysis ==="
-# Generate analysis config pointing at the lading config used for this run
-cat > scratch/captures/analysis_run.yaml << ANALYSIS_EOF
-inputs:
-  fuse_capture: scratch/captures/fuse_reads.jsonl
-  blackhole_capture: scratch/captures/blackhole.jsonl
-  lading_config: ${LADING_CONFIG}
-
-output_dir: scratch/captures/analysis
-
-checks:
-  - completeness:
-      min_ratio: 0.95
-  - fabrication:
-      max_count: 0
-  - duplication:
-      max_ratio: 0.01
-  - latency:
-      max_p99_ms: 10000
-ANALYSIS_EOF
-cargo run --bin lading-analysis -- --config scratch/captures/analysis_run.yaml || true
+cargo run --bin lading-analysis -- --config "$ANALYSIS_CONFIG" || true
 
 echo ""
 echo "=== Agent logs (last 20 lines) ==="

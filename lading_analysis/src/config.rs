@@ -41,6 +41,9 @@ pub enum CheckConfig {
     Duplication(DuplicationParams),
     /// Latency distribution check: measures per-line latency from FUSE read to blackhole receipt.
     Latency(LatencyParams),
+    /// Truncation check: verifies the downstream system correctly truncated
+    /// oversized lines emitted by the `truncation_test` payload variant.
+    Truncation(TruncationParams),
 }
 
 /// Parameters for the completeness check.
@@ -75,4 +78,19 @@ pub struct LatencyParams {
     /// If omitted, the check is informational (always passes).
     #[serde(default)]
     pub max_p99_ms: Option<u64>,
+}
+
+/// Parameters for the truncation check.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TruncationParams {
+    /// The downstream system's configured max message size, in bytes. Lines
+    /// longer than this are expected to be split into multiple output messages
+    /// with `...TRUNCATED...` markers. Default is 900_000 (DD logs agent default).
+    #[serde(default = "default_max_message_size")]
+    pub max_message_size: u64,
+}
+
+fn default_max_message_size() -> u64 {
+    900_000
 }
