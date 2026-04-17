@@ -43,7 +43,6 @@ generator:
         load_profile:
           constant: "1 MiB"
         read_capture_path: scratch/captures/fuse_reads.jsonl
-        direct_io: true
 
 blackhole:
   # Core agent check-in

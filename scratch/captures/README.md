@@ -144,23 +144,7 @@ Output files land in `scratch/captures/`:
 
 ## Architecture Decisions
 
-### ADR-1: `direct_io` for correctness testing
-
-**Problem:** The Linux kernel page cache sits between the target's `read()`
-syscalls and the FUSE handler. The kernel coalesces, reorders, and caches reads.
-FUSE capture records don't represent what the target actually read — they
-represent what the kernel requested from FUSE to fill its page cache.
-
-**Decision:** Added an opt-in `direct_io: bool` config field on `logrotate_fs`.
-When enabled, every file opened by the target gets `FOPEN_DIRECT_IO`, bypassing
-the page cache entirely. Every target `read()` syscall becomes a 1:1 FUSE
-request with an accurate timestamp.
-
-**Tradeoff:** Less realistic I/O performance (no readahead, no page cache), but
-perfect input observability. Use `direct_io: true` for correctness experiments,
-`false` (default) for performance benchmarks.
-
-### ADR-2: Freeze model during cooldown (not unmount)
+### ADR-1: Freeze model during cooldown (not unmount)
 
 **Problem:** The cooldown feature was designed to shut down generators before
 blackholes so the target can flush its pipeline. But for FUSE-based generators,
@@ -178,7 +162,7 @@ the mount is unmounted and the target is killed.
 open FDs on the mount. You cannot use unmounting to "stop" a FUSE generator
 while the target is still reading.
 
-### ADR-3: Cooldown period between generator freeze and full shutdown
+### ADR-2: Cooldown period between generator freeze and full shutdown
 
 **Problem:** When lading shuts down, all components receive the shutdown signal
 simultaneously. The target has buffered data that hasn't been sent to the
@@ -239,25 +223,68 @@ The blackhole capture stores the raw decoded HTTP payload. The output parser
 assumes DD logs agent JSON format (`[{"message": "..."}]`). Agents using
 protobuf encoding will produce payloads the parser cannot read.
 
-### FUSE capture BufWriter sizing
+### FUSE capture drain is coupled to FUSE teardown (known bandaid in place)
 
-The FUSE writer thread uses `BufWriter::new()` (8 KB default buffer). This is
-fine for the small `read` records but could be tuned with
-`BufWriter::with_capacity()` if write syscall overhead becomes measurable.
+The FUSE capture writer thread owns a `BufWriter<File>`. Its lifetime is
+transitively tied to FUSE teardown: `capture_tx` (the sender) lives inside
+`LogrotateFS`, which is owned by `BackgroundSession`. The writer's
+`for record in rx` loop only exits when that sender is dropped, which only
+happens when the session is dropped.
+
+`BackgroundSession::join()` in turn waits for the FUSE kernel thread to
+exit, which requires an unmount. Nothing in lading reliably triggers that
+unmount: `AutoUnmount` fires on drop of the session, not on `join()`, and
+the target's open FDs can also block `fusermount`. If anything in this
+chain hangs and the process is killed externally (docker stop timeout,
+Ctrl-C escalation), the writer thread dies with records still buffered in
+its `BufWriter`, and those records are lost. This is how we originally saw
+the "capture under-counting" bug (`fs_read=128` in the counters, only 91
+records on disk).
+
+**Current mitigation (bandaid):** `spawn_capture_writer` flushes the
+`BufWriter` to disk after every record. One extra `write()` syscall per
+record, but records are durable under abrupt shutdown — and the capture
+file can be tailed live during a run, which is genuinely useful. This is
+fine for the rates a correctness harness runs at (tens of reads/sec to low
+thousands).
+
+**Proper fix (deferred, tracked in Future Work):** Phased shutdown with
+explicit ordering. Three pieces:
+
+1. Wait for the target process to exit (FDs closed) *before* attempting to
+   tear down the FUSE mount, so unmount can actually succeed.
+2. Explicitly drop the `BackgroundSession` (or invoke `fusermount -u`)
+   instead of relying on `.join()` to magically trigger an unmount it was
+   never designed to trigger.
+3. Move `capture_tx` out of `LogrotateFS` so the capture writer can be
+   drained independently of FUSE teardown, with a timeout and hard fallback
+   (e.g. lazy unmount `fusermount -uz`) so a hung mount can't take out the
+   capture.
+
+Keeping flush-per-record even after this fix is fine — it's cheap and
+enables live-tailing.
 
 ## Resolved Issues
 
 - **Hash collision risk** — originally used `FxHasher` (`u64`); replaced with
   SHA-256 (`[u8; 32]`) for collision-resistant content matching.
-- **Agent line-splitting at read boundaries** — resolved by `direct_io: true`
-  (1:1 FUSE reads) + newline-delimited reconstruction (stitches lines across
-  read boundaries, discards partial lines). Fabrication dropped to 0.
-- **Shutdown flush behavior** — resolved by ADR-2 (freeze model, keep mount
-  alive) + ADR-3 (cooldown period keeps blackhole alive for agent flush).
+- **Agent line-splitting at read boundaries** — resolved by newline-delimited
+  reconstruction, which stitches lines across read boundaries and discards
+  partial final lines. Kernel page-cache coalescing/reordering of FUSE reads
+  is hidden from the checks because they operate on stitched lines, not raw
+  per-read byte ranges.
+- **Shutdown flush behavior** — resolved by ADR-1 (freeze model, keep mount
+  alive) + ADR-2 (cooldown period keeps blackhole alive for agent flush).
   Completeness reached 100% with 30s cooldown.
 
 ## Future Work
 
+- **Proper shutdown ordering for FUSE capture drain** — replace the
+  flush-per-record bandaid (see Known Limitations) with phased shutdown:
+  wait for the target to exit before unmounting, drop the
+  `BackgroundSession` explicitly instead of trusting `.join()` to unmount,
+  and decouple `capture_tx` from `LogrotateFS` so the writer can drain
+  independently under a timeout with a lazy-unmount fallback.
 - **Performance validation** — run with and without capture to confirm overhead
   is negligible at target throughput.
 - **Per-line unique IDs** — add unique line identifiers to the payload to
