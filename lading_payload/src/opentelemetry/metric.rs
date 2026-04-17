@@ -49,7 +49,10 @@ use crate::opentelemetry::common::templates::PoolError;
 use crate::{Error, common::config::ConfRange, common::strings};
 use bytes::BytesMut;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::metrics::v1::{ResourceMetrics, metric::Data, number_data_point};
+use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+use opentelemetry_proto::tonic::metrics::v1::{
+    Metric, ResourceMetrics, metric::Data, number_data_point,
+};
 use prost::Message;
 use serde::Deserialize;
 use templates::{Pool, ResourceTemplateGenerator};
@@ -62,6 +65,87 @@ pub const SMALLEST_PROTOBUF: usize = 31;
 
 /// Increment timestamps by 100 milliseconds (in nanoseconds) per tick
 const TIME_INCREMENT_NANOS: u64 = 1_000_000;
+
+fn randomize_point_attributes<R>(attributes: &mut [KeyValue], rng: &mut R)
+where
+    R: rand::Rng + ?Sized,
+{
+    for attribute in attributes {
+        if attribute.key == "sample" || attribute.key == "spread" || attribute.key == "jitter" {
+            attribute.value = Some(AnyValue {
+                value: Some(any_value::Value::DoubleValue(
+                    rng.random_range(0.0_f64..=1_000_000.0),
+                )),
+            });
+        }
+    }
+}
+
+fn metric_data_points_total(metric: &Metric) -> usize {
+    match &metric.data {
+        Some(Data::Gauge(gauge)) => gauge.data_points.len(),
+        Some(Data::Sum(sum)) => sum.data_points.len(),
+        Some(Data::Histogram(histogram)) => histogram.data_points.len(),
+        Some(Data::ExponentialHistogram(histogram)) => histogram.data_points.len(),
+        Some(Data::Summary(summary)) => summary.data_points.len(),
+        None => 0,
+    }
+}
+
+fn trim_one_data_point(resource_metrics: &mut ResourceMetrics) -> bool {
+    for scope_idx in (0..resource_metrics.scope_metrics.len()).rev() {
+        let mut trimmed = false;
+        let mut remove_metric_idx = None;
+        let remove_scope;
+
+        {
+            let scope_metrics = &mut resource_metrics.scope_metrics[scope_idx];
+            for metric_idx in (0..scope_metrics.metrics.len()).rev() {
+                let metric = &mut scope_metrics.metrics[metric_idx];
+                let did_trim = match &mut metric.data {
+                    Some(Data::Gauge(gauge)) => gauge.data_points.pop().is_some(),
+                    Some(Data::Sum(sum)) => sum.data_points.pop().is_some(),
+                    Some(Data::Histogram(histogram)) => histogram.data_points.pop().is_some(),
+                    Some(Data::ExponentialHistogram(histogram)) => {
+                        histogram.data_points.pop().is_some()
+                    }
+                    Some(Data::Summary(summary)) => summary.data_points.pop().is_some(),
+                    None => false,
+                };
+                if did_trim {
+                    trimmed = true;
+                    if metric_data_points_total(metric) == 0 {
+                        remove_metric_idx = Some(metric_idx);
+                    }
+                    break;
+                }
+            }
+            if let Some(metric_idx) = remove_metric_idx {
+                scope_metrics.metrics.remove(metric_idx);
+            }
+            remove_scope = scope_metrics.metrics.is_empty();
+        }
+
+        if trimmed {
+            if remove_scope {
+                resource_metrics.scope_metrics.remove(scope_idx);
+            }
+            return true;
+        }
+    }
+
+    false
+}
+
+fn total_data_points(resource_metrics: &ResourceMetrics) -> u64 {
+    let mut total = 0_u64;
+    for scope_metrics in &resource_metrics.scope_metrics {
+        for metric in &scope_metrics.metrics {
+            total += metric_data_points_total(metric) as u64;
+        }
+    }
+    total
+}
 
 /// Configure the OpenTelemetry metric payload.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq, Copy)]
@@ -109,14 +193,23 @@ pub struct MetricWeights {
     pub sum_delta: u8,
     /// The relative probability of generating a sum cumulative metric.
     pub sum_cumulative: u8,
+    /// The relative probability of generating a histogram metric.
+    pub histogram: u8,
+    /// The relative probability of generating an exponential histogram metric.
+    pub exponential_histogram: u8,
+    /// The relative probability of generating a summary metric.
+    pub summary: u8,
 }
 
 impl Default for MetricWeights {
     fn default() -> Self {
         Self {
-            gauge: 50,          // 50%
-            sum_delta: 25,      // 25%
-            sum_cumulative: 25, // 25%
+            gauge: 40,                // 40%
+            sum_delta: 25,            // 20%
+            sum_cumulative: 25,       // 20%
+            histogram: 15,            //15%
+            exponential_histogram: 3, // 3%
+            summary: 2,               //2%
         }
     }
 }
@@ -143,7 +236,9 @@ impl Config {
         // we can generate a diverse set of metrics
         if self.metric_weights.gauge == 0
             || self.metric_weights.sum_delta == 0
-            || self.metric_weights.sum_cumulative == 0
+            || self.metric_weights.summary == 0
+            || self.metric_weights.histogram == 0
+            || self.metric_weights.exponential_histogram == 0
         {
             return Err("Metric weights cannot be 0".to_string());
         }
@@ -342,6 +437,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
     /// * Timestamps advance monotonically based on internal tick counter
     ///   starting at epoch
     /// * Each call advances the tick counter by a random amount (1-60)
+    #[allow(clippy::too_many_lines)]
     fn generate<R>(&'a mut self, rng: &mut R, budget: &mut usize) -> Result<Self::Output, Error>
     where
         R: rand::Rng + ?Sized,
@@ -350,6 +446,7 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         self.incr_f += rng.random_range(1.0..=100.0);
         self.incr_i += rng.random_range(1_i64..=100_i64);
 
+        let budget_before_fetch = *budget;
         let mut tpl: ResourceMetrics = match self.pool.fetch(rng, budget) {
             Ok(t) => t.to_owned(),
             Err(PoolError::EmptyChoice) => {
@@ -362,14 +459,12 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
         // Update data points in each metric. For gauges we use random values,
         // for accumulating sums we increment by a fixed amount per tick.
         // All timestamps are updated based on the current tick.
-        let mut data_points_count = 0;
 
         for scope_metrics in &mut tpl.scope_metrics {
             for metric in &mut scope_metrics.metrics {
                 if let Some(data) = &mut metric.data {
                     match data {
                         Data::Gauge(gauge) => {
-                            data_points_count += gauge.data_points.len() as u64;
                             for point in &mut gauge.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
                                 if let Some(value) = &mut point.value {
@@ -385,7 +480,6 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                             }
                         }
                         Data::Sum(sum) => {
-                            data_points_count += sum.data_points.len() as u64;
                             let is_accumulating = sum.is_monotonic;
                             for point in &mut sum.data_points {
                                 point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
@@ -419,13 +513,110 @@ impl<'a> SizedGenerator<'a> for OpentelemetryMetrics {
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        Data::Histogram(histogram) => {
+                            for point in &mut histogram.data_points {
+                                randomize_point_attributes(&mut point.attributes, rng);
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                point.explicit_bounds = templates::random_histogram_bounds(
+                                    point.explicit_bounds.len(),
+                                    rng,
+                                );
+                                let n_buckets = point.explicit_bounds.len() + 1;
+                                let new_count: u64 =
+                                    rng.random_range(n_buckets as u64..=250_000_u64);
+                                point.count = new_count;
+                                point.bucket_counts =
+                                    templates::random_partition(new_count, n_buckets, rng);
+                                point.sum = Some(rng.random_range(0.0_f64..=1_000_000.0));
+                                let (min, max) = templates::random_non_negative_min_max(rng);
+                                point.min = min;
+                                point.max = max;
+                            }
+                        }
+                        Data::ExponentialHistogram(eh) => {
+                            for point in &mut eh.data_points {
+                                randomize_point_attributes(&mut point.attributes, rng);
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+
+                                let n_pos =
+                                    point.positive.as_ref().map_or(0, |b| b.bucket_counts.len());
+                                let n_neg =
+                                    point.negative.as_ref().map_or(0, |b| b.bucket_counts.len());
+                                let partition = templates::random_partition(
+                                    rng.random_range(3_u64..=250_000_u64),
+                                    3,
+                                    rng,
+                                );
+                                let pos_count = partition[0];
+                                let negative_count = partition[1];
+                                let zero_count = partition[2];
+
+                                point.count = pos_count + negative_count + zero_count;
+                                point.zero_count = zero_count;
+                                point.sum = Some(rng.random_range(-1_000_000.0_f64..=1_000_000.0));
+                                point.scale = rng.random_range(-20_i32..=20);
+                                point.zero_threshold = rng.random_range(0.0_f64..=10_000.0);
+                                let (min, max) = templates::random_signed_min_max(rng);
+                                point.min = min;
+                                point.max = max;
+
+                                if let Some(pos) = &mut point.positive {
+                                    pos.offset = rng.random_range(-256_i32..=256);
+                                    pos.bucket_counts =
+                                        templates::random_partition(pos_count, n_pos, rng);
+                                }
+                                if let Some(neg) = &mut point.negative {
+                                    neg.offset = rng.random_range(-256_i32..=256);
+                                    neg.bucket_counts =
+                                        templates::random_partition(negative_count, n_neg, rng);
+                                }
+                            }
+                        }
+                        Data::Summary(summary) => {
+                            for point in &mut summary.data_points {
+                                randomize_point_attributes(&mut point.attributes, rng);
+                                point.time_unix_nano = self.tick * TIME_INCREMENT_NANOS;
+                                let quantiles = templates::random_summary_quantiles(
+                                    point.quantile_values.len(),
+                                    rng,
+                                );
+                                point.count = rng.random_range(
+                                    point.quantile_values.len().max(1) as u64..=100_000_u64,
+                                );
+                                let mut val = rng.random_range(0.0_f64..=10_000.0);
+                                for (qv, quantile) in
+                                    point.quantile_values.iter_mut().zip(quantiles)
+                                {
+                                    qv.quantile = quantile;
+                                    val += rng.random_range(0.25_f64..=25_000.0);
+                                    qv.value = val;
+                                }
+                                point.sum = val * rng.random_range(1.0_f64..=4.0);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        self.data_points_per_resource = data_points_count;
+        while tpl.encoded_len() > budget_before_fetch {
+            if !trim_one_data_point(&mut tpl) {
+                debug!(
+                    budget_before_fetch,
+                    actual_size = tpl.encoded_len(),
+                    "metric payload could not be trimmed to fit budget"
+                );
+                Err(PoolError::EmptyChoice)?;
+            }
+        }
+
+        self.data_points_per_resource = total_data_points(&tpl);
+
+        // The pool deducted the template's stored encoded size from budget, but
+        // mutations (timestamp, values, bucket counts) may change varint sizes.
+        // Correct the budget so it reflects the actual bytes the caller will
+        // consume.
+        *budget = budget_before_fetch.saturating_sub(tpl.encoded_len());
 
         Ok(tpl)
     }
@@ -893,8 +1084,15 @@ mod test {
                             sum.aggregation_temporality.hash(&mut hasher);
                             sum.is_monotonic.hash(&mut hasher);
                         }
-                        // Add other metric types as needed
-                        _ => "unknown".hash(&mut hasher),
+                        Data::Histogram(h) => {
+                            "histogram".hash(&mut hasher);
+                            h.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::ExponentialHistogram(eh) => {
+                            "exponential_histogram".hash(&mut hasher);
+                            eh.aggregation_temporality.hash(&mut hasher);
+                        }
+                        Data::Summary(_) => "summary".hash(&mut hasher),
                     }
                 }
             }
@@ -1006,7 +1204,30 @@ mod test {
                                                 .push(point.time_unix_nano);
                                         }
                                     },
-                                    _ => {},
+                                    Data::Histogram(histogram) => {
+                                        for point in &histogram.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::ExponentialHistogram(eh) => {
+                                        for point in &eh.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
+                                    Data::Summary(summary) => {
+                                        for point in &summary.data_points {
+                                            timestamps_by_metric
+                                                .entry(id)
+                                                .or_default()
+                                                .push(point.time_unix_nano);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -1059,6 +1280,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1099,6 +1323,9 @@ mod test {
                     gauge: 0,   // Only generate sum metrics
                     sum_delta: 50,
                     sum_cumulative: 50,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 0,
                 },
             };
 
@@ -1344,6 +1571,9 @@ mod test {
                 gauge: 0,
                 sum_delta: 25,
                 sum_cumulative: 25,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
@@ -1354,6 +1584,9 @@ mod test {
                 gauge: 50,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 15,
+                exponential_histogram: 3,
+                summary: 2,
             },
             ..valid_config
         };
@@ -1364,9 +1597,195 @@ mod test {
                 gauge: 0,
                 sum_delta: 0,
                 sum_cumulative: 0,
+                histogram: 0,
+                exponential_histogram: 0,
+                summary: 0,
             },
             ..valid_config
         };
         assert!(zero_weights.valid().is_err());
+    }
+
+    proptest! {
+        #[test]
+        fn histogram_data_points_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 100,
+                    exponential_histogram: 0,
+                    summary: 0,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::Histogram(h)) = &metric.data {
+                                for point in &h.data_points {
+                                    prop_assert_eq!(
+                                        point.bucket_counts.len(),
+                                        point.explicit_bounds.len() + 1,
+                                        "bucket_counts.len() must be explicit_bounds.len() + 1"
+                                    );
+                                    let total: u64 = point.bucket_counts.iter().sum();
+                                    prop_assert_eq!(
+                                        total,
+                                        point.count,
+                                        "sum of bucket_counts must equal count"
+                                    );
+                                    for bounds in point.explicit_bounds.windows(2) {
+                                        prop_assert!(
+                                            bounds[0] < bounds[1],
+                                            "explicit bounds must be strictly increasing: {} >= {}",
+                                            bounds[0],
+                                            bounds[1]
+                                        );
+                                    }
+                                    if let (Some(min), Some(max)) = (point.min, point.max) {
+                                        prop_assert!(
+                                            min <= max,
+                                            "min ({min}) must be <= max ({max})"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn exponential_histogram_data_points_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 0,
+                    exponential_histogram: 100,
+                    summary: 0,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::ExponentialHistogram(eh)) = &metric.data {
+                                for point in &eh.data_points {
+                                    let pos_count: u64 = point
+                                        .positive
+                                        .as_ref()
+                                        .map_or(0, |b| b.bucket_counts.iter().sum());
+                                    let negative_count: u64 = point
+                                        .negative
+                                        .as_ref()
+                                        .map_or(0, |b| b.bucket_counts.iter().sum());
+                                    prop_assert_eq!(
+                                        pos_count + negative_count + point.zero_count,
+                                        point.count,
+                                        "pos_count + negative_count + zero_count must equal count"
+                                    );
+                                    prop_assert!(
+                                        point.zero_threshold >= 0.0,
+                                        "zero_threshold must be non-negative: {}",
+                                        point.zero_threshold
+                                    );
+                                    if let (Some(min), Some(max)) = (point.min, point.max) {
+                                        prop_assert!(
+                                            min <= max,
+                                            "min ({min}) must be <= max ({max})"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn summary_quantile_values_are_valid(
+            seed: u64,
+            steps in 1..u8::MAX,
+            budget in SMALLEST_PROTOBUF..2048_usize,
+        ) {
+            let config = Config {
+                metric_weights: super::MetricWeights {
+                    gauge: 0,
+                    sum_delta: 0,
+                    sum_cumulative: 0,
+                    histogram: 0,
+                    exponential_histogram: 0,
+                    summary: 100,
+                },
+                ..Default::default()
+            };
+
+            let mut budget = budget;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut otel_metrics = OpentelemetryMetrics::new(config, budget, &mut rng)?;
+
+            for _ in 0..steps {
+                if let Ok(resource_metrics) = otel_metrics.generate(&mut rng, &mut budget) {
+                    for scope_metrics in &resource_metrics.scope_metrics {
+                        for metric in &scope_metrics.metrics {
+                            if let Some(Data::Summary(s)) = &metric.data {
+                                for point in &s.data_points {
+                                    let qvs = &point.quantile_values;
+                                    for quantile in qvs {
+                                        prop_assert!(
+                                            (0.0..=1.0).contains(&quantile.quantile),
+                                            "quantiles must stay in [0, 1]: {}",
+                                            quantile.quantile
+                                        );
+                                    }
+                                    for i in 1..qvs.len() {
+                                        prop_assert!(
+                                            qvs[i].quantile >= qvs[i - 1].quantile,
+                                            "quantiles must be non-decreasing: {} < {}",
+                                            qvs[i].quantile, qvs[i - 1].quantile
+                                        );
+                                        prop_assert!(
+                                            qvs[i].value >= qvs[i - 1].value,
+                                            "quantile values must be non-decreasing: {} < {}",
+                                            qvs[i].value, qvs[i - 1].value
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
