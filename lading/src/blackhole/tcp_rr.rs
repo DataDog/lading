@@ -32,14 +32,12 @@ use crate::neper::flow::{self, Action, Flow, FlowMap};
 use crate::neper::metrics::{self, ThreadMetrics};
 use crate::neper::thread;
 
-const fn default_nonzero_u16() -> NonZeroU16 {
-    // Safety: 1 != 0
-    unsafe { NonZeroU16::new_unchecked(1) }
+fn default_nonzero_u16() -> NonZeroU16 {
+    NonZeroU16::new(1).expect("1 is nonzero")
 }
 
-const fn default_nonzero_usize() -> NonZeroUsize {
-    // Safety: 1 != 0
-    unsafe { NonZeroUsize::new_unchecked(1) }
+fn default_nonzero_usize() -> NonZeroUsize {
+    NonZeroUsize::new(1).expect("1 is nonzero")
 }
 
 fn default_control_port() -> u16 {
