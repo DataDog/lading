@@ -1,59 +1,44 @@
-//! Per-thread lock-free metrics for neper-style workloads.
+//! Per-thread metrics for neper-style workloads.
 //!
-//! Each OS thread owns a [`ThreadMetrics`] struct containing plain `u64`
-//! counters behind [`UnsafeCell`]. Workers increment via [`ThreadCounter::add`].
-//! A dedicated metrics thread periodically snapshots all counters, computes deltas,
-//! and submits aggregated values to the `metrics` crate via `counter!()`.
-//!
-//! ## Safety
-//!
-//! [`ThreadCounter`] is `Sync` because:
-//! - Only one thread (the owner) writes to the counter.
-//! - The snapshot thread only reads.
-//! - Since there is a single writer, and the snapshotter does not need the
-//!   precise counts every time, we avoid the use of atomics.
+//! Each OS thread owns a [`ThreadMetrics`] struct containing `AtomicU64`
+//! counters. Workers increment via [`ThreadCounter::add`] with `Relaxed`
+//! ordering. A dedicated metrics thread periodically snapshots all counters,
+//! computes deltas, and submits aggregated values to the `metrics` crate
+//! via `counter!()`.
 
-use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use metrics::counter;
 
-/// A counter written by exactly one thread and read (snapshot) by another.
-///
-/// Uses plain `u64` for zero overhead on the write path.
+/// A per-thread atomic counter.
 #[repr(C, align(8))]
 pub(crate) struct ThreadCounter {
-    value: UnsafeCell<u64>,
+    value: AtomicU64,
 }
-
-// Safety: only one thread writes; reads are tear-free on aligned u64.
-unsafe impl Sync for ThreadCounter {}
-// Required for Arc<Vec<ThreadMetrics>>.
-unsafe impl Send for ThreadCounter {}
 
 impl ThreadCounter {
     pub(crate) const fn new() -> Self {
         Self {
-            value: UnsafeCell::new(0),
+            value: AtomicU64::new(0),
         }
     }
 
-    /// Increment. Must only be called from the owning thread.
+    /// Increment the counter.
     #[inline]
     pub(crate) fn add(&self, n: u64) {
-        unsafe { *self.value.get() += n }
+        self.value.fetch_add(n, Relaxed);
     }
 
-    /// Read current value. May be called from any thread (snapshot reader).
+    /// Read current value.
     #[inline]
     pub(crate) fn get(&self) -> u64 {
-        unsafe { *self.value.get() }
+        self.value.load(Relaxed)
     }
 }
 
 /// Defines [`ThreadMetrics`], the field-name array, and the `read_all` helper
-/// from a single list of field names. Add new metrics below to the macro call
+/// from a single list of field names. Add new metrics below to the macro call.
 macro_rules! define_thread_metrics {
     ($($name:ident),* $(,)?) => {
         /// Per-thread counters.
